@@ -44,17 +44,21 @@ function executeCommandHook(
     };
 
     // Use shell to execute the command (matches Claude Code behavior)
-    const shell = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
-    const shellArgs =
-      process.platform === "win32"
-        ? ["/c", handler.command]
-        : ["-c", handler.command];
+    const isWindows = process.platform === "win32";
+    const shell = isWindows ? "cmd.exe" : "/bin/sh";
+    // Same defect as core/hooks/toolHooks.ts: without verbatim arguments Node escapes the
+    // quotes inside the command as \", cmd.exe passes them through literally, and a hook
+    // written as `pwsh -File "C:\path\hook.ps1"` dies with exit 64 before running a line.
+    const shellArgs = isWindows
+      ? ["/d", "/s", "/c", `"${handler.command}"`]
+      : ["-c", handler.command];
 
     const child = execFile(shell, shellArgs, {
       cwd,
       env,
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024, // 10MB
+      windowsVerbatimArguments: isWindows,
     });
 
     let stdout = "";
