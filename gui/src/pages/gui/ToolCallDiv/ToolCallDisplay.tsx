@@ -14,6 +14,7 @@ interface ToolCallDisplayProps {
   tool: Tool | undefined;
   toolCallState: ToolCallState;
   historyIndex: number;
+  alwaysShowBody?: boolean;
 }
 
 export function ToolCallDisplay({
@@ -22,6 +23,7 @@ export function ToolCallDisplay({
   children,
   icon,
   historyIndex,
+  alwaysShowBody = false,
 }: ToolCallDisplayProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const focusView = useAppSelector((state) => state.ui.focusView);
@@ -34,7 +36,8 @@ export function ToolCallDisplay({
   const live =
     toolCallState.status === "generating" || toolCallState.status === "calling";
   const [open, setOpen] = useState(false);
-  const showBody = shouldShowToolCallBody(open, live, focusView);
+  const showBody =
+    alwaysShowBody || shouldShowToolCallBody(open, live, focusView);
 
   function handleClick() {
     setOpen((prev) => !prev);

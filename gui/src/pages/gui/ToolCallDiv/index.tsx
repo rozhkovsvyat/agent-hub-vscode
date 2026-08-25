@@ -8,6 +8,8 @@ import FunctionSpecificToolCallDiv from "./FunctionSpecificToolCallDiv";
 import { GroupedToolCallHeader } from "./GroupedToolCallHeader";
 import { McpAppRenderer } from "./MCPAppRenderer";
 import { SimpleToolCallUI } from "./SimpleToolCallUI";
+import { TodoListCard } from "./TodoListCard";
+import { isTodoWriteToolCall } from "./todoWriteUtils";
 import { ToolCallDisplay } from "./ToolCallDisplay";
 import {
   CursorBridgeProgress,
@@ -80,6 +82,20 @@ export function ToolCallDiv({
           historyIndex={historyIndex}
         >
           <McpAppRenderer toolCallState={toolCallState} />
+        </ToolCallDisplay>
+      );
+    }
+
+    if (isTodoWriteToolCall(functionName)) {
+      return (
+        <ToolCallDisplay
+          icon={getStatusIcon(toolCallState.status)}
+          tool={tool}
+          toolCallState={toolCallState}
+          historyIndex={historyIndex}
+          alwaysShowBody
+        >
+          <TodoListCard parsedArgs={toolCallState.parsedArgs} />
         </ToolCallDisplay>
       );
     }
