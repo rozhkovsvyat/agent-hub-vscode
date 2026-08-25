@@ -425,7 +425,7 @@ export function UnifiedTerminalCommand({
       <div className="outline-command-border rounded-default bg-editor !my-2 flex min-w-0 flex-col outline outline-1">
         {/* Toolbar */}
         <div
-          className={`find-widget-skip bg-editor sticky -top-2 z-10 m-0 flex items-center justify-between gap-3 px-1.5 py-1 ${
+          className={`find-widget-skip bg-editor relative m-0 flex items-center justify-between gap-3 px-1.5 py-1 ${
             isExpanded
               ? "rounded-t-default border-command-border border-b"
               : "rounded-default"

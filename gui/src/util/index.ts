@@ -48,7 +48,10 @@ export function getAltKeyLabel(): string {
 }
 
 export function getFontSize(): number {
-  return getLocalStorage("fontSize") ?? (isJetBrains() ? 15 : 14);
+  // 13, а не 14: замер сравнительного скриншота дал у Клода шаг строк 29–30px
+  // против наших 32 и высоту глифов 10 против 11 — два независимых замера
+  // сходятся на кегле примерно на 9% меньше нашего.
+  return getLocalStorage("fontSize") ?? (isJetBrains() ? 14 : 13);
 }
 
 export function fontSize(n: number): string {

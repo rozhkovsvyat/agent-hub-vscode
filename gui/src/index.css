@@ -144,3 +144,305 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+:root {
+  --cukii-canvas: #1f1f1d;
+  --cukii-sidebar: #242321;
+  --cukii-shell: #3a3835;
+  --cukii-shell-raised: #42403c;
+  --cukii-surface: #f4eadb;
+  --cukii-surface-muted: #eadbca;
+  --cukii-line: #5a5550;
+  --cukii-line-strong: #b98068;
+  --cukii-text: #2c241c;
+  --cukii-on-dark: #eee9df;
+  --cukii-muted: #aaa29a;
+  --cukii-accent: #a9634e;
+  --cukii-accent-strong: #c77758;
+  --cukii-accent-soft: #ead7c5;
+  --cukii-thinking: #f4814d;
+  --cukii-shadow: 0 16px 38px rgba(0, 0, 0, 0.32);
+}
+
+body,
+#root {
+  /* Был хардкод #1f1f1d (тёплый тёмный бренда). По просьбе владельца заливка
+     приведена к заливке Клода — это фон редактора VS Code (#1e1e1e в Dark+),
+     взятый токеном, чтобы менялся вместе с темой пользователя. */
+  background: var(--vscode-editor-background, #1e1e1e) !important;
+  color: var(--cukii-on-dark);
+}
+
+button,
+[role="button"] {
+  letter-spacing: 0;
+}
+
+.bg-vsc-input-background,
+.bg-input,
+.bg-background,
+.bg-vsc-background,
+.bg-vsc-editor-background {
+  background-color: var(--cukii-shell) !important;
+}
+
+.text-vsc-foreground,
+.text-foreground,
+.text-description {
+  color: var(--cukii-on-dark) !important;
+}
+
+.text-description-muted {
+  color: var(--cukii-muted) !important;
+}
+
+.border-border,
+.border-command-border,
+.border-description {
+  border-color: var(--cukii-line) !important;
+}
+
+.ProseMirror {
+  color: var(--cukii-on-dark);
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--cukii-muted) !important;
+}
+
+[data-testid^="continue-input-box-"] > div.relative {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+[data-testid^="continue-input-box-"] [contenteditable="true"] {
+  caret-color: var(--cukii-accent);
+}
+
+[data-testid^="continue-input-box-"] .find-widget-skip {
+  background: transparent !important;
+}
+
+[data-testid^="continue-input-box-"] .cukii-input-box {
+  background: var(--cukii-shell) !important;
+  border: 1px solid var(--cukii-line) !important;
+  border-radius: 9px !important;
+  box-shadow: var(--cukii-shadow);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.cukii-main-input-shell {
+  margin-top: auto;
+  padding-bottom: 8px;
+}
+
+.cukii-editor-stack,
+.find-widget-skip {
+  min-width: 0;
+}
+
+[data-testid^="continue-input-box-"] .cukii-input-box:focus-within {
+  border-color: var(--cukii-accent-strong) !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
+  transform: translateY(-1px);
+}
+
+.cukii-submit-button {
+  display: inline-flex !important;
+  height: 32px;
+  width: 32px;
+  margin: 0 !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+}
+
+[data-testid="mode-select-button"],
+[data-testid="broker-model-select-button"],
+[data-testid="model-select-button"],
+[data-testid="broker-subagent-select-button"] {
+  background: var(--cukii-surface) !important;
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  color: var(--cukii-text) !important;
+  min-height: 22px;
+  min-width: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.28) inset;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.cukii-broker-segmented {
+  max-width: min(68vw, 372px);
+}
+
+.cukii-broker-segmented [data-testid="broker-model-select-button"],
+.cukii-broker-segmented [data-testid="broker-subagent-select-button"] {
+  max-width: min(34vw, 186px) !important;
+}
+
+.cukii-broker-segmented .cukii-segment-left {
+  border-radius: 999px 0 0 999px !important;
+  border-right-color: #d8c5ad !important;
+}
+
+.cukii-broker-segmented .cukii-segment-right {
+  border-radius: 0 999px 999px 0 !important;
+  margin-left: -1px;
+}
+
+@media (max-width: 360px) {
+  .cukii-broker-segmented {
+    max-width: calc(100vw - 126px);
+  }
+
+  .cukii-broker-segmented [data-testid="broker-model-select-button"],
+  .cukii-broker-segmented [data-testid="broker-subagent-select-button"] {
+    max-width: calc((100vw - 128px) / 2) !important;
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+  }
+}
+
+[data-testid="mode-select-button"]:hover,
+[data-testid="broker-model-select-button"]:hover,
+[data-testid="model-select-button"]:hover,
+[data-testid="broker-subagent-select-button"]:hover {
+  background: var(--cukii-accent-soft) !important;
+  border-color: var(--cukii-line-strong) !important;
+  transform: translateY(-1px);
+}
+
+[data-headlessui-state] {
+  outline-color: var(--cukii-accent);
+}
+
+[role="listbox"] {
+  background: #f7efe5 !important;
+  border-color: #cbb79f !important;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32) !important;
+  color: var(--cukii-text) !important;
+}
+
+[role="listbox"] .text-foreground,
+[role="listbox"] .text-description {
+  color: var(--cukii-text) !important;
+}
+
+[role="listbox"] .text-description-muted {
+  color: #7a6755 !important;
+}
+
+[role="option"] {
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+[role="option"]:hover,
+[role="option"][data-headlessui-state~="active"] {
+  background: var(--cukii-accent-soft) !important;
+  color: var(--cukii-text) !important;
+}
+
+button.bg-primary,
+.bg-primary {
+  background: var(--cukii-accent) !important;
+  color: #fffaf2 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 7px !important;
+}
+
+button.bg-primary:hover,
+.bg-primary:hover {
+  background: var(--cukii-accent-strong) !important;
+  filter: none;
+}
+
+.thread-message {
+  animation: cukiiMessageIn 220ms ease-out;
+}
+
+.thread-message > div,
+.thread-message .bg-background {
+  background: transparent !important;
+}
+
+.thread-message .bg-background {
+  border-left: 2px solid var(--cukii-line);
+  padding-left: 10px;
+}
+
+.cukii-thinking-row,
+.cukii-thinking-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #a7a29a;
+}
+
+.cukii-thinking-row {
+  min-height: 28px;
+}
+
+.cukii-thinking-text {
+  min-width: 15ch;
+  animation: cukiiThinkingText 2200ms ease-in-out infinite;
+}
+
+.cukii-tab-dot-pulse {
+  animation: cukiiCookiePulse 2600ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+.cukii-thinking-glyph {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  background: #e3a867;
+  filter: drop-shadow(0 0 1px #c9873f);
+  transform-origin: center;
+  animation: cukiiCookiePulse 2600ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+@keyframes cukiiCookiePulse {
+  0% {
+    transform: scale(1);
+  }
+  28% {
+    transform: translateY(0.5px) scale(0.92) rotate(-2deg);
+  }
+  54% {
+    transform: translateY(-0.5px) scale(1.05) rotate(1deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes cukiiThinkingText {
+  0% {
+    opacity: 0.62;
+  }
+  45% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes cukiiMessageIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -8,6 +8,8 @@ import { GlobalContext } from "core/util/GlobalContext";
 import { VsCodeContinueApi } from "./api";
 import setupInlineTips from "./InlineTipManager";
 
+let activeExtension: VsCodeExtension | undefined;
+
 export async function activateExtension(context: vscode.ExtensionContext) {
   const platformCheck = isUnsupportedPlatform();
   const globalContext = new GlobalContext();
@@ -32,6 +34,7 @@ export async function activateExtension(context: vscode.ExtensionContext) {
   setupInlineTips(context);
 
   const vscodeExtension = new VsCodeExtension(context);
+  activeExtension = vscodeExtension;
 
   // Load Continue configuration
   if (!context.globalState.get("hasBeenInstalled")) {
@@ -77,4 +80,9 @@ export async function activateExtension(context: vscode.ExtensionContext) {
         extension: vscodeExtension,
       }
     : continuePublicApi;
+}
+
+export async function deactivateExtension(): Promise<void> {
+  await activeExtension?.shutdown();
+  activeExtension = undefined;
 }

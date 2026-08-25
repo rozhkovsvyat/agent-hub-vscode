@@ -12,6 +12,7 @@ function getNumUserMsgs(history: ChatHistoryItemWithMessageId[]) {
 export const useAutoScroll = (
   ref: React.RefObject<HTMLDivElement>,
   history: ChatHistoryItemWithMessageId[],
+  isStreaming: boolean,
 ) => {
   const [userHasScrolled, setUserHasScrolled] = useState(false);
   const numUserMsgs = useMemo(() => getNumUserMsgs(history), [history.length]);
@@ -57,5 +58,5 @@ export const useAutoScroll = (
       resizeObserver.disconnect();
       ref.current?.removeEventListener("scroll", handleScroll);
     };
-  }, [ref, history.length, userHasScrolled]);
+  }, [ref, history.length, isStreaming, userHasScrolled]);
 };

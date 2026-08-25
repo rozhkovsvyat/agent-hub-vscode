@@ -4,9 +4,13 @@
 // The current default theme is dark with blue accents
 export const THEME_COLORS = {
   background: {
+    // Фон редактора идёт ПЕРВЫМ, а не фон сайдбара.
+    // Замер сравнительного скриншота: лента Клода — #1e1e1e (editor), наша была
+    // #252526 (sideBar), потому что этим токеном Chat.tsx красит ленту инлайном.
+    // Берём editor-фон, а не хардкод: он так же следует теме пользователя.
     vars: [
-      "--vscode-sideBar-background",
       "--vscode-editor-background",
+      "--vscode-sideBar-background",
       "--vscode-panel-background",
     ],
     default: "#1e1e1e", // dark gray

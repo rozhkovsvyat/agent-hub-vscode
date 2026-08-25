@@ -9,6 +9,11 @@ import { GroupedToolCallHeader } from "./GroupedToolCallHeader";
 import { McpAppRenderer } from "./MCPAppRenderer";
 import { SimpleToolCallUI } from "./SimpleToolCallUI";
 import { ToolCallDisplay } from "./ToolCallDisplay";
+import {
+  CursorBridgeProgress,
+  getCursorBridgeProgress,
+  isCursorBridgeToolCall,
+} from "./CursorBridgeProgress";
 import { getIconByName, getStatusIcon } from "./utils";
 
 interface ToolCallDivProps {
@@ -36,6 +41,9 @@ export function ToolCallDiv({
     (call) => call.status !== "canceled",
   );
   const pendingCalls = toolCallStates.filter((call) => call.status !== "done");
+  const liveSubagent = toolCallStates
+    .map(getCursorBridgeProgress)
+    .find((progress) => progress?.active);
 
   const renderToolCall = (toolCallState: ToolCallState) => {
     const tool = availableTools.find(
@@ -46,6 +54,22 @@ export function ToolCallDiv({
       functionName && tool?.toolCallIcon
         ? getIconByName(tool.toolCallIcon)
         : undefined;
+
+    if (isCursorBridgeToolCall(toolCallState)) {
+      const progress = getCursorBridgeProgress(toolCallState);
+      return (
+        <ToolCallDisplay
+          icon={getStatusIcon(
+            progress?.active ? "calling" : toolCallState.status,
+          )}
+          tool={tool}
+          toolCallState={toolCallState}
+          historyIndex={historyIndex}
+        >
+          <CursorBridgeProgress toolCallState={toolCallState} />
+        </ToolCallDisplay>
+      );
+    }
 
     if (toolCallState.mcpUiState) {
       return (
@@ -111,6 +135,7 @@ export function ToolCallDiv({
         <GroupedToolCallHeader
           toolCallStates={toolCallStates}
           activeCalls={pendingCalls.length > 0 ? pendingCalls : activeCalls}
+          liveSubagent={liveSubagent}
           open={open}
           onToggle={() => setOpen(!open)}
         />

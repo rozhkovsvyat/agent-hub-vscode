@@ -22,7 +22,11 @@ export function getNonce() {
 }
 
 export function getExtensionUri(): vscode.Uri {
-  return vscode.extensions.getExtension("Continue.continue")!.extensionUri;
+  const extension = vscode.extensions.getExtension("cukii.cukii-vscode");
+  if (!extension) {
+    throw new Error("Cukii extension is not registered in VS Code");
+  }
+  return extension.extensionUri;
 }
 
 export function getViewColumnOfFile(

@@ -38,6 +38,8 @@ export function ModeSelect() {
       dispatch(setMode("plan"));
     } else if (mode === "plan") {
       dispatch(setMode("agent"));
+    } else if (mode === "agent") {
+      dispatch(setMode("broker"));
     } else {
       dispatch(setMode("chat"));
     }
@@ -86,6 +88,15 @@ export function ModeSelect() {
     </>
   );
 
+  const modeTitle =
+    mode === "chat"
+      ? "Chat"
+      : mode === "agent"
+        ? "Agent"
+        : mode === "broker"
+          ? "Broker"
+          : "Plan";
+
   return (
     <Listbox value={mode} onChange={selectMode}>
       <div className="relative">
@@ -94,9 +105,7 @@ export function ModeSelect() {
           className="xs:px-2 text-description bg-lightgray/20 gap-1 rounded-full border-none px-1.5 py-0.5 transition-colors duration-200 hover:brightness-110"
         >
           <ModeIcon mode={mode} />
-          <span className="hidden sm:block">
-            {mode === "chat" ? "Chat" : mode === "agent" ? "Agent" : "Plan"}
-          </span>
+          <span className="hidden sm:block">{modeTitle}</span>
           <ChevronDownIcon
             className="h-2 w-2 flex-shrink-0"
             aria-hidden="true"
@@ -161,6 +170,25 @@ export function ModeSelect() {
             {!isGoodAtAgentMode && notGreatAtAgent("Agent")}
             <CheckIcon
               className={`ml-auto h-3 w-3 ${mode === "agent" ? "" : "opacity-0"}`}
+            />
+          </ListboxOption>
+
+          <ListboxOption value="broker" className={"gap-1"}>
+            <div className="flex flex-row items-center gap-1.5">
+              <ModeIcon mode="broker" />
+              <span className="">Broker</span>
+              <ToolTip
+                style={{
+                  zIndex: 200001,
+                }}
+                content="Broker tools and subagent routing"
+              >
+                <InformationCircleIcon className="h-2.5 w-2.5 flex-shrink-0" />
+              </ToolTip>
+            </div>
+            {!isGoodAtAgentMode && notGreatAtAgent("Broker")}
+            <CheckIcon
+              className={`ml-auto h-3 w-3 ${mode === "broker" ? "" : "opacity-0"}`}
             />
           </ListboxOption>
 

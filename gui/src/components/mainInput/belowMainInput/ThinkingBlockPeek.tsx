@@ -5,8 +5,10 @@ import { ChatHistoryItem } from "core";
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 
-import { AnimatedEllipsis } from "../../AnimatedEllipsis";
 import StyledMarkdownPreview from "../../StyledMarkdownPreview";
+import { useThinkingPhrase } from "../../cukii/useThinkingPhrase";
+import { CukiiThinkingGlyph } from "../../cukii/CukiiThinkingGlyph";
+import { useAppSelector } from "../../../redux/hooks";
 import { Button } from "../../ui";
 
 const MarkdownWrapper = styled.div`
@@ -36,6 +38,15 @@ function ThinkingBlockPeek({
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>("");
+  const phrase = useThinkingPhrase(!!inProgress);
+  const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+
+  useEffect(() => {
+    if (thinkingCollapse.version === 0) {
+      return;
+    }
+    setOpen(thinkingCollapse.open);
+  }, [thinkingCollapse.version, thinkingCollapse.open]);
 
   const duplicateRedactedThinkingBlock =
     prevItem &&
@@ -60,17 +71,19 @@ function ThinkingBlockPeek({
       <div className="mt-1 flex flex-col px-4">
         <div>
           <Button
-            variant="outline"
-            className="text-description flex-0 border-border m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full border-[0.5px] border-solid px-3 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
+            // ghost, а не outline: у Клода пилюля размышлений без рамки —
+            // видна только надпись, а фон появляется лишь на hover.
+            variant="ghost"
+            className="text-description flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
             data-testid="thinking-block-peek"
             aria-expanded={open}
             aria-controls={`thinking-block-content-${index}`}
             onClick={() => setOpen(!open)}
           >
             {inProgress ? (
-              <span>
-                {redactedThinking ? "Redacted Thinking" : "Thinking"}
-                <AnimatedEllipsis />
+              <span className="cukii-thinking-inline">
+                <CukiiThinkingGlyph />
+                {redactedThinking ? "Redacted thinking" : phrase}
               </span>
             ) : redactedThinking ? (
               "Redacted Thinking"

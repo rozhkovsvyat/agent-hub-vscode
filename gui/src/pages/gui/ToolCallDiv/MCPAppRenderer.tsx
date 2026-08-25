@@ -21,7 +21,7 @@ import {
   useState,
 } from "react";
 import { IdeMessengerContext } from "../../../context/IdeMessenger";
-import { useAppDispatch } from "../../../redux/hooks";
+import { useAppDispatch, useAppSelector } from "../../../redux/hooks";
 import { streamResponseThunk } from "../../../redux/thunks/streamResponse";
 
 /**
@@ -96,6 +96,7 @@ export function McpAppRenderer({
 }) {
   const ideMessenger = useContext(IdeMessengerContext);
   const dispatch = useAppDispatch();
+  const sessionId = useAppSelector((state) => state.session.id);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const appBridgeRef = useRef<AppBridge | null>(null);
   const [iframeHeight, setIframeHeight] = useState(300);
@@ -207,6 +208,7 @@ export function McpAppRenderer({
 
     bridge.oncalltool = async (params: any) => {
       const output = await ideMessenger.request("tools/call", {
+        sessionId,
         toolCall: {
           function: {
             name: getToolNameFromMCPServer(
@@ -271,7 +273,7 @@ export function McpAppRenderer({
     return () => {
       appBridgeRef.current = null;
     };
-  }, [ideMessenger, dispatch]);
+  }, [ideMessenger, dispatch, sessionId, toolCallState]);
 
   // Connect bridge to iframe when it loads
   const handleIframeLoad = useCallback(async () => {

@@ -77,6 +77,7 @@ export async function evaluateToolPolicies(
   activeTools: Tool[],
   generatedToolCalls: ToolCallState[],
   toolPolicies: ToolPolicies,
+  allowAllPermissions = false,
 ): Promise<EvaluatedPolicy[]> {
   // Check if ALL tool calls are auto-approved using dynamic evaluation
   const policyResults = await Promise.all(
@@ -114,6 +115,14 @@ export async function evaluateToolPolicies(
           },
         ],
       }),
+    );
+  }
+
+  if (allowAllPermissions) {
+    return policyResults.map((result) =>
+      result.policy === "allowedWithPermission"
+        ? { ...result, policy: "allowedWithoutPermission" as const }
+        : result,
     );
   }
 

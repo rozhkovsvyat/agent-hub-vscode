@@ -1,8 +1,8 @@
 {
-  "name": "continue",
+  "name": "cukii-vscode",
   "icon": "media/icon.png",
-  "author": "Continue Dev, Inc",
-  "version": "2.0.0",
+  "author": "Cukii",
+  "version": "2.0.26",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -18,10 +18,10 @@
   "homepage": "https://continue.dev",
   "qna": "https://github.com/continuedev/continue/issues/new/choose",
   "license": "Apache-2.0",
-  "displayName": "Continue - open-source AI code agent",
+  "displayName": "Cukii",
   "pricing": "Free",
-  "description": "The leading open-source AI code agent",
-  "publisher": "Continue",
+  "description": "Cukii - local AI development workspace",
+  "publisher": "cukii",
   "engines": {
     "vscode": "^1.70.0",
     "node": ">=20.20.1"
@@ -84,19 +84,19 @@
       }
     ],
     "configuration": {
-      "title": "Continue",
+      "title": "Cukii",
       "properties": {
         "continue.telemetryEnabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Continue collects anonymous usage data, cleaned of PII, to help us improve the product for our users. Read more  at [continue.dev › Telemetry](https://docs.continue.dev/telemetry).",
+          "markdownDescription": "Cukii collects anonymous usage data, cleaned of PII, to help us improve the product for our users. Read more  at [continue.dev › Telemetry](https://docs.continue.dev/telemetry).",
           "markdownDeprecationMessage": "This setting is deprecated and will be removed in a later version. Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page.",
           "deprecationMessage": "Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page."
         },
         "continue.showInlineTip": {
           "type": "boolean",
           "default": true,
-          "description": "Show inline suggestion to use the Continue keyboard shortcuts (e.g. \"Cmd/Ctrl L to select code, Cmd/Ctrl I to edit\")."
+          "description": "Show inline suggestion to use the Cukii keyboard shortcuts (e.g. \"Cmd/Ctrl L to select code, Cmd/Ctrl I to edit\")."
         },
         "continue.disableQuickFix": {
           "type": "boolean",
@@ -111,22 +111,22 @@
         "continue.enableTabAutocomplete": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Enable Continue's tab autocomplete feature. Read our walkthrough to learn about configuration and how to share feedback: [continue.dev › Walkthrough: Tab Autocomplete (beta)](https://docs.continue.dev/features/tab-autocomplete)"
+          "markdownDescription": "Enable Cukii's tab autocomplete feature. Read our walkthrough to learn about configuration and how to share feedback: [continue.dev › Walkthrough: Tab Autocomplete (beta)](https://docs.continue.dev/features/tab-autocomplete)"
         },
         "continue.enableNextEdit": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Enable Continue's next edit feature. Read our docs to learn about configuration and how to share feedback: [continue.dev › Features › Autocomplete › Next Edit (experimental)](https://docs.continue.dev/features/autocomplete/next-edit)"
+          "markdownDescription": "Enable Cukii's next edit feature. Read our docs to learn about configuration and how to share feedback: [continue.dev › Features › Autocomplete › Next Edit (experimental)](https://docs.continue.dev/features/autocomplete/next-edit)"
         },
         "continue.pauseTabAutocompleteOnBattery": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Pause Continue's tab autocomplete feature when your battery is low."
+          "markdownDescription": "Pause Cukii's tab autocomplete feature when your battery is low."
         },
         "continue.pauseCodebaseIndexOnStart": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Pause Continue's codebase index on start."
+          "markdownDescription": "Pause Cukii's codebase index on start."
         },
         "continue.enableConsole": {
           "type": "boolean",
@@ -152,239 +152,249 @@
     },
     "commands": [
       {
+        "command": "cukii.openBridgeSession",
+        "category": "Cukii",
+        "title": "Open Bridge Session"
+      },
+      {
+        "command": "cukii.recoverBridgeSession",
+        "category": "Cukii",
+        "title": "Recover Bridge Session"
+      },
+      {
         "command": "continue.applyCodeFromChat",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Apply code from chat",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.acceptDiff",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Accept Diff",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.rejectDiff",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Reject Diff",
-        "group": "Continue",
+        "group": "Cukii",
         "icon": "$(stop)"
       },
       {
         "command": "continue.acceptVerticalDiffBlock",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Accept Vertical Diff Block",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.rejectVerticalDiffBlock",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Reject Vertical Diff Block",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.focusEdit",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Add to Edit",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
-        "command": "continue.focusContinueInput",
-        "category": "Continue",
+        "command": "continue.focusCuKiiInput",
+        "category": "Cukii",
         "title": "Add Highlighted Code to Context and Clear Chat",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
-        "command": "continue.focusContinueInputWithoutClear",
-        "category": "Continue",
+        "command": "continue.focusCuKiiInputWithoutClear",
+        "category": "Cukii",
         "title": "Add to Chat",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.debugTerminal",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Debug Terminal",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.exitEditMode",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Exit Edit Mode",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.openConfigPage",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Open Settings",
         "icon": "$(gear)",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.toggleTabAutocompleteEnabled",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Toggle Autocomplete Enabled",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.forceAutocomplete",
-        "title": "Continue: Force Autocomplete",
-        "category": "Continue"
+        "title": "Cukii: Force Autocomplete",
+        "category": "Cukii"
       },
       {
         "command": "continue.selectFilesAsContext",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Select Files as Context",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.newSession",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "New Session",
         "icon": "$(add)",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.shareSession",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Share Current Chat Session as Markdown",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.viewHistory",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "View History",
         "icon": "$(history)",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.viewLogs",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "View Logs",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.clearConsole",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Clear Console",
         "icon": "$(clear-all)",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.navigateTo",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Navigate to a path",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.writeCommentsForCode",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Write Comments for this Code",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.writeDocstringForCode",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Write a Docstring for this Code",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.fixCode",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Fix this Code",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.optimizeCode",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Optimize this Code",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.fixGrammar",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Fix Grammar / Spelling",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.codebaseForceReIndex",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Codebase Force Re-Index",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.rebuildCodebaseIndex",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Rebuild codebase index",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.docsIndex",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Docs Index",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.docsReIndex",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Docs Force Re-Index",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
-        "command": "continue.focusContinueInput",
-        "category": "Continue",
-        "title": "Focus Continue Chat",
-        "group": "Continue"
+        "command": "continue.focusCuKiiInput",
+        "category": "Cukii",
+        "title": "Focus Cukii Chat",
+        "group": "Cukii"
       },
       {
         "command": "continue.enterEnterpriseLicenseKey",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Enter Enterprise License Key",
-        "group": "Continue"
+        "group": "Cukii"
       },
       {
         "command": "continue.toggleNextEditEnabled",
-        "title": "Continue: Toggle Next Edit"
+        "title": "Cukii: Toggle Next Edit"
       },
       {
         "command": "continue.nextEditWindow.hideNextEditSuggestion",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Hide Next Edit Suggestion"
       },
       {
         "command": "continue.nextEditWindow.acceptNextEditSuggestion",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Accept Next Edit Suggestion"
       },
       {
         "command": "continue.forceNextEdit",
-        "category": "Continue",
-        "title": "Continue: Force Next Edit"
+        "category": "Cukii",
+        "title": "Cukii: Force Next Edit"
       },
       {
         "command": "continue.acceptJump",
-        "category": "Continue",
-        "title": "Continue: Accept Jump Suggestion"
+        "category": "Cukii",
+        "title": "Cukii: Accept Jump Suggestion"
       },
       {
         "command": "continue.rejectJump",
-        "category": "Continue",
-        "title": "Continue: Reject Jump Suggestion"
+        "category": "Cukii",
+        "title": "Cukii: Reject Jump Suggestion"
       },
       {
         "command": "continue.openInNewWindow",
-        "category": "Continue",
+        "category": "Cukii",
         "title": "Open in new window",
-        "group": "Continue"
+        "group": "Cukii"
       }
     ],
     "keybindings": [
       {
-        "command": "continue.focusContinueInput",
+        "command": "continue.focusCuKiiInput",
         "mac": "cmd+l",
         "key": "ctrl+l"
       },
       {
-        "command": "continue.focusContinueInputWithoutClear",
+        "command": "continue.focusCuKiiInputWithoutClear",
         "mac": "cmd+shift+l",
         "key": "ctrl+shift+l"
       },
@@ -498,16 +508,16 @@
     "submenus": [
       {
         "id": "continue.continueSubMenu",
-        "label": "Continue"
+        "label": "Cukii"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "continue.focusContinueInput"
+          "command": "continue.focusCuKiiInput"
         },
         {
-          "command": "continue.focusContinueInputWithoutClear"
+          "command": "continue.focusCuKiiInputWithoutClear"
         },
         {
           "command": "continue.debugTerminal"
@@ -531,18 +541,18 @@
       "editor/title/run": [
         {
           "command": "continue.rejectDiff",
-          "group": "Continue",
+          "group": "Cukii",
           "when": "continue.streamingDiff"
         }
       ],
       "continue.continueSubMenu": [
         {
-          "command": "continue.focusContinueInputWithoutClear",
-          "group": "Continue"
+          "command": "continue.focusCuKiiInputWithoutClear",
+          "group": "Cukii"
         },
         {
           "command": "continue.focusEdit",
-          "group": "Continue",
+          "group": "Cukii",
           "when": "!editorReadonly"
         }
       ],
@@ -596,26 +606,26 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "continue",
-          "title": "Continue",
-          "icon": "media/sidebar-icon.png"
+          "id": "cukii",
+          "title": "Cukii",
+          "icon": "media/cukii-activity.svg"
         }
       ],
       "panel": [
         {
           "id": "continueConsole",
-          "title": "Continue Console",
+          "title": "Cukii Console",
           "icon": "$(window)"
         }
       ]
     },
     "views": {
-      "continue": [
+      "cukii": [
         {
           "type": "webview",
           "id": "continue.continueGUIView",
-          "name": "Continue",
-          "icon": "media/sidebar-icon.png",
+          "name": "Cukii",
+          "icon": "media/cukii-activity.svg",
           "visibility": "visible"
         }
       ],
@@ -623,7 +633,7 @@
         {
           "type": "webview",
           "id": "continue.continueConsoleView",
-          "name": "Continue Console",
+          "name": "Cukii Console",
           "icon": "$(window)",
           "visibility": "visible",
           "when": "config.continue.enableConsole"

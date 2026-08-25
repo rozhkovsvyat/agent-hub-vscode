@@ -21,7 +21,11 @@ import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
 import "./TipTapEditor.css";
 import { createEditorConfig, getPlaceholderText } from "./utils/editorConfig";
-import { handleImageFile } from "./utils/imageUtils";
+import {
+  BROKER_IMAGE_MAX_DATA_URL_CHARS,
+  BROKER_IMAGE_RESOLUTION,
+  handleImageFile,
+} from "./utils/imageUtils";
 import { useEditorEventHandlers } from "./utils/keyHandlers";
 
 export interface TipTapEditorProps {
@@ -56,6 +60,19 @@ function TipTapEditorInner(props: TipTapEditorProps) {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const historyLength = useAppSelector((store) => store.session.history.length);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const mode = useAppSelector((store) => store.session.mode);
+  const supportsImageInput =
+    mode === "broker" ||
+    modelSupportsImages(
+      defaultModel?.provider || "",
+      defaultModel?.model || "",
+      defaultModel?.title,
+      defaultModel?.capabilities,
+    );
+  const imageResolution =
+    mode === "broker" ? BROKER_IMAGE_RESOLUTION : undefined;
+  const imageMaxChars =
+    mode === "broker" ? BROKER_IMAGE_MAX_DATA_URL_CHARS : undefined;
 
   const { editor, onEnter } = createEditorConfig({
     props,
@@ -213,8 +230,8 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       onKeyUp={handleKeyUp}
       className={
         !props.isMainInput && shouldHideToolbar
-          ? "cursor-pointer"
-          : "cursor-text"
+          ? "cukii-input-box cursor-pointer"
+          : "cukii-input-box cursor-text"
       }
       onClick={() => {
         editor?.commands.focus();
@@ -237,19 +254,16 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       }}
       onDrop={(event) => {
         setShowDragOverMsg(false);
-        if (
-          !defaultModel ||
-          !modelSupportsImages(
-            defaultModel.provider,
-            defaultModel.model,
-            defaultModel.title,
-            defaultModel.capabilities,
-          )
-        ) {
+        if (!supportsImageInput) {
           return;
         }
         let file = event.dataTransfer.files[0];
-        void handleImageFile(ideMessenger, file).then((result) => {
+        void handleImageFile(
+          ideMessenger,
+          file,
+          imageResolution,
+          imageMaxChars,
+        ).then((result) => {
           if (!editor) {
             return;
           }
@@ -264,7 +278,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
         event.preventDefault();
       }}
     >
-      <div className="px-2.5 pb-1 pt-2">
+      <div className="cukii-editor-stack px-2.5 pb-1 pt-2">
         <EditorContent
           className={`scroll-container overflow-y-scroll ${props.isMainInput ? "max-h-[70vh]" : ""}`}
           spellCheck={false}
@@ -281,7 +295,12 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           onAddContextItem={() => insertCharacterWithWhitespace("@")}
           onEnter={onEnter}
           onImageFileSelected={(file) => {
-            void handleImageFile(ideMessenger, file).then((result) => {
+            void handleImageFile(
+              ideMessenger,
+              file,
+              imageResolution,
+              imageMaxChars,
+            ).then((result) => {
               if (!editor) {
                 return;
               }
@@ -300,15 +319,9 @@ function TipTapEditorInner(props: TipTapEditorProps) {
         />
       </div>
 
-      {showDragOverMsg &&
-        modelSupportsImages(
-          defaultModel?.provider || "",
-          defaultModel?.model || "",
-          defaultModel?.title,
-          defaultModel?.capabilities,
-        ) && (
-          <DragOverlay show={showDragOverMsg} setShow={setShowDragOverMsg} />
-        )}
+      {showDragOverMsg && supportsImageInput && (
+        <DragOverlay show={showDragOverMsg} setShow={setShowDragOverMsg} />
+      )}
       <div id={TIPPY_DIV_ID} className="fixed z-50" />
     </InputBoxDiv>
   );

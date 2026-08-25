@@ -29,6 +29,8 @@ type UIState = {
   ruleSettings: RulePolicies;
   reasoningSettings: ReasoningSettings;
   ttsActive: boolean;
+  allowAllPermissions: boolean;
+  thinkingCollapse: { version: number; open: boolean };
 };
 
 export const DEFAULT_TOOL_SETTING: ToolPolicy = "allowedWithPermission";
@@ -49,6 +51,8 @@ export const DEFAULT_UI_SLICE: UIState = {
   },
   ruleSettings: {},
   reasoningSettings: {},
+  allowAllPermissions: false,
+  thinkingCollapse: { version: 0, open: false },
 };
 
 export const uiSlice = createSlice({
@@ -79,7 +83,9 @@ export const uiSlice = createSlice({
     // Tools
     addTool: (state, action: PayloadAction<Tool>) => {
       state.toolSettings[action.payload.function.name] =
-        action.payload.defaultToolPolicy ?? DEFAULT_TOOL_SETTING;
+        state.allowAllPermissions
+          ? "allowedWithoutPermission"
+          : (action.payload.defaultToolPolicy ?? DEFAULT_TOOL_SETTING);
     },
     setToolPolicy: (
       state,
@@ -89,6 +95,9 @@ export const uiSlice = createSlice({
       }>,
     ) => {
       state.toolSettings[action.payload.toolName] = action.payload.policy;
+      if (action.payload.policy !== "allowedWithoutPermission") {
+        state.allowAllPermissions = false;
+      }
     },
     clearToolPolicy: (state, action: PayloadAction<string>) => {
       delete state.toolSettings[action.payload];
@@ -149,6 +158,35 @@ export const uiSlice = createSlice({
       state.reasoningSettings[action.payload.modelTitle] =
         action.payload.enabled;
     },
+    setAllowAllPermissions: (
+      state,
+      action: PayloadAction<{ enabled: boolean; toolNames?: string[] }>,
+    ) => {
+      state.allowAllPermissions = action.payload.enabled;
+      for (const toolName of action.payload.toolNames ?? []) {
+        state.toolSettings[toolName] = action.payload.enabled
+          ? "allowedWithoutPermission"
+          : DEFAULT_TOOL_SETTING;
+      }
+    },
+    syncAllowAllPermissions: (
+      state,
+      action: PayloadAction<{ toolNames: string[] }>,
+    ) => {
+      const toolNames = action.payload.toolNames;
+      state.allowAllPermissions =
+        toolNames.length > 0 &&
+        toolNames.every(
+          (toolName) =>
+            state.toolSettings[toolName] === "allowedWithoutPermission",
+        );
+    },
+    setThinkingCollapse: (state, action: PayloadAction<boolean>) => {
+      state.thinkingCollapse = {
+        version: state.thinkingCollapse.version + 1,
+        open: action.payload,
+      };
+    },
   },
 });
 
@@ -166,6 +204,9 @@ export const {
   toggleRuleSetting,
   setTTSActive,
   setReasoningSetting,
+  setAllowAllPermissions,
+  syncAllowAllPermissions,
+  setThinkingCollapse,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

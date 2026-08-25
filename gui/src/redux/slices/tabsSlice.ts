@@ -1,10 +1,17 @@
 import { PayloadAction, createSlice } from "@reduxjs/toolkit";
 
+export type TabAttention =
+  | "none"
+  | "streaming"
+  | "pending-permission"
+  | "ready";
+
 export interface Tab {
   id: string;
   title: string;
   isActive: boolean;
   sessionId?: string;
+  attention?: TabAttention;
 }
 
 interface TabsState {

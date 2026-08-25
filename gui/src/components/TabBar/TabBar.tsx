@@ -10,10 +10,13 @@ import {
   removeTab,
   setActiveTab,
   setTabs,
+  updateTab,
 } from "../../redux/slices/tabsSlice";
+import { selectPendingToolCalls } from "../../redux/selectors/selectToolCalls";
 import { AppDispatch, RootState } from "../../redux/store";
 import { loadSession, saveCurrentSession } from "../../redux/thunks/session";
 import { varWithFallback } from "../../styles/theme";
+import { deriveTabAttention, snapshotLeavingAttention } from "./tabAttention";
 
 // Haven't set up theme colors for tabs yet
 // Will keep it simple and choose from existing ones. Comments show vars we could use
@@ -137,6 +140,10 @@ export const TabBar = React.forwardRef<HTMLDivElement>((_, ref) => {
     (state: RootState) => state.session.history.length > 0,
   );
   const tabs = useSelector((state: RootState) => state.tabs.tabs);
+  const isStreaming = useSelector(
+    (state: RootState) => state.session.isStreaming,
+  );
+  const pendingToolCalls = useSelector(selectPendingToolCalls);
 
   // Simple UUID generator for our needs
   const generateId = useCallback(() => {
@@ -156,6 +163,7 @@ export const TabBar = React.forwardRef<HTMLDivElement>((_, ref) => {
   }, [currentSessionId, currentSessionTitle]);
 
   const handleNewTab = async () => {
+    snapshotActiveTabAttention();
     // Save current session before creating new one
     if (hasHistory) {
       await dispatch(
@@ -181,9 +189,47 @@ export const TabBar = React.forwardRef<HTMLDivElement>((_, ref) => {
     }
   }, [tabs.map((t) => t.id).join(",")]);
 
+  const liveAttention = deriveTabAttention({
+    isStreaming,
+    pendingCount: pendingToolCalls.length,
+  });
+
+  const snapshotActiveTabAttention = () => {
+    const activeTab = tabs.find((tab) => tab.isActive);
+    if (!activeTab) {
+      return;
+    }
+    dispatch(
+      updateTab({
+        id: activeTab.id,
+        updates: {
+          attention: snapshotLeavingAttention(
+            activeTab.attention,
+            liveAttention,
+          ),
+        },
+      }),
+    );
+  };
+
+  useEffect(() => {
+    const activeTab = tabs.find((tab) => tab.isActive);
+    if (!activeTab || activeTab.attention === liveAttention) {
+      return;
+    }
+    dispatch(
+      updateTab({
+        id: activeTab.id,
+        updates: { attention: liveAttention },
+      }),
+    );
+  }, [liveAttention, currentSessionId, tabs.find((tab) => tab.isActive)?.id]);
+
   const handleTabClick = async (id: string) => {
     const targetTab = tabs.find((tab) => tab.id === id);
     if (!targetTab) return;
+
+    snapshotActiveTabAttention();
 
     if (targetTab.sessionId) {
       // Switch to existing session
@@ -245,6 +291,26 @@ export const TabBar = React.forwardRef<HTMLDivElement>((_, ref) => {
             }
           }}
         >
+          {tab.attention && tab.attention !== "none" && (
+            <span
+              data-testid={`tab-attention-${tab.id}`}
+              data-attention={tab.attention}
+              className={`mr-1 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                tab.attention === "pending-permission"
+                  ? "bg-blue-500"
+                  : tab.attention === "ready"
+                    ? "bg-orange-400"
+                    : "bg-description-muted cukii-tab-dot-pulse"
+              }`}
+              aria-label={
+                tab.attention === "pending-permission"
+                  ? "Pending permission"
+                  : tab.attention === "ready"
+                    ? "Ready in background"
+                    : "Streaming"
+              }
+            />
+          )}
           <TabTitle>{tab.title}</TabTitle>
           <CloseButton
             /* disabled={tabs.length === 1} */

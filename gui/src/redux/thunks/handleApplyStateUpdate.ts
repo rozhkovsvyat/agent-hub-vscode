@@ -49,11 +49,13 @@ export const handleApplyStateUpdate = createAsyncThunk<
           applyState.toolCallId,
         );
 
+        const uiState = getState().ui;
         if (
           applyState.status === "done" &&
           toolCallState?.toolCall.function.name &&
-          getState().ui.toolSettings[toolCallState.toolCall.function.name] ===
-            "allowedWithoutPermission"
+          (uiState.toolSettings[toolCallState.toolCall.function.name] ===
+            "allowedWithoutPermission" ||
+            uiState.allowAllPermissions)
         ) {
           extra.ideMessenger.post("acceptDiff", {
             streamId: applyState.streamId,

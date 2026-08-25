@@ -15,6 +15,7 @@ import {
   ContextItem,
   ContextItemWithId,
   FileSymbolMap,
+  InputModifiers,
   McpUiState,
   MessageModes,
   PromptLog,
@@ -200,18 +201,27 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
 };
 
+export type QueuedChatMessage = {
+  editorState: JSONContent;
+  modifiers: InputModifiers;
+  preview: string;
+};
+
 type SessionState = {
   lastSessionId?: string;
   isSessionMetadataLoading: boolean;
   allSessionMetadata: BaseSessionMetadata[];
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
+  queuedMessage?: QueuedChatMessage;
   title: string;
   id: string;
   streamAborter: AbortController;
   mainEditorContentTrigger?: JSONContent | undefined;
   symbols: FileSymbolMap;
   mode: MessageModes;
+  brokerModel?: BrokerModel;
+  brokerSubagent?: BrokerSubagent;
   isInEdit: boolean;
   codeBlockApplyStates: {
     states: ApplyState[];
@@ -225,6 +235,15 @@ type SessionState = {
   compactionLoading: Record<number, boolean>; // Track compaction loading by message index
 };
 
+export type BrokerModel =
+  | "opus-5"
+  | "fable-5"
+  | "codex-5-6-terra"
+  | "grok-4-6"
+  | "composer-2-5";
+
+export type BrokerSubagent = "auto" | BrokerModel;
+
 export const INITIAL_SESSION_STATE: SessionState = {
   isSessionMetadataLoading: false,
   allSessionMetadata: [],
@@ -235,6 +254,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamAborter: new AbortController(),
   symbols: {},
   mode: "agent",
+  brokerModel: "fable-5",
+  brokerSubagent: "auto",
   isInEdit: false,
   codeBlockApplyStates: {
     states: [],
@@ -243,6 +264,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   lastSessionId: undefined,
   newestToolbarPreviewForInput: {},
   compactionLoading: {},
+  queuedMessage: undefined,
 };
 
 export const sessionSlice = createSlice({
@@ -517,6 +539,12 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
     },
+    setQueuedMessage: (state, action: PayloadAction<QueuedChatMessage>) => {
+      state.queuedMessage = action.payload;
+    },
+    clearQueuedMessage: (state) => {
+      state.queuedMessage = undefined;
+    },
     abortStream: (state) => {
       state.streamAborter.abort();
       state.streamAborter = new AbortController();
@@ -691,6 +719,7 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
       state.symbols = {};
+      state.queuedMessage = undefined;
 
       state.inlineErrorMessage = undefined;
       state.isPruned = false;
@@ -960,6 +989,12 @@ export const sessionSlice = createSlice({
     setMode: (state, action: PayloadAction<MessageModes>) => {
       state.mode = action.payload;
     },
+    setBrokerModel: (state, action: PayloadAction<BrokerModel>) => {
+      state.brokerModel = action.payload;
+    },
+    setBrokerSubagent: (state, action: PayloadAction<BrokerSubagent>) => {
+      state.brokerSubagent = action.payload;
+    },
     setIsInEdit: (state, action: PayloadAction<boolean>) => {
       state.isInEdit = action.payload;
     },
@@ -1053,6 +1088,8 @@ export const {
   addContextItemsAtIndex,
   setAppliedRulesAtIndex,
   setInactive,
+  setQueuedMessage,
+  clearQueuedMessage,
   streamUpdate,
   newSession,
   updateSessionTitle,
@@ -1078,6 +1115,8 @@ export const {
   updateToolCallOutput,
   setProcessedToolCallArgs,
   setMode,
+  setBrokerModel,
+  setBrokerSubagent,
   setIsSessionMetadataLoading,
   setAllSessionMetadata,
   addSessionMetadata,

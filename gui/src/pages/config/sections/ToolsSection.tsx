@@ -13,7 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { MCPConnectionStatus, MCPServerStatus } from "core";
 import { BUILT_IN_GROUP_NAME } from "core/tools/builtIn";
-import { useContext, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import Alert from "../../../components/gui/Alert";
 import { ToolTip } from "../../../components/gui/Tooltip";
 import { useEditBlock } from "../../../components/mainInput/Lump/useEditBlock";
@@ -30,7 +30,12 @@ import { useAuth } from "../../../context/Auth";
 import { IdeMessengerContext } from "../../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../../redux/hooks";
 import { updateConfig } from "../../../redux/slices/configSlice";
+import {
+  setAllowAllPermissions,
+  syncAllowAllPermissions,
+} from "../../../redux/slices/uiSlice";
 import { ConfigHeader } from "../components/ConfigHeader";
+import { UserSetting } from "../components/UserSetting";
 import { ToolPoliciesGroup } from "../components/ToolPoliciesGroup";
 
 interface MCPServerStatusProps {
@@ -405,7 +410,12 @@ function MCPServerPreview({
 }
 
 export function ToolsSection() {
+  const dispatch = useAppDispatch();
   const availableTools = useAppSelector((state) => state.config.config.tools);
+  const allowAllPermissions = useAppSelector(
+    (state) => state.ui.allowAllPermissions,
+  );
+  const toolSettings = useAppSelector((state) => state.ui.toolSettings);
 
   const mode = useAppSelector((store) => store.session.mode);
   const servers = useAppSelector(
@@ -414,6 +424,18 @@ export function ToolsSection() {
   const { selectedProfile } = useAuth();
   const ideMessenger = useContext(IdeMessengerContext);
   const disableMcp = false;
+
+  const knownToolNames = useMemo(
+    () => availableTools.map((tool) => tool.function.name),
+    [availableTools],
+  );
+
+  // The master switch is a summary of individual policy rows as well as an
+  // action that updates them. Keeping the summary derived prevents stale UI
+  // after a row was changed independently or restored from local storage.
+  useEffect(() => {
+    dispatch(syncAllowAllPermissions({ toolNames: knownToolNames }));
+  }, [dispatch, knownToolNames, toolSettings]);
 
   const duplicateDetection = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -481,6 +503,24 @@ export function ToolsSection() {
           </Alert>
         </div>
       )}
+      <div className="mb-4">
+        <Card>
+          <UserSetting
+            type="toggle"
+            title="Allow all tool permissions"
+            description="When enabled, all tool calls are auto-approved without confirmation prompts. Disabled by default for safety."
+            value={allowAllPermissions}
+            onChange={(enabled) =>
+              dispatch(
+                setAllowAllPermissions({
+                  enabled,
+                  toolNames: knownToolNames,
+                }),
+              )
+            }
+          />
+        </Card>
+      </div>
       <div className="mb-4 space-y-6">
         <ToolPoliciesGroup
           showIcon={false}

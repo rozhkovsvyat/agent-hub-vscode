@@ -1,0 +1,627 @@
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { ChatMessage, PromptLog } from "core";
+import * as vscode from "vscode";
+
+import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
+import {
+  contentToText,
+  describeBridgeLaunch,
+  grokPromptJson,
+} from "./grokPrompt";
+import {
+  closeFollowers,
+  drainFollowers,
+  registerNestedWorkerFollower,
+  type NestedWorkerFollower,
+} from "./nestedWorkerFollow";
+
+type BrokerModel =
+  | "opus-5"
+  | "fable-5"
+  | "codex-5-6-terra"
+  | "grok-4-6"
+  | "composer-2-5";
+
+type BrokerSubagent = "auto" | BrokerModel;
+
+type BridgeRoute = {
+  label: string;
+  program: string;
+  args: string[];
+  /** Формат stdout нативного CLI: от него зависит разбор в события. */
+  format: BridgeFormat;
+  promptFile?: string;
+  logFile: string;
+};
+
+type ResolvedCommand = {
+  program: string;
+  args: string[];
+};
+
+type BridgeEnv = NodeJS.ProcessEnv;
+
+const MODEL_LABELS: Record<BrokerModel, string> = {
+  "opus-5": "Opus 5",
+  "fable-5": "Fable 5",
+  "codex-5-6-terra": "Codex 5.6 Terra",
+  "grok-4-6": "Grok 4.6",
+  "composer-2-5": "Composer 2.5",
+};
+
+function windowsCmdPath(): string {
+  const fallback = "C:\\Windows\\System32\\cmd.exe";
+  const comSpec = process.env.ComSpec;
+  if (
+    comSpec &&
+    path.isAbsolute(comSpec) &&
+    comSpec.toLowerCase().endsWith("\\cmd.exe") &&
+    fs.existsSync(comSpec)
+  ) {
+    return comSpec;
+  }
+  return fallback;
+}
+
+function buildPrompt(
+  messages: ChatMessage[],
+  brokerModel: BrokerModel,
+  brokerSubagent: BrokerSubagent,
+  cwd: string,
+): string {
+  const subagent =
+    brokerSubagent === "auto" ? "Auto" : MODEL_LABELS[brokerSubagent];
+  const selectedSubagentGuidance =
+    brokerSubagent === "auto"
+      ? "Subagent routing is Auto: choose the strongest appropriate native worker and say which one you chose."
+      : [
+          `Subagent routing is locked to ${MODEL_LABELS[brokerSubagent]}.`,
+          "If the user asks you to delegate, you MUST use that selected native worker.",
+          "Do not use Claude Code's built-in Agent/Explore/Task subagent as a substitute for a selected Cukii subagent.",
+          "If the selected native worker cannot be launched, report that failure explicitly instead of silently falling back.",
+          // Раньше здесь была только shell-подсказка, поэтому делегирование
+          // зависело от того, догадается ли модель вызвать инструмент. Называем
+          // оба пути и правило выбора между ними явно.
+          "Two delegation mechanisms exist; pick by where the work lives.",
+          "(1) Work inside a Cukii vault scope (work, fm, housing, agents, hub):" +
+            ` call mcp__cukii-broker__broker_delegate with agent="${brokerAgentId(brokerSubagent)}",` +
+            ` model="${MODEL_LABELS[brokerSubagent]}" and an EXPLICIT scope argument,` +
+            " then poll broker_status and finish with broker_accept." +
+            " The scope argument is mandatory unless the task text names the scope itself:" +
+            " without it routing cannot resolve and delegation is refused.",
+          `(2) Work outside those vault roots — including this workspace at ${cwd} —` +
+            " is not routable by the broker: run the native CLI yourself instead:" +
+            ` ${nativeDelegateHint(brokerSubagent, cwd)}`,
+          "Report which of the two mechanisms you used.",
+          // Вложенный worker пишет в свой процесс, и его ход в ленту не попадает:
+          // окно видит только сам вызов и его результат. Пока нет мультиплекса
+          // вложенного потока, связность обеспечивает рассказ брокера.
+          "Narrate the delegation as it happens: one short line BEFORE you launch" +
+            " the worker saying what you are handing over and to whom, and one line" +
+            " AFTER it returns saying what it actually did and whether it succeeded." +
+            " The user cannot see inside the worker process, so silence between" +
+            " those lines reads as a freeze.",
+        ].join(" ");
+
+  const transcript = messages
+    .filter((message) => message.role !== "tool")
+    .map(
+      (message) =>
+        `${message.role.toUpperCase()}:\n${contentToText(message.content)}`,
+    )
+    .join("\n\n");
+
+  return [
+    "You are Cukii Broker running through a native bridge, not through the Continue chat model.",
+    `Broker model: ${MODEL_LABELS[brokerModel]}.`,
+    `Preferred subagent model: ${subagent}.`,
+    selectedSubagentGuidance,
+    "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
+    "Answer in the user's language and keep normal chat continuity from the transcript.",
+    "",
+    transcript,
+  ].join("\n");
+}
+
+/** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
+function brokerAgentId(
+  model: BrokerModel,
+): "codex" | "claude" | "grok" | "cursor" {
+  switch (model) {
+    case "opus-5":
+    case "fable-5":
+      return "claude";
+    case "codex-5-6-terra":
+      return "codex";
+    case "grok-4-6":
+      return "grok";
+    case "composer-2-5":
+      return "cursor";
+  }
+}
+
+function nativeDelegateHint(model: BrokerModel, cwd: string): string {
+  switch (model) {
+    case "opus-5":
+      return 'claude --model opus -p "<task>"';
+    case "fable-5":
+      return 'claude --model fable -p "<task>"';
+    case "codex-5-6-terra":
+      return `codex -m gpt-5.6-terra exec -s danger-full-access --cd "${cwd}" -`;
+    case "grok-4-6":
+      return `grok --model grok-4.6 --cwd "${cwd}" --prompt-file <task-file>`;
+    case "composer-2-5":
+      return "cursor-agent -p --output-format text --model composer-2.5 --trust";
+  }
+}
+
+function bridgeLogFile(model: BrokerModel): string {
+  return path.join(
+    os.tmpdir(),
+    `cukii-${model}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
+  );
+}
+
+function commandCandidates(program: string): string[] {
+  if (
+    process.platform !== "win32" ||
+    program.includes("\\") ||
+    program.includes("/")
+  ) {
+    return [program];
+  }
+
+  const home = os.homedir();
+  return [
+    // Avoid the npm .cmd shim for `--prompt-json`: cmd.exe has a much smaller
+    // command-line budget than the native Grok executable.
+    ...(program === "grok"
+      ? [path.join(home, ".grok", "bin", "grok.exe")]
+      : []),
+    path.join(
+      home,
+      "scoop",
+      "apps",
+      "nodejs",
+      "current",
+      "bin",
+      `${program}.cmd`,
+    ),
+    path.join(home, "scoop", "persist", "nodejs", "bin", `${program}.cmd`),
+    path.join(home, "AppData", "Roaming", "npm", `${program}.cmd`),
+    path.join(home, ".local", "bin", `${program}.exe`),
+    program,
+  ];
+}
+
+function resolveCommand(program: string, args: string[]): ResolvedCommand {
+  const resolved = commandCandidates(program).find((candidate) =>
+    candidate === program ? true : fs.existsSync(candidate),
+  );
+  const executable = resolved ?? program;
+
+  if (
+    process.platform === "win32" &&
+    executable.toLowerCase().endsWith(".cmd")
+  ) {
+    return {
+      program: windowsCmdPath(),
+      args: ["/d", "/c", "call", executable, ...args],
+    };
+  }
+
+  return { program: executable, args };
+}
+
+function appendPathSegment(
+  segments: string[],
+  candidate: string | undefined,
+): void {
+  if (!candidate || !fs.existsSync(candidate)) {
+    return;
+  }
+  const normalized = candidate.toLowerCase();
+  if (!segments.some((segment) => segment.toLowerCase() === normalized)) {
+    segments.push(candidate);
+  }
+}
+
+function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
+  const home = os.homedir();
+  const pathKey =
+    Object.keys(process.env).find((key) => key.toLowerCase() === "path") ??
+    "Path";
+  const rawPath = process.env[pathKey] ?? "";
+  const segments = rawPath.split(path.delimiter).filter(Boolean);
+
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    appendPathSegment(segments, path.join(systemRoot, "System32"));
+    appendPathSegment(segments, systemRoot);
+    appendPathSegment(segments, path.join(systemRoot, "System32", "Wbem"));
+    appendPathSegment(
+      segments,
+      path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0"),
+    );
+    appendPathSegment(segments, "C:\\Program Files\\PowerShell\\7");
+    appendPathSegment(
+      segments,
+      path.join(home, "scoop", "apps", "nodejs", "current", "bin"),
+    );
+    appendPathSegment(
+      segments,
+      path.join(home, "scoop", "persist", "nodejs", "bin"),
+    );
+    appendPathSegment(segments, path.join(home, "AppData", "Roaming", "npm"));
+    appendPathSegment(segments, path.join(home, ".local", "bin"));
+  }
+
+  return {
+    ...process.env,
+    [pathKey]: segments.join(path.delimiter),
+    ...(process.platform === "win32" ? { ComSpec: windowsCmdPath() } : {}),
+    CUKII_BRIDGE_MODE: "broker",
+    CUKII_BROKER_MODEL: model,
+    CUKII_SUBAGENT_MODEL: subagent,
+  };
+}
+
+function ensureProgramAvailable(route: BridgeRoute): ResolvedCommand {
+  const probeCommand = resolveCommand(route.program, ["--version"]);
+  const probe = spawnSync(probeCommand.program, probeCommand.args, {
+    encoding: "utf8",
+    env: bridgeEnv("fable-5", "auto"),
+    shell: false,
+    windowsHide: true,
+  });
+  if (probe.error) {
+    throw new Error(
+      `${route.label} bridge is unavailable: cannot start "${route.program}". ` +
+        "Install/authenticate the native CLI or select another broker model.",
+    );
+  }
+  return resolveCommand(route.program, route.args);
+}
+
+function routeForModel(
+  model: BrokerModel,
+  cwd: string,
+  prompt: string,
+  messages: ChatMessage[],
+): BridgeRoute {
+  const logFile = bridgeLogFile(model);
+  switch (model) {
+    // `--verbose` обязателен: без него `claude -p` не отдаёт stream-json.
+    case "opus-5":
+      return {
+        label: MODEL_LABELS[model],
+        program: "claude",
+        args: [
+          "--model",
+          "opus",
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        format: "anthropic-envelope",
+        logFile,
+      };
+    case "fable-5":
+      return {
+        label: MODEL_LABELS[model],
+        program: "claude",
+        args: [
+          "--model",
+          "fable",
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        format: "anthropic-envelope",
+        logFile,
+      };
+    case "codex-5-6-terra":
+      return {
+        label: MODEL_LABELS[model],
+        program: "codex",
+        args: [
+          "-m",
+          "gpt-5.6-terra",
+          "exec",
+          "--json",
+          "-s",
+          "danger-full-access",
+          "--cd",
+          cwd,
+          "-",
+        ],
+        format: "codex-thread",
+        logFile,
+      };
+    case "grok-4-6":
+      const promptFile = path.join(
+        os.tmpdir(),
+        `cukii-grok-transcript-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+      );
+      fs.writeFileSync(promptFile, prompt, "utf8");
+      let promptJson: string;
+      try {
+        promptJson = grokPromptJson(messages, promptFile);
+      } catch (error) {
+        fs.rmSync(promptFile, { force: true });
+        throw error;
+      }
+      return {
+        label: MODEL_LABELS[model],
+        program: "grok",
+        args: [
+          "--model",
+          "grok-4.6",
+          "--cwd",
+          cwd,
+          "--prompt-json",
+          promptJson,
+          "--output-format",
+          "streaming-messages-json",
+          // The VS Code bridge is a headless process: it has no channel for
+          // Grok's per-tool confirmation prompt. Without this Grok resolves
+          // every terminal request as `cancelled` immediately, then the UI
+          // reports a generic worker failure. Broker mode is itself the
+          // explicit approval boundary for this native worker.
+          "--always-approve",
+        ],
+        // Проверено прогоном: grok отдаёт тот же конверт, что claude stream-json.
+        format: "anthropic-envelope",
+        promptFile,
+        logFile,
+      };
+    case "composer-2-5":
+      if (process.platform === "win32") {
+        const wslCwd = cwd
+          .replace(
+            /^([A-Za-z]):\\/,
+            (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
+          )
+          .replace(/\\/g, "/");
+        return {
+          label: MODEL_LABELS[model],
+          program: "wsl.exe",
+          args: [
+            "-d",
+            "Ubuntu-24.04",
+            "--",
+            "bash",
+            "-lc",
+            'cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format text --model composer-2.5 --trust "$(cat)"',
+            "cukii-cursor",
+            wslCwd,
+          ],
+          // cursor-agent пока остаётся на тексте: его событийная схема не снята
+          // прогоном, а писать парсер по догадке — тот же дефект, что чиним.
+          format: "text",
+          logFile,
+        };
+      }
+      return {
+        label: MODEL_LABELS[model],
+        program: "cursor-agent",
+        args: [
+          "-p",
+          "--output-format",
+          "text",
+          "--model",
+          "composer-2.5",
+          "--trust",
+        ],
+        format: "text",
+        logFile,
+      };
+  }
+}
+
+/**
+ * Событие моста -> сообщения ленты чата.
+ *
+ * `toolStart` едет отдельным assistant-сообщением с ПУСТЫМ контентом: редьюсер
+ * прикрепляет tool-call к последнему assistant-сообщению только в этом случае
+ * (ветка без messageContent в sessionSlice.streamUpdate). Инструмент уже выполнен
+ * внутри worker-а, поэтому GUI переводит его в состояние done и НИКОГДА не
+ * исполняет повторно — это витрина чужой работы, а не запрос на подтверждение.
+ */
+function toChatMessages(event: BridgeEvent): ChatMessage[] {
+  switch (event.kind) {
+    case "text":
+      return [{ role: "assistant", content: event.text }];
+    case "thinking":
+      return [{ role: "thinking", content: event.text }];
+    case "toolStart":
+      return [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: event.id,
+              type: "function",
+              function: { name: event.name, arguments: event.args },
+            },
+          ],
+        },
+      ];
+    case "toolResult":
+      return [
+        {
+          role: "tool",
+          content: event.output,
+          toolCallId: event.id,
+          // This is bridge-private transport metadata. It reaches the Redux
+          // thunk with the observed result and prevents a failed native tool
+          // from being painted as a successful action.
+          cukiiToolError: event.isError,
+        },
+      ] as unknown as ChatMessage[];
+    case "error":
+      return [{ role: "assistant", content: `\n\n⚠️ ${event.text}\n` }];
+  }
+}
+
+export async function* streamBridgeChat(args: {
+  messages: ChatMessage[];
+  brokerModel: BrokerModel;
+  brokerSubagent: BrokerSubagent;
+}): AsyncGenerator<ChatMessage, PromptLog> {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
+  const prompt = buildPrompt(
+    args.messages,
+    args.brokerModel,
+    args.brokerSubagent,
+    cwd,
+  );
+  const route = routeForModel(args.brokerModel, cwd, prompt, args.messages);
+  const subagentLabel =
+    args.brokerSubagent === "auto" ? "Auto" : MODEL_LABELS[args.brokerSubagent];
+  yield {
+    role: "thinking",
+    content:
+      `Starting ${route.label} broker bridge.\n` +
+      `Subagent route: ${subagentLabel}.\n` +
+      (args.brokerSubagent === "auto"
+        ? "Auto routing may choose the strongest available native worker.\n"
+        : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),
+  };
+  let command: ResolvedCommand;
+  try {
+    command = ensureProgramAvailable(route);
+  } catch (err) {
+    if (route.promptFile) {
+      fs.rmSync(route.promptFile, { force: true });
+    }
+    throw err;
+  }
+  yield {
+    role: "thinking",
+    content: `Launching native command: ${describeBridgeLaunch(command.program, command.args)}\n`,
+  };
+
+  const child = spawn(command.program, command.args, {
+    cwd,
+    env: bridgeEnv(args.brokerModel, args.brokerSubagent),
+    shell: false,
+    windowsHide: true,
+  });
+
+  let completion = "";
+  let stderr = "";
+  let stdoutTail = "";
+  let rawStdout = "";
+
+  child.stdin.write(prompt);
+  child.stdin.end();
+
+  const parser = new BridgeEventParser(route.format);
+  const queue: BridgeEvent[] = [];
+  const toolNamesById = new Map<string, string>();
+  const followers: NestedWorkerFollower[] = [];
+  let done = false;
+  let error: Error | undefined;
+
+  child.stdout.on("data", (chunk: Buffer) => {
+    const text = chunk.toString("utf8");
+    stdoutTail = (stdoutTail + text).slice(-4000);
+    // Сырой stdout нужен только как страховка: если вендор сменит формат и не
+    // разберётся ни одно событие, пользователь обязан увидеть ответ, а не пустоту.
+    if (rawStdout.length < 2_000_000) {
+      rawStdout += text;
+    }
+    queue.push(...parser.push(text));
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    const text = chunk.toString("utf8");
+    stderr += text;
+    fs.appendFileSync(route.logFile, text, "utf8");
+  });
+  child.once("error", (err) => {
+    error = err;
+    done = true;
+  });
+  child.once("close", (code) => {
+    queue.push(...parser.flush());
+    if (code && code !== 0) {
+      const detail = stderr.trim() || stdoutTail.trim();
+      error = new Error(
+        `${route.label} bridge exited with code ${code}.` +
+          (detail
+            ? ` ${detail}`
+            : " Native CLI stopped before returning a normal response.") +
+          ` Bridge log: ${route.logFile}`,
+      );
+    }
+    done = true;
+  });
+
+  // Потребитель может бросить генератор на середине (кнопка Stop в чате). Без
+  // finally дочерний CLI оставался жить: он дописывал ответ в никуда, продолжал
+  // тратить токены и мог править файлы уже после того, как пользователь остановил
+  // ответ. Полная отмена требует ещё и проброса AbortSignal через протокол —
+  // здесь закрыт только гарантированный процессный хвост.
+  try {
+    while (!done || queue.length) {
+      const next = queue.shift();
+      if (next) {
+        if (next.kind === "text") {
+          completion += next.text;
+        }
+        registerNestedWorkerFollower(next, toolNamesById, followers);
+        for (const message of toChatMessages(next)) {
+          yield message;
+        }
+      } else {
+        const nestedThinking = drainFollowers(followers);
+        if (nestedThinking.length) {
+          for (const message of nestedThinking) {
+            yield message;
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+      }
+    }
+    for (const message of drainFollowers(followers)) {
+      yield message;
+    }
+    if (
+      route.format !== "text" &&
+      !parser.sawStructuredOutput &&
+      rawStdout.trim()
+    ) {
+      completion += rawStdout;
+      yield { role: "assistant", content: rawStdout };
+    }
+  } finally {
+    closeFollowers(followers);
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill();
+    }
+    if (route.promptFile) {
+      fs.rmSync(route.promptFile, { force: true });
+    }
+  }
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    modelTitle: route.label,
+    modelProvider: "cukii-bridge",
+    prompt,
+    completion,
+  };
+}

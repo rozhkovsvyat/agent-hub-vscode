@@ -221,6 +221,7 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "llm/streamChat": [
     {
       messages: ChatMessage[];
+      sessionId: string;
       completionOptions: LLMFullCompletionOptions;
       title: string;
       messageOptions?: MessageOption;
@@ -301,13 +302,25 @@ export type ToCoreFromIdeOrWebviewProtocol = {
 
   "auth/getAuthUrl": [{ useOnboarding: boolean }, { url: string }];
   "tools/call": [
-    { toolCall: ToolCall },
+    // Tool invocations can outlive the stream that created them. Carry the
+    // session explicitly; never infer it from mutable Core state.
+    { toolCall: ToolCall; sessionId: string },
     {
       contextItems: ContextItem[];
       errorMessage?: string;
       errorReason?: ContinueErrorReason;
       mcpUiState?: McpUiState;
     },
+  ];
+  "tools/runHook": [
+    {
+      event: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
+      sessionId: string;
+      toolCall: ToolCall;
+      toolInput: Record<string, unknown>;
+      extra?: Record<string, unknown>;
+    },
+    { blocked: boolean; reason?: string; updatedInput?: unknown },
   ];
   "tools/evaluatePolicy": [
     {

@@ -87,6 +87,9 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       },
     ],
   },
+  "tools/runHook": {
+    blocked: false,
+  },
   "context/getSymbolsForFiles": {},
   "tools/preprocessArgs": {
     preprocessedArgs: undefined,

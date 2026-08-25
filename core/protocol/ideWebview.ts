@@ -8,6 +8,8 @@ import {
   ApplyToFilePayload,
   HighlightedCodePayload,
   MessageContent,
+  ChatMessage,
+  PromptLog,
   RangeInFileWithContents,
   SetCodeToEditPayload,
   ShowFilePayload,
@@ -25,6 +27,29 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   toggleFullScreen: [{ newWindow?: boolean } | undefined, void];
   insertAtCursor: [{ text: string }, void];
   copyText: [{ text: string }, void];
+  "cukii/openBridgeSession": [
+    { agent: "deepseek" | "claude" | "codex" | "grok" | "cursor" },
+    void,
+  ];
+  "cukii/streamBridgeChat": [
+    {
+      messages: ChatMessage[];
+      brokerModel:
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+      brokerSubagent:
+        | "auto"
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+    },
+    AsyncGenerator<ChatMessage, PromptLog>,
+  ];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [
     undefined,
@@ -66,6 +91,7 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
 
   focusContinueSessionId: [{ sessionId: string | undefined }, void];
   newSession: [undefined, void];
+  "cukii/getActiveSessionId": [undefined, string];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];
   "jetbrains/editorInsetRefresh": [undefined, void];

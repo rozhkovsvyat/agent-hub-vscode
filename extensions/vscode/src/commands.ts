@@ -313,6 +313,14 @@ const getCommandsMap: (
         void addHighlightedCodeToContext(sidebar.webviewProtocol);
       }
     },
+    "continue.focusCuKiiInput": async () => {
+      await vscode.commands.executeCommand("continue.focusContinueInput");
+    },
+    "continue.focusCuKiiInputWithoutClear": async () => {
+      await vscode.commands.executeCommand(
+        "continue.focusContinueInputWithoutClear",
+      );
+    },
     // QuickEditShowParams are passed from CodeLens, temp fix
     // until we update to new params specific to Edit
     "continue.focusEdit": async (args?: QuickEditShowParams) => {
@@ -771,7 +779,7 @@ const getCommandsMap: (
       // Create the full screen panel
       let panel = vscode.window.createWebviewPanel(
         "continue.continueGUIView",
-        "Continue",
+        "Cukii",
         vscode.ViewColumn.One,
         {
           retainContextWhenHidden: true,

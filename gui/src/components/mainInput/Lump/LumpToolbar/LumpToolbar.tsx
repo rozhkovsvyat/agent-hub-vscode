@@ -117,7 +117,7 @@ export function LumpToolbar() {
 
     // Also stop regular streaming if it's happening
     if (isStreaming) {
-      dispatch(cancelStream());
+      void dispatch(cancelStream());
     }
   };
 
@@ -191,11 +191,6 @@ export function LumpToolbar() {
     return (
       <StreamingToolbar onStop={handleStopAction} displayText={stopText} />
     );
-  }
-
-  // Regular streaming (non-terminal)
-  if (isStreaming) {
-    return <StreamingToolbar onStop={() => dispatch(cancelStream())} />;
   }
 
   if (pendingToolCalls.length > 0) {

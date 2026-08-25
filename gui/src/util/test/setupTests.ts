@@ -1,5 +1,29 @@
 import "@testing-library/jest-dom";
 
+// Node 22+ exposes a broken experimental global localStorage unless
+// --localstorage-file is set. Unqualified `localStorage.getItem` then throws
+// during module init (Tooltip → fontSize) before jsdom's window.localStorage
+// is used. Seed a memory backend first.
+const localStorageMemory = new Map<string, string>();
+const localStorageMock: Storage = {
+  get length() {
+    return localStorageMemory.size;
+  },
+  clear: () => localStorageMemory.clear(),
+  getItem: (key: string) => localStorageMemory.get(key) ?? null,
+  key: (index: number) => Array.from(localStorageMemory.keys())[index] ?? null,
+  removeItem: (key: string) => {
+    localStorageMemory.delete(key);
+  },
+  setItem: (key: string, value: string) => {
+    localStorageMemory.set(key, String(value));
+  },
+};
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
+
 afterEach(() => {
   vi.clearAllMocks();
 });

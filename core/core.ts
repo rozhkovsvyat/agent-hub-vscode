@@ -19,12 +19,24 @@ import { fetchModels } from "./llm/fetchModels";
 import Ollama from "./llm/llms/Ollama";
 import { EditAggregator } from "./nextEdit/context/aggregateEdits";
 import { createNewPromptFileV2 } from "./promptFiles/createNewPromptFile";
+import { runLifecycleHooks, runToolHooks } from "./hooks/toolHooks";
+import {
+  bindBrokerLifecycleBinding,
+  emitBrokerLifecycle,
+  startBrokerLifecycleBinding,
+} from "./hooks/brokerLifecycleBridge";
+import { HookSessionLedger } from "./hooks/sessionLedger";
 import { callTool } from "./tools/callTool";
+import { safeParseToolCallArgs } from "./tools/parseArgs";
 import { ChatDescriber } from "./util/chatDescriber";
 import { compactConversation } from "./util/conversationCompaction";
 import { GlobalContext } from "./util/GlobalContext";
 import historyManager from "./util/history";
-import { editConfigFile, migrateV1DevDataFiles } from "./util/paths";
+import {
+  editConfigFile,
+  getSessionFilePath,
+  migrateV1DevDataFiles,
+} from "./util/paths";
 
 import {
   isProcessBackgrounded,
@@ -36,6 +48,7 @@ import { TTS } from "./util/tts";
 
 import {
   CompleteOnboardingPayload,
+  ChatMessage,
   ContextItemId,
   ContextItemWithId,
   IdeSettings,
@@ -45,6 +58,7 @@ import {
   ToolCall,
   type ContextItem,
   type IDE,
+  type PromptLog,
 } from ".";
 
 import { ConfigYaml } from "@continuedev/config-yaml";
@@ -85,6 +99,7 @@ import type { IMessenger, Message } from "./protocol/messenger";
 import { ContinueError, ContinueErrorReason } from "./util/errors";
 import { shareSession } from "./util/historyUtils";
 import { Logger } from "./util/Logger.js";
+import { fileURLToPath } from "node:url";
 
 export class Core {
   configHandler: ConfigHandler;
@@ -96,6 +111,9 @@ export class Core {
   llmLogger = new LLMLogger();
 
   private messageAbortControllers = new Map<string, AbortController>();
+  private activeHookSessions = new Map<string, string>();
+  private readonly hookSessionLedger = new HookSessionLedger();
+  private hookLifecycleReady: Promise<void> = Promise.resolve();
   private addMessageAbortController(id: string): AbortController {
     const controller = new AbortController();
     this.messageAbortControllers.set(id, controller);
@@ -136,6 +154,10 @@ export class Core {
       const ideInfoPromise = messenger.request("getIdeInfo", undefined);
       const ideSettingsPromise = messenger.request("getIdeSettings", undefined);
       this.configHandler = new ConfigHandler(this.ide, this.llmLogger);
+
+      // A crash cannot run a shutdown hook. Reconcile the durable journal as
+      // soon as the next host is available instead of silently losing SessionEnd.
+      this.hookLifecycleReady = this.reconcileHookSessions();
 
       this.docsService = DocsService.createSingleton(
         this.configHandler,
@@ -308,12 +330,17 @@ export class Core {
       return sessions.slice(0, limit);
     });
 
-    on("history/delete", (msg) => {
+    on("history/delete", async (msg) => {
+      await this.hookLifecycleReady;
+      await this.endHookSession(msg.data.id, "clear");
       historyManager.delete(msg.data.id);
     });
 
-    on("history/load", (msg) => {
-      return historyManager.load(msg.data.id);
+    on("history/load", async (msg) => {
+      await this.hookLifecycleReady;
+      const session = historyManager.load(msg.data.id);
+      await this.startHookSession(session.sessionId, "resume");
+      return session;
     });
 
     on("history/save", (msg) => {
@@ -327,7 +354,11 @@ export class Core {
       await shareSession(this.ide, history, outputDir);
     });
 
-    on("history/clear", (msg) => {
+    on("history/clear", async () => {
+      await this.hookLifecycleReady;
+      for (const sessionId of this.activeHookSessions.keys()) {
+        await this.endHookSession(sessionId, "clear");
+      }
       historyManager.clearAll();
     });
 
@@ -562,13 +593,7 @@ export class Core {
 
     on("llm/streamChat", (msg) => {
       const abortController = this.addMessageAbortController(msg.messageId);
-      return llmStreamChat(
-        this.configHandler,
-        abortController,
-        msg,
-        this.ide,
-        this.messenger,
-      );
+      return this.streamChatWithHooks(msg, abortController);
     });
 
     on("llm/complete", async (msg) => {
@@ -620,11 +645,23 @@ export class Core {
     });
 
     on("conversation/compact", async (msg) => {
+      await this.hookLifecycleReady;
       const currentModel = (await this.configHandler.loadConfig()).config
         ?.selectedModelByRole.chat;
 
       if (!currentModel) {
         throw new Error("No chat model selected");
+      }
+
+      await this.startHookSession(msg.data.sessionId, "compact");
+
+      const compact = await this.runLifecycleHook(
+        "PreCompact",
+        msg.data.sessionId,
+        { trigger: "manual", custom_instructions: null },
+      );
+      if (compact.blocked) {
+        throw new Error(compact.reason || "Compaction blocked by hook");
       }
 
       try {
@@ -1044,9 +1081,30 @@ export class Core {
       return { url: "" };
     });
 
-    on("tools/call", async ({ data: { toolCall } }) =>
-      this.handleToolCall(toolCall),
+    on("tools/call", async ({ data: { toolCall, sessionId } }) =>
+      this.handleToolCall(toolCall, sessionId),
     );
+
+    on("tools/runHook", async ({ data }) => {
+      await this.hookLifecycleReady;
+      const cwd = await this.getHooksCwd(data.sessionId);
+      const result = await runToolHooks(
+        data.event,
+        data.toolCall.function.name,
+        data.toolInput,
+        data.toolCall.id,
+        cwd,
+        data.extra,
+        undefined,
+        data.sessionId,
+        getSessionFilePath(data.sessionId),
+      );
+      return {
+        blocked: result.blocked,
+        reason: result.reason,
+        updatedInput: result.updatedInput,
+      };
+    });
 
     on(
       "tools/evaluatePolicy",
@@ -1147,7 +1205,257 @@ export class Core {
     });
   }
 
-  private async handleToolCall(toolCall: ToolCall) {
+  private async getHooksCwd(sessionId?: string): Promise<string> {
+    const remembered = sessionId && this.activeHookSessions.get(sessionId);
+    if (remembered) return remembered;
+    const workspaceUri = (await this.ide.getWorkspaceDirs())[0];
+    if (!workspaceUri) return process.cwd();
+    return workspaceUri.startsWith("file:")
+      ? fileURLToPath(workspaceUri)
+      : workspaceUri;
+  }
+
+  /** Called only by the trusted VS Code UI after its local broker handshake. */
+  async bindBrokerLifecycle(
+    chatSessionId: string,
+    bridgeSessionId: string,
+    token: string,
+  ): Promise<void> {
+    bindBrokerLifecycleBinding(chatSessionId, bridgeSessionId, token);
+    try {
+      const cwd = await this.getHooksCwd(chatSessionId);
+      await startBrokerLifecycleBinding(chatSessionId, cwd);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async runLifecycleHook(
+    event:
+      | "UserPromptSubmit"
+      | "SessionStart"
+      | "SessionEnd"
+      | "Stop"
+      | "PreCompact",
+    sessionId: string,
+    fields: Record<string, unknown>,
+  ) {
+    const cwd = await this.getHooksCwd(sessionId);
+    // Broker receipt is independent of local hook implementation.  Without
+    // an explicitly provisioned bridge token this is intentionally a no-op,
+    // so an arbitrary VS Code process cannot self-attest DeepSeek parity.
+    try {
+      await emitBrokerLifecycle(event, sessionId, cwd, fields);
+    } catch (error) {
+      // The extension's own lifecycle/hook session remains authoritative for
+      // UI availability. A missing broker must surface as absent parity in its
+      // receipt, never turn every DeepSeek conversation into an outage.
+      console.warn("Cukii broker lifecycle bridge unavailable", error);
+    }
+    const matcherValue =
+      typeof fields.source === "string"
+        ? fields.source
+        : typeof fields.reason === "string"
+          ? fields.reason
+          : typeof fields.trigger === "string"
+            ? fields.trigger
+            : "";
+    return runLifecycleHooks(
+      event,
+      fields,
+      cwd,
+      sessionId,
+      getSessionFilePath(sessionId),
+      matcherValue,
+    );
+  }
+
+  private async startHookSession(
+    sessionId: string,
+    source: "startup" | "resume" | "clear" | "compact",
+  ): Promise<string | undefined> {
+    if (this.activeHookSessions.has(sessionId)) return undefined;
+    const cwd = await this.getHooksCwd();
+    // Journal before the observable start: a host crash after this point is
+    // reconciled deterministically on next activation.
+    this.hookSessionLedger.open({
+      sessionId,
+      cwd,
+      openedAt: new Date().toISOString(),
+      state: "starting",
+      startInvocationId: uuidv4(),
+    });
+    this.activeHookSessions.set(sessionId, cwd);
+    const started = await this.runLifecycleHook("SessionStart", sessionId, {
+      source,
+      hook_invocation_id:
+        this.hookSessionLedger.get(sessionId)?.startInvocationId,
+    });
+    if (started.blocked) {
+      this.activeHookSessions.delete(sessionId);
+      this.hookSessionLedger.close(sessionId);
+      throw new Error(started.reason || "Session start blocked by hook");
+    }
+    this.hookSessionLedger.markStarted(sessionId);
+    return started.additionalContext;
+  }
+
+  private async endHookSession(
+    sessionId: string,
+    reason: "clear" | "other",
+    recovered = false,
+  ): Promise<void> {
+    if (!this.activeHookSessions.has(sessionId) && !recovered) return;
+    const endInvocationId =
+      this.hookSessionLedger.get(sessionId)?.endInvocationId ?? uuidv4();
+    this.hookSessionLedger.markEnding(sessionId, endInvocationId);
+    const ended = await this.runLifecycleHook("SessionEnd", sessionId, {
+      reason,
+      hook_invocation_id: endInvocationId,
+      ...(recovered ? { recovery: true } : {}),
+    });
+    if (ended.blocked)
+      throw new Error(ended.reason || "Session end blocked by hook");
+    this.activeHookSessions.delete(sessionId);
+    this.hookSessionLedger.close(sessionId);
+  }
+
+  private async reconcileHookSessions(): Promise<void> {
+    for (const entry of this.hookSessionLedger.list()) {
+      this.activeHookSessions.set(entry.sessionId, entry.cwd);
+      try {
+        if (entry.state === "starting") {
+          // The previous host died before acknowledging SessionStart. Replay a
+          // marked recovery start so SessionEnd is never emitted on its own.
+          const started = await this.runLifecycleHook(
+            "SessionStart",
+            entry.sessionId,
+            {
+              source: "startup",
+              recovery: true,
+              hook_invocation_id: entry.startInvocationId,
+            },
+          );
+          if (started.blocked) {
+            throw new Error(started.reason || "Recovery SessionStart blocked");
+          }
+          this.hookSessionLedger.markStarted(entry.sessionId);
+        }
+        await this.endHookSession(entry.sessionId, "other", true);
+      } catch (error) {
+        // Do not turn a blocking recovery hook into an allow. The readiness
+        // promise rejects and every lifecycle/tool entrypoint remains closed.
+        throw new Error(
+          `Hook session recovery blocked for ${entry.sessionId}: ${String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async *streamChatWithHooks(
+    msg: Message<ToCoreProtocol["llm/streamChat"][0]>,
+    abortController: AbortController,
+  ): AsyncGenerator<ChatMessage, PromptLog> {
+    await this.hookLifecycleReady;
+    const sessionId = msg.data.sessionId;
+    const messages = msg.data.messages;
+    const lastUser = [...messages]
+      .reverse()
+      .find((message) => message.role === "user");
+    const prompt =
+      lastUser && typeof lastUser.content === "string" ? lastUser.content : "";
+
+    const startContext = await this.startHookSession(sessionId, "startup");
+
+    const submitted = await this.runLifecycleHook(
+      "UserPromptSubmit",
+      sessionId,
+      { prompt },
+    );
+    if (submitted.blocked)
+      throw new Error(submitted.reason || "Prompt blocked by hook");
+
+    const initialContext = [startContext, submitted.additionalContext]
+      .filter(Boolean)
+      .join("\n");
+    let streamMessage = msg;
+    if (initialContext) {
+      streamMessage = {
+        ...msg,
+        data: {
+          ...msg.data,
+          messages: [
+            ...messages,
+            {
+              role: "user",
+              content: `<hook_context>\n${initialContext}\n</hook_context>`,
+            },
+          ],
+        },
+      };
+    }
+
+    for (let stopAttempts = 0; ; stopAttempts++) {
+      const stream = llmStreamChat(
+        this.configHandler,
+        abortController,
+        streamMessage,
+        this.ide,
+        this.messenger,
+      );
+      let lastAssistantMessage = "";
+      const stagedChunks: ChatMessage[] = [];
+      let next = await stream.next();
+      while (!next.done) {
+        const chunk = next.value;
+        if (chunk.role === "assistant" && typeof chunk.content === "string") {
+          lastAssistantMessage += chunk.content;
+        }
+        stagedChunks.push(chunk);
+        next = await stream.next();
+      }
+
+      const stopped = await this.runLifecycleHook("Stop", sessionId, {
+        stop_hook_active: stopAttempts > 0,
+        last_assistant_message: lastAssistantMessage,
+      });
+      if (!stopped.blocked) {
+        // Stop is a commit gate: no assistant content reaches Redux/history
+        // until all blocking hooks have allowed completion.
+        for (const chunk of stagedChunks) yield chunk;
+        return next.value;
+      }
+      if (stopAttempts >= 2) {
+        throw new Error(
+          stopped.reason || "Stop hook blocked completion repeatedly",
+        );
+      }
+      streamMessage = {
+        ...streamMessage,
+        data: {
+          ...streamMessage.data,
+          messages: [
+            ...streamMessage.data.messages,
+            { role: "assistant", content: lastAssistantMessage },
+            {
+              role: "user",
+              content: `<stop_hook_feedback>\n${stopped.additionalContext || stopped.reason || "Resolve the hook requirement before stopping."}\n</stop_hook_feedback>`,
+            },
+          ],
+        },
+      };
+    }
+  }
+
+  public async shutdown(): Promise<void> {
+    await this.hookLifecycleReady;
+    for (const sessionId of [...this.activeHookSessions.keys()]) {
+      await this.endHookSession(sessionId, "other");
+    }
+  }
+
+  private async handleToolCall(toolCall: ToolCall, sessionId: string) {
+    await this.hookLifecycleReady;
     const { config } = await this.configHandler.loadConfig();
     if (!config) {
       throw new Error("Config not loaded");
@@ -1173,17 +1481,122 @@ export class Core {
       this.messenger.send("toolCallPartialOutput", params);
     };
 
-    const result = await callTool(tool, toolCall, {
-      config,
-      ide: this.ide,
-      llm: config.selectedModelByRole.chat,
-      fetch: (url, init) =>
-        fetchwithRequestOptions(url, init, config.requestOptions),
-      tool,
-      toolCallId: toolCall.id,
-      onPartialOutput,
-      codeBaseIndexer: this.codeBaseIndexer,
-    });
+    const cwd = await this.getHooksCwd(sessionId);
+    const transcriptPath = getSessionFilePath(sessionId);
+    const toolInput = safeParseToolCallArgs(toolCall) as Record<
+      string,
+      unknown
+    >;
+    const preToolUse = await runToolHooks(
+      "PreToolUse",
+      toolCall.function.name,
+      toolInput,
+      toolCall.id,
+      cwd,
+      {},
+      undefined,
+      sessionId,
+      transcriptPath,
+    );
+    if (preToolUse.blocked) {
+      return {
+        contextItems: [],
+        errorMessage: preToolUse.reason || "Blocked by hook",
+      };
+    }
+
+    if (preToolUse.updatedInput !== undefined) {
+      try {
+        const processedArgs = await tool.preprocessArgs?.(
+          preToolUse.updatedInput as Record<string, unknown>,
+          {
+            ide: this.ide,
+          },
+        );
+        const policy = tool.evaluateToolCallPolicy?.(
+          "allowedWithoutPermission",
+          preToolUse.updatedInput as Record<string, unknown>,
+          processedArgs,
+        );
+        if (policy && policy !== "allowedWithoutPermission") {
+          return {
+            contextItems: [],
+            errorMessage:
+              "Hook-updated tool input requires a new permission decision and was blocked.",
+          };
+        }
+      } catch (error) {
+        return {
+          contextItems: [],
+          errorMessage: `Hook-updated tool input was blocked: ${String(error)}`,
+        };
+      }
+    }
+
+    const effectiveToolCall =
+      preToolUse.updatedInput === undefined
+        ? toolCall
+        : {
+            ...toolCall,
+            function: {
+              ...toolCall.function,
+              arguments: JSON.stringify(preToolUse.updatedInput),
+            },
+          };
+    const effectiveInput = preToolUse.updatedInput ?? toolInput;
+    let result;
+    try {
+      result = await callTool(tool, effectiveToolCall, {
+        config,
+        ide: this.ide,
+        llm: config.selectedModelByRole.chat,
+        fetch: (url, init) =>
+          fetchwithRequestOptions(url, init, config.requestOptions),
+        tool,
+        toolCallId: toolCall.id,
+        onPartialOutput,
+        codeBaseIndexer: this.codeBaseIndexer,
+      });
+    } catch (error) {
+      await runToolHooks(
+        "PostToolUseFailure",
+        toolCall.function.name,
+        effectiveInput,
+        toolCall.id,
+        cwd,
+        { error: String(error) },
+        undefined,
+        sessionId,
+        transcriptPath,
+      );
+      throw error;
+    }
+
+    if (result.errorMessage) {
+      await runToolHooks(
+        "PostToolUseFailure",
+        toolCall.function.name,
+        effectiveInput,
+        toolCall.id,
+        cwd,
+        { error: result.errorMessage },
+        undefined,
+        sessionId,
+        transcriptPath,
+      );
+    } else {
+      await runToolHooks(
+        "PostToolUse",
+        toolCall.function.name,
+        effectiveInput,
+        toolCall.id,
+        cwd,
+        { tool_response: result.contextItems },
+        undefined,
+        sessionId,
+        transcriptPath,
+      );
+    }
 
     return result;
   }

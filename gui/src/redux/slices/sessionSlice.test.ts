@@ -3,7 +3,13 @@ import { renderChatMessage } from "core/util/messageContent";
 import { v4 as uuidv4 } from "uuid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addToolCallDeltaToState } from "../../util/toolCallState";
-import { ChatHistoryItemWithMessageId, sessionSlice } from "./sessionSlice";
+import {
+  ChatHistoryItemWithMessageId,
+  clearQueuedMessage,
+  newSession,
+  sessionSlice,
+  setQueuedMessage,
+} from "./sessionSlice";
 
 // Mock dependencies
 vi.mock("uuid");
@@ -76,6 +82,7 @@ describe("sessionSlice streamUpdate", () => {
     newestToolbarPreviewForInput: {},
     isSessionMetadataLoading: false,
     compactionLoading: {},
+    queuedMessage: undefined,
   });
 
   describe("Basic Chat Message", () => {
@@ -450,5 +457,52 @@ describe("sessionSlice streamUpdate", () => {
       expect(newState.history[1].message.role).toBe("assistant");
       expect(newState.history[1].toolCallStates).toHaveLength(1);
     });
+  });
+});
+
+describe("sessionSlice queued message", () => {
+  const queued = {
+    editorState: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "follow-up" }],
+        },
+      ],
+    },
+    modifiers: { useCodebase: false, noContext: true },
+    preview: "follow-up",
+  };
+
+  it("replaces the single slot instead of stacking", () => {
+    const initial = sessionSlice.getInitialState();
+    const first = sessionSlice.reducer(
+      initial,
+      setQueuedMessage({ ...queued, preview: "one" }),
+    );
+    const second = sessionSlice.reducer(
+      first,
+      setQueuedMessage({ ...queued, preview: "two" }),
+    );
+    expect(second.queuedMessage?.preview).toBe("two");
+  });
+
+  it("clears the slot", () => {
+    const queuedState = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setQueuedMessage(queued),
+    );
+    const cleared = sessionSlice.reducer(queuedState, clearQueuedMessage());
+    expect(cleared.queuedMessage).toBeUndefined();
+  });
+
+  it("newSession drops the queue", () => {
+    const queuedState = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setQueuedMessage(queued),
+    );
+    const next = sessionSlice.reducer(queuedState, newSession(undefined));
+    expect(next.queuedMessage).toBeUndefined();
   });
 });

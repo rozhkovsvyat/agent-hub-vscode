@@ -1,6 +1,12 @@
 import {
+  ArrowPathIcon,
+  ArrowUpIcon,
   AtSymbolIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  CubeIcon,
   LightBulbIcon as LightBulbIconOutline,
+  PencilIcon,
   PhotoIcon,
 } from "@heroicons/react/24/outline";
 import { LightBulbIcon as LightBulbIconSolid } from "@heroicons/react/24/solid";
@@ -14,17 +20,43 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
 import { selectSelectedChatModel } from "../../redux/slices/configSlice";
-import { setHasReasoningEnabled } from "../../redux/slices/sessionSlice";
+import {
+  setBrokerModel,
+  setBrokerSubagent,
+  setHasReasoningEnabled,
+} from "../../redux/slices/sessionSlice";
+import type {
+  BrokerModel,
+  BrokerSubagent,
+} from "../../redux/slices/sessionSlice";
 import { setReasoningSetting } from "../../redux/slices/uiSlice";
+import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
 import { getMetaKeyLabel, isMetaEquivalentKeyPressed } from "../../util";
 import { ToolTip } from "../gui/Tooltip";
 import ModelSelect from "../modelSelection/ModelSelect";
 import { ModeSelect } from "../ModeSelect";
 import { Button } from "../ui";
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "../ui";
 import { useFontSize } from "../ui/font";
 import ContextStatus from "./ContextStatus";
 import HoverItem from "./InputToolbar/HoverItem";
+
+const BROKER_MODEL_OPTIONS: Array<{
+  value: BrokerModel;
+  label: string;
+}> = [
+  { value: "opus-5", label: "Opus 5" },
+  { value: "fable-5", label: "Fable 5" },
+  { value: "codex-5-6-terra", label: "Codex 5.6 Terra" },
+  { value: "grok-4-6", label: "Grok 4.6" },
+  { value: "composer-2-5", label: "Composer 2.5" },
+];
+
+const BROKER_SUBAGENT_OPTIONS: Array<{
+  value: BrokerSubagent;
+  label: string;
+}> = [{ value: "auto", label: "Auto" }, ...BROKER_MODEL_OPTIONS];
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -53,12 +85,26 @@ function InputToolbar(props: InputToolbarProps) {
   const defaultModel = useAppSelector(selectSelectedChatModel);
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const isStreaming = useAppSelector((store) => store.session.isStreaming);
+  const mode = useAppSelector((store) => store.session.mode);
+  const brokerModel = useAppSelector((store) => store.session.brokerModel);
+  const brokerSubagent = useAppSelector(
+    (store) => store.session.brokerSubagent,
+  );
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
   const hasReasoningEnabled = useAppSelector(
     (store) => store.session.hasReasoningEnabled,
   );
   const isEnterDisabled =
-    props.disabled || (isInEdit && codeToEdit.length === 0);
+    !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
+  const isRetry = props.toolbarOptions?.enterText === "Retry";
+  const submitButtonLabel = isStreaming
+    ? "Stop response"
+    : isInEdit
+      ? isRetry
+        ? "Retry edit"
+        : "Edit selection"
+      : "Send message";
 
   const supportsImages =
     defaultModel &&
@@ -73,17 +119,86 @@ function InputToolbar(props: InputToolbarProps) {
 
   const smallFont = useFontSize(-2);
   const tinyFont = useFontSize(-3);
+  const selectedBrokerModel =
+    BROKER_MODEL_OPTIONS.find((option) => option.value === brokerModel) ??
+    BROKER_MODEL_OPTIONS[1];
+  const selectedBrokerSubagent =
+    BROKER_SUBAGENT_OPTIONS.find((option) => option.value === brokerSubagent) ??
+    BROKER_SUBAGENT_OPTIONS[0];
+
+  const renderBrokerPicker = <T extends BrokerModel | BrokerSubagent>({
+    value,
+    options,
+    selectedLabel,
+    heading,
+    testId,
+    tooltip,
+    segment,
+    onChange,
+  }: {
+    value: T | undefined;
+    options: Array<{ value: T; label: string }>;
+    selectedLabel: string;
+    heading: string;
+    testId: string;
+    tooltip: string;
+    segment?: "left" | "right";
+    onChange: (value: T) => void;
+  }) => (
+    <ToolTip place="top" content={tooltip}>
+      <HoverItem className="!p-0">
+        <Listbox value={value} onChange={onChange}>
+          <div className="relative flex min-w-0">
+            <ListboxButton
+              data-testid={testId}
+              className={`text-description h-[22px] max-w-[180px] gap-1 border-none px-2 ${segment === "left" ? "cukii-segment-left" : ""} ${segment === "right" ? "cukii-segment-right" : ""}`}
+            >
+              <CubeIcon className="h-3 w-3 flex-shrink-0" />
+              <span className="min-w-0 truncate hover:brightness-110">
+                {selectedLabel}
+              </span>
+              <ChevronDownIcon
+                className="hidden h-2 w-2 flex-shrink-0 hover:brightness-110 min-[250px]:flex"
+                aria-hidden="true"
+              />
+            </ListboxButton>
+            <ListboxOptions className="min-w-[210px]">
+              <div className="text-description-muted px-2 py-1 text-xs font-medium">
+                {heading}
+              </div>
+              {options.map((option) => (
+                <ListboxOption key={option.value} value={option.value}>
+                  <div className="flex min-w-0 items-center gap-2 py-0.5">
+                    <CubeIcon className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{option.label}</span>
+                  </div>
+                  <CheckIcon
+                    className={`ml-auto h-3 w-3 ${
+                      option.value === value ? "" : "opacity-0"
+                    }`}
+                  />
+                </ListboxOption>
+              ))}
+            </ListboxOptions>
+          </div>
+        </Listbox>
+      </HoverItem>
+    </ToolTip>
+  );
 
   return (
     <>
       <div
         onClick={props.onClick}
-        className={`find-widget-skip bg-vsc-input-background flex select-none flex-row items-center justify-between gap-1 pt-1 ${props.hidden ? "pointer-events-none h-0 cursor-default opacity-0" : "pointer-events-auto mt-2 cursor-text opacity-100"}`}
+        // min-w-0 на самой строке: без него flex-контейнер не может стать уже
+        // суммы min-content своих групп и выдавливает содержимое за панель —
+        // именно так обрезались и кнопка отправки, и текст сообщений.
+        className={`find-widget-skip bg-vsc-input-background flex min-w-0 select-none flex-row items-center justify-between gap-1 pt-1 ${props.hidden ? "pointer-events-none h-0 cursor-default opacity-0" : "pointer-events-auto mt-2 cursor-text opacity-100"}`}
         style={{
           fontSize: smallFont,
         }}
       >
-        <div className="xs:gap-1.5 flex flex-row items-center gap-1">
+        <div className="xs:gap-1.5 flex min-w-0 flex-row items-center gap-1">
           {!isInEdit && (
             <ToolTip place="top" content="Select Mode">
               <HoverItem className="!p-0">
@@ -91,11 +206,36 @@ function InputToolbar(props: InputToolbarProps) {
               </HoverItem>
             </ToolTip>
           )}
-          <ToolTip place="top" content="Select Model">
-            <HoverItem className="!p-0">
-              <ModelSelect />
-            </HoverItem>
-          </ToolTip>
+          {mode === "broker" && !isInEdit ? (
+            <div className="cukii-broker-segmented flex min-w-0 flex-row items-center">
+              {renderBrokerPicker<BrokerModel>({
+                value: brokerModel,
+                options: BROKER_MODEL_OPTIONS,
+                selectedLabel: selectedBrokerModel.label,
+                heading: "Broker model",
+                testId: "broker-model-select-button",
+                tooltip: "Select Broker Model",
+                segment: "left",
+                onChange: (value) => dispatch(setBrokerModel(value)),
+              })}
+              {renderBrokerPicker<BrokerSubagent>({
+                value: brokerSubagent,
+                options: BROKER_SUBAGENT_OPTIONS,
+                selectedLabel: selectedBrokerSubagent.label,
+                heading: "Subagent model",
+                testId: "broker-subagent-select-button",
+                tooltip: "Select Subagent Model",
+                segment: "right",
+                onChange: (value) => dispatch(setBrokerSubagent(value)),
+              })}
+            </div>
+          ) : (
+            <ToolTip place="top" content="Select Model">
+              <HoverItem className="!p-0">
+                <ModelSelect />
+              </HoverItem>
+            </ToolTip>
+          )}
           <div className="xs:flex text-description -mb-1 hidden items-center transition-colors duration-200">
             {props.toolbarOptions?.hideImageUpload ||
               (supportsImages && (
@@ -169,7 +309,9 @@ function InputToolbar(props: InputToolbarProps) {
         </div>
 
         <div
-          className="text-description flex items-center gap-2 whitespace-nowrap"
+          // flex-shrink-0 у правой группы: она короткая и обязана остаться целой,
+          // сжиматься должна левая (у пилюль моделей есть truncate и max-width).
+          className="text-description flex min-w-0 flex-shrink-0 items-center gap-2 whitespace-nowrap"
           style={{
             fontSize: tinyFont,
           }}
@@ -221,12 +363,39 @@ function InputToolbar(props: InputToolbarProps) {
               </span>
             </HoverItem>
           )}
-          <ToolTip place="top" content="Send (⏎)">
+          {isStreaming && props.isMainInput && (
+            <ToolTip place="top" content="В очередь">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="cukii-queue-button"
+                data-testid="queue-input-button"
+                aria-label="В очередь"
+                onClick={(e) => {
+                  props.onEnter?.({
+                    useCodebase: false,
+                    noContext: useActiveFile
+                      ? isMetaEquivalentKeyPressed(e as any) || e.altKey
+                      : !(isMetaEquivalentKeyPressed(e as any) || e.altKey),
+                  });
+                }}
+              >
+                <ArrowUpIcon className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </ToolTip>
+          )}
+          <ToolTip place="top" content={submitButtonLabel}>
             <Button
               variant={props.isMainInput ? "primary" : "secondary"}
               size="sm"
+              className="cukii-submit-button"
               data-testid="submit-input-button"
+              aria-label={submitButtonLabel}
               onClick={async (e) => {
+                if (isStreaming) {
+                  void dispatch(cancelStream());
+                  return;
+                }
                 if (props.onEnter) {
                   props.onEnter({
                     useCodebase: false,
@@ -238,10 +407,20 @@ function InputToolbar(props: InputToolbarProps) {
               }}
               disabled={isEnterDisabled}
             >
-              <span className="hidden md:inline">
-                ⏎ {props.toolbarOptions?.enterText ?? "Enter"}
-              </span>
-              <span className="md:hidden">⏎</span>
+              {isStreaming ? (
+                <span
+                  className="h-2.5 w-2.5 rounded-[1px] bg-white"
+                  aria-hidden="true"
+                />
+              ) : isInEdit ? (
+                isRetry ? (
+                  <ArrowPathIcon className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <PencilIcon className="h-4 w-4" aria-hidden="true" />
+                )
+              ) : (
+                <ArrowUpIcon className="h-4 w-4" aria-hidden="true" />
+              )}
             </Button>
           </ToolTip>
         </div>

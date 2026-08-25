@@ -52,6 +52,8 @@ function ParallelListeners() {
   const lastSessionId = useAppSelector((store) => store.session.lastSessionId);
   const [initialSessionId] = useState(sessionId || lastSessionId);
 
+  useWebviewListener("cukii/getActiveSessionId", async () => sessionId || "");
+
   const handleConfigUpdate = useCallback(
     async (isInitial: boolean, result: FromCoreProtocol["configUpdate"][0]) => {
       const { result: configResult, profileId, profiles } = result;

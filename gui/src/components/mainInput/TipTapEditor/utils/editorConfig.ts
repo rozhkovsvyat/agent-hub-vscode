@@ -18,8 +18,10 @@ import useUpdatingRef from "../../../../hooks/useUpdatingRef";
 import { useAppSelector } from "../../../../redux/hooks";
 import { selectUseActiveFile } from "../../../../redux/selectors";
 import { selectSelectedChatModel } from "../../../../redux/slices/configSlice";
+import { setQueuedMessage } from "../../../../redux/slices/sessionSlice";
 import { AppDispatch } from "../../../../redux/store";
 import { exitEdit } from "../../../../redux/thunks/edit";
+import { previewFromEditorJson } from "../../queuedMessagePreview";
 import { getFontSize, isJetBrains } from "../../../../util";
 import { CodeBlock, Mention, PromptBlock, SlashCommand } from "../extensions";
 import { TipTapEditorProps } from "../TipTapEditor";
@@ -27,7 +29,11 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import { handleImageFile } from "./imageUtils";
+import {
+  BROKER_IMAGE_MAX_DATA_URL_CHARS,
+  BROKER_IMAGE_RESOLUTION,
+  handleImageFile,
+} from "./imageUtils";
 
 export function getPlaceholderText(
   placeholder: TipTapEditorProps["placeholder"],
@@ -85,6 +91,7 @@ export function createEditorConfig(options: {
 
   const { getSubmenuContextItems } = useSubmenuContextProviders();
   const defaultModel = useAppSelector(selectSelectedChatModel);
+  const sessionMode = useAppSelector((state) => state.session.mode);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const historyLength = useAppSelector((store) => store.session.history.length);
@@ -95,6 +102,7 @@ export function createEditorConfig(options: {
   const inSubmenuRef = useRef<string | undefined>(undefined);
   const inDropdownRef = useRef(false);
   const defaultModelRef = useUpdatingRef(defaultModel);
+  const sessionModeRef = useUpdatingRef(sessionMode);
   const isStreamingRef = useUpdatingRef(isStreaming);
   const getSubmenuContextItemsRef = useUpdatingRef(getSubmenuContextItems);
   const availableContextProvidersRef = useUpdatingRef(
@@ -158,32 +166,51 @@ export function createEditorConfig(options: {
               handleDOMEvents: {
                 paste(view, event) {
                   const model = defaultModelRef.current;
-                  if (!model) return;
+                  const broker = sessionModeRef.current === "broker";
                   const items = event.clipboardData?.items;
-                  if (items) {
-                    for (const item of items) {
-                      const file = item.getAsFile();
-                      file &&
+                  if (!items) {
+                    return false;
+                  }
+                  let handled = false;
+                  for (const item of items) {
+                    const file = item.getAsFile();
+                    if (!file || !file.type.startsWith("image/")) {
+                      continue;
+                    }
+                    const allowed =
+                      broker ||
+                      (model &&
                         modelSupportsImages(
                           model.provider,
                           model.model,
                           model.title,
                           model.capabilities,
-                        ) &&
-                        void handleImageFile(ideMessenger, file).then(
-                          (resp) => {
-                            if (!resp) return;
-                            const [img, dataUrl] = resp;
-                            const { schema } = view.state;
-                            const node = schema.nodes.image.create({
-                              src: dataUrl,
-                            });
-                            const tr = view.state.tr.insert(0, node);
-                            view.dispatch(tr);
-                          },
-                        );
+                        ));
+                    if (!allowed) {
+                      continue;
                     }
+                    handled = true;
+                    void handleImageFile(
+                      ideMessenger,
+                      file,
+                      broker ? BROKER_IMAGE_RESOLUTION : undefined,
+                      broker ? BROKER_IMAGE_MAX_DATA_URL_CHARS : undefined,
+                    ).then((resp) => {
+                      if (!resp) return;
+                      const [, dataUrl] = resp;
+                      const { schema } = view.state;
+                      const node = schema.nodes.image.create({
+                        src: dataUrl,
+                      });
+                      const tr = view.state.tr.insert(0, node);
+                      view.dispatch(tr);
+                    });
                   }
+                  if (handled) {
+                    event.preventDefault();
+                    return true;
+                  }
+                  return false;
                 },
               },
             },
@@ -391,7 +418,7 @@ export function createEditorConfig(options: {
     if (!editor) {
       return;
     }
-    if (isStreamingRef.current || (codeToEdit.length === 0 && isInEdit)) {
+    if (codeToEdit.length === 0 && isInEdit) {
       return;
     }
 
@@ -399,6 +426,21 @@ export function createEditorConfig(options: {
 
     // Don't do anything if input box doesn't have valid content
     if (!hasValidEditorContent(json)) {
+      return;
+    }
+
+    if (isStreamingRef.current) {
+      if (!props.isMainInput) {
+        return;
+      }
+      dispatch(
+        setQueuedMessage({
+          editorState: json,
+          modifiers,
+          preview: previewFromEditorJson(json),
+        }),
+      );
+      editor.commands.clearContent();
       return;
     }
 

@@ -6,10 +6,12 @@ import {
   DocumentIcon,
   PencilIcon,
   QuestionMarkCircleIcon,
+  UserGroupIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import { ConfigSection } from "./components/ConfigSection";
 import { ConfigsSection } from "./sections/ConfigsSection";
+import { AgentsSection } from "./sections/AgentsSection";
 import { HelpSection } from "./sections/HelpSection";
 import { IndexingSettingsSection } from "./sections/IndexingSettingsSection";
 import { ModelsSection } from "./sections/ModelsSection";
@@ -48,6 +50,16 @@ export const topTabSections: TabSection[] = [
     id: "blocks",
     showTopDivider: true,
     tabs: [
+      {
+        id: "agents",
+        label: "Agents",
+        component: (
+          <ConfigSection>
+            <AgentsSection />
+          </ConfigSection>
+        ),
+        icon: <UserGroupIcon className="xs:h-4 xs:w-4 h-3 w-3 flex-shrink-0" />,
+      },
       {
         id: "models",
         label: "Models",

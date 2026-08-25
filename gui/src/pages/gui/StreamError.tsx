@@ -16,7 +16,9 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import { setDialogMessage, setShowDialog } from "../../redux/slices/uiSlice";
+import { BROKER_MODEL_LABELS } from "../../redux/util/getBaseSystemMessage";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
+import { ModelDescription } from "core";
 import { analyzeError } from "../../util/errorAnalysis";
 
 interface StreamErrorProps {
@@ -26,7 +28,12 @@ interface StreamErrorProps {
 const StreamErrorDialog = ({ error }: StreamErrorProps) => {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
-  const selectedModel = useAppSelector(selectSelectedChatModel);
+  const selectedModel = useAppSelector(selectSelectedChatModel) as
+    | ModelDescription
+    | null
+    | undefined;
+  const sessionMode = useAppSelector((state) => state.session.mode);
+  const brokerModel = useAppSelector((state) => state.session.brokerModel);
   const { refreshProfiles } = useAuth();
   const { mainEditor } = useMainEditor();
 
@@ -39,7 +46,21 @@ const StreamErrorDialog = ({ error }: StreamErrorProps) => {
     apiKeyUrl,
     helpUrl,
     customErrorMessage,
-  } = useMemo(() => analyzeError(error, selectedModel), [error, selectedModel]);
+  } = useMemo(() => {
+    if (sessionMode !== "broker") {
+      return analyzeError(error, selectedModel);
+    }
+    const label = BROKER_MODEL_LABELS[brokerModel ?? "fable-5"] ?? "Broker";
+    return analyzeError(error, {
+      ...(selectedModel ?? {
+        title: label,
+        provider: "cukii-bridge",
+        model: brokerModel ?? "grok-4.6",
+      }),
+      title: `${label} (Cukii Broker)`,
+      underlyingProviderName: "cukii-bridge",
+    });
+  }, [error, selectedModel, sessionMode, brokerModel]);
 
   const handleRefreshProfiles = () => {
     void refreshProfiles("Clicked reload config from stream error dialog");

@@ -62,22 +62,75 @@ export const callToolById = createAsyncThunk<
     )
   ) {
     // Tool is called on client side
-    const {
-      output: clientToolOutput,
-      respondImmediately,
-      error: clientToolError,
-    } = await callClientTool(toolCallState, {
-      dispatch,
-      ideMessenger: extra.ideMessenger,
-      getState,
+    const sessionId = getState().session.id;
+    const hookInput = toolCallState.parsedArgs as Record<string, unknown>;
+    const preHook = await extra.ideMessenger.request("tools/runHook", {
+      event: "PreToolUse",
+      sessionId,
+      toolCall: toolCallState.toolCall,
+      toolInput: hookInput,
     });
-    output = clientToolOutput;
-    error = clientToolError;
-    streamResponse = respondImmediately;
+    if (preHook.status === "error") {
+      throw new Error(preHook.error);
+    }
+    if (preHook.content.blocked) {
+      output = [];
+      error = new ContinueError(
+        ContinueErrorReason.Unspecified,
+        preHook.content.reason || "Blocked by hook",
+      );
+      streamResponse = true;
+    } else {
+      // Client-side edit implementations write directly through the IDE. They
+      // do not have Core's second policy gate, so input rewriting is fail-closed
+      // here: a hook may approve/deny an edit, never retarget it after approval.
+      if (preHook.content.updatedInput !== undefined) {
+        output = [];
+        error = new ContinueError(
+          ContinueErrorReason.Unspecified,
+          "Hook-updated input for a client edit requires a new permission decision and was blocked.",
+        );
+        streamResponse = true;
+      } else {
+        const effectiveInput =
+          (preHook.content.updatedInput as
+            | Record<string, unknown>
+            | undefined) ?? hookInput;
+        const effectiveToolCallState =
+          preHook.content.updatedInput === undefined
+            ? toolCallState
+            : { ...toolCallState, parsedArgs: effectiveInput };
+        const {
+          output: clientToolOutput,
+          respondImmediately,
+          error: clientToolError,
+        } = await callClientTool(effectiveToolCallState, {
+          dispatch,
+          ideMessenger: extra.ideMessenger,
+          getState,
+        });
+        output = clientToolOutput;
+        error = clientToolError;
+        streamResponse = respondImmediately;
+        const postHook = await extra.ideMessenger.request("tools/runHook", {
+          event: clientToolError ? "PostToolUseFailure" : "PostToolUse",
+          sessionId,
+          toolCall: toolCallState.toolCall,
+          toolInput: effectiveInput,
+          extra: clientToolError
+            ? { error: clientToolError.message }
+            : { tool_response: clientToolOutput },
+        });
+        if (postHook.status === "error") {
+          throw new Error(postHook.error);
+        }
+      }
+    }
   } else {
     // Tool is called on core side
     const result = await extra.ideMessenger.request("tools/call", {
       toolCall: toolCallState.toolCall,
+      sessionId: getState().session.id,
     });
     if (result.status === "error") {
       throw new Error(result.error);

@@ -66,8 +66,13 @@ const StyledMarkdown = styled.div<{
     background-color: ${vscEditorBackground};
     border-radius: ${defaultBorderRadius};
 
-    max-width: calc(100vw - 24px);
-    overflow-x: scroll;
+    /* Было calc(100vw - 24px): ширина кодового блока привязывалась к вьюпорту,
+       а не к своему контейнеру. Панель чата почти никогда не равна вьюпорту —
+       у неё свои отступы, а в отдельном окне и своя ширина, — поэтому предел
+       оказывался то больше контейнера, то не совпадал с ним после ресайза.
+       100% всегда считается от родителя и потому верно в любой раскладке. */
+    max-width: 100%;
+    overflow-x: auto;
     overflow-y: hidden;
 
     padding: 8px;

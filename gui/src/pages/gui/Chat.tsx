@@ -37,11 +37,16 @@ import {
   newSession,
   updateToolCallOutput,
 } from "../../redux/slices/sessionSlice";
+
 import { streamEditThunk } from "../../redux/thunks/edit";
 import { loadLastSession } from "../../redux/thunks/session";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
 import { isJetBrains, isMetaEquivalentKeyPressed } from "../../util";
 import { ToolCallDiv } from "./ToolCallDiv";
+import {
+  NestedWorkerCard,
+  parseNestedWorkerThinking,
+} from "./ToolCallDiv/NestedWorkerCard";
 
 import { useStore } from "react-redux";
 import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
@@ -50,13 +55,18 @@ import { DeprecationBanner } from "../../components/DeprecationBanner";
 import { FatalErrorIndicator } from "../../components/config/FatalErrorNotice";
 import InlineErrorMessage from "../../components/mainInput/InlineErrorMessage";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
-import { setDialogMessage, setShowDialog } from "../../redux/slices/uiSlice";
+import {
+  setDialogMessage,
+  setShowDialog,
+  setThinkingCollapse,
+} from "../../redux/slices/uiSlice";
 import { RootState } from "../../redux/store";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
+import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -74,6 +84,7 @@ const StepsDiv = styled.div`
 
   & > * {
     position: relative;
+    flex-shrink: 0;
   }
 
   .thread-message {
@@ -117,6 +128,8 @@ export function Chat() {
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const history = useAppSelector((state) => state.session.history);
+  const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+  const hasThinking = history.some((item) => item.message.role === "thinking");
   const showChatScrollbar = useAppSelector(
     (state) => state.config.config.ui?.showChatScrollbar,
   );
@@ -131,10 +144,9 @@ export function Chat() {
     return isJetBrains();
   }, []);
 
-  useAutoScroll(stepsDivRef, history);
+  useAutoScroll(stepsDivRef, history, isStreaming);
 
   useEffect(() => {
-    // Cmd + Backspace to delete current step
     const listener = (e: KeyboardEvent) => {
       if (
         e.key === "Backspace" &&
@@ -143,13 +155,22 @@ export function Chat() {
       ) {
         void dispatch(cancelStream());
       }
+      if (
+        e.key.toLowerCase() === "o" &&
+        isMetaEquivalentKeyPressed(e) &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        dispatch(setThinkingCollapse(!thinkingCollapse.open));
+      }
     };
     window.addEventListener("keydown", listener);
 
     return () => {
       window.removeEventListener("keydown", listener);
     };
-  }, [isStreaming, jetbrains, isInEdit]);
+  }, [isStreaming, jetbrains, isInEdit, thinkingCollapse.open]);
 
   const { widget, highlights } = useFindWidget(
     stepsDivRef,
@@ -339,6 +360,18 @@ export function Chat() {
         if (!thinkingContent?.trim()) {
           return null;
         }
+        const inProgress = index === history.length - 1 && isStreaming;
+        const nestedWorker = parseNestedWorkerThinking(
+          thinkingContent,
+          inProgress,
+        );
+        if (nestedWorker) {
+          return (
+            <div className={isBeforeLatestSummary ? "opacity-50" : ""}>
+              <NestedWorkerCard view={nestedWorker} />
+            </div>
+          );
+        }
         return (
           <div className={isBeforeLatestSummary ? "opacity-50" : ""}>
             <ThinkingBlockPeek
@@ -346,7 +379,7 @@ export function Chat() {
               redactedThinking={message.redactedThinking}
               index={index}
               prevItem={index > 0 ? history[index - 1] : null}
-              inProgress={index === history.length - 1 && isStreaming}
+              inProgress={inProgress}
               signature={message.signature}
             />
           </div>
@@ -386,15 +419,19 @@ export function Chat() {
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"} ${history.length > 0 ? "min-h-0 flex-1 overflow-y-scroll" : "shrink-0"}`}
+        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
       >
         <DeprecationBanner dismissable={true} />
         {highlights}
+        {history.length === 0 && (
+          <EmptyChatBody showOnboardingCard={onboardingCard.show} />
+        )}
         {history
           .filter((item) => item.message.role !== "system")
           .map((item, index: number) => (
             <div
               key={item.message.id}
+              className="shrink-0"
               style={{
                 minHeight: index === history.length - 1 ? "200px" : 0,
               }}
@@ -410,8 +447,17 @@ export function Chat() {
               {index === history.length - 1 && <InlineErrorMessage />}
             </div>
           ))}
+        {isStreaming && !isInEdit && (
+          <div className="mt-auto shrink-0 px-4 pb-1 pt-2">
+            <CukiiStreamingToolbar
+              onStop={() => {
+                void dispatch(cancelStream());
+              }}
+            />
+          </div>
+        )}
       </StepsDiv>
-      <div className={"relative shrink-0"}>
+      <div className={"cukii-main-input-shell relative shrink-0"}>
         <ContinueInputBox
           isMainInput
           isLastUserInput={false}
@@ -439,13 +485,24 @@ export function Chat() {
                   <span className="text-xs">Last Session</span>
                 </NewSessionButton>
               )}
+              {hasThinking && (
+                <button
+                  type="button"
+                  className="text-description hover:text-foreground ml-2 text-xs"
+                  data-testid="collapse-all-thinking"
+                  onClick={() =>
+                    dispatch(setThinkingCollapse(!thinkingCollapse.open))
+                  }
+                >
+                  {thinkingCollapse.open
+                    ? "Collapse thoughts"
+                    : "Expand thoughts"}
+                </button>
+              )}
             </div>
           </div>
           <FatalErrorIndicator />
           {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
-          {history.length === 0 && (
-            <EmptyChatBody showOnboardingCard={onboardingCard.show} />
-          )}
         </div>
       </div>
     </>

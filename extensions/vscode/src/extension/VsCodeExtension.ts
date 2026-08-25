@@ -38,6 +38,12 @@ import { VsCodeIde } from "../VsCodeIde";
 
 import { ConfigYamlDocumentLinkProvider } from "./ConfigYamlDocumentLinkProvider";
 import { VsCodeMessenger } from "./VsCodeMessenger";
+import {
+  listBridgeScopes,
+  listBrokerSessions,
+  openBridgeSession,
+  recoverBridgeSession,
+} from "./bridgeUiClient";
 
 import { modelSupportsNextEdit } from "core/llm/autodetect";
 import { NEXT_EDIT_MODELS } from "core/llm/constants";
@@ -78,6 +84,10 @@ export class VsCodeExtension {
   private fileSearch: FileSearch;
   private uriHandler = new UriEventHandler();
   private completionProvider: ContinueCompletionProvider;
+
+  public async shutdown(): Promise<void> {
+    await this.core.shutdown();
+  }
 
   private ARBITRARY_TYPING_DELAY = 2000;
 
@@ -279,6 +289,242 @@ export class VsCodeExtension {
     );
 
     this.core = new Core(inProcessMessenger, this.ide);
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "cukii.openBridgeSession",
+        async (requestedAgent?: unknown) => {
+          const token = process.env.AGENT_HUB_BROKER_UI_TOKEN;
+          if (!token) {
+            void vscode.window.showErrorMessage(
+              "Cukii Bridge UI token unavailable. Reload VS Code after bridge setup.",
+            );
+            return;
+          }
+          const agents = [
+            "deepseek",
+            "claude",
+            "codex",
+            "grok",
+            "cursor",
+          ] as const;
+          const agent =
+            typeof requestedAgent === "string" &&
+            agents.includes(requestedAgent as (typeof agents)[number])
+              ? (requestedAgent as (typeof agents)[number])
+              : await vscode.window.showQuickPick(agents, {
+                  placeHolder: "Cukii: выберите native agent",
+                });
+          if (!agent) return;
+          const role = await vscode.window.showQuickPick(["broker", "worker"], {
+            placeHolder: "Cukii: выберите роль",
+          });
+          if (!role) return;
+          let scopes: Awaited<ReturnType<typeof listBridgeScopes>>;
+          try {
+            scopes = await listBridgeScopes(token);
+          } catch {
+            void vscode.window.showErrorMessage("Cukii broker недоступен");
+            return;
+          }
+          const scopePick = await vscode.window.showQuickPick(
+            scopes.map((item) => ({
+              label: item.name,
+              description: item.root,
+              scope: item,
+            })),
+            { placeHolder: "Cukii: выберите scope" },
+          );
+          if (!scopePick) return;
+          const scope = scopePick.scope.name;
+          let parent_session_id: string | undefined;
+          if (role === "worker") {
+            const parents = await listBrokerSessions(token, scope);
+            const parent = await vscode.window.showQuickPick(
+              parents.map((item) => ({
+                label: `${item.agent}: ${item.session_id}`,
+                sessionId: item.session_id,
+              })),
+              { placeHolder: "Cukii: выберите parent broker" },
+            );
+            if (!parent) return;
+            parent_session_id = parent.sessionId;
+          }
+          const taskId = await vscode.window.showInputBox({
+            prompt: "Task ID",
+            value: `ui-${uuidv4().slice(0, 12)}`,
+            validateInput: (value) =>
+              /^[A-Za-z0-9_.-]+$/.test(value)
+                ? undefined
+                : "Только буквы, цифры, _, - и .",
+          });
+          if (!taskId) return;
+          const chatSessionId =
+            agent === "deepseek"
+              ? await this.sidebar.webviewProtocol?.request(
+                  "cukii/getActiveSessionId",
+                  undefined,
+                )
+              : undefined;
+          if (agent === "deepseek" && !chatSessionId) {
+            void vscode.window.showErrorMessage(
+              "Сначала откройте нужную пустую DeepSeek chat-вкладку, затем повторите Open Bridge Session.",
+            );
+            return;
+          }
+          try {
+            const result = await openBridgeSession({
+              token,
+              session_id: `ui-${uuidv4()}`,
+              agent,
+              role,
+              scope,
+              task_id: taskId,
+              ...(parent_session_id ? { parent_session_id } : {}),
+            });
+            const bridgeSessionId =
+              typeof (result.session as { session_id?: unknown } | undefined)
+                ?.session_id === "string"
+                ? (result.session as { session_id: string }).session_id
+                : undefined;
+            const lifecycleToken =
+              typeof result.lifecycle_token === "string"
+                ? result.lifecycle_token
+                : undefined;
+            if (bridgeSessionId) {
+              await context.workspaceState.update("cukii.lastBridgeSession", {
+                session_id: bridgeSessionId,
+                agent,
+                role,
+                scope,
+                task_id: taskId,
+                parent_session_id,
+              });
+            }
+            if (agent === "deepseek" && bridgeSessionId && lifecycleToken) {
+              await this.core.bindBrokerLifecycle(
+                chatSessionId!,
+                bridgeSessionId,
+                lifecycleToken,
+              );
+              void vscode.window.showInformationMessage(
+                `Cukii: DeepSeek ${role} привязан к выбранной chat-вкладке.`,
+              );
+            } else if (
+              (agent === "claude" ||
+                agent === "codex" ||
+                agent === "grok" ||
+                agent === "cursor") &&
+              bridgeSessionId
+            ) {
+              // shellPath/args are fixed constants; neither task text nor any user
+              // input is ever interpolated into a shell command.
+              const worktree = (
+                result.session as { worktree?: unknown } | undefined
+              )?.worktree;
+              if (typeof worktree !== "string" || !worktree)
+                throw new Error("broker did not provision module worktree");
+              const root = worktree;
+              const wslRoot = root
+                .replace(
+                  /^([A-Za-z]):\\/,
+                  (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
+                )
+                .replace(/\\/g, "/");
+              const cursorScript = Buffer.from(
+                `cd -- ${JSON.stringify(wslRoot)}\nexec cursor-agent`,
+                "utf8",
+              ).toString("base64");
+              const terminal = vscode.window.createTerminal({
+                name: `Cukii · ${agent} · ${role}`,
+                cwd: root,
+                shellPath: agent === "cursor" ? "wsl.exe" : agent,
+                shellArgs:
+                  agent === "codex"
+                    ? ["--cd", root]
+                    : agent === "grok"
+                      ? ["--cwd", root]
+                      : agent === "cursor"
+                        ? [
+                            "-d",
+                            "Ubuntu-24.04",
+                            "--",
+                            "bash",
+                            "-lc",
+                            `printf %s ${cursorScript} | base64 -d | bash`,
+                          ]
+                        : [],
+                env: {
+                  AGENT_HUB_BRIDGE_SESSION: bridgeSessionId,
+                  AGENT_HUB_BRIDGE_ROLE: role,
+                  AGENT_HUB_BRIDGE_SCOPE: scope,
+                },
+              });
+              terminal.show();
+              void vscode.window.showInformationMessage(
+                `Cukii: native ${agent} ${role} открыт в изолированном module worktree; authenticated broker adapter ещё не подключён.`,
+              );
+            } else {
+              void vscode.window.showInformationMessage(
+                `Cukii: ${agent} ${role} открыт (${String(result.status)}; transport ещё не подключён)`,
+              );
+            }
+          } catch {
+            void vscode.window.showErrorMessage(
+              "Cukii не открыл bridge session",
+            );
+          }
+        },
+      ),
+    );
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "cukii.recoverBridgeSession",
+        async () => {
+          const token = process.env.AGENT_HUB_BROKER_UI_TOKEN;
+          const saved = context.workspaceState.get<{
+            session_id: string;
+            agent: string;
+            role: string;
+            scope: string;
+            task_id: string;
+            parent_session_id?: string;
+          }>("cukii.lastBridgeSession");
+          if (!token || !saved) {
+            void vscode.window.showErrorMessage(
+              "Нет сохранённой bridge session для recovery.",
+            );
+            return;
+          }
+          try {
+            const result = await recoverBridgeSession({ token, ...saved });
+            const lifecycleToken =
+              typeof result.lifecycle_token === "string"
+                ? result.lifecycle_token
+                : undefined;
+            if (saved.agent === "deepseek" && lifecycleToken) {
+              const chatSessionId = await this.sidebar.webviewProtocol?.request(
+                "cukii/getActiveSessionId",
+                undefined,
+              );
+              if (!chatSessionId)
+                throw new Error("DeepSeek chat session unavailable");
+              await this.core.bindBrokerLifecycle(
+                chatSessionId,
+                saved.session_id,
+                lifecycleToken,
+              );
+            }
+            void vscode.window.showInformationMessage(
+              `Cukii: bridge session ${saved.session_id} восстановлена с новым handshake.`,
+            );
+          } catch {
+            void vscode.window.showErrorMessage(
+              "Cukii не смог восстановить bridge session",
+            );
+          }
+        },
+      ),
+    );
     this.configHandler = this.core.configHandler;
     resolveConfigHandler?.(this.configHandler);
 

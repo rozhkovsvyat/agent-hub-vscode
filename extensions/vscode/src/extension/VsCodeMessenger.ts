@@ -28,6 +28,7 @@ import { VsCodeIde } from "../VsCodeIde";
 import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
+import { streamBridgeChat } from "./bridgeChatAdapter";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -328,6 +329,15 @@ export class VsCodeMessenger {
     });
     this.onWebviewOrCore("runCommand", async (msg) => {
       await ide.runCommand(msg.data.command);
+    });
+    this.onWebview("cukii/openBridgeSession", async (msg) => {
+      await vscode.commands.executeCommand(
+        "cukii.openBridgeSession",
+        msg.data.agent,
+      );
+    });
+    this.onWebview("cukii/streamBridgeChat", (msg) => {
+      return streamBridgeChat(msg.data);
     });
     this.onWebviewOrCore("getSearchResults", async (msg) => {
       return ide.getSearchResults(msg.data.query, msg.data.maxResults);

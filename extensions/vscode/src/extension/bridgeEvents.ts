@@ -1,0 +1,222 @@
+/**
+ * Разбор структурного вывода нативных CLI в события моста.
+ *
+ * Схемы сняты живыми прогонами, а не взяты из документации:
+ *  - `claude -p --output-format stream-json --verbose` и
+ *    `grok -p --output-format streaming-messages-json` дают ОДИН И ТОТ ЖЕ конверт
+ *    (`assistant` / `user` / `system` / `result` с блоками
+ *    `thinking` | `text` | `tool_use` | `tool_result`), поэтому парсер общий;
+ *  - `codex exec --json` использует другую модель — `thread.started`,
+ *    `turn.*`, `item.started` / `item.completed` с типами item'ов
+ *    (`command_execution`, `agent_message`, `error`, …).
+ *
+ * Модуль намеренно ничего не знает про ChatMessage: он переводит вендорный
+ * формат в нейтральные события, а раскладку по сообщениям UI делает адаптер.
+ */
+
+export type BridgeEvent =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "toolStart"; id: string; name: string; args: string }
+  | { kind: "toolResult"; id: string; output: string; isError: boolean }
+  | { kind: "error"; text: string };
+
+export type BridgeFormat = "anthropic-envelope" | "codex-thread" | "text";
+
+function asText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((part) =>
+        part && typeof part === "object" && "text" in (part as any)
+          ? String((part as any).text ?? "")
+          : typeof part === "string"
+            ? part
+            : JSON.stringify(part),
+      )
+      .join("");
+  }
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return JSON.stringify(value);
+}
+
+/** claude `stream-json` и grok `streaming-messages-json` — один конверт. */
+function parseAnthropicEnvelope(event: any): BridgeEvent[] {
+  const out: BridgeEvent[] = [];
+
+  if (event.type === "assistant" || event.type === "user") {
+    const content = event?.message?.content;
+    const blocks = Array.isArray(content)
+      ? content
+      : typeof content === "string"
+        ? [{ type: "text", text: content }]
+        : [];
+    for (const block of blocks) {
+      switch (block?.type) {
+        case "thinking": {
+          const text = asText(block.thinking);
+          // Пустой thinking-блок приходит вместе с одной лишь подписью —
+          // показывать нечего, а пустой пузырь в ленте выглядит как сбой.
+          if (text.trim()) {
+            out.push({ kind: "thinking", text });
+          }
+          break;
+        }
+        case "text": {
+          const text = asText(block.text);
+          if (text) {
+            out.push({ kind: "text", text });
+          }
+          break;
+        }
+        case "tool_use":
+          out.push({
+            kind: "toolStart",
+            id: String(block.id ?? ""),
+            name: String(block.name ?? "tool"),
+            args: JSON.stringify(block.input ?? {}),
+          });
+          break;
+        case "tool_result":
+          out.push({
+            kind: "toolResult",
+            id: String(block.tool_use_id ?? ""),
+            output: asText(block.content),
+            isError: block.is_error === true,
+          });
+          break;
+        default:
+          break;
+      }
+    }
+    return out;
+  }
+
+  // Финальный `result` дублирует уже отданный текст, поэтому в ленту он не
+  // попадает — кроме случая, когда прогон завершился ошибкой.
+  if (event.type === "result" && event.is_error) {
+    out.push({
+      kind: "error",
+      text: asText(
+        event.result ?? event.error ?? "worker завершился с ошибкой",
+      ),
+    });
+  }
+  return out;
+}
+
+/** `codex exec --json`: события thread/turn/item. */
+function parseCodexThread(event: any): BridgeEvent[] {
+  const item = event?.item;
+  if (
+    !item ||
+    (event.type !== "item.started" && event.type !== "item.completed")
+  ) {
+    return [];
+  }
+  const id = String(item.id ?? "");
+  const started = event.type === "item.started";
+
+  switch (item.type) {
+    case "agent_message":
+      return started ? [] : [{ kind: "text", text: asText(item.text) }];
+    case "reasoning":
+      return started
+        ? []
+        : [{ kind: "thinking", text: asText(item.text ?? item.summary) }];
+    case "error":
+      return started ? [] : [{ kind: "error", text: asText(item.message) }];
+    case "command_execution":
+      return started
+        ? [
+            {
+              kind: "toolStart",
+              id,
+              name: "Shell",
+              args: JSON.stringify({ command: asText(item.command) }),
+            },
+          ]
+        : [
+            {
+              kind: "toolResult",
+              id,
+              output: asText(item.aggregated_output),
+              isError: item.exit_code !== 0 && item.exit_code !== null,
+            },
+          ];
+    default:
+      // Неизвестный тип item'а не глотаем: молчаливая потеря события выглядит
+      // как «агент ничего не делал». Показываем его как инструмент с сырым JSON.
+      return started
+        ? [
+            {
+              kind: "toolStart",
+              id,
+              name: String(item.type ?? "item"),
+              args: JSON.stringify(item),
+            },
+          ]
+        : [
+            {
+              kind: "toolResult",
+              id,
+              output: JSON.stringify(item, null, 2),
+              isError: false,
+            },
+          ];
+  }
+}
+
+/**
+ * Инкрементальный NDJSON-разборщик: stdout приходит произвольными кусками, и
+ * строка легко рвётся посередине. Держим хвост до перевода строки.
+ */
+export class BridgeEventParser {
+  private buffer = "";
+  private structured = false;
+
+  constructor(private readonly format: BridgeFormat) {}
+
+  /** Хоть одно вендорное событие разобрано — значит формат живой. */
+  get sawStructuredOutput(): boolean {
+    return this.structured;
+  }
+
+  push(chunk: string): BridgeEvent[] {
+    if (this.format === "text") {
+      return chunk ? [{ kind: "text", text: chunk }] : [];
+    }
+    this.buffer += chunk;
+    const lines = this.buffer.split("\n");
+    this.buffer = lines.pop() ?? "";
+    return lines.flatMap((line) => this.line(line));
+  }
+
+  /** Хвост без завершающего перевода строки в конце процесса. */
+  flush(): BridgeEvent[] {
+    const rest = this.buffer;
+    this.buffer = "";
+    return rest.trim() ? this.line(rest) : [];
+  }
+
+  private line(raw: string): BridgeEvent[] {
+    const line = raw.trim();
+    if (!line || line[0] !== "{") {
+      return [];
+    }
+    let event: any;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return [];
+    }
+    this.structured = true;
+    return this.format === "codex-thread"
+      ? parseCodexThread(event)
+      : parseAnthropicEnvelope(event);
+  }
+}

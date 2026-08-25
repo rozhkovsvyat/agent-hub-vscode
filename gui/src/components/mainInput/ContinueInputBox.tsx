@@ -14,6 +14,7 @@ import { RulesPeek } from "./belowMainInput/RulesPeek";
 import { GradientBorder } from "./GradientBorder";
 import { ToolbarOptions } from "./InputToolbar";
 import { Lump } from "./Lump";
+import { QueuedMessageChip } from "./QueuedMessageChip";
 import { TipTapEditor } from "./TipTapEditor";
 
 interface ContinueInputBoxProps {
@@ -114,6 +115,7 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
     >
       <div className={`relative flex flex-col px-2`}>
         {props.isMainInput && <Lump />}
+        {props.isMainInput && <QueuedMessageChip />}
         <GradientBorder
           loading={isStreaming && (props.isLastUserInput || isInEdit) ? 1 : 0}
           borderColor={
