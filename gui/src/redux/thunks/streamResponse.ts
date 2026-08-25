@@ -4,6 +4,7 @@ import { InputModifiers } from "core";
 
 import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
+import { isCompactSlashCommand } from "../../util/isCompactSlashCommand";
 import { selectSelectedChatModel } from "../slices/configSlice";
 import {
   resetNextCodeBlockToApplyIndex,
@@ -11,6 +12,7 @@ import {
   updateHistoryItemAtIndex,
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
+import { compactConversationThunk } from "./compactConversation";
 import { streamNormalInput } from "./streamNormalInput";
 import { streamThunkWrapper } from "./streamThunkWrapper";
 import { updateFileSymbolsFromFiles } from "./updateFileSymbols";
@@ -29,6 +31,15 @@ export const streamResponseThunk = createAsyncThunk<
     await dispatch(
       streamThunkWrapper(async () => {
         const state = getState();
+
+        if (isCompactSlashCommand(editorState)) {
+          const compactIndex = state.session.history.length - 1;
+          if (compactIndex >= 0 && state.session.id) {
+            await dispatch(compactConversationThunk({ index: compactIndex }));
+          }
+          return;
+        }
+
         const selectedChatModel = selectSelectedChatModel(state);
         const inputIndex = index ?? state.session.history.length; // Either given index or concat to end
 

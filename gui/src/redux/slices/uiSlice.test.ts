@@ -2,19 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../util/localStorage", () => ({
   getLocalStorage: () => undefined,
+  setLocalStorage: vi.fn(),
   LocalStorageKey: {
     IsExploreDialogOpen: "isExploreDialogOpen",
     HasDismissedExploreDialog: "hasDismissedExploreDialog",
+    FocusView: "focusView",
   },
 }));
 
 import {
   setAllowAllPermissions,
+  setFocusView,
   setThinkingCollapse,
   setToolPolicy,
   syncAllowAllPermissions,
 } from "./uiSlice";
-import reducer from "./uiSlice";
+import reducer, { DEFAULT_UI_SLICE } from "./uiSlice";
+import { setLocalStorage } from "../../util/localStorage";
 
 describe("allow all tool permissions", () => {
   it("makes every known tool automatic when enabled", () => {
@@ -100,5 +104,21 @@ describe("thinking collapse", () => {
   it("bumps version and sets open=false", () => {
     const state = reducer(undefined, setThinkingCollapse(false));
     expect(state.thinkingCollapse).toEqual({ version: 1, open: false });
+  });
+});
+
+describe("focus view", () => {
+  it("defaults to false", () => {
+    expect(DEFAULT_UI_SLICE.focusView).toBe(false);
+  });
+
+  it("toggles focusView and persists", () => {
+    const state = reducer(undefined, setFocusView(true));
+    expect(state.focusView).toBe(true);
+    expect(setLocalStorage).toHaveBeenCalledWith("focusView", true);
+
+    const off = reducer(state, setFocusView(false));
+    expect(off.focusView).toBe(false);
+    expect(setLocalStorage).toHaveBeenCalledWith("focusView", false);
   });
 });

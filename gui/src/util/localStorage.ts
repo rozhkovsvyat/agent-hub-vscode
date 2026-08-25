@@ -16,11 +16,13 @@ type LocalStorageTypes = {
   shownProfilesIntroduction: boolean;
   disableIndexing: boolean;
   hasDismissedDeprecationBanner: boolean;
+  focusView: boolean;
 };
 
 export enum LocalStorageKey {
   IsExploreDialogOpen = "isExploreDialogOpen",
   HasDismissedExploreDialog = "hasDismissedExploreDialog",
+  FocusView = "focusView",
 }
 
 export function getLocalStorage<T extends keyof LocalStorageTypes>(

@@ -2,7 +2,9 @@ import { Tool, ToolCallState } from "core";
 import { useContext, useMemo, useState } from "react";
 import { openContextItem } from "../../../components/mainInput/belowMainInput/ContextItemsPeek";
 import { IdeMessengerContext } from "../../../context/IdeMessenger";
+import { useAppSelector } from "../../../redux/hooks";
 import { ToolCallStatusMessage } from "./ToolCallStatusMessage";
+import { shouldShowToolCallBody } from "./shouldShowToolCallBody";
 import { toolCallStateToContextItems } from "./utils";
 import { ToolTruncateHistoryIcon } from "./ToolTruncateHistoryIcon";
 
@@ -22,6 +24,7 @@ export function ToolCallDisplay({
   historyIndex,
 }: ToolCallDisplayProps) {
   const ideMessenger = useContext(IdeMessengerContext);
+  const focusView = useAppSelector((state) => state.ui.focusView);
   const shownContextItems = useMemo(() => {
     const contextItems = toolCallStateToContextItems(toolCallState);
     return contextItems.filter((item) => !item.hidden);
@@ -31,7 +34,7 @@ export function ToolCallDisplay({
   const live =
     toolCallState.status === "generating" || toolCallState.status === "calling";
   const [open, setOpen] = useState(false);
-  const showBody = open || live;
+  const showBody = shouldShowToolCallBody(open, live, focusView);
 
   function handleClick() {
     setOpen((prev) => !prev);

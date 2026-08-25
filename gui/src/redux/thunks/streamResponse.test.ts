@@ -396,6 +396,7 @@ describe("streamResponseThunk", () => {
             content: "Hello",
           },
         ],
+        sessionId: "session-123",
         title: "Claude 3.5 Sonnet",
       },
       expect.any(AbortSignal),
@@ -1219,6 +1220,7 @@ describe("streamResponseThunk", () => {
             content: "Hello",
           },
         ],
+        sessionId: "session-123",
         title: "Claude 3.5 Sonnet",
       },
       expect.any(AbortSignal),
@@ -1269,6 +1271,63 @@ describe("streamResponseThunk", () => {
         isPruned: false,
         title: "Session summary",
       },
+    });
+  });
+
+  it("compacts conversation instead of streaming when /compact is submitted", async () => {
+    const initialState = getRootStateWithClaude();
+    initialState.session.history = [
+      {
+        message: { id: "1", role: "user", content: "Hello" },
+        contextItems: [],
+      },
+      {
+        message: { id: "2", role: "assistant", content: "Hi" },
+        contextItems: [],
+      },
+    ];
+    initialState.session.id = "session-123";
+    const mockStore = createMockStore(initialState);
+    const requestSpy = vi.spyOn(mockStore.mockIdeMessenger, "request");
+    mockStore.mockIdeMessenger.responses["conversation/compact"] = undefined;
+    mockStore.mockIdeMessenger.responses["history/load"] = {
+      sessionId: "session-123",
+      title: "Test session",
+      workspaceDirectory: "/workspace",
+      history: initialState.session.history,
+    };
+
+    const compactEditorState: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "prompt-block",
+          attrs: { item: { name: "compact" } },
+        },
+      ],
+    };
+
+    await mockStore.dispatch(
+      streamResponseThunk({
+        editorState: compactEditorState,
+        modifiers: mockModifiers,
+      }) as any,
+    );
+
+    const actions = mockStore.getActions();
+    expect(
+      actions.some(
+        (action) => action.type === "chat/streamNormalInput/pending",
+      ),
+    ).toBe(false);
+    expect(
+      actions.some(
+        (action) => action.type === "session/submitEditorAndInitAtIndex",
+      ),
+    ).toBe(false);
+    expect(requestSpy).toHaveBeenCalledWith("conversation/compact", {
+      index: 1,
+      sessionId: "session-123",
     });
   });
 });

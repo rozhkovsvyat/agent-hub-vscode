@@ -59,6 +59,7 @@ import {
   setDialogMessage,
   setShowDialog,
   setThinkingCollapse,
+  setFocusView,
 } from "../../redux/slices/uiSlice";
 import { RootState } from "../../redux/store";
 import { cancelStream } from "../../redux/thunks/cancelStream";
@@ -129,6 +130,7 @@ export function Chat() {
   const tabsRef = useRef<HTMLDivElement>(null);
   const history = useAppSelector((state) => state.session.history);
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+  const focusView = useAppSelector((state) => state.ui.focusView);
   const hasThinking = history.some((item) => item.message.role === "thinking");
   const showChatScrollbar = useAppSelector(
     (state) => state.config.config.ui?.showChatScrollbar,
@@ -164,13 +166,22 @@ export function Chat() {
         e.preventDefault();
         dispatch(setThinkingCollapse(!thinkingCollapse.open));
       }
+      if (
+        e.key.toLowerCase() === "f" &&
+        isMetaEquivalentKeyPressed(e) &&
+        e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        dispatch(setFocusView(!focusView));
+      }
     };
     window.addEventListener("keydown", listener);
 
     return () => {
       window.removeEventListener("keydown", listener);
     };
-  }, [isStreaming, jetbrains, isInEdit, thinkingCollapse.open]);
+  }, [isStreaming, jetbrains, isInEdit, thinkingCollapse.open, focusView]);
 
   const { widget, highlights } = useFindWidget(
     stepsDivRef,
@@ -497,6 +508,16 @@ export function Chat() {
                   {thinkingCollapse.open
                     ? "Collapse thoughts"
                     : "Expand thoughts"}
+                </button>
+              )}
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  className="text-description hover:text-foreground ml-2 text-xs"
+                  data-testid="focus-view-toggle"
+                  onClick={() => dispatch(setFocusView(!focusView))}
+                >
+                  {focusView ? "Focus" : "Focus on"}
                 </button>
               )}
             </div>

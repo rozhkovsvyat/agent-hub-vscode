@@ -6,7 +6,11 @@ import {
   defaultOnboardingCardState,
   OnboardingCardState,
 } from "../../components/OnboardingCard";
-import { getLocalStorage, LocalStorageKey } from "../../util/localStorage";
+import {
+  getLocalStorage,
+  LocalStorageKey,
+  setLocalStorage,
+} from "../../util/localStorage";
 
 export type RulePolicy = "on" | "off";
 
@@ -31,6 +35,7 @@ type UIState = {
   ttsActive: boolean;
   allowAllPermissions: boolean;
   thinkingCollapse: { version: number; open: boolean };
+  focusView: boolean;
 };
 
 export const DEFAULT_TOOL_SETTING: ToolPolicy = "allowedWithPermission";
@@ -53,6 +58,7 @@ export const DEFAULT_UI_SLICE: UIState = {
   reasoningSettings: {},
   allowAllPermissions: false,
   thinkingCollapse: { version: 0, open: false },
+  focusView: getLocalStorage(LocalStorageKey.FocusView) ?? false,
 };
 
 export const uiSlice = createSlice({
@@ -187,6 +193,10 @@ export const uiSlice = createSlice({
         open: action.payload,
       };
     },
+    setFocusView: (state, action: PayloadAction<boolean>) => {
+      state.focusView = action.payload;
+      setLocalStorage(LocalStorageKey.FocusView, action.payload);
+    },
   },
 });
 
@@ -207,6 +217,7 @@ export const {
   setAllowAllPermissions,
   syncAllowAllPermissions,
   setThinkingCollapse,
+  setFocusView,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

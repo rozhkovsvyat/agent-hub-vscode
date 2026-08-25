@@ -40,13 +40,18 @@ function ThinkingBlockPeek({
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const phrase = useThinkingPhrase(!!inProgress);
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+  const focusView = useAppSelector((state) => state.ui.focusView);
 
   useEffect(() => {
+    if (focusView) {
+      setOpen(false);
+      return;
+    }
     if (thinkingCollapse.version === 0) {
       return;
     }
     setOpen(thinkingCollapse.open);
-  }, [thinkingCollapse.version, thinkingCollapse.open]);
+  }, [thinkingCollapse.version, thinkingCollapse.open, focusView]);
 
   const duplicateRedactedThinkingBlock =
     prevItem &&
