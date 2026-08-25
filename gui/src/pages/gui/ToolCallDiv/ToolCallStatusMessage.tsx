@@ -1,4 +1,5 @@
 import { Tool, ToolCallState } from "core";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 
 interface ToolCallStatusMessageProps {
   tool: Tool | undefined;
@@ -52,8 +53,8 @@ export function ToolCallStatusMessage({
   const arg = principalArg(toolCallState.parsedArgs);
   const lines = outputLineCount(toolCallState);
   const pending = toolCallState.status === "generated";
-  const failed =
-    toolCallState.status === "errored" || toolCallState.status === "canceled";
+  const interrupted = toolCallState.status === "canceled";
+  const failed = toolCallState.status === "errored";
 
   return (
     <span
@@ -70,6 +71,11 @@ export function ToolCallStatusMessage({
       {arg && (
         <span className="text-description min-w-0 truncate" title={arg}>
           {arg}
+        </span>
+      )}
+      {interrupted && (
+        <span className="text-description-muted flex-shrink-0">
+          {TOOL_INTERRUPTED_MESSAGE}
         </span>
       )}
       {lines > 0 && (

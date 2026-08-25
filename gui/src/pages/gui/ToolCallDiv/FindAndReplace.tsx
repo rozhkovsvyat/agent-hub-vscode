@@ -184,7 +184,8 @@ export function FindAndReplaceDisplay({
 
   const statusIcon = useMemo(() => {
     const status = toolCallState?.status;
-    if (status) {
+    const icon = status ? getStatusIcon(status) : null;
+    if (status && icon) {
       return (
         <div
           className={`mr-1 h-4 w-4 flex-shrink-0 ${toolCallState.output ? "cursor-pointer" : ""}`}
@@ -198,7 +199,7 @@ export function FindAndReplaceDisplay({
             }
           }}
         >
-          {getStatusIcon(status)}
+          {icon}
         </div>
       );
     }

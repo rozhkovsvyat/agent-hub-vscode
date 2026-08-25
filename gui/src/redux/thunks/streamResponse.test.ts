@@ -347,6 +347,20 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: expect.objectContaining({
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: expect.objectContaining({
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
         type: "chat/streamResponse/fulfilled",
         meta: expect.objectContaining({
           arg: { editorState: mockEditorState, modifiers: mockModifiers },
@@ -648,6 +662,8 @@ describe("streamResponseThunk", () => {
       "session/update/fulfilled",
       "session/saveCurrent/fulfilled",
       "chat/streamWrapper/fulfilled",
+      "chat/continueIfTrailingSteer/pending",
+      "chat/continueIfTrailingSteer/fulfilled",
       "chat/streamResponse/fulfilled",
     ]);
 
@@ -1161,6 +1177,24 @@ describe("streamResponseThunk", () => {
         type: "chat/streamWrapper/fulfilled",
         meta: {
           arg: expect.any(Function),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },

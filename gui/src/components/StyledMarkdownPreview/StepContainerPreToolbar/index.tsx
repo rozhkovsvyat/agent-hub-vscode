@@ -93,8 +93,7 @@ export function StepContainerPreToolbar({
   const toolCallStatusIcon =
     showToolCallStatusIcon &&
     (toolCallState?.status === "canceled" ||
-      toolCallState?.status === "errored" ||
-      toolCallState?.status === "done") ? (
+      toolCallState?.status === "errored") ? (
       <div
         className={`mr-1 h-4 w-4 flex-shrink-0 ${toolCallState.output ? "cursor-pointer" : ""}`}
         onClick={() => {

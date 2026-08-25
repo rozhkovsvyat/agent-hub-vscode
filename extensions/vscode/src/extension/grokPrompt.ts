@@ -1,4 +1,6 @@
-import { ChatMessage, MessageContent } from "core";
+import { ChatMessage } from "core";
+
+import { contentToText } from "./bridgeTranscript";
 
 export type GrokPromptBlock =
   | { type: "text"; text: string }
@@ -10,16 +12,6 @@ const DATA_IMAGE_URL = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
 // margin for the executable and fixed CLI arguments instead of silently
 // dropping the attachment or failing only after the process starts.
 export const MAX_GROK_PROMPT_JSON_BYTES = 28_000;
-
-export function contentToText(content: MessageContent): string {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  return content
-    .map((part) => (part.type === "text" ? part.text : "[image attached]"))
-    .join("\n");
-}
 
 export function grokImageBlock(
   url: string | undefined,

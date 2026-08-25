@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
 /**
- * Печатающаяся фраза статуса Cukii.
+ * Печатающаяся фраза живого лоадера стрима.
  *
- * Логика жила копиями в ThinkingIndicator и ThinkingBlockPeek, а теперь нужна
- * ещё и нижней строке — три копии разъехались бы по таймингам и набору фраз.
+ * Thinking-надпись этим хуком больше не пользуется: она должна говорить
+ * «Thinking», а не притворяться вторым лоадером.
  */
 export const CUKII_THINKING_PHRASES = [
   "Thinking",
@@ -15,9 +15,9 @@ export const CUKII_THINKING_PHRASES = [
   "Checking the bite",
 ];
 
-// Фраза должна успеть прочитаться: прошлые 0.56 s между надписями выглядели как
-// лихорадочная печать и постоянно обрывали слово на середине.
-const PHRASE_HOLD_MS = 2_200;
+// Фраза должна успеть прочитаться: держим её ~4 s, как у Claude Code, —
+// прошлые короткие интервалы выглядели как лихорадочная печать.
+const PHRASE_HOLD_MS = 4_000;
 
 export function useThinkingPhrase(active = true): string {
   const [phraseIndex, setPhraseIndex] = useState(0);

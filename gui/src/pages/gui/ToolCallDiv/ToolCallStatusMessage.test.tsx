@@ -51,4 +51,16 @@ describe("ToolCallStatusMessage", () => {
     expect(title).toHaveTextContent("Read");
     expect(title).toHaveTextContent("a.ts");
   });
+
+  it("shows Tool interrupted on canceled calls", () => {
+    render(
+      <ToolCallStatusMessage
+        tool={registeredTool}
+        toolCallState={state({ status: "canceled" })}
+      />,
+    );
+    const title = screen.getByTestId("tool-call-title");
+    expect(title).toHaveTextContent("Tool interrupted");
+    expect(title.textContent).not.toMatch(/tried/);
+  });
 });

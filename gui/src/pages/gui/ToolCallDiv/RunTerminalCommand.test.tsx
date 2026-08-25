@@ -273,4 +273,41 @@ describe("RunTerminalCommand", () => {
     const statusElement = screen.getByTestId("status");
     expect(statusElement.textContent).toBe("failed");
   });
+
+  it("shows Tool interrupted when the call was canceled", () => {
+    const canceledToolCallState: ToolCallState = {
+      toolCallId: "test-id",
+      toolCall: {
+        id: "test-id",
+        type: "function",
+        function: {
+          name: "runTerminalCommand",
+          arguments: JSON.stringify({ command: "sleep 30" }),
+        },
+      },
+      status: "canceled",
+      parsedArgs: { command: "sleep 30" },
+      output: [
+        {
+          name: "Tool interrupted",
+          description: "Tool interrupted",
+          content: "Tool interrupted",
+        },
+      ],
+    };
+
+    render(
+      <RunTerminalCommand
+        command="sleep 30"
+        toolCallState={canceledToolCallState}
+        toolCallId="test-id"
+      />,
+    );
+
+    expect(screen.getByTestId("status").textContent).toBe("failed");
+    expect(screen.getByTestId("status-message").textContent).toBe(
+      "Tool interrupted",
+    );
+    expect(screen.getByTestId("output").textContent).toBe("Tool interrupted");
+  });
 });

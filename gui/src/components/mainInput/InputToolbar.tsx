@@ -363,27 +363,6 @@ function InputToolbar(props: InputToolbarProps) {
               </span>
             </HoverItem>
           )}
-          {isStreaming && props.isMainInput && (
-            <ToolTip place="top" content="В очередь">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="cukii-queue-button"
-                data-testid="queue-input-button"
-                aria-label="В очередь"
-                onClick={(e) => {
-                  props.onEnter?.({
-                    useCodebase: false,
-                    noContext: useActiveFile
-                      ? isMetaEquivalentKeyPressed(e as any) || e.altKey
-                      : !(isMetaEquivalentKeyPressed(e as any) || e.altKey),
-                  });
-                }}
-              >
-                <ArrowUpIcon className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </ToolTip>
-          )}
           <ToolTip place="top" content={submitButtonLabel}>
             <Button
               variant={props.isMainInput ? "primary" : "secondary"}

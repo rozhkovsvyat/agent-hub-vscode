@@ -18,10 +18,9 @@ import useUpdatingRef from "../../../../hooks/useUpdatingRef";
 import { useAppSelector } from "../../../../redux/hooks";
 import { selectUseActiveFile } from "../../../../redux/selectors";
 import { selectSelectedChatModel } from "../../../../redux/slices/configSlice";
-import { setQueuedMessage } from "../../../../redux/slices/sessionSlice";
 import { AppDispatch } from "../../../../redux/store";
 import { exitEdit } from "../../../../redux/thunks/edit";
-import { previewFromEditorJson } from "../../queuedMessagePreview";
+import { steerDuringStream } from "../../../../redux/thunks/steerDuringStream";
 import { getFontSize, isJetBrains } from "../../../../util";
 import { CodeBlock, Mention, PromptBlock, SlashCommand } from "../extensions";
 import { TipTapEditorProps } from "../TipTapEditor";
@@ -334,6 +333,11 @@ export function createEditorConfig(options: {
               if (inDropdownRef.current) {
                 return false;
               }
+              // Esc stops the turn (Claude parity). Consume it so we don't
+              // also blur to the editor or close the JetBrains sidebar.
+              if (isStreamingRef.current) {
+                return true;
+              }
               // In JetBrains, this is how we close the sidebar when the input box is focused
               if (isJetBrains()) {
                 ideMessenger.post("closeSidebar", undefined);
@@ -433,11 +437,10 @@ export function createEditorConfig(options: {
       if (!props.isMainInput) {
         return;
       }
-      dispatch(
-        setQueuedMessage({
+      void dispatch(
+        steerDuringStream({
           editorState: json,
           modifiers,
-          preview: previewFromEditorJson(json),
         }),
       );
       editor.commands.clearContent();

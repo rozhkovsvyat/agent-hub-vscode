@@ -41,7 +41,7 @@ import {
 import { streamEditThunk } from "../../redux/thunks/edit";
 import { loadLastSession } from "../../redux/thunks/session";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
-import { isJetBrains, isMetaEquivalentKeyPressed } from "../../util";
+import { isMetaEquivalentKeyPressed } from "../../util";
 import { ToolCallDiv } from "./ToolCallDiv";
 import {
   NestedWorkerCard,
@@ -89,7 +89,7 @@ const StepsDiv = styled.div`
   }
 
   .thread-message {
-    margin: 0 0 0 1px;
+    margin: 0;
   }
 `;
 
@@ -142,19 +142,21 @@ export function Chat() {
   const hasDismissedExploreDialog = useAppSelector(
     (state) => state.ui.hasDismissedExploreDialog,
   );
-  const jetbrains = useMemo(() => {
-    return isJetBrains();
-  }, []);
 
   useAutoScroll(stepsDivRef, history, isStreaming);
 
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
       if (
-        e.key === "Backspace" &&
-        (jetbrains ? e.altKey : isMetaEquivalentKeyPressed(e)) &&
+        e.key === "Escape" &&
+        isStreaming &&
+        !e.defaultPrevented &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
         !e.shiftKey
       ) {
+        e.preventDefault();
         void dispatch(cancelStream());
       }
       if (
@@ -181,7 +183,7 @@ export function Chat() {
     return () => {
       window.removeEventListener("keydown", listener);
     };
-  }, [isStreaming, jetbrains, isInEdit, thinkingCollapse.open, focusView]);
+  }, [isStreaming, isInEdit, thinkingCollapse.open, focusView]);
 
   const { widget, highlights } = useFindWidget(
     stepsDivRef,
@@ -422,6 +424,9 @@ export function Chat() {
   );
 
   const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
+  const visibleHistory = history.filter(
+    (item) => item.message.role !== "system",
+  );
 
   return (
     <>
@@ -430,22 +435,31 @@ export function Chat() {
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
+        className={`cukii-transcript flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
       >
         <DeprecationBanner dismissable={true} />
         {highlights}
         {history.length === 0 && (
           <EmptyChatBody showOnboardingCard={onboardingCard.show} />
         )}
-        {history
-          .filter((item) => item.message.role !== "system")
-          .map((item, index: number) => (
+        {visibleHistory.map((item, index: number) => {
+          // tool-результаты рендерятся в null — пустой враппер ломает
+          // adjacent-sibling правила рейки, как у Claude.
+          if (item.message.role === "tool") {
+            return null;
+          }
+          const isLastVisible =
+            visibleHistory
+              .slice(index + 1)
+              .every((next) => next.message.role === "tool") && isStreaming;
+          return (
             <div
               key={item.message.id}
-              className="shrink-0"
-              style={{
-                minHeight: index === history.length - 1 ? "200px" : 0,
-              }}
+              className={`cukii-timeline-item shrink-0 ${
+                item.message.role === "user"
+                  ? "cukii-timeline-checkpoint"
+                  : "cukii-timeline-event"
+              } ${isLastVisible ? "cukii-timeline-current" : ""}`}
             >
               <ErrorBoundary
                 FallbackComponent={fallbackRender}
@@ -455,16 +469,13 @@ export function Chat() {
               >
                 {renderChatHistoryItem(item, index)}
               </ErrorBoundary>
-              {index === history.length - 1 && <InlineErrorMessage />}
+              {index === visibleHistory.length - 1 && <InlineErrorMessage />}
             </div>
-          ))}
+          );
+        })}
         {isStreaming && !isInEdit && (
-          <div className="mt-auto shrink-0 px-4 pb-1 pt-2">
-            <CukiiStreamingToolbar
-              onStop={() => {
-                void dispatch(cancelStream());
-              }}
-            />
+          <div className="cukii-spinner-row" data-testid="cukii-spinner-row">
+            <CukiiStreamingToolbar />
           </div>
         )}
       </StepsDiv>

@@ -21,6 +21,12 @@ const GROK_LINES = [
   '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-db19","content":"line-one"}]}}',
 ];
 
+const CURSOR_LINES = [
+  '{"type":"thinking","subtype":"delta","text":"Checking files."}',
+  '{"type":"tool_call","subtype":"started","call_id":"tool_cursor_1","tool_call":{"readToolCall":{"args":{"path":"hello.txt"}}}}',
+  '{"type":"tool_call","subtype":"completed","call_id":"tool_cursor_1","tool_call":{"readToolCall":{"result":{"content":"line-one"}}}}',
+];
+
 const CODEX_LINES = [
   '{"type":"thread.started","thread_id":"01a0359c"}',
   '{"type":"turn.started"}',
@@ -83,6 +89,25 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("разбирает живые Cursor stream-json events", () => {
+    const { events } = collect("anthropic-envelope", CURSOR_LINES);
+    expect(events).toEqual([
+      { kind: "thinking", text: "Checking files." },
+      {
+        kind: "toolStart",
+        id: "tool_cursor_1",
+        name: "readToolCall",
+        args: JSON.stringify({ path: "hello.txt" }),
+      },
+      {
+        kind: "toolResult",
+        id: "tool_cursor_1",
+        output: JSON.stringify({ content: "line-one" }),
+        isError: false,
+      },
+    ]);
+  });
+
   it("разбирает событийную модель codex exec --json", () => {
     const { events } = collect("codex-thread", CODEX_LINES);
     expect(events).toEqual([
@@ -120,6 +145,14 @@ describe("BridgeEventParser", () => {
   it("не считает формат живым, если структурных событий не было", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(parser.push("совершенно обычный текст\n")).toEqual([]);
+    expect(parser.sawStructuredOutput).toBe(false);
+  });
+
+  it("не подавляет raw fallback от одного непонятного JSON-события", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    expect(
+      parser.push('{"type":"system","subtype":"future-schema"}\n'),
+    ).toEqual([]);
     expect(parser.sawStructuredOutput).toBe(false);
   });
 

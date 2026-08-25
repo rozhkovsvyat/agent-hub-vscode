@@ -2,8 +2,9 @@
  * Разбор структурного вывода нативных CLI в события моста.
  *
  * Схемы сняты живыми прогонами, а не взяты из документации:
- *  - `claude -p --output-format stream-json --verbose` и
- *    `grok -p --output-format streaming-messages-json` дают ОДИН И ТОТ ЖЕ конверт
+ *  - `claude -p --output-format stream-json --verbose`,
+ *    `grok -p --output-format streaming-messages-json` и Cursor
+ *    `--output-format stream-json --stream-partial-output` дают совместимый конверт
  *    (`assistant` / `user` / `system` / `result` с блоками
  *    `thinking` | `text` | `tool_use` | `tool_result`), поэтому парсер общий;
  *  - `codex exec --json` использует другую модель — `thread.started`,
@@ -47,6 +48,45 @@ function asText(value: unknown): string {
 /** claude `stream-json` и grok `streaming-messages-json` — один конверт. */
 function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   const out: BridgeEvent[] = [];
+
+  if (event.type === "thinking" && event.subtype === "delta") {
+    const text = asText(event.text);
+    return text ? [{ kind: "thinking", text }] : [];
+  }
+
+  if (event.type === "tool_call") {
+    const toolCall = event.tool_call;
+    const entry =
+      toolCall && typeof toolCall === "object"
+        ? Object.entries(toolCall).find(([name]) =>
+            name.toLowerCase().endsWith("toolcall"),
+          )
+        : undefined;
+    const id = String(event.call_id ?? event.tool_call?.toolCallId ?? "");
+    if (!entry || !id) {
+      return out;
+    }
+    const [name, detail] = entry;
+    if (event.subtype === "started") {
+      const args =
+        detail && typeof detail === "object" && "args" in detail
+          ? (detail as { args: unknown }).args
+          : detail;
+      return [
+        { kind: "toolStart", id, name, args: JSON.stringify(args ?? {}) },
+      ];
+    }
+    if (event.subtype === "completed") {
+      const result =
+        detail && typeof detail === "object" && "result" in detail
+          ? (detail as { result: unknown }).result
+          : detail;
+      const isError =
+        !!result && typeof result === "object" && "error" in result;
+      return [{ kind: "toolResult", id, output: asText(result), isError }];
+    }
+    return out;
+  }
 
   if (event.type === "assistant" || event.type === "user") {
     const content = event?.message?.content;
@@ -214,9 +254,15 @@ export class BridgeEventParser {
     } catch {
       return [];
     }
-    this.structured = true;
-    return this.format === "codex-thread"
-      ? parseCodexThread(event)
-      : parseAnthropicEnvelope(event);
+    const events =
+      this.format === "codex-thread"
+        ? parseCodexThread(event)
+        : parseAnthropicEnvelope(event);
+    // An init/schema-drift JSON object is not useful structured output. Keep
+    // raw-stdout fallback alive until an event the UI can actually render.
+    if (events.length) {
+      this.structured = true;
+    }
+    return events;
   }
 }

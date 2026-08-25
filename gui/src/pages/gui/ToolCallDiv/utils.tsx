@@ -75,7 +75,8 @@ export function getStatusIcon(state: ToolStatus) {
     case "generated":
       return <Icons.ArrowRightIcon color={vscButtonBackground} />;
     case "done":
-      return <Icons.CheckIcon className="text-success" />;
+      // Status lives on the transcript timeline (green dot), same as Claude.
+      return null;
     case "canceled":
     case "errored":
       return <Icons.XMarkIcon className="text-error" />;

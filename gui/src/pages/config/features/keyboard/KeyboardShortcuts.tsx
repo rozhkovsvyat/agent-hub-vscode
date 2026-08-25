@@ -39,7 +39,7 @@ const vscodeShortcuts: Omit<KeyboardShortcutProps, "isEven">[] = [
       "New Chat / New Chat With Selected Code / Close Continue Sidebar If Chat Already In Focus",
   },
   {
-    shortcut: "cmd backspace",
+    shortcut: "esc",
     description: "Cancel response",
   },
   {
@@ -100,7 +100,7 @@ const jetbrainsShortcuts: Omit<KeyboardShortcutProps, "isEven">[] = [
       "New Chat / New Chat With Selected Code / Close Continue Sidebar If Chat Already In Focus",
   },
   {
-    shortcut: "cmd backspace",
+    shortcut: "esc",
     description: "Cancel response",
   },
   {

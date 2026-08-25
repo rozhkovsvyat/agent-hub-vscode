@@ -210,7 +210,7 @@ button,
   color: var(--cukii-muted) !important;
 }
 
-[data-testid^="continue-input-box-"] > div.relative {
+.cukii-main-input-shell [data-testid^="continue-input-box-"] > div.relative {
   padding-left: 14px;
   padding-right: 14px;
 }
@@ -223,7 +223,7 @@ button,
   background: transparent !important;
 }
 
-[data-testid^="continue-input-box-"] .cukii-input-box {
+.cukii-main-input-shell .cukii-input-box {
   background: var(--cukii-shell) !important;
   border: 1px solid var(--cukii-line) !important;
   border-radius: 9px !important;
@@ -232,6 +232,29 @@ button,
     border-color 180ms ease,
     box-shadow 180ms ease,
     transform 180ms ease;
+}
+
+/* Historical user turns: Claude userMessage — inline bubble, not the composer shell. */
+.cukii-user-bubble .cukii-input-box {
+  background: var(--vscode-input-background, var(--cukii-shell)) !important;
+  border: 1px solid var(--vscode-input-border, var(--cukii-line)) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transform: none !important;
+  display: inline-flex !important;
+  flex-direction: column;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px 6px;
+}
+
+.cukii-user-bubble > div.relative {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.cukii-user-bubble .cukii-editor-stack {
+  padding: 0 !important;
 }
 
 .cukii-main-input-shell {
@@ -244,7 +267,7 @@ button,
   min-width: 0;
 }
 
-[data-testid^="continue-input-box-"] .cukii-input-box:focus-within {
+.cukii-main-input-shell .cukii-input-box:focus-within {
   border-color: var(--cukii-accent-strong) !important;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
   transform: translateY(-1px);
@@ -373,9 +396,93 @@ button.bg-primary:hover,
   background: transparent !important;
 }
 
-.thread-message .bg-background {
-  border-left: 2px solid var(--cukii-line);
-  padding-left: 10px;
+/* Geometry copied from Claude Code webview `.messagesContainer` / `.timelineMessage`. */
+.cukii-transcript {
+  padding: 20px 20px 8px;
+}
+
+.cukii-timeline-item {
+  position: relative;
+  padding: 8px 0 8px 30px;
+}
+
+.cukii-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 15px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  z-index: 1;
+  background: var(--vscode-descriptionForeground, #55524c);
+}
+
+.cukii-timeline-checkpoint::before {
+  background: #74c991;
+}
+
+.cukii-timeline-event::before {
+  background: var(--vscode-descriptionForeground, #55524c);
+}
+
+.cukii-timeline-failed::before {
+  background: #c74e39;
+}
+
+.cukii-timeline-current::before {
+  animation: cukiiTimelineBlink 1s linear infinite;
+}
+
+.cukii-timeline-item::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(
+    --vscode-sideBarActivityBarTop-border,
+    var(--cukii-line, #3a382f)
+  );
+}
+
+.cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item)::after {
+  top: 18px;
+}
+
+.cukii-timeline-item:not(:has(+ .cukii-timeline-item))::after {
+  height: 18px;
+  bottom: auto;
+}
+
+.cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item):not(
+    :has(+ .cukii-timeline-item)
+  )::after {
+  display: none;
+}
+
+@keyframes cukiiTimelineBlink {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.cukii-spinner-row {
+  display: flex;
+  animation: fadeIn 0.3s ease-in-out;
+  align-items: center;
+  height: 1.85em;
+  margin-top: 4px;
+  padding-left: 30px;
+}
+
+.cukii-spinner-row .cukii-thinking-row {
+  min-height: 0;
 }
 
 .cukii-thinking-row,
@@ -392,7 +499,7 @@ button.bg-primary:hover,
 
 .cukii-thinking-text {
   min-width: 15ch;
-  animation: cukiiThinkingText 2200ms ease-in-out infinite;
+  animation: cukiiThinkingText 4000ms ease-in-out infinite;
 }
 
 .cukii-tab-dot-pulse {

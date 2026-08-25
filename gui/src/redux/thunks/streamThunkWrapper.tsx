@@ -34,9 +34,6 @@ export const streamThunkWrapper = createAsyncThunk<
           }),
         );
       }
-      void import("./flushQueuedMessage").then(({ flushQueuedMessage }) => {
-        void dispatch(flushQueuedMessage());
-      });
       return;
     } catch (e) {
       // Get the selected model from the state for error analysis
@@ -56,9 +53,6 @@ export const streamThunkWrapper = createAsyncThunk<
         await dispatch(cancelStream());
         dispatch(setDialogMessage(<StreamErrorDialog error={e} />));
         dispatch(setShowDialog(true));
-        void import("./flushQueuedMessage").then(({ flushQueuedMessage }) => {
-          void dispatch(flushQueuedMessage());
-        });
 
         return;
       }

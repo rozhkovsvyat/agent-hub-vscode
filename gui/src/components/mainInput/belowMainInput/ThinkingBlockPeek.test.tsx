@@ -68,4 +68,20 @@ describe("ThinkingBlockPeek", () => {
       "true",
     );
   });
+
+  it("shows a Thinking label while in progress, not the live loader", async () => {
+    await renderWithProviders(
+      <ThinkingBlockPeek
+        content="Reasoning in progress"
+        index={0}
+        prevItem={null}
+        inProgress
+      />,
+    );
+
+    const peek = screen.getByTestId("thinking-block-peek");
+    expect(peek.textContent).toMatch(/Thinking/);
+    expect(peek.querySelector(".cukii-thinking-glyph")).toBeNull();
+    expect(peek.querySelector(".cukii-thinking-inline")).toBeNull();
+  });
 });

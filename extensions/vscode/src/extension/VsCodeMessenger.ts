@@ -29,6 +29,7 @@ import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
 import { streamBridgeChat } from "./bridgeChatAdapter";
+import { appendSteerMessage } from "./bridgeSteer";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -338,6 +339,9 @@ export class VsCodeMessenger {
     });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       return streamBridgeChat(msg.data);
+    });
+    this.onWebview("cukii/steerDuringStream", (msg) => {
+      return appendSteerMessage(msg.data.text);
     });
     this.onWebviewOrCore("getSearchResults", async (msg) => {
       return ide.getSearchResults(msg.data.query, msg.data.maxResults);

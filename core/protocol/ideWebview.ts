@@ -50,6 +50,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];
+  "cukii/steerDuringStream": [{ text: string }, boolean];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [
     undefined,

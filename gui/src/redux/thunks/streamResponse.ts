@@ -111,5 +111,9 @@ export const streamResponseThunk = createAsyncThunk<
         );
       }),
     );
+    const { continueIfTrailingSteer } = await import(
+      "./continueIfTrailingSteer"
+    );
+    await dispatch(continueIfTrailingSteer());
   },
 );

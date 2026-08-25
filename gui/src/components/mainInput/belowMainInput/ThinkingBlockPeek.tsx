@@ -6,8 +6,6 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 
 import StyledMarkdownPreview from "../../StyledMarkdownPreview";
-import { useThinkingPhrase } from "../../cukii/useThinkingPhrase";
-import { CukiiThinkingGlyph } from "../../cukii/CukiiThinkingGlyph";
 import { useAppSelector } from "../../../redux/hooks";
 import { Button } from "../../ui";
 
@@ -38,7 +36,6 @@ function ThinkingBlockPeek({
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>("");
-  const phrase = useThinkingPhrase(!!inProgress);
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
   const focusView = useAppSelector((state) => state.ui.focusView);
 
@@ -85,18 +82,15 @@ function ThinkingBlockPeek({
             aria-controls={`thinking-block-content-${index}`}
             onClick={() => setOpen(!open)}
           >
-            {inProgress ? (
-              <span className="cukii-thinking-inline">
-                <CukiiThinkingGlyph />
-                {redactedThinking ? "Redacted thinking" : phrase}
-              </span>
-            ) : redactedThinking ? (
-              "Redacted Thinking"
-            ) : (
-              "Thought" +
-              (elapsedTime ? ` for ${elapsedTime}` : "") +
-              (tokens ? ` (${tokens} tokens)` : "")
-            )}
+            {inProgress
+              ? redactedThinking
+                ? "Redacted thinking"
+                : "Thinking"
+              : redactedThinking
+                ? "Redacted Thinking"
+                : "Thought" +
+                  (elapsedTime ? ` for ${elapsedTime}` : "") +
+                  (tokens ? ` (${tokens} tokens)` : "")}
             {open ? (
               <ChevronUpIcon className="h-3 w-3" />
             ) : (

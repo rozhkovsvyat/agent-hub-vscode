@@ -175,6 +175,24 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/streamResponse/fulfilled",
         meta: {
           arg: {
@@ -456,6 +474,24 @@ describe("streamResponseThunk", () => {
         type: "chat/streamWrapper/fulfilled",
         meta: {
           arg: expect.any(Function),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -757,6 +793,24 @@ describe("streamResponseThunk", () => {
         type: "chat/streamWrapper/fulfilled",
         meta: {
           arg: expect.any(Function),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },

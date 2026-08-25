@@ -47,7 +47,7 @@ export function ToolCallDisplay({
   }
 
   return (
-    <div className="flex min-w-0 flex-col justify-center px-3 py-0.5">
+    <div className="flex min-w-0 flex-col justify-center px-0 py-0.5">
       <div className="flex min-w-0 flex-col">
         <div className="flex flex-row items-center justify-between gap-1.5">
           <div
@@ -59,7 +59,9 @@ export function ToolCallDisplay({
             onClick={isClickable || children ? handleClick : undefined}
             data-testid="tool-call-row"
           >
-            <div className="h-4 w-4 flex-shrink-0 font-semibold">{icon}</div>
+            {icon ? (
+              <div className="h-4 w-4 flex-shrink-0 font-semibold">{icon}</div>
+            ) : null}
             {tool?.faviconUrl && (
               <img src={tool.faviconUrl} className="h-4 w-4 rounded-sm" />
             )}

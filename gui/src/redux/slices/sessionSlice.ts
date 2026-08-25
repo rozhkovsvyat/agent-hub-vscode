@@ -15,7 +15,6 @@ import {
   ContextItem,
   ContextItemWithId,
   FileSymbolMap,
-  InputModifiers,
   McpUiState,
   MessageModes,
   PromptLog,
@@ -32,6 +31,7 @@ import {
   renderChatMessage,
   renderContextItems,
 } from "core/util/messageContent";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { findUriInDirs, getUriPathBasename } from "core/util/uri";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
@@ -199,12 +199,7 @@ export function handleStreamingToolCallUpdates(
 // The proper fix is adding a UUID to all chat messages, but this is the temp workaround.
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
-};
-
-export type QueuedChatMessage = {
-  editorState: JSONContent;
-  modifiers: InputModifiers;
-  preview: string;
+  isSteer?: boolean;
 };
 
 type SessionState = {
@@ -213,7 +208,6 @@ type SessionState = {
   allSessionMetadata: BaseSessionMetadata[];
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
-  queuedMessage?: QueuedChatMessage;
   title: string;
   id: string;
   streamAborter: AbortController;
@@ -264,7 +258,6 @@ export const INITIAL_SESSION_STATE: SessionState = {
   lastSessionId: undefined,
   newestToolbarPreviewForInput: {},
   compactionLoading: {},
-  queuedMessage: undefined,
 };
 
 export const sessionSlice = createSlice({
@@ -327,9 +320,19 @@ export const sessionSlice = createSlice({
             message.toolCallStates.forEach((toolCallState) => {
               if (
                 toolCallState.status === "generated" ||
-                toolCallState.status === "generating"
+                toolCallState.status === "generating" ||
+                toolCallState.status === "calling"
               ) {
                 toolCallState.status = "canceled";
+                if (!toolCallState.output?.length) {
+                  toolCallState.output = [
+                    {
+                      name: TOOL_INTERRUPTED_MESSAGE,
+                      description: TOOL_INTERRUPTED_MESSAGE,
+                      content: TOOL_INTERRUPTED_MESSAGE,
+                    },
+                  ];
+                }
               }
             });
           }
@@ -539,11 +542,27 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
     },
-    setQueuedMessage: (state, action: PayloadAction<QueuedChatMessage>) => {
-      state.queuedMessage = action.payload;
-    },
-    clearQueuedMessage: (state) => {
-      state.queuedMessage = undefined;
+    appendUserSteerMessage: (
+      state,
+      action: PayloadAction<{
+        content: ChatMessage["content"];
+        editorState?: JSONContent;
+        contextItems?: ContextItemWithId[];
+      }>,
+    ) => {
+      if (!state.isStreaming) {
+        return;
+      }
+      state.history.push({
+        message: {
+          id: uuidv4(),
+          role: "user",
+          content: action.payload.content,
+        },
+        contextItems: action.payload.contextItems ?? [],
+        editorState: action.payload.editorState,
+        isSteer: true,
+      });
     },
     abortStream: (state) => {
       state.streamAborter.abort();
@@ -719,7 +738,6 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
       state.symbols = {};
-      state.queuedMessage = undefined;
 
       state.inlineErrorMessage = undefined;
       state.isPruned = false;
@@ -1088,8 +1106,7 @@ export const {
   addContextItemsAtIndex,
   setAppliedRulesAtIndex,
   setInactive,
-  setQueuedMessage,
-  clearQueuedMessage,
+  appendUserSteerMessage,
   streamUpdate,
   newSession,
   updateSessionTitle,

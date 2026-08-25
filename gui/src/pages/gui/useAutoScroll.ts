@@ -28,8 +28,10 @@ export const useAutoScroll = (
       const elem = ref.current;
       if (!elem) return;
 
+      // Порог с запасом: при зуме scrollTop дробный, и строгий «<1px»
+      // молча отклеивал транскрипт от низа.
       const isAtBottom =
-        Math.abs(elem.scrollHeight - elem.scrollTop - elem.clientHeight) < 1;
+        Math.abs(elem.scrollHeight - elem.scrollTop - elem.clientHeight) < 24;
 
       /**
        * We stop auto scrolling if a user manually scrolled up.

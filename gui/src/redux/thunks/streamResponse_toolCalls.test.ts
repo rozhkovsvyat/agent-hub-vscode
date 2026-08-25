@@ -309,6 +309,8 @@ describe("streamResponseThunk - tool calls", () => {
       "session/update/fulfilled",
       "session/saveCurrent/fulfilled",
       "chat/streamWrapper/fulfilled",
+      "chat/continueIfTrailingSteer/pending",
+      "chat/continueIfTrailingSteer/fulfilled",
       "chat/streamResponse/fulfilled",
     ]);
 
@@ -903,6 +905,24 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/streamResponse/fulfilled",
         meta: {
           arg: {
@@ -956,9 +976,10 @@ describe("streamResponseThunk - tool calls", () => {
             content: "Please search the codebase",
           },
         ],
+        sessionId: "session-123",
         title: "Claude 3.5 Sonnet",
       },
-      expect.any(AbortSignal),
+      expect.anything(),
     );
 
     // Should NOT call tools/call since tool requires approval
@@ -1451,6 +1472,24 @@ describe("streamResponseThunk - tool calls", () => {
         type: "chat/streamWrapper/fulfilled",
         meta: {
           arg: expect.any(Function),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },

@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addToolCallDeltaToState } from "../../util/toolCallState";
 import {
   ChatHistoryItemWithMessageId,
-  clearQueuedMessage,
+  appendUserSteerMessage,
   newSession,
   sessionSlice,
-  setQueuedMessage,
+  setActive,
 } from "./sessionSlice";
 
 // Mock dependencies
@@ -82,7 +82,6 @@ describe("sessionSlice streamUpdate", () => {
     newestToolbarPreviewForInput: {},
     isSessionMetadataLoading: false,
     compactionLoading: {},
-    queuedMessage: undefined,
   });
 
   describe("Basic Chat Message", () => {
@@ -460,49 +459,49 @@ describe("sessionSlice streamUpdate", () => {
   });
 });
 
-describe("sessionSlice queued message", () => {
-  const queued = {
-    editorState: {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [{ type: "text", text: "follow-up" }],
-        },
-      ],
-    },
-    modifiers: { useCodebase: false, noContext: true },
-    preview: "follow-up",
-  };
+describe("sessionSlice mid-task steer messages", () => {
+  it("ignores steer while idle", () => {
+    const next = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      appendUserSteerMessage({ content: "too late" }),
+    );
+    expect(next.history).toHaveLength(0);
+  });
 
-  it("replaces the single slot instead of stacking", () => {
-    const initial = sessionSlice.getInitialState();
+  it("appends every user follow-up to history while streaming", () => {
+    const streaming = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
     const first = sessionSlice.reducer(
-      initial,
-      setQueuedMessage({ ...queued, preview: "one" }),
+      streaming,
+      appendUserSteerMessage({ content: "one" }),
     );
     const second = sessionSlice.reducer(
       first,
-      setQueuedMessage({ ...queued, preview: "two" }),
+      appendUserSteerMessage({ content: "two" }),
     );
-    expect(second.queuedMessage?.preview).toBe("two");
+    expect(second.history.map((item) => item.message.content)).toEqual([
+      "one",
+      "two",
+    ]);
+    expect(second.history.every((item) => item.message.role === "user")).toBe(
+      true,
+    );
+    expect(second.history.every((item) => item.isSteer)).toBe(true);
   });
 
-  it("clears the slot", () => {
-    const queuedState = sessionSlice.reducer(
+  it("newSession drops in-flight steer messages with the rest of history", () => {
+    const streaming = sessionSlice.reducer(
       sessionSlice.getInitialState(),
-      setQueuedMessage(queued),
+      setActive(),
     );
-    const cleared = sessionSlice.reducer(queuedState, clearQueuedMessage());
-    expect(cleared.queuedMessage).toBeUndefined();
-  });
-
-  it("newSession drops the queue", () => {
-    const queuedState = sessionSlice.reducer(
-      sessionSlice.getInitialState(),
-      setQueuedMessage(queued),
+    const steered = sessionSlice.reducer(
+      streaming,
+      appendUserSteerMessage({ content: "steer" }),
     );
-    const next = sessionSlice.reducer(queuedState, newSession(undefined));
-    expect(next.queuedMessage).toBeUndefined();
+    const next = sessionSlice.reducer(steered, newSession(undefined));
+    expect(next.history).toHaveLength(0);
+    expect(next.isStreaming).toBe(false);
   });
 });

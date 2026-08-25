@@ -1,19 +1,17 @@
 import { ChatHistoryItem } from "core";
 import { useAppSelector } from "../../redux/hooks";
-import { useThinkingPhrase } from "../cukii/useThinkingPhrase";
-import { CukiiThinkingGlyph } from "../cukii/CukiiThinkingGlyph";
 
 interface ThinkingIndicatorProps {
   historyItem: ChatHistoryItem;
 }
-/*
-    Thinking animation
-    Only for reasoning (long load time) models for now
-*/
 
+/**
+ * Надпись, что модель думает. Это не лоадер: живой лоадер — отдельная
+ * нижняя строка стрима. Раньше оба ряда рисовали один и тот же глиф,
+ * и в ленте появлялся дубль.
+ */
 const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
-  const phrase = useThinkingPhrase();
 
   const hasContent = Array.isArray(historyItem.message.content)
     ? !!historyItem.message.content.length
@@ -25,9 +23,11 @@ const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
   }
 
   return (
-    <div className="cukii-thinking-row px-2 py-2">
-      <CukiiThinkingGlyph />
-      <span className="cukii-thinking-text">{phrase}</span>
+    <div
+      className="text-description px-2 py-2 text-xs"
+      data-testid="cukii-thinking-label"
+    >
+      Thinking...
     </div>
   );
 };

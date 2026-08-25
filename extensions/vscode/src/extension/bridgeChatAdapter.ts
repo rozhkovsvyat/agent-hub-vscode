@@ -7,17 +7,19 @@ import { ChatMessage, PromptLog } from "core";
 import * as vscode from "vscode";
 
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
-import {
-  contentToText,
-  describeBridgeLaunch,
-  grokPromptJson,
-} from "./grokPrompt";
+import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
+import { buildBridgeTranscript } from "./bridgeTranscript";
 import {
   closeFollowers,
   drainFollowers,
   registerNestedWorkerFollower,
   type NestedWorkerFollower,
 } from "./nestedWorkerFollow";
+import {
+  beginSteerSession,
+  endSteerSession,
+  steerPromptInstruction,
+} from "./bridgeSteer";
 
 type BrokerModel =
   | "opus-5"
@@ -72,6 +74,7 @@ function buildPrompt(
   brokerModel: BrokerModel,
   brokerSubagent: BrokerSubagent,
   cwd: string,
+  steerPath: string,
 ): string {
   const subagent =
     brokerSubagent === "auto" ? "Auto" : MODEL_LABELS[brokerSubagent];
@@ -107,13 +110,7 @@ function buildPrompt(
             " those lines reads as a freeze.",
         ].join(" ");
 
-  const transcript = messages
-    .filter((message) => message.role !== "tool")
-    .map(
-      (message) =>
-        `${message.role.toUpperCase()}:\n${contentToText(message.content)}`,
-    )
-    .join("\n\n");
+  const transcript = buildBridgeTranscript(messages);
 
   return [
     "You are Cukii Broker running through a native bridge, not through the Continue chat model.",
@@ -122,6 +119,8 @@ function buildPrompt(
     selectedSubagentGuidance,
     "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
     "Answer in the user's language and keep normal chat continuity from the transcript.",
+    "While working, write short status lines often — what you are doing now, not a spinner. Long silent stretches between tools read as a freeze.",
+    steerPromptInstruction(steerPath),
     "",
     transcript,
   ].join("\n");
@@ -398,13 +397,13 @@ function routeForModel(
             "--",
             "bash",
             "-lc",
-            'cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format text --model composer-2.5 --trust "$(cat)"',
+            'cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model composer-2.5 --trust "$(cat)"',
             "cukii-cursor",
             wslCwd,
           ],
-          // cursor-agent пока остаётся на тексте: его событийная схема не снята
-          // прогоном, а писать парсер по догадке — тот же дефект, что чиним.
-          format: "text",
+          // Схема снята из живого cursor-bridge прогона: Cursor отдаёт тот же
+          // assistant/user envelope, плюс top-level thinking/tool_call events.
+          format: "anthropic-envelope",
           logFile,
         };
       }
@@ -414,12 +413,13 @@ function routeForModel(
         args: [
           "-p",
           "--output-format",
-          "text",
+          "stream-json",
+          "--stream-partial-output",
           "--model",
           "composer-2.5",
           "--trust",
         ],
-        format: "text",
+        format: "anthropic-envelope",
         logFile,
       };
   }
@@ -478,11 +478,33 @@ export async function* streamBridgeChat(args: {
 }): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
+  const steerPath = path.join(
+    os.tmpdir(),
+    `cukii-steer-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+  );
+  beginSteerSession(steerPath);
+  try {
+    return yield* streamBridgeChatWithSteer(args, cwd, steerPath);
+  } finally {
+    endSteerSession();
+  }
+}
+
+async function* streamBridgeChatWithSteer(
+  args: {
+    messages: ChatMessage[];
+    brokerModel: BrokerModel;
+    brokerSubagent: BrokerSubagent;
+  },
+  cwd: string,
+  steerPath: string,
+): AsyncGenerator<ChatMessage, PromptLog> {
   const prompt = buildPrompt(
     args.messages,
     args.brokerModel,
     args.brokerSubagent,
     cwd,
+    steerPath,
   );
   const route = routeForModel(args.brokerModel, cwd, prompt, args.messages);
   const subagentLabel =
@@ -521,6 +543,8 @@ export async function* streamBridgeChat(args: {
   let stderr = "";
   let stdoutTail = "";
   let rawStdout = "";
+  const launchedAt = Date.now();
+  let firstOutputAt: number | undefined;
 
   child.stdin.write(prompt);
   child.stdin.end();
@@ -533,6 +557,13 @@ export async function* streamBridgeChat(args: {
   let error: Error | undefined;
 
   child.stdout.on("data", (chunk: Buffer) => {
+    if (firstOutputAt === undefined) {
+      firstOutputAt = Date.now();
+      queue.push({
+        kind: "thinking",
+        text: `Native bridge first output after ${((firstOutputAt - launchedAt) / 1000).toFixed(1)} s.\n`,
+      });
+    }
     const text = chunk.toString("utf8");
     stdoutTail = (stdoutTail + text).slice(-4000);
     // Сырой stdout нужен только как страховка: если вендор сменит формат и не

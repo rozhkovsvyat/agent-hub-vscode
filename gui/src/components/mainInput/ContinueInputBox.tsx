@@ -14,7 +14,6 @@ import { RulesPeek } from "./belowMainInput/RulesPeek";
 import { GradientBorder } from "./GradientBorder";
 import { ToolbarOptions } from "./InputToolbar";
 import { Lump } from "./Lump";
-import { QueuedMessageChip } from "./QueuedMessageChip";
 import { TipTapEditor } from "./TipTapEditor";
 
 interface ContinueInputBoxProps {
@@ -110,33 +109,50 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
 
   return (
     <div
-      className={`${props.hidden ? "hidden" : ""}`}
+      className={`${props.hidden ? "hidden" : ""} ${
+        props.isMainInput ? "cukii-composer" : "cukii-user-bubble"
+      }`}
       data-testid={`continue-input-box-${props.inputId}`}
     >
-      <div className={`relative flex flex-col px-2`}>
+      <div
+        className={`relative flex flex-col ${props.isMainInput ? "px-2" : ""}`}
+      >
         {props.isMainInput && <Lump />}
-        {props.isMainInput && <QueuedMessageChip />}
-        <GradientBorder
-          loading={isStreaming && (props.isLastUserInput || isInEdit) ? 1 : 0}
-          borderColor={
-            isStreaming && (props.isLastUserInput || isInEdit)
-              ? undefined
-              : vscBackground
-          }
-          borderRadius={defaultBorderRadius}
-        >
+        {props.isMainInput ? (
+          <GradientBorder
+            loading={isStreaming && (props.isLastUserInput || isInEdit) ? 1 : 0}
+            borderColor={
+              isStreaming && (props.isLastUserInput || isInEdit)
+                ? undefined
+                : vscBackground
+            }
+            borderRadius={defaultBorderRadius}
+          >
+            <TipTapEditor
+              editorState={props.editorState}
+              onEnter={props.onEnter}
+              placeholder={placeholder}
+              isMainInput={props.isMainInput ?? false}
+              availableContextProviders={filteredContextProviders}
+              availableSlashCommands={filteredSlashCommands}
+              historyKey={historyKey}
+              toolbarOptions={toolbarOptions}
+              inputId={props.inputId}
+            />
+          </GradientBorder>
+        ) : (
           <TipTapEditor
             editorState={props.editorState}
             onEnter={props.onEnter}
             placeholder={placeholder}
-            isMainInput={props.isMainInput ?? false}
+            isMainInput={false}
             availableContextProviders={filteredContextProviders}
             availableSlashCommands={filteredSlashCommands}
             historyKey={historyKey}
             toolbarOptions={toolbarOptions}
             inputId={props.inputId}
           />
-        </GradientBorder>
+        )}
       </div>
 
       {(appliedRules.length > 0 || contextItems.length > 0) && (
