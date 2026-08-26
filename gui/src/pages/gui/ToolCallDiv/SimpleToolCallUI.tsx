@@ -15,6 +15,7 @@ interface SimpleToolCallUIProps {
   tool: Tool | undefined;
   icon?: ComponentType<React.SVGProps<SVGSVGElement>>;
   historyIndex: number;
+  showLeadingIcon?: boolean;
 }
 
 export function SimpleToolCallUI({
@@ -22,6 +23,7 @@ export function SimpleToolCallUI({
   toolCallState,
   tool,
   historyIndex,
+  showLeadingIcon = true,
 }: SimpleToolCallUIProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const shownContextItems = useMemo(() => {
@@ -54,12 +56,14 @@ export function SimpleToolCallUI({
           onClick={isClickable ? handleClick : undefined}
           data-testid="context-items-peek"
         >
-          <ToggleWithIcon
-            icon={Icon}
-            isToggleable={isToggleable}
-            open={shouldShowContent}
-            isClickable={isSingleItem}
-          />
+          {(showLeadingIcon || isToggleable) && (
+            <ToggleWithIcon
+              icon={showLeadingIcon ? Icon : undefined}
+              isToggleable={isToggleable}
+              open={shouldShowContent}
+              isClickable={isSingleItem}
+            />
+          )}
           <ToolCallStatusMessage tool={tool} toolCallState={toolCallState} />
         </div>
 

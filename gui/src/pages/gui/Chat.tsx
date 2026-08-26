@@ -1,7 +1,4 @@
-import {
-  ArrowLeftIcon,
-  ChatBubbleOvalLeftIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { Editor, JSONContent } from "@tiptap/react";
 import { ChatHistoryItem, InputModifiers } from "core";
 import { renderChatMessage } from "core/util/messageContent";
@@ -11,13 +8,12 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
+  type ReactNode,
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
 import { useFindWidget } from "../../components/find/FindWidget";
-import TimelineItem from "../../components/gui/TimelineItem";
 import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
 import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
@@ -42,7 +38,7 @@ import { streamEditThunk } from "../../redux/thunks/edit";
 import { loadLastSession } from "../../redux/thunks/session";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
 import { isMetaEquivalentKeyPressed } from "../../util";
-import { ToolCallDiv } from "./ToolCallDiv";
+import { SingleToolCallDiv } from "./ToolCallDiv";
 import {
   NestedWorkerCard,
   parseNestedWorkerThinking,
@@ -68,6 +64,10 @@ import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
 import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
+import {
+  getLastInProgressToolCallId,
+  getToolTimelineClass,
+} from "./timelineUtils";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -77,6 +77,24 @@ function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
     }
   }
   return -1; // No summary found
+}
+
+function assistantHasVisibleText(item: ChatHistoryItemWithMessageId): boolean {
+  const text = renderChatMessage(item.message).trim();
+  return (
+    text.length > 0 ||
+    !!item.conversationSummary ||
+    !!item.reasoning?.text?.trim()
+  );
+}
+
+function isLastAgentTurn(
+  visibleHistory: ChatHistoryItemWithMessageId[],
+  index: number,
+): boolean {
+  return visibleHistory
+    .slice(index + 1)
+    .every((entry) => entry.message.role === "tool");
 }
 
 const StepsDiv = styled.div`
@@ -124,7 +142,6 @@ export function Chat() {
     (store) => store.config.config.ui?.showSessionTabs,
   );
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
-  const [stepsOpen] = useState<(boolean | undefined)[]>([]);
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -297,8 +314,17 @@ export function Chat() {
     [history],
   );
 
-  const renderChatHistoryItem = useCallback(
-    (item: ChatHistoryItemWithMessageId, index: number) => {
+  const latestSummaryIndex = useMemo(
+    () => findLatestSummaryIndex(history),
+    [history],
+  );
+
+  const renderTranscriptRows = useCallback((): JSX.Element[] => {
+    const visibleHistory = history.filter(
+      (item) => item.message.role !== "system",
+    );
+
+    return history.flatMap((item, historyIndex): JSX.Element[] => {
       const {
         message,
         editorState,
@@ -307,126 +333,147 @@ export function Chat() {
         toolCallStates,
       } = item;
 
-      // Calculate once for the entire function
-      const latestSummaryIndex = findLatestSummaryIndex(history);
+      if (message.role === "system" || message.role === "tool") {
+        return [];
+      }
+
+      const visibleIndex = visibleHistory.findIndex(
+        (entry) => entry.message.id === message.id,
+      );
       const isBeforeLatestSummary =
-        latestSummaryIndex !== -1 && index < latestSummaryIndex;
+        latestSummaryIndex !== -1 && historyIndex < latestSummaryIndex;
+      const isLiveTurn =
+        isStreaming && isLastAgentTurn(visibleHistory, visibleIndex);
+      const lastInProgressToolCallId = isLiveTurn
+        ? getLastInProgressToolCallId(toolCallStates)
+        : undefined;
+      const errorBoundary = (content: ReactNode) => (
+        <ErrorBoundary
+          FallbackComponent={fallbackRender}
+          onReset={() => {
+            dispatch(newSession());
+          }}
+        >
+          {content}
+        </ErrorBoundary>
+      );
 
       if (message.role === "user") {
-        return (
-          <ContinueInputBox
-            onEnter={(editorState, modifiers) =>
-              sendInput(editorState, modifiers, index)
-            }
-            isLastUserInput={isLastUserInput(index)}
-            isMainInput={false}
-            editorState={editorState ?? item.message.content}
-            contextItems={contextItems}
-            appliedRules={appliedRules}
-            inputId={message.id}
-          />
-        );
-      }
-
-      if (message.role === "tool") {
-        return null;
-      }
-
-      if (message.role === "assistant") {
-        return (
-          <>
-            {/* Always render assistant content through normal path */}
-            <div className="thread-message">
-              <TimelineItem
-                item={item}
-                iconElement={
-                  <ChatBubbleOvalLeftIcon width="16px" height="16px" />
+        return [
+          <div key={message.id} className="cukii-user-row shrink-0">
+            {errorBoundary(
+              <ContinueInputBox
+                onEnter={(nextEditorState, modifiers) =>
+                  sendInput(nextEditorState, modifiers, historyIndex)
                 }
-                open={
-                  typeof stepsOpen[index] === "undefined"
-                    ? true
-                    : stepsOpen[index]!
-                }
-                onToggle={() => {}}
-              >
-                <StepContainer
-                  index={index}
-                  isLast={index === history.length - 1}
-                  item={item}
-                  latestSummaryIndex={latestSummaryIndex}
-                />
-              </TimelineItem>
-            </div>
-
-            {toolCallStates && (
-              <ToolCallDiv
-                toolCallStates={toolCallStates}
-                historyIndex={index}
-              />
+                isLastUserInput={isLastUserInput(historyIndex)}
+                isMainInput={false}
+                editorState={editorState ?? message.content}
+                contextItems={contextItems}
+                appliedRules={appliedRules}
+                inputId={message.id}
+              />,
             )}
-          </>
-        );
+          </div>,
+        ];
       }
 
       if (message.role === "thinking") {
         const thinkingContent = renderChatMessage(message);
         if (!thinkingContent?.trim()) {
-          return null;
+          return [];
         }
-        const inProgress = index === history.length - 1 && isStreaming;
+
+        const inProgress = historyIndex === history.length - 1 && isStreaming;
         const nestedWorker = parseNestedWorkerThinking(
           thinkingContent,
           inProgress,
         );
-        if (nestedWorker) {
-          return (
-            <div className={isBeforeLatestSummary ? "opacity-50" : ""}>
-              <NestedWorkerCard view={nestedWorker} />
-            </div>
-          );
-        }
-        return (
-          <div className={isBeforeLatestSummary ? "opacity-50" : ""}>
-            <ThinkingBlockPeek
-              content={thinkingContent}
-              redactedThinking={message.redactedThinking}
-              index={index}
-              prevItem={index > 0 ? history[index - 1] : null}
-              inProgress={inProgress}
-              signature={message.signature}
-            />
-          </div>
+        const thinkingBody = nestedWorker ? (
+          <NestedWorkerCard view={nestedWorker} />
+        ) : (
+          <ThinkingBlockPeek
+            content={thinkingContent}
+            redactedThinking={message.redactedThinking}
+            index={historyIndex}
+            prevItem={historyIndex > 0 ? history[historyIndex - 1] : null}
+            inProgress={inProgress}
+            signature={message.signature}
+          />
         );
+
+        return [
+          <div
+            key={message.id}
+            className={`cukii-timeline-item cukii-timeline-event shrink-0 ${
+              isLiveTurn && inProgress ? "cukii-timeline-current" : ""
+            } ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+          >
+            {errorBoundary(thinkingBody)}
+          </div>,
+        ];
       }
 
-      // Default case - regular assistant message
-      return (
-        <div className="thread-message">
-          <TimelineItem
-            item={item}
-            iconElement={<ChatBubbleOvalLeftIcon width="16px" height="16px" />}
-            open={
-              typeof stepsOpen[index] === "undefined" ? true : stepsOpen[index]!
-            }
-            onToggle={() => {}}
-          >
-            <StepContainer
-              index={index}
-              isLast={index === history.length - 1}
-              item={item}
-              latestSummaryIndex={latestSummaryIndex}
-            />
-          </TimelineItem>
-        </div>
-      );
-    },
-    [sendInput, isLastUserInput, history, stepsOpen, isStreaming],
-  );
+      if (message.role === "assistant") {
+        const rows: JSX.Element[] = [];
+
+        if (assistantHasVisibleText(item)) {
+          rows.push(
+            <div
+              key={`${message.id}-text`}
+              className={`cukii-timeline-item cukii-timeline-event shrink-0 ${
+                isLiveTurn && !lastInProgressToolCallId
+                  ? "cukii-timeline-current"
+                  : ""
+              } ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+            >
+              {errorBoundary(
+                <div className="thread-message">
+                  <StepContainer
+                    index={historyIndex}
+                    isLast={historyIndex === history.length - 1}
+                    item={item}
+                    latestSummaryIndex={latestSummaryIndex}
+                  />
+                </div>,
+              )}
+            </div>,
+          );
+        }
+
+        toolCallStates?.forEach((toolCallState) => {
+          rows.push(
+            <div
+              key={toolCallState.toolCallId}
+              className={`cukii-timeline-item shrink-0 ${getToolTimelineClass(
+                toolCallState.status,
+              )} ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+            >
+              {errorBoundary(
+                <SingleToolCallDiv
+                  toolCallState={toolCallState}
+                  historyIndex={historyIndex}
+                />,
+              )}
+            </div>,
+          );
+        });
+
+        return rows;
+      }
+
+      return [];
+    });
+  }, [
+    dispatch,
+    history,
+    isLastUserInput,
+    isStreaming,
+    latestSummaryIndex,
+    sendInput,
+  ]);
 
   const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
-  const visibleHistory = history.filter(
-    (item) => item.message.role !== "system",
-  );
 
   return (
     <>
@@ -442,37 +489,8 @@ export function Chat() {
         {history.length === 0 && (
           <EmptyChatBody showOnboardingCard={onboardingCard.show} />
         )}
-        {visibleHistory.map((item, index: number) => {
-          // tool-результаты рендерятся в null — пустой враппер ломает
-          // adjacent-sibling правила рейки, как у Claude.
-          if (item.message.role === "tool") {
-            return null;
-          }
-          const isLastVisible =
-            visibleHistory
-              .slice(index + 1)
-              .every((next) => next.message.role === "tool") && isStreaming;
-          return (
-            <div
-              key={item.message.id}
-              className={`cukii-timeline-item shrink-0 ${
-                item.message.role === "user"
-                  ? "cukii-timeline-checkpoint"
-                  : "cukii-timeline-event"
-              } ${isLastVisible ? "cukii-timeline-current" : ""}`}
-            >
-              <ErrorBoundary
-                FallbackComponent={fallbackRender}
-                onReset={() => {
-                  dispatch(newSession());
-                }}
-              >
-                {renderChatHistoryItem(item, index)}
-              </ErrorBoundary>
-              {index === visibleHistory.length - 1 && <InlineErrorMessage />}
-            </div>
-          );
-        })}
+        {renderTranscriptRows()}
+        <InlineErrorMessage />
         {isStreaming && !isInEdit && (
           <div className="cukii-spinner-row" data-testid="cukii-spinner-row">
             <CukiiStreamingToolbar />

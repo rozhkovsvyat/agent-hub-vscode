@@ -143,7 +143,7 @@ const StreamErrorDialog = ({ error }: StreamErrorProps) => {
       <div className="m-0 p-0">
         <p className="m-0 mb-2 p-0">
           There was an error handling the response from{" "}
-          {selectedModel?.title || "the model"}.
+          {modelTitle || "the model"}.
         </p>
         <p className="m-0 p-0">Please try to submit your message again.</p>
         <div className="mt-3">{resubmitButton}</div>

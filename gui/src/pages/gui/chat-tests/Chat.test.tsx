@@ -158,15 +158,15 @@ test("streaming loader lives in the transcript, not on the composer", async () =
   ).not.toBeNull();
 });
 
-test("user turns use timeline checkpoints, not check icons", async () => {
+test("user bubbles are not timeline items", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
     store.dispatch({
       type: "session/newSession",
       payload: {
-        sessionId: "timeline-checkpoint",
-        title: "Timeline checkpoint",
+        sessionId: "timeline-user-row",
+        title: "Timeline user row",
         history: [
           {
             message: { id: "user-1", role: "user", content: "Hello from user" },
@@ -190,11 +190,64 @@ test("user turns use timeline checkpoints, not check icons", async () => {
   );
   expect(userBox).not.toBeNull();
   expect(userBox?.className).toMatch(/cukii-user-bubble/);
-  expect(userBox?.closest(".cukii-timeline-checkpoint")).not.toBeNull();
-  expect(userBox?.closest(".cukii-transcript")).not.toBeNull();
-  expect(
-    container.querySelector(".cukii-timeline-checkpoint .text-success"),
-  ).toBeNull();
+  expect(userBox?.closest(".cukii-user-row")).not.toBeNull();
+  expect(userBox?.closest(".cukii-timeline-item")).toBeNull();
+  expect(userBox?.closest(".cukii-timeline-checkpoint")).toBeNull();
+});
+
+test("assistant text and tool calls render as sibling timeline items", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "timeline-tool-rows",
+        title: "Timeline tool rows",
+        history: [
+          {
+            message: { id: "user-1", role: "user", content: "Search the repo" },
+            contextItems: [],
+          },
+          {
+            message: {
+              id: "assistant-1",
+              role: "assistant",
+              content: "Sure, let me search.",
+            },
+            contextItems: [],
+            toolCallStates: [
+              {
+                toolCallId: "tool-1",
+                toolCall: {
+                  id: "tool-1",
+                  type: "function",
+                  function: { name: "grep", arguments: '{"pattern":"foo"}' },
+                },
+                status: "done",
+                parsedArgs: { pattern: "foo" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  const timelineItems = container.querySelectorAll(".cukii-timeline-item");
+  expect(timelineItems).toHaveLength(2);
+
+  const assistantTextItem = container.querySelector(
+    ".cukii-timeline-item.cukii-timeline-event",
+  );
+  const toolItem = container.querySelector(
+    ".cukii-timeline-item.cukii-timeline-checkpoint",
+  );
+
+  expect(assistantTextItem).not.toBeNull();
+  expect(toolItem).not.toBeNull();
+  expect(assistantTextItem?.contains(toolItem ?? null)).toBe(false);
+  expect(toolItem?.contains(assistantTextItem ?? null)).toBe(false);
 });
 
 test("streaming toolbar follows the current transcript", async () => {
@@ -295,4 +348,66 @@ test("thinking label sits above the streaming loader", async () => {
   expect(toolbar?.compareDocumentPosition(thinking) ?? 0).toBe(
     Node.DOCUMENT_POSITION_PRECEDING,
   );
+});
+
+test("shell tool calls stay compact captions and do not nest Terminal cards", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "terminal-cards",
+        title: "Terminal cards",
+        history: [
+          {
+            message: { id: "user-1", role: "user", content: "run checks" },
+            contextItems: [],
+          },
+          {
+            message: {
+              id: "assistant-1",
+              role: "assistant",
+              content: "Running the checks now.",
+            },
+            contextItems: [],
+            toolCallStates: [1, 2, 3].map((n) => ({
+              toolCallId: `term-${n}`,
+              toolCall: {
+                id: `term-${n}`,
+                type: "function",
+                function: {
+                  name: "run_terminal_command",
+                  arguments: `{"command":"echo ${n}"}`,
+                },
+              },
+              status: "done",
+              parsedArgs: { command: `echo ${n}` },
+              output: [
+                {
+                  name: "Tool output",
+                  description: "stdout",
+                  content: `ok ${n}`,
+                  hidden: false,
+                },
+              ],
+            })),
+          },
+        ],
+      },
+    });
+  });
+
+  expect(
+    container.querySelectorAll('[data-testid="terminal-container"]'),
+  ).toHaveLength(0);
+  expect(
+    container.querySelectorAll('[data-testid="tool-call-title"]'),
+  ).toHaveLength(3);
+
+  const timelineItems = container.querySelectorAll(".cukii-timeline-item");
+  expect(timelineItems.length).toBeGreaterThanOrEqual(4);
+  timelineItems.forEach((item) => {
+    expect(item.querySelector(".cukii-timeline-item")).toBeNull();
+  });
 });

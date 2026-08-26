@@ -16,7 +16,7 @@ export function CukiiStreamingToolbar() {
     >
       <div className="cukii-thinking-row min-w-0">
         <CukiiThinkingGlyph />
-        <span className="cukii-thinking-text truncate">{phrase}...</span>
+        <span className="cukii-thinking-text truncate">{phrase}..</span>
       </div>
     </div>
   );

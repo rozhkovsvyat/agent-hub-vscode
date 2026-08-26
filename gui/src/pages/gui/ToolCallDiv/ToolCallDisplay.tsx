@@ -21,10 +21,9 @@ export function ToolCallDisplay({
   tool,
   toolCallState,
   children,
-  icon,
   historyIndex,
   alwaysShowBody = false,
-}: ToolCallDisplayProps) {
+}: Omit<ToolCallDisplayProps, "icon">) {
   const ideMessenger = useContext(IdeMessengerContext);
   const focusView = useAppSelector((state) => state.ui.focusView);
   const shownContextItems = useMemo(() => {
@@ -59,9 +58,6 @@ export function ToolCallDisplay({
             onClick={isClickable || children ? handleClick : undefined}
             data-testid="tool-call-row"
           >
-            {icon ? (
-              <div className="h-4 w-4 flex-shrink-0 font-semibold">{icon}</div>
-            ) : null}
             {tool?.faviconUrl && (
               <img src={tool.faviconUrl} className="h-4 w-4 rounded-sm" />
             )}

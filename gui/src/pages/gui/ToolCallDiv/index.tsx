@@ -1,11 +1,9 @@
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import { ToolCallState } from "core";
 import { BuiltInToolNames } from "core/tools/builtIn";
-import { useState } from "react";
 import { useAppSelector } from "../../../redux/hooks";
 import { RootState } from "../../../redux/store";
 import FunctionSpecificToolCallDiv from "./FunctionSpecificToolCallDiv";
-import { GroupedToolCallHeader } from "./GroupedToolCallHeader";
 import { McpAppRenderer } from "./MCPAppRenderer";
 import { SimpleToolCallUI } from "./SimpleToolCallUI";
 import { TodoListCard } from "./TodoListCard";
@@ -16,7 +14,119 @@ import {
   getCursorBridgeProgress,
   isCursorBridgeToolCall,
 } from "./CursorBridgeProgress";
-import { getIconByName, getStatusIcon } from "./utils";
+import { getIconByName } from "./utils";
+
+interface SingleToolCallDivProps {
+  toolCallState: ToolCallState;
+  historyIndex: number;
+}
+
+export function SingleToolCallDiv({
+  toolCallState,
+  historyIndex,
+}: SingleToolCallDivProps) {
+  const availableTools = useAppSelector(
+    (state: RootState) => state.config.config.tools,
+  );
+
+  const tool = availableTools.find(
+    (candidate) =>
+      toolCallState.toolCall.function?.name === candidate.function.name,
+  );
+  const functionName = toolCallState.toolCall.function?.name;
+  const icon =
+    functionName && tool?.toolCallIcon
+      ? getIconByName(tool.toolCallIcon)
+      : undefined;
+
+  if (isCursorBridgeToolCall(toolCallState)) {
+    return (
+      <ToolCallDisplay
+        tool={tool}
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+      >
+        <CursorBridgeProgress toolCallState={toolCallState} />
+      </ToolCallDisplay>
+    );
+  }
+
+  if (toolCallState.mcpUiState) {
+    return (
+      <ToolCallDisplay
+        tool={tool}
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+      >
+        <McpAppRenderer toolCallState={toolCallState} />
+      </ToolCallDisplay>
+    );
+  }
+
+  if (isTodoWriteToolCall(functionName)) {
+    return (
+      <ToolCallDisplay
+        tool={tool}
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+        alwaysShowBody
+      >
+        <TodoListCard parsedArgs={toolCallState.parsedArgs} />
+      </ToolCallDisplay>
+    );
+  }
+
+  if (icon) {
+    return (
+      <SimpleToolCallUI
+        tool={tool}
+        toolCallState={toolCallState}
+        icon={toolCallState.status === "generated" ? ArrowRightIcon : icon}
+        historyIndex={historyIndex}
+        showLeadingIcon={false}
+      />
+    );
+  }
+
+  // Broker/Grok shell tools used to render as nested UnifiedTerminal
+  // chrome (chevron + "Terminal" + Run) and collapse the feed. Claude
+  // shows one caption row per command on the timeline; match that.
+  if (functionName === BuiltInToolNames.RunTerminalCommand) {
+    return (
+      <SimpleToolCallUI
+        tool={tool}
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+        showLeadingIcon={false}
+      />
+    );
+  }
+
+  if (
+    functionName === BuiltInToolNames.SingleFindAndReplace ||
+    functionName === BuiltInToolNames.MultiEdit
+  ) {
+    return (
+      <FunctionSpecificToolCallDiv
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+      />
+    );
+  }
+
+  return (
+    <ToolCallDisplay
+      tool={tool}
+      toolCallState={toolCallState}
+      historyIndex={historyIndex}
+    >
+      <FunctionSpecificToolCallDiv
+        toolCallState={toolCallState}
+        historyIndex={historyIndex}
+      />
+    </ToolCallDisplay>
+  );
+}
 
 interface ToolCallDivProps {
   toolCallStates: ToolCallState[];
@@ -27,152 +137,15 @@ export function ToolCallDiv({
   toolCallStates,
   historyIndex,
 }: ToolCallDivProps) {
-  const [open, setOpen] = useState(true);
-  const availableTools = useAppSelector(
-    (state: RootState) => state.config.config.tools,
-  );
-
-  if (!toolCallStates?.length) return null;
-
-  const isStreamingComplete = toolCallStates.every(
-    (toolCall) => toolCall.status !== "generating",
-  );
-
-  const shouldShowGroupedUI = toolCallStates.length > 1 && isStreamingComplete;
-  const activeCalls = toolCallStates.filter(
-    (call) => call.status !== "canceled",
-  );
-  const pendingCalls = toolCallStates.filter((call) => call.status !== "done");
-  const liveSubagent = toolCallStates
-    .map(getCursorBridgeProgress)
-    .find((progress) => progress?.active);
-
-  const renderToolCall = (toolCallState: ToolCallState) => {
-    const tool = availableTools.find(
-      (tool) => toolCallState.toolCall.function?.name === tool.function.name,
-    );
-    const functionName = toolCallState.toolCall.function?.name;
-    const icon =
-      functionName && tool?.toolCallIcon
-        ? getIconByName(tool.toolCallIcon)
-        : undefined;
-
-    if (isCursorBridgeToolCall(toolCallState)) {
-      const progress = getCursorBridgeProgress(toolCallState);
-      return (
-        <ToolCallDisplay
-          icon={getStatusIcon(
-            progress?.active ? "calling" : toolCallState.status,
-          )}
-          tool={tool}
-          toolCallState={toolCallState}
-          historyIndex={historyIndex}
-        >
-          <CursorBridgeProgress toolCallState={toolCallState} />
-        </ToolCallDisplay>
-      );
-    }
-
-    if (toolCallState.mcpUiState) {
-      return (
-        <ToolCallDisplay
-          icon={getStatusIcon(toolCallState.status)}
-          tool={tool}
-          toolCallState={toolCallState}
-          historyIndex={historyIndex}
-        >
-          <McpAppRenderer toolCallState={toolCallState} />
-        </ToolCallDisplay>
-      );
-    }
-
-    if (isTodoWriteToolCall(functionName)) {
-      return (
-        <ToolCallDisplay
-          icon={getStatusIcon(toolCallState.status)}
-          tool={tool}
-          toolCallState={toolCallState}
-          historyIndex={historyIndex}
-          alwaysShowBody
-        >
-          <TodoListCard parsedArgs={toolCallState.parsedArgs} />
-        </ToolCallDisplay>
-      );
-    }
-
-    if (icon) {
-      return (
-        <SimpleToolCallUI
-          tool={tool}
-          toolCallState={toolCallState}
-          icon={toolCallState.status === "generated" ? ArrowRightIcon : icon}
-          historyIndex={historyIndex}
-        />
-      );
-    }
-
-    // Trying this out while it's an experimental feature
-    // Obviously missing the truncate and args buttons
-    // All the info from args is displayed here
-    // But we'd need a nicer place to put the truncate button and the X icon when tool call fails
-    if (
-      functionName === BuiltInToolNames.SingleFindAndReplace ||
-      functionName === BuiltInToolNames.MultiEdit ||
-      functionName === BuiltInToolNames.RunTerminalCommand
-    ) {
-      return (
-        <div className="flex flex-col px-1">
-          <FunctionSpecificToolCallDiv
-            toolCallState={toolCallState}
-            historyIndex={historyIndex}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <ToolCallDisplay
-        icon={getStatusIcon(toolCallState.status)}
-        tool={tool}
-        toolCallState={toolCallState}
-        historyIndex={historyIndex}
-      >
-        <FunctionSpecificToolCallDiv
-          toolCallState={toolCallState}
-          historyIndex={historyIndex}
-        />
-      </ToolCallDisplay>
-    );
-  };
-
-  if (shouldShowGroupedUI) {
-    return (
-      <div className="border-border rounded-lg border px-4 py-3 pb-0">
-        <GroupedToolCallHeader
-          toolCallStates={toolCallStates}
-          activeCalls={pendingCalls.length > 0 ? pendingCalls : activeCalls}
-          liveSubagent={liveSubagent}
-          open={open}
-          onToggle={() => setOpen(!open)}
-        />
-        <div
-          className={`overflow-y-auto transition-all duration-300 ease-in-out ${
-            open ? "max-h-[50vh] opacity-100" : "max-h-0 opacity-0"
-          }`}
-        >
-          {toolCallStates.map((toolCallState) => (
-            <div className="py-1 pl-6" key={toolCallState.toolCallId}>
-              {renderToolCall(toolCallState)}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  if (!toolCallStates?.length) {
+    return null;
   }
 
   return toolCallStates.map((toolCallState) => (
-    <div className="py-1" key={toolCallState.toolCallId}>
-      {renderToolCall(toolCallState)}
-    </div>
+    <SingleToolCallDiv
+      key={toolCallState.toolCallId}
+      toolCallState={toolCallState}
+      historyIndex={historyIndex}
+    />
   ));
 }

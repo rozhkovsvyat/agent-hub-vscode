@@ -8,8 +8,9 @@ describe("CukiiStreamingToolbar", () => {
 
     const toolbar = screen.getByTestId("cukii-streaming-toolbar");
     expect(toolbar.textContent).toMatch(
-      /(?:Thinking|Combulating|Sussing|Sifting|Warming|Checking).*\.\.\./,
+      /(?:Thinking|Combulating|Sussing|Sifting|Warming|Checking).*\.\.(?!\.)/,
     );
+    expect(toolbar.textContent).not.toMatch(/\.\.\./);
     expect(toolbar.textContent).not.toMatch(/Backspace/i);
     expect(toolbar.textContent).not.toMatch(/to stop/i);
     expect(toolbar.textContent).not.toMatch(/\bStop\b/);

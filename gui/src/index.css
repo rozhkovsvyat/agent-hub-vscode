@@ -401,9 +401,33 @@ button.bg-primary:hover,
   padding: 20px 20px 8px;
 }
 
+.cukii-user-row {
+  margin: 12px 0 16px;
+  min-width: 0;
+}
+
+.cukii-user-bubble .ProseMirror img,
+.cukii-user-bubble img {
+  display: block;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
 .cukii-timeline-item {
   position: relative;
-  padding: 8px 0 8px 30px;
+  display: block;
+  min-width: 0;
+  padding-left: 30px;
+}
+
+.cukii-timeline-item .thread-message > div {
+  padding: 0 !important;
+}
+
+.cukii-timeline-item img {
+  display: block;
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 .cukii-timeline-item::before {
@@ -428,6 +452,10 @@ button.bg-primary:hover,
 
 .cukii-timeline-failed::before {
   background: #c74e39;
+}
+
+.cukii-timeline-warning::before {
+  background: #e1c08d;
 }
 
 .cukii-timeline-current::before {
