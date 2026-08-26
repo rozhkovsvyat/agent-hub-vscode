@@ -424,6 +424,14 @@ button.bg-primary:hover,
   padding: 0 !important;
 }
 
+/* Разнобой точек («все едет») — из-за разного верхнего отступа у текста,
+   thinking и tool-рядов. Обнуляем верх первого потомка, чтобы первая строка
+   каждого типа стартовала от одной базы и точка ::before садилась ровно. */
+.cukii-timeline-item > *:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
 .cukii-timeline-item img {
   display: block;
   margin-top: 8px;

@@ -165,6 +165,23 @@ function TipTapEditorInner(props: TipTapEditorProps) {
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
+  // Пустой ли редактор — нужно тулбару: во время хода при непустом вводе кнопка
+  // становится «отправить» (steering), а Stop показывается только на пустом поле.
+  const [isEditorEmpty, setIsEditorEmpty] = useState(true);
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    const syncEmpty = () => setIsEditorEmpty(editor.isEmpty);
+    syncEmpty();
+    editor.on("update", syncEmpty);
+    editor.on("transaction", syncEmpty);
+    return () => {
+      editor.off("update", syncEmpty);
+      editor.off("transaction", syncEmpty);
+    };
+  }, [editor]);
+
   const insertCharacterWithWhitespace = useCallback(
     (char: string) => {
       if (!editor) {
@@ -291,6 +308,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           isMainInput={props.isMainInput}
           toolbarOptions={props.toolbarOptions}
           activeKey={activeKey}
+          isInputEmpty={isEditorEmpty}
           hidden={shouldHideToolbar && !props.isMainInput}
           onAddContextItem={() => insertCharacterWithWhitespace("@")}
           onEnter={onEnter}

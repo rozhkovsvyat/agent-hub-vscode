@@ -76,6 +76,7 @@ interface InputToolbarProps {
   toolbarOptions?: ToolbarOptions;
   disabled?: boolean;
   isMainInput?: boolean;
+  isInputEmpty?: boolean;
 }
 
 function InputToolbar(props: InputToolbarProps) {
@@ -98,7 +99,11 @@ function InputToolbar(props: InputToolbarProps) {
   const isEnterDisabled =
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
   const isRetry = props.toolbarOptions?.enterText === "Retry";
-  const submitButtonLabel = isStreaming
+  // Stop показываем только когда идёт ход И поле пустое. Есть текст во время
+  // хода — кнопка «отправить» (steering-сообщение в ленту), как у Claude.
+  const isInputEmpty = props.isInputEmpty ?? true;
+  const showStop = isStreaming && isInputEmpty;
+  const submitButtonLabel = showStop
     ? "Stop response"
     : isInEdit
       ? isRetry
@@ -371,7 +376,7 @@ function InputToolbar(props: InputToolbarProps) {
               data-testid="submit-input-button"
               aria-label={submitButtonLabel}
               onClick={async (e) => {
-                if (isStreaming) {
+                if (showStop) {
                   void dispatch(cancelStream());
                   return;
                 }
@@ -386,7 +391,7 @@ function InputToolbar(props: InputToolbarProps) {
               }}
               disabled={isEnterDisabled}
             >
-              {isStreaming ? (
+              {showStop ? (
                 <span
                   className="h-2.5 w-2.5 rounded-[1px] bg-white"
                   aria-hidden="true"
@@ -426,6 +431,7 @@ export default memo(
     prev.hidden === next.hidden &&
     prev.disabled === next.disabled &&
     prev.isMainInput === next.isMainInput &&
+    prev.isInputEmpty === next.isInputEmpty &&
     prev.activeKey === next.activeKey &&
     shallowToolbarOptionsEqual(prev.toolbarOptions, next.toolbarOptions),
 );
