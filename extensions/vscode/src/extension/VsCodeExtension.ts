@@ -41,6 +41,7 @@ import { VsCodeMessenger } from "./VsCodeMessenger";
 import {
   listBridgeScopes,
   listBrokerSessions,
+  delegateBridgeWorker,
   openBridgeSession,
   recoverBridgeSession,
 } from "./bridgeUiClient";
@@ -289,6 +290,113 @@ export class VsCodeExtension {
     );
 
     this.core = new Core(inProcessMessenger, this.ide);
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        "cukii.delegateBridgeWorker",
+        async () => {
+          const token = process.env.AGENT_HUB_BROKER_UI_TOKEN;
+          if (!token) {
+            void vscode.window.showErrorMessage(
+              "Cukii Bridge UI token unavailable. Reload VS Code after bridge setup.",
+            );
+            return;
+          }
+          let scopes: Awaited<ReturnType<typeof listBridgeScopes>>;
+          try {
+            scopes = await listBridgeScopes(token);
+          } catch {
+            void vscode.window.showErrorMessage("Cukii broker недоступен");
+            return;
+          }
+          const candidates = (
+            await Promise.all(
+              scopes.map(async (scope) =>
+                (await listBrokerSessions(token, scope.name)).map(
+                  (session) => ({ scope, ...session }),
+                ),
+              ),
+            )
+          ).flat();
+          const parent = await vscode.window.showQuickPick(
+            candidates.map((item) => ({
+              label: `${item.agent}: ${item.session_id}`,
+              description: item.scope.name,
+              item,
+            })),
+            { placeHolder: "Cukii: broker, который делегирует работу" },
+          );
+          if (!parent) return;
+          const requestedWorker = await vscode.window.showQuickPick(
+            ["auto", "deepseek", "claude", "codex", "grok", "cursor"],
+            {
+              placeHolder: "Cukii: выберите vendor worker-а",
+            },
+          );
+          if (!requestedWorker) return;
+          const task = await vscode.window.showInputBox({
+            prompt: "Конкретная задача для isolated worker-а",
+            validateInput: (value) =>
+              value.trim() ? undefined : "Задача не должна быть пустой",
+          });
+          if (!task) return;
+          const taskId = `ui-${uuidv4().slice(0, 12)}`;
+          try {
+            const result = await delegateBridgeWorker({
+              token,
+              parent_session_id: parent.item.session_id,
+              agent: requestedWorker,
+              task_id: taskId,
+              task,
+            });
+            const worker =
+              typeof result.agent === "string" ? result.agent : requestedWorker;
+            const session = result.session as
+              | { session_id?: unknown }
+              | undefined;
+            const workerSessionId =
+              typeof session?.session_id === "string"
+                ? session.session_id
+                : undefined;
+            if (worker === "deepseek") {
+              const lifecycleToken =
+                typeof result.lifecycle_token === "string"
+                  ? result.lifecycle_token
+                  : undefined;
+              if (!workerSessionId || !lifecycleToken)
+                throw new Error("DeepSeek worker capability missing");
+              // The VS Code provider remains the credential owner. We open a
+              // fresh chat, bind it before input, then submit the broker task;
+              // no provider key crosses the broker loopback boundary.
+              await this.sidebar.webviewProtocol?.request(
+                "newSession",
+                undefined,
+              );
+              const chatSessionId = await this.sidebar.webviewProtocol?.request(
+                "cukii/getActiveSessionId",
+                undefined,
+              );
+              if (!chatSessionId)
+                throw new Error("DeepSeek chat session missing");
+              await this.core.bindBrokerLifecycle(
+                chatSessionId,
+                workerSessionId,
+                lifecycleToken,
+              );
+              await this.sidebar.webviewProtocol?.request("userInput", {
+                input: task,
+              });
+            }
+            void vscode.window.showInformationMessage(
+              `Cukii: ${worker} worker delegated from ${parent.item.agent} broker.`,
+            );
+          } catch {
+            void vscode.window.showErrorMessage(
+              "Cukii не смог делегировать worker-а",
+            );
+          }
+        },
+      ),
+    );
     context.subscriptions.push(
       vscode.commands.registerCommand(
         "cukii.openBridgeSession",

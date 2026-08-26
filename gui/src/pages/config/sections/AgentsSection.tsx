@@ -22,8 +22,17 @@ export function AgentsSection() {
     <div className="space-y-4">
       <ConfigHeader
         title="Agents"
-        subtext="Open broker or worker sessions without leaving Cukii"
+        subtext="Open broker/worker sessions and delegate a selected worker without leaving Cukii"
       />
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() =>
+          void ideMessenger.request("cukii/delegateBridgeWorker", {})
+        }
+      >
+        Delegate worker
+      </Button>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {NATIVE_AGENTS.map((agent) => (
           <Card

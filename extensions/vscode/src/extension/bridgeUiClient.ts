@@ -92,6 +92,17 @@ export async function listBrokerSessions(
     : [];
 }
 
+export async function delegateBridgeWorker(args: {
+  token: string;
+  parent_session_id: string;
+  agent: string;
+  task_id: string;
+  task: string;
+  model?: string;
+}): Promise<RpcResult> {
+  return call("bridge_delegate_worker", args);
+}
+
 export async function pollWorkerStatus(
   scope: string,
   taskId: string,

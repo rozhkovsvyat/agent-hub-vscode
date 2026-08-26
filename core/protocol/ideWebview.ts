@@ -31,6 +31,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     { agent: "deepseek" | "claude" | "codex" | "grok" | "cursor" },
     void,
   ];
+  "cukii/delegateBridgeWorker": [{}, void];
   "cukii/streamBridgeChat": [
     {
       messages: ChatMessage[];
