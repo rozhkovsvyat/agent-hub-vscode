@@ -576,6 +576,14 @@ button.bg-primary:hover,
   min-height: 0;
 }
 
+/* Turn-level "Interrupted" fact — Claude renders it as plain muted text,
+   not as a timeline event with a red dot. Align with the prose column. */
+.cukii-interrupted-fact {
+  position: relative;
+  display: block;
+  padding-left: 30px;
+}
+
 /* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста. */
 .cukii-spinner-row .cukii-thinking-glyph {
   position: absolute;

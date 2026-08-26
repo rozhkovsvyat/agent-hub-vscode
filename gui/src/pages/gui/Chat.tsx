@@ -409,17 +409,19 @@ export function Chat() {
           </div>,
         ];
 
-        // Turn-level "Interrupted" marker for canceled thinking-only streams.
+        // Turn-level "Interrupted" fact for canceled thinking-only streams.
+        // Render it as plain muted text (Claude parity), not a timeline event
+        // with a red dot.
         if (item.interrupted) {
           thinkingRows.push(
             <div
               key={`${message.id}-interrupted`}
-              className={`cukii-timeline-item cukii-timeline-failed shrink-0 ${
+              className={`cukii-interrupted-fact mt-2 min-w-0 ${
                 isBeforeLatestSummary ? "opacity-50" : ""
               }`}
             >
               <span
-                className="text-description-muted flex min-w-0 items-baseline"
+                className="text-description-muted"
                 data-testid="turn-interrupted"
               >
                 {TOOL_INTERRUPTED_MESSAGE}
@@ -476,19 +478,20 @@ export function Chat() {
           );
         });
 
-        // Turn-level "Interrupted" marker (Claude parity). Always shown when
+        // Turn-level "Interrupted" fact (Claude parity). Always shown when
         // the user canceled this turn, so the label is visible regardless of
         // whether an in-flight tool call already carries the per-tool label.
+        // Render it as plain muted text, not a timeline event with a red dot.
         if (item.interrupted) {
           rows.push(
             <div
               key={`${message.id}-interrupted`}
-              className={`cukii-timeline-item cukii-timeline-failed shrink-0 ${
+              className={`cukii-interrupted-fact mt-2 min-w-0 ${
                 isBeforeLatestSummary ? "opacity-50" : ""
               }`}
             >
               <span
-                className="text-description-muted flex min-w-0 items-baseline"
+                className="text-description-muted"
                 data-testid="turn-interrupted"
               >
                 {TOOL_INTERRUPTED_MESSAGE}

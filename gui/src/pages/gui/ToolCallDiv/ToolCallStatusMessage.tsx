@@ -65,12 +65,7 @@ export function ToolCallStatusMessage({
     >
       <span className="text-foreground flex-shrink-0 font-medium">{name}</span>
       {arg && (
-        <span
-          className={`text-description min-w-0 truncate ${
-            isShell ? "cukii-shell-tool-argument" : ""
-          }`}
-          title={arg}
-        >
+        <span className="text-description-muted min-w-0 truncate" title={arg}>
           {arg}
         </span>
       )}
