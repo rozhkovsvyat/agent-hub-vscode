@@ -557,16 +557,27 @@ button.bg-primary:hover,
 }
 
 .cukii-spinner-row {
+  position: relative;
   display: flex;
   animation: fadeIn 0.3s ease-in-out;
   align-items: center;
   height: 1.85em;
   margin-top: 4px;
+  /* Текст лоадера выравнивается по левому краю строк сообщений (30px), как у
+     Claude. Глиф уходит в левый жёлоб (абсолют), а не толкает текст вправо. */
   padding-left: 30px;
 }
 
 .cukii-spinner-row .cukii-thinking-row {
   min-height: 0;
+}
+
+/* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста. */
+.cukii-spinner-row .cukii-thinking-glyph {
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  margin-top: -9px;
 }
 
 .cukii-thinking-row,

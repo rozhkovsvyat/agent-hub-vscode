@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.41",
+  "version": "2.0.42",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -600,12 +600,12 @@
         {
           "command": "continue.newSession",
           "group": "navigation@1",
-          "when": "activeWebviewPanelId == continue.continueGUIView"
+          "when": "activeWebviewPanelId == continue.continueGUIView || activeWebviewPanelId == cukii.fullScreenChat"
         },
         {
           "command": "continue.viewHistory",
           "group": "navigation@2",
-          "when": "activeWebviewPanelId == continue.continueGUIView"
+          "when": "activeWebviewPanelId == continue.continueGUIView || activeWebviewPanelId == cukii.fullScreenChat"
         }
       ],
       "terminal/context": [

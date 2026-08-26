@@ -53,9 +53,13 @@ let fullScreenPanel: vscode.WebviewPanel | undefined;
 
 function getFullScreenTab() {
   const tabs = vscode.window.tabGroups.all.flatMap((tabGroup) => tabGroup.tabs);
-  return tabs.find((tab) =>
-    (tab.input as any)?.viewType?.endsWith("continue.continueGUIView"),
-  );
+  return tabs.find((tab) => {
+    const vt = (tab.input as any)?.viewType;
+    return (
+      vt?.endsWith("cukii.fullScreenChat") ||
+      vt?.endsWith("continue.continueGUIView")
+    );
+  });
 }
 
 function focusGUI() {
@@ -757,10 +761,26 @@ const getCommandsMap: (
       );
     },
     "continue.openInNewWindow": async () => {
-      // A normal editor tab beside the current group.  Do not open or reset
-      // the sidebar: the legacy path created two Cukii surfaces at once.
+      // Cukii lives in exactly one full-screen tab at a time. The GUI↔core
+      // protocol is a singleton bound to a single webview; creating a second
+      // panel rebinds (hijacks) it and breaks both surfaces — that's the
+      // "second window then errors, stops opening" bug. So: if a tab already
+      // exists, just reveal it instead of creating another.
+      if (fullScreenPanel) {
+        try {
+          fullScreenPanel.reveal();
+          return;
+        } catch {
+          // Reference is stale (panel was disposed) — recreate below.
+          fullScreenPanel = undefined;
+        }
+      }
+
+      // Distinct viewType (NOT the sidebar view id) so opening the tab does not
+      // also reveal the sidebar view container — that collision was the extra
+      // "шторка" that slid out next to the tab.
       let panel = vscode.window.createWebviewPanel(
-        "continue.continueGUIView",
+        "cukii.fullScreenChat",
         "Cukii",
         vscode.ViewColumn.Beside,
         {

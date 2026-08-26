@@ -311,10 +311,11 @@ export const sessionSlice = createSlice({
       let validAssistantMessageIdx = -1;
       for (let i = state.history.length - 1; i > lastUserOrToolIdx; i--) {
         const message = state.history[i];
-        const hasGeneratedMsg = message.toolCallStates?.some(
-          (toolCallState) => toolCallState.status !== "generating",
-        );
-        if (message.message.content || hasGeneratedMsg) {
+        // Any in-flight tool call (even still "generating") makes this message
+        // worth keeping: we mark it canceled below so the transcript shows
+        // "Tool interrupted", instead of silently deleting the turn on Esc.
+        const hasToolCalls = (message.toolCallStates?.length ?? 0) > 0;
+        if (message.message.content || hasToolCalls) {
           validAssistantMessageIdx = i;
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
