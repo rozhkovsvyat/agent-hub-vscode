@@ -424,11 +424,26 @@ button.bg-primary:hover,
   padding: 0 !important;
 }
 
-/* Разнобой точек («все едет») — из-за разного верхнего отступа у текста,
-   thinking и tool-рядов. Обнуляем верх первого потомка, чтобы первая строка
-   каждого типа стартовала от одной базы и точка ::before садилась ровно. */
+/* Разнобой точек («все едет») — первая строка у текста, thinking и tool-рядов
+   стартует с разного верхнего отступа (текст: markdown-абзац 13px + падинг
+   бабла 4px; thinking: mt-1 4px + падинг кнопки 4px; tool: 0). Сводим ВСЕ
+   первые строки к одной базе (flush), тогда точка ::before с фиксированным top
+   садится в центр первой строки у любого типа. Проверено замером в
+   timeline-harness: дельта «центр точки vs центр первой строки» ≈ 0 по всем. */
 .cukii-timeline-item > *:first-child {
   margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.cukii-timeline-item p:first-child {
+  margin-top: 0 !important;
+}
+.cukii-timeline-item .bg-background {
+  padding-top: 0 !important;
+}
+.cukii-timeline-item .mt-1 {
+  margin-top: 0 !important;
+}
+.cukii-timeline-item .thread-message button {
   padding-top: 0 !important;
 }
 
@@ -442,7 +457,7 @@ button.bg-primary:hover,
   content: "";
   position: absolute;
   left: 9px;
-  top: 15px;
+  top: 7px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
