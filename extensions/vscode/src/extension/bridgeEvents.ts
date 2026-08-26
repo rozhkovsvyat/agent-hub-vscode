@@ -22,7 +22,11 @@ export type BridgeEvent =
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
   | { kind: "error"; text: string };
 
-export type BridgeFormat = "anthropic-envelope" | "codex-thread" | "text";
+export type BridgeFormat =
+  | "anthropic-envelope"
+  | "codex-thread"
+  | "kimi-ndjson"
+  | "text";
 
 function asText(value: unknown): string {
   if (typeof value === "string") {
@@ -212,6 +216,79 @@ function parseCodexThread(event: any): BridgeEvent[] {
 }
 
 /**
+ * `kimi -p --output-format stream-json`: NDJSON в стиле OpenAI chat.
+ * Схема снята живым прогоном (kimi-code 0.38):
+ *  - `{role:"meta", type:"system.version"|"session.resume_hint"}` — служебное,
+ *    в ленту не идёт (но type c "error" всплываем как ошибку, не глотаем);
+ *  - `{role:"assistant", tool_calls:[{id, function:{name, arguments}}]}` —
+ *    вызов инструмента (arguments уже строка JSON, как у OpenAI);
+ *  - `{role:"tool", tool_call_id, content}` — результат инструмента;
+ *  - `{role:"assistant", content}` — текст ответа;
+ *  - reasoning (если модель его отдаёт) — в `reasoning_content`/`thinking`.
+ * Живой Bash-тул печатает свой вывод и сырыми строками мимо JSON — их отсекает
+ * общий фильтр `line[0] !== "{"`, поэтому здесь они не всплывают дважды.
+ */
+function parseKimiNdjson(event: any): BridgeEvent[] {
+  const role = event?.role;
+
+  if (role === "meta") {
+    if (event.type === "error" || event.type === "system.error") {
+      return [
+        {
+          kind: "error",
+          text: asText(event.content ?? event.message ?? event.error),
+        },
+      ];
+    }
+    return [];
+  }
+
+  if (role === "assistant") {
+    const out: BridgeEvent[] = [];
+    const thinking = asText(event.reasoning_content ?? event.thinking ?? "");
+    if (thinking.trim()) {
+      out.push({ kind: "thinking", text: thinking });
+    }
+    const toolCalls = Array.isArray(event.tool_calls) ? event.tool_calls : [];
+    for (const call of toolCalls) {
+      const fn = call?.function ?? {};
+      out.push({
+        kind: "toolStart",
+        id: String(call?.id ?? ""),
+        name: String(fn.name ?? "tool"),
+        args:
+          typeof fn.arguments === "string"
+            ? fn.arguments
+            : JSON.stringify(fn.arguments ?? {}),
+      });
+    }
+    const text = asText(event.content);
+    if (text) {
+      out.push({ kind: "text", text });
+    }
+    return out;
+  }
+
+  if (role === "tool") {
+    return [
+      {
+        kind: "toolResult",
+        id: String(event.tool_call_id ?? event.id ?? ""),
+        output: asText(event.content),
+        isError: event.is_error === true || event.isError === true,
+      },
+    ];
+  }
+
+  if (role === "thinking" || role === "reasoning") {
+    const text = asText(event.content ?? event.text);
+    return text.trim() ? [{ kind: "thinking", text }] : [];
+  }
+
+  return [];
+}
+
+/**
  * Инкрементальный NDJSON-разборщик: stdout приходит произвольными кусками, и
  * строка легко рвётся посередине. Держим хвост до перевода строки.
  */
@@ -257,7 +334,9 @@ export class BridgeEventParser {
     const events =
       this.format === "codex-thread"
         ? parseCodexThread(event)
-        : parseAnthropicEnvelope(event);
+        : this.format === "kimi-ndjson"
+          ? parseKimiNdjson(event)
+          : parseAnthropicEnvelope(event);
     // An init/schema-drift JSON object is not useful structured output. Keep
     // raw-stdout fallback alive until an event the UI can actually render.
     if (events.length) {

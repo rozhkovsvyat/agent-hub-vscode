@@ -36,8 +36,16 @@ const CODEX_LINES = [
   '{"type":"turn.completed","usage":{"input_tokens":34622}}',
 ];
 
+const KIMI_LINES = [
+  '{"role":"meta","type":"system.version","version":"0.38.0"}',
+  '{"role":"assistant","tool_calls":[{"type":"function","id":"tool_Qy6A","function":{"name":"Bash","arguments":"{\\"command\\":\\"ls -1\\"}"}}]}',
+  '{"role":"tool","tool_call_id":"tool_Qy6A","content":"hello.txt\\n"}',
+  '{"role":"assistant","content":"There is one file: hello.txt"}',
+  '{"role":"meta","type":"session.resume_hint","session_id":"session_x","command":"kimi -r session_x"}',
+];
+
 function collect(
-  format: "anthropic-envelope" | "codex-thread",
+  format: "anthropic-envelope" | "codex-thread" | "kimi-ndjson",
   lines: string[],
 ) {
   const parser = new BridgeEventParser(format);
@@ -126,6 +134,27 @@ describe("BridgeEventParser", () => {
         isError: false,
       },
       { kind: "text", text: "line-one" },
+    ]);
+  });
+
+  it("разбирает живой kimi stream-json (NDJSON в стиле OpenAI)", () => {
+    const { events, parser } = collect("kimi-ndjson", KIMI_LINES);
+    expect(parser.sawStructuredOutput).toBe(true);
+    // meta-строки (version/resume_hint) в ленту не идут.
+    expect(events).toEqual([
+      {
+        kind: "toolStart",
+        id: "tool_Qy6A",
+        name: "Bash",
+        args: '{"command":"ls -1"}',
+      },
+      {
+        kind: "toolResult",
+        id: "tool_Qy6A",
+        output: "hello.txt\n",
+        isError: false,
+      },
+      { kind: "text", text: "There is one file: hello.txt" },
     ]);
   });
 

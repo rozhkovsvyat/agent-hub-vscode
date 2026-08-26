@@ -39,6 +39,11 @@ type BridgeRoute = {
   format: BridgeFormat;
   promptFile?: string;
   logFile: string;
+  /**
+   * CLI получает промпт аргументом и stdin не читает (kimi -p). Писать туда весь
+   * транскрипт нельзя: непрочитанный pipe переполняется и даёт EPIPE/зависание.
+   */
+  noStdin?: boolean;
 };
 
 type ResolvedCommand = {
@@ -54,37 +59,33 @@ const MODEL_LABELS: Record<BrokerModel, string> = {
   "codex-5-6-terra": "Codex 5.6 Terra",
   "grok-4-6": "Grok 4.6",
   "composer-2-5": "Composer 2.5",
-  "kimi-k2": "Kimi K2",
+  // Enum id остаётся kimi-k2 ради совместимости с persist'ом globalState.
+  // Дефолт подписки — kimi-code/kimi-for-coding (K2.7 Coding), поэтому витрина —
+  // «Kimi K2.7». K3 у подписки тоже есть (kimi-code/k3), выбирается через
+  // CUKII_KIMI_MODEL; отдельной кнопкой станет в двухпанельном пикере моделей.
+  "kimi-k2": "Kimi K2.7",
 };
 
-// Kimi K2 (Moonshot) прячется за Anthropic-совместимым эндпоинтом, поэтому едет
-// тем же `claude` CLI, что Opus/Fable, но с подменёнными base URL/токеном/моделью.
-// Ключ берём из среды или файла (по конвенции машины, как .gitlab-token), сам
-// секрет в лог и в UI не попадает.
-const MOONSHOT_ANTHROPIC_BASE_URL = "https://api.moonshot.ai/anthropic";
+// Kimi едет собственным ПОДПИСОЧНЫМ CLI `kimi` (Kimi Code, device-login на
+// kimi.ai/global — flat-fee + квота), а НЕ платным per-token API и НЕ через
+// claude CLI: у аккаунта обычно только consumer-подписка, ключ Kimi Code Console
+// недоступен, а подписочный CLI работает как Grok/Cursor — свой агент-луп на
+// подписке. Токен кладёт `kimi login` (managed, в лог/UI не попадает). Паритет
+// памяти/хуков claude здесь НЕ наследуется — это отдельная работа «свои хуки для
+// Kimi» (config.toml MCP + --skills-dir), см. follow-up.
+//
+// Windows CreateProcess ограничивает командную строку ~32k символов, а `kimi -p`
+// берёт промпт АРГУМЕНТОМ (stdin в prompt-режиме не читает — проверено прогоном).
+// Поэтому большой транскрипт уводим в файл и просим kimi прочитать его тулом.
+const KIMI_INLINE_PROMPT_BUDGET = 24_000;
 
-function moonshotModelId(): string {
-  return (
-    process.env.CUKII_KIMI_MODEL || process.env.MOONSHOT_MODEL || "kimi-k2-0905"
-  );
+function kimiCliProgram(): string {
+  return "kimi";
 }
 
-function moonshotApiKey(): string | undefined {
-  const fromEnv =
-    process.env.MOONSHOT_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
-  if (fromEnv && fromEnv.trim()) {
-    return fromEnv.trim();
-  }
-  const keyFile = path.join(os.homedir(), ".moonshot-key");
-  try {
-    const fromFile = fs.readFileSync(keyFile, "utf8").trim();
-    if (fromFile) {
-      return fromFile;
-    }
-  } catch {
-    // отсутствие файла — не ошибка чтения, а просто «ключа нет»
-  }
-  return undefined;
+function kimiModelOverride(): string | undefined {
+  const m = process.env.CUKII_KIMI_MODEL || process.env.MOONSHOT_MODEL;
+  return m && m.trim() ? m.trim() : undefined;
 }
 
 function windowsCmdPath(): string {
@@ -191,12 +192,7 @@ function nativeDelegateHint(model: BrokerModel, cwd: string): string {
     case "composer-2-5":
       return "cursor-agent -p --output-format text --model composer-2.5 --trust";
     case "kimi-k2":
-      return (
-        `set ANTHROPIC_BASE_URL=${MOONSHOT_ANTHROPIC_BASE_URL} & ` +
-        `set ANTHROPIC_MODEL=${moonshotModelId()} & ` +
-        "set ANTHROPIC_AUTH_TOKEN=<moonshot-key> & " +
-        'claude -p "<task>"'
-      );
+      return 'kimi -p "<task>" --output-format stream-json';
   }
 }
 
@@ -222,6 +218,11 @@ function commandCandidates(program: string): string[] {
     // command-line budget than the native Grok executable.
     ...(program === "grok"
       ? [path.join(home, ".grok", "bin", "grok.exe")]
+      : []),
+    // Kimi Code CLI ставит нативный exe вне PATH — резолвим его напрямую, иначе
+    // .cmd-шим съедает и без того тесный бюджет командной строки под транскрипт.
+    ...(program === "kimi"
+      ? [path.join(home, ".kimi-code", "bin", "kimi.exe")]
       : []),
     path.join(
       home,
@@ -310,16 +311,8 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     CUKII_SUBAGENT_MODEL: subagent,
   };
 
-  // Kimi: перенаправляем claude CLI на Moonshot. small-fast тоже на Kimi —
-  // иначе фоновые вызовы claude бьют в несуществующую на Moonshot дефолт-модель.
-  // ANTHROPIC_API_KEY чистим, чтобы CLI использовал bearer ANTHROPIC_AUTH_TOKEN.
-  if (model === "kimi-k2") {
-    env.ANTHROPIC_BASE_URL = MOONSHOT_ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = moonshotApiKey() ?? "";
-    env.ANTHROPIC_MODEL = moonshotModelId();
-    env.ANTHROPIC_SMALL_FAST_MODEL = moonshotModelId();
-    delete env.ANTHROPIC_API_KEY;
-  }
+  // Kimi аутентифицируется собственным device-токеном (`kimi login`), а не через
+  // ANTHROPIC_*-переменные — специальная env-обвязка ему не нужна.
 
   return env;
 }
@@ -380,24 +373,47 @@ function routeForModel(
         format: "anthropic-envelope",
         logFile,
       };
-    // Kimi K2 = claude CLI + Moonshot Anthropic endpoint. Модель задаётся через
-    // ANTHROPIC_MODEL в bridgeEnv, а НЕ через --model: иначе claude валидирует
-    // алиас по своему списку и отвергает внешний id. Ключа нет — падаем сразу с
-    // понятным текстом, а не молча уводим запрос на дефолтный Anthropic.
-    case "kimi-k2":
-      if (!moonshotApiKey()) {
-        throw new Error(
-          "Kimi K2 bridge is unavailable: no Moonshot API key. " +
-            "Set MOONSHOT_API_KEY or put the key in ~/.moonshot-key, then retry.",
+    // Kimi = подписочный CLI `kimi` (device-login), поток stream-json в формате
+    // kimi-ndjson. Модель НЕ форсируем — берётся default_model из config.toml
+    // (то, что реально даёт подписка); override только через CUKII_KIMI_MODEL.
+    // `-p` берёт промпт аргументом и stdin не читает, поэтому большой транскрипт
+    // уходит в файл, а kimi получает короткую инструкцию прочитать его тулом.
+    case "kimi-k2": {
+      const modelArg = kimiModelOverride();
+      const inline =
+        Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
+      let promptArg = prompt;
+      let kimiPromptFile: string | undefined;
+      const extraArgs: string[] = [];
+      if (!inline) {
+        kimiPromptFile = path.join(
+          os.tmpdir(),
+          `cukii-kimi-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
         );
+        fs.writeFileSync(kimiPromptFile, prompt, "utf8");
+        promptArg =
+          "Your full broker instructions and the conversation transcript are in " +
+          `the file "${kimiPromptFile}". Read that file first, then act on the ` +
+          "latest user message. Answer in the user's language.";
+        extraArgs.push("--add-dir", os.tmpdir());
       }
       return {
         label: MODEL_LABELS[model],
-        program: "claude",
-        args: ["-p", "--output-format", "stream-json", "--verbose"],
-        format: "anthropic-envelope",
+        program: kimiCliProgram(),
+        args: [
+          "-p",
+          promptArg,
+          "--output-format",
+          "stream-json",
+          ...(modelArg ? ["-m", modelArg] : []),
+          ...extraArgs,
+        ],
+        format: "kimi-ndjson",
+        promptFile: kimiPromptFile,
         logFile,
+        noStdin: true,
       };
+    }
     case "codex-5-6-terra":
       return {
         label: MODEL_LABELS[model],
@@ -619,7 +635,9 @@ async function* streamBridgeChatWithSteer(
   const launchedAt = Date.now();
   let firstOutputAt: number | undefined;
 
-  child.stdin.write(prompt);
+  if (!route.noStdin) {
+    child.stdin.write(prompt);
+  }
   child.stdin.end();
 
   const parser = new BridgeEventParser(route.format);

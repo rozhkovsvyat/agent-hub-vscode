@@ -79,10 +79,11 @@ export function grokPromptJson(
 /** Keep `--prompt-json` bytes out of the thinking card and the launch line. */
 export function describeBridgeLaunch(program: string, args: string[]): string {
   const redacted: string[] = [];
+  const inlinePromptFlags = new Set(["--prompt-json", "-p", "--prompt"]);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--prompt-json" && i + 1 < args.length) {
+    if (inlinePromptFlags.has(args[i]) && i + 1 < args.length) {
       const bytes = Buffer.byteLength(args[i + 1], "utf8");
-      redacted.push("--prompt-json", `<${bytes} bytes>`);
+      redacted.push(args[i], `<${bytes} bytes>`);
       i += 1;
       continue;
     }
