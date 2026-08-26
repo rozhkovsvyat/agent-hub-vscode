@@ -763,15 +763,6 @@ const getCommandsMap: (
         "getCurrentSessionId",
         undefined,
       );
-      // Check if full screen is already open by checking open tabs
-      const fullScreenTab = getFullScreenTab();
-
-      if (fullScreenTab && fullScreenPanel) {
-        // Full screen open, but not focused - focus it
-        fullScreenPanel.reveal();
-        return;
-      }
-
       // Clear the sidebar to prevent overwriting changes made in fullscreen
       vscode.commands.executeCommand("continue.newSession");
 
@@ -819,7 +810,6 @@ const getCommandsMap: (
         extensionContext.subscriptions,
       );
 
-      vscode.commands.executeCommand("workbench.action.copyEditorToNewWindow");
       vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
     },
     "continue.forceNextEdit": async () => {

@@ -55,10 +55,14 @@ export function ToolCallStatusMessage({
   const pending = toolCallState.status === "generated";
   const interrupted = toolCallState.status === "canceled";
   const failed = toolCallState.status === "errored";
+  const isShell =
+    toolCallState.toolCall.function?.name === "run_terminal_command";
 
   return (
     <span
-      className="flex min-w-0 items-baseline gap-1.5"
+      className={`flex min-w-0 items-baseline gap-1.5 ${
+        isShell ? "cukii-shell-tool-call" : ""
+      }`}
       data-testid="tool-call-title"
     >
       {pending && (
@@ -69,7 +73,12 @@ export function ToolCallStatusMessage({
       )}
       <span className="text-foreground flex-shrink-0 font-medium">{name}</span>
       {arg && (
-        <span className="text-description min-w-0 truncate" title={arg}>
+        <span
+          className={`text-description min-w-0 truncate ${
+            isShell ? "cukii-shell-tool-argument" : ""
+          }`}
+          title={arg}
+        >
           {arg}
         </span>
       )}

@@ -337,6 +337,28 @@ export class VsCodeMessenger {
         msg.data.agent,
       );
     });
+    this.onWebview("cukii/getBrokerPreferences", () => ({
+      brokerModel: this.context.globalState.get(
+        "cukii.brokerModel",
+        "codex-5-6-terra",
+      ),
+      brokerSubagent: this.context.globalState.get(
+        "cukii.brokerSubagent",
+        "auto",
+      ),
+    }));
+    this.onWebview("cukii/setBrokerPreferences", async (msg) => {
+      await Promise.all([
+        this.context.globalState.update(
+          "cukii.brokerModel",
+          msg.data.brokerModel,
+        ),
+        this.context.globalState.update(
+          "cukii.brokerSubagent",
+          msg.data.brokerSubagent,
+        ),
+      ]);
+    });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       return streamBridgeChat(msg.data);
     });

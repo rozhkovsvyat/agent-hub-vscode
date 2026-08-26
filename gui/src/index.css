@@ -433,7 +433,18 @@ button.bg-primary:hover,
 /* A timeline event is a discrete checkpoint, not a line of a paragraph.
    Leave Claude-like breathing room between consecutive events. */
 .cukii-timeline-item + .cukii-timeline-item {
-  margin-top: 6px;
+  margin-top: 8px;
+}
+
+/* Claude keeps shell events readable without giving them full message-card
+   weight: the action stays prominent and the potentially long command line is
+   visually secondary. */
+.cukii-shell-tool-call {
+  color: var(--vscode-foreground);
+}
+
+.cukii-shell-tool-call .cukii-shell-tool-argument {
+  color: var(--vscode-descriptionForeground, #979797);
 }
 
 .cukii-timeline-item .thread-message > div {
@@ -506,7 +517,7 @@ button.bg-primary:hover,
   position: absolute;
   left: 12px;
   top: 0;
-  bottom: 0;
+  bottom: -8px;
   width: 1px;
   background: var(
     --vscode-sideBarActivityBarTop-border,
@@ -514,12 +525,16 @@ button.bg-primary:hover,
   );
 }
 
+/* Первый элемент: линия начинается от ЦЕНТРА точки (10.5px), а не от верха
+   блока — иначе над первой точкой торчит стуб-разрыв. */
 .cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item)::after {
-  top: 18px;
+  top: 10px;
 }
 
+/* Последний элемент: линия заканчивается НА центре точки, а не ниже — иначе
+   «последняя точка выше конца линии». Центр точки = top(7) + height(7)/2. */
 .cukii-timeline-item:not(:has(+ .cukii-timeline-item))::after {
-  height: 18px;
+  height: 11px;
   bottom: auto;
 }
 

@@ -248,7 +248,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamAborter: new AbortController(),
   symbols: {},
   mode: "agent",
-  brokerModel: "fable-5",
+  brokerModel: "codex-5-6-terra",
   brokerSubagent: "auto",
   isInEdit: false,
   codeBlockApplyStates: {

@@ -32,6 +32,42 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     void,
   ];
   "cukii/delegateBridgeWorker": [{}, void];
+  "cukii/getBrokerPreferences": [
+    undefined,
+    {
+      brokerModel:
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+      brokerSubagent:
+        | "auto"
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+    },
+  ];
+  "cukii/setBrokerPreferences": [
+    {
+      brokerModel:
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+      brokerSubagent:
+        | "auto"
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5";
+    },
+    void,
+  ];
   "cukii/streamBridgeChat": [
     {
       messages: ChatMessage[];

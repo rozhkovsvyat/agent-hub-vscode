@@ -69,6 +69,7 @@ const LoadButton = styled.button`
 const ImageContainer = styled.div`
   max-width: 100%;
   display: inline-block;
+  margin: 12px 0;
 
   img {
     max-width: 100%;

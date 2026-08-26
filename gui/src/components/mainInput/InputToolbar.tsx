@@ -15,7 +15,7 @@ import {
   modelSupportsImages,
   modelSupportsReasoning,
 } from "core/llm/autodetect";
-import { memo, useContext, useRef } from "react";
+import { memo, useContext, useEffect, useRef } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
@@ -92,6 +92,28 @@ function InputToolbar(props: InputToolbarProps) {
   const brokerSubagent = useAppSelector(
     (store) => store.session.brokerSubagent,
   );
+  useEffect(() => {
+    void ideMessenger
+      .request("cukii/getBrokerPreferences", undefined)
+      .then((result) => {
+        if (result.status === "success") {
+          dispatch(setBrokerModel(result.content.brokerModel));
+          dispatch(setBrokerSubagent(result.content.brokerSubagent));
+        }
+      });
+  }, [dispatch, ideMessenger]);
+
+  const updateBrokerPreferences = (
+    nextModel: BrokerModel,
+    nextSubagent: BrokerSubagent,
+  ) => {
+    dispatch(setBrokerModel(nextModel));
+    dispatch(setBrokerSubagent(nextSubagent));
+    ideMessenger.post("cukii/setBrokerPreferences", {
+      brokerModel: nextModel,
+      brokerSubagent: nextSubagent,
+    });
+  };
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
   const hasReasoningEnabled = useAppSelector(
     (store) => store.session.hasReasoningEnabled,
@@ -221,7 +243,8 @@ function InputToolbar(props: InputToolbarProps) {
                 testId: "broker-model-select-button",
                 tooltip: "Select Broker Model",
                 segment: "left",
-                onChange: (value) => dispatch(setBrokerModel(value)),
+                onChange: (value) =>
+                  updateBrokerPreferences(value, brokerSubagent ?? "auto"),
               })}
               {renderBrokerPicker<BrokerSubagent>({
                 value: brokerSubagent,
@@ -231,7 +254,11 @@ function InputToolbar(props: InputToolbarProps) {
                 testId: "broker-subagent-select-button",
                 tooltip: "Select Subagent Model",
                 segment: "right",
-                onChange: (value) => dispatch(setBrokerSubagent(value)),
+                onChange: (value) =>
+                  updateBrokerPreferences(
+                    brokerModel ?? "codex-5-6-terra",
+                    value,
+                  ),
               })}
             </div>
           ) : (
