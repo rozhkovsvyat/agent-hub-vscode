@@ -24,6 +24,7 @@ import {
   setBrokerModel,
   setBrokerSubagent,
   setHasReasoningEnabled,
+  setMode,
 } from "../../redux/slices/sessionSlice";
 import type {
   BrokerModel,
@@ -93,13 +94,19 @@ function InputToolbar(props: InputToolbarProps) {
   const brokerSubagent = useAppSelector(
     (store) => store.session.brokerSubagent,
   );
+  // Once the user picks a model in this session, the in-flight mount request
+  // (which reads globalState that may pre-date the pick) must not clobber it.
+  const userTouchedBrokerRef = useRef(false);
   useEffect(() => {
     void ideMessenger
       .request("cukii/getBrokerPreferences", undefined)
       .then((result) => {
-        if (result.status === "success") {
+        if (result.status === "success" && !userTouchedBrokerRef.current) {
           dispatch(setBrokerModel(result.content.brokerModel));
           dispatch(setBrokerSubagent(result.content.brokerSubagent));
+          if (result.content.mode) {
+            dispatch(setMode(result.content.mode));
+          }
         }
       });
   }, [dispatch, ideMessenger]);
@@ -108,11 +115,13 @@ function InputToolbar(props: InputToolbarProps) {
     nextModel: BrokerModel,
     nextSubagent: BrokerSubagent,
   ) => {
+    userTouchedBrokerRef.current = true;
     dispatch(setBrokerModel(nextModel));
     dispatch(setBrokerSubagent(nextSubagent));
     ideMessenger.post("cukii/setBrokerPreferences", {
       brokerModel: nextModel,
       brokerSubagent: nextSubagent,
+      mode: "broker",
     });
   };
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);

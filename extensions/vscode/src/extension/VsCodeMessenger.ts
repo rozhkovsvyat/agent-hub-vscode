@@ -355,6 +355,10 @@ export class VsCodeMessenger {
         | "composer-2-5"
         | "kimi-k2"
       >("cukii.brokerSubagent", "auto"),
+      mode: this.context.globalState.get<"chat" | "plan" | "agent" | "broker">(
+        "cukii.brokerMode",
+        "broker",
+      ),
     }));
     this.onWebview("cukii/setBrokerPreferences", async (msg) => {
       await Promise.all([
@@ -366,6 +370,9 @@ export class VsCodeMessenger {
           "cukii.brokerSubagent",
           msg.data.brokerSubagent,
         ),
+        ...(msg.data.mode
+          ? [this.context.globalState.update("cukii.brokerMode", msg.data.mode)]
+          : []),
       ]);
     });
     this.onWebview("cukii/streamBridgeChat", (msg) => {

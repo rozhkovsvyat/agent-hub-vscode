@@ -6,7 +6,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { MessageModes } from "core";
 import { isRecommendedAgentModel } from "core/llm/toolSupport";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useContext, useEffect, useMemo } from "react";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import { setMode } from "../../redux/slices/sessionSlice";
@@ -18,7 +19,12 @@ import { ModeIcon } from "./ModeIcon";
 
 export function ModeSelect() {
   const dispatch = useAppDispatch();
+  const ideMessenger = useContext(IdeMessengerContext);
   const mode = useAppSelector((store) => store.session.mode);
+  const brokerModel = useAppSelector((store) => store.session.brokerModel);
+  const brokerSubagent = useAppSelector(
+    (store) => store.session.brokerSubagent,
+  );
   const selectedModel = useAppSelector(selectSelectedChatModel);
 
   const isGoodAtAgentMode = useMemo(() => {
@@ -33,21 +39,38 @@ export function ModeSelect() {
     return getMetaKeyLabel();
   }, []);
 
+  const setAndPersistMode = useCallback(
+    (nextMode: MessageModes) => {
+      dispatch(setMode(nextMode));
+      if (nextMode === "background") {
+        return;
+      }
+      ideMessenger.post("cukii/setBrokerPreferences", {
+        brokerModel: brokerModel ?? "opus-5",
+        brokerSubagent: brokerSubagent ?? "auto",
+        mode: nextMode,
+      });
+    },
+    [brokerModel, brokerSubagent, dispatch, ideMessenger],
+  );
+
   const cycleMode = useCallback(() => {
+    let nextMode: MessageModes;
     if (mode === "chat") {
-      dispatch(setMode("plan"));
+      nextMode = "plan";
     } else if (mode === "plan") {
-      dispatch(setMode("agent"));
+      nextMode = "agent";
     } else if (mode === "agent") {
-      dispatch(setMode("broker"));
+      nextMode = "broker";
     } else {
-      dispatch(setMode("chat"));
+      nextMode = "chat";
     }
+    setAndPersistMode(nextMode);
     // Only focus main editor if another one doesn't already have focus
     if (!document.activeElement?.classList?.contains("ProseMirror")) {
       mainEditor?.commands.focus();
     }
-  }, [mode, mainEditor]);
+  }, [mode, mainEditor, setAndPersistMode]);
 
   const selectMode = useCallback(
     (newMode: MessageModes) => {
@@ -55,11 +78,11 @@ export function ModeSelect() {
         return;
       }
 
-      dispatch(setMode(newMode));
+      setAndPersistMode(newMode);
 
       mainEditor?.commands.focus();
     },
-    [mode, mainEditor],
+    [mode, mainEditor, setAndPersistMode],
   );
 
   useEffect(() => {

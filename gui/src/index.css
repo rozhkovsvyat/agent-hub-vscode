@@ -417,7 +417,9 @@ button.bg-primary:hover,
   position: relative;
   display: block;
   min-width: 0;
-  padding-left: 30px;
+  /* Transcript x=20, prose x=64. Glyph consumes 18px + 8px gap, so this
+     aligns loader text itself with the prose column. */
+  padding-left: 18px;
 }
 
 /* Claude keeps every timeline caption on one text column.  Markdown replies

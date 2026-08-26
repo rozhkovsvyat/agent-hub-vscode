@@ -50,6 +50,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
         | "grok-4-6"
         | "composer-2-5"
         | "kimi-k2";
+      mode?: "chat" | "plan" | "agent" | "broker";
     },
   ];
   "cukii/setBrokerPreferences": [
@@ -69,6 +70,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
         | "grok-4-6"
         | "composer-2-5"
         | "kimi-k2";
+      mode?: "chat" | "plan" | "agent" | "broker";
     },
     void,
   ];

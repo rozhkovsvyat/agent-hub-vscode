@@ -42,9 +42,12 @@ const saveSubsetFilters = [
     // Persist edit mode in case closes in middle
     "mode",
 
-    // Remember broker model/subagent picks across window reloads
-    "brokerModel",
-    "brokerSubagent",
+    // NB: brokerModel/brokerSubagent are intentionally NOT persisted here.
+    // globalState (extension host) is the single source of truth, applied on
+    // mount via cukii/getBrokerPreferences. Persisting them to localStorage too
+    // created two sources that raced on reload — rehydrate (stale localStorage)
+    // vs getBrokerPreferences (fresh globalState) — and the stale value often
+    // won, silently resetting the user's model pick (e.g. Opus → Terra).
 
     // higher risk to persist
     // codeBlockApplyStates

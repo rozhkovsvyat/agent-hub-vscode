@@ -757,17 +757,8 @@ const getCommandsMap: (
       );
     },
     "continue.openInNewWindow": async () => {
-      focusGUI();
-
-      const sessionId = await sidebar.webviewProtocol.request(
-        "getCurrentSessionId",
-        undefined,
-      );
-      // Clear the sidebar to prevent overwriting changes made in fullscreen
-      vscode.commands.executeCommand("continue.newSession");
-
-      // Full screen not open - open it
-      // Create the full screen panel
+      // A normal editor tab beside the current group.  Do not open or reset
+      // the sidebar: the legacy path created two Cukii surfaces at once.
       let panel = vscode.window.createWebviewPanel(
         "continue.continueGUIView",
         "Cukii",
@@ -788,29 +779,17 @@ const getCommandsMap: (
         true,
       );
 
-      const sessionLoader = panel.onDidChangeViewState(() => {
-        vscode.commands.executeCommand("continue.newSession");
-        if (sessionId) {
-          vscode.commands.executeCommand(
-            "continue.focusContinueSessionId",
-            sessionId,
-          );
-        }
-        panel.reveal();
-        sessionLoader.dispose();
-      });
-
-      // When panel closes, reset the webview and focus
+      // Closing an editor tab must not mutate the sidebar session or its
+      // protocol. Multiple Cukii tabs are ordinary independent editor tabs.
       panel.onDidDispose(
         () => {
-          sidebar.resetWebviewProtocolWebview();
-          vscode.commands.executeCommand("continue.focusContinueInput");
+          if (fullScreenPanel === panel) {
+            fullScreenPanel = undefined;
+          }
         },
         null,
         extensionContext.subscriptions,
       );
-
-      vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
     },
     "continue.forceNextEdit": async () => {
       // This is basically the same logic as forceAutocomplete.
