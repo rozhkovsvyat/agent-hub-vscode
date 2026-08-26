@@ -49,6 +49,8 @@ import { getMetaKeyLabel } from "./util/util";
 import { openEditorAndRevealRange } from "./util/vscode";
 import { VsCodeIde } from "./VsCodeIde";
 
+export const FULL_SCREEN_VIEW_TYPE = "cukii.fullScreenChat";
+
 let fullScreenPanel: vscode.WebviewPanel | undefined;
 
 function getFullScreenTab() {
@@ -56,34 +58,96 @@ function getFullScreenTab() {
   return tabs.find((tab) => {
     const vt = (tab.input as any)?.viewType;
     return (
-      vt?.endsWith("cukii.fullScreenChat") ||
+      vt?.endsWith(FULL_SCREEN_VIEW_TYPE) ||
       vt?.endsWith("continue.continueGUIView")
     );
   });
 }
 
+/**
+ * Наполняет полноэкранную панель и берёт её под учёт.
+ *
+ * Общий код для двух путей: создание по команде и **восстановление** таба,
+ * который VS Code вернул после перезапуска окна. Второй путь раньше
+ * отсутствовал вовсе, и восстановленный таб оставался навсегда пустым.
+ */
+function attachFullScreenPanel(
+  panel: vscode.WebviewPanel,
+  extensionContext: vscode.ExtensionContext,
+  sidebar: ContinueGUIWebviewViewProvider,
+) {
+  fullScreenPanel = panel;
+
+  panel.webview.html = sidebar.getSidebarContent(
+    extensionContext,
+    panel,
+    undefined,
+    undefined,
+    true,
+  );
+
+  // Closing an editor tab must not mutate the sidebar session or its
+  // protocol. Multiple Cukii tabs are ordinary independent editor tabs.
+  panel.onDidDispose(
+    () => {
+      if (fullScreenPanel === panel) {
+        fullScreenPanel = undefined;
+      }
+    },
+    null,
+    extensionContext.subscriptions,
+  );
+}
+
+/**
+ * Восстановление полноэкранного таба после перезапуска окна.
+ *
+ * Без сериализатора VS Code возвращает оболочку таба, но HTML в неё уже никто
+ * не кладёт: панель остаётся пустой серой, и это переживает и reload, и
+ * рестарт. Регистрируется на активации, иначе VS Code выбросит восстановленный
+ * webview до того, как мы о нём узнаем.
+ */
+export function registerFullScreenPanelSerializer(
+  context: vscode.ExtensionContext,
+  extensionContext: vscode.ExtensionContext,
+  sidebar: ContinueGUIWebviewViewProvider,
+) {
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(FULL_SCREEN_VIEW_TYPE, {
+      async deserializeWebviewPanel(panel: vscode.WebviewPanel) {
+        // Протокол GUI↔core — одиночка на одну панель. Если живая панель уже
+        // есть, второй восстановленный таб её перехватит, поэтому лишний
+        // закрывается, а не наполняется.
+        if (fullScreenPanel && fullScreenPanel !== panel) {
+          panel.dispose();
+          return;
+        }
+        panel.webview.options = { enableScripts: true };
+        attachFullScreenPanel(panel, extensionContext, sidebar);
+      },
+    }),
+  );
+}
+
 function focusGUI() {
-  const fullScreenTab = getFullScreenTab();
-  if (fullScreenTab) {
-    // focus fullscreen
-    fullScreenPanel?.reveal();
-  } else {
-    // focus sidebar
-    vscode.commands.executeCommand("continue.continueGUIView.focus");
-    // vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
+  // Опора на ЖИВУЮ панель, а не на наличие таба. Раньше здесь стояло
+  // `getFullScreenTab()` + `fullScreenPanel?.reveal()`: после перезапуска окна
+  // таб существовал, ссылка на панель была потеряна, и вызов превращался в
+  // тихий no-op — до сайдбара дело не доходило, и плагин переставал
+  // открываться вообще.
+  if (fullScreenPanel) {
+    fullScreenPanel.reveal();
+    return;
   }
+  vscode.commands.executeCommand("continue.continueGUIView.focus");
 }
 
 function hideGUI() {
-  const fullScreenTab = getFullScreenTab();
-  if (fullScreenTab) {
-    // focus fullscreen
-    fullScreenPanel?.dispose();
-  } else {
-    // focus sidebar
-    vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
-    // vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar");
+  if (fullScreenPanel) {
+    fullScreenPanel.dispose();
+    return;
   }
+  vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
 }
 
 function waitForSidebarReady(
@@ -779,8 +843,15 @@ const getCommandsMap: (
       // Distinct viewType (NOT the sidebar view id) so opening the tab does not
       // also reveal the sidebar view container — that collision was the extra
       // "шторка" that slid out next to the tab.
-      let panel = vscode.window.createWebviewPanel(
-        "cukii.fullScreenChat",
+      // Мёртвая оболочка восстановленного таба, которую не удалось оживить,
+      // иначе останется висеть рядом с новой панелью пустым серым дублем.
+      const staleTab = getFullScreenTab();
+      if (staleTab) {
+        void vscode.window.tabGroups.close(staleTab);
+      }
+
+      const panel = vscode.window.createWebviewPanel(
+        FULL_SCREEN_VIEW_TYPE,
         "Cukii",
         vscode.ViewColumn.Beside,
         {
@@ -788,28 +859,8 @@ const getCommandsMap: (
           enableScripts: true,
         },
       );
-      fullScreenPanel = panel;
 
-      // Add content to the panel
-      panel.webview.html = sidebar.getSidebarContent(
-        extensionContext,
-        panel,
-        undefined,
-        undefined,
-        true,
-      );
-
-      // Closing an editor tab must not mutate the sidebar session or its
-      // protocol. Multiple Cukii tabs are ordinary independent editor tabs.
-      panel.onDidDispose(
-        () => {
-          if (fullScreenPanel === panel) {
-            fullScreenPanel = undefined;
-          }
-        },
-        null,
-        extensionContext.subscriptions,
-      );
+      attachFullScreenPanel(panel, extensionContext, sidebar);
     },
     "continue.forceNextEdit": async () => {
       // This is basically the same logic as forceAutocomplete.
@@ -876,6 +927,10 @@ export function registerAllCommands(
   core: Core,
   editDecorationManager: EditDecorationManager,
 ) {
+  // До регистрации команд: VS Code отдаёт восстановленные webview сразу после
+  // активации, и без сериализатора к этому моменту таб уже осиротел.
+  registerFullScreenPanelSerializer(context, extensionContext, sidebar);
+
   for (const [command, callback] of Object.entries(
     getCommandsMap(
       ide,
