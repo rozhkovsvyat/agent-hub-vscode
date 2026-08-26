@@ -234,7 +234,8 @@ export type BrokerModel =
   | "fable-5"
   | "codex-5-6-terra"
   | "grok-4-6"
-  | "composer-2-5";
+  | "composer-2-5"
+  | "kimi-k2";
 
 export type BrokerSubagent = "auto" | BrokerModel;
 

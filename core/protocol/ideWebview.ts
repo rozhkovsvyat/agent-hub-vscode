@@ -40,14 +40,16 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
       brokerSubagent:
         | "auto"
         | "opus-5"
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
     },
   ];
   "cukii/setBrokerPreferences": [
@@ -57,14 +59,16 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
       brokerSubagent:
         | "auto"
         | "opus-5"
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
     },
     void,
   ];
@@ -76,14 +80,16 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
       brokerSubagent:
         | "auto"
         | "opus-5"
         | "fable-5"
         | "codex-5-6-terra"
         | "grok-4-6"
-        | "composer-2-5";
+        | "composer-2-5"
+        | "kimi-k2";
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];

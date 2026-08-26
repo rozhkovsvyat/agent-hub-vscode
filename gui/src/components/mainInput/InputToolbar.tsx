@@ -51,6 +51,7 @@ const BROKER_MODEL_OPTIONS: Array<{
   { value: "codex-5-6-terra", label: "Codex 5.6 Terra" },
   { value: "grok-4-6", label: "Grok 4.6" },
   { value: "composer-2-5", label: "Composer 2.5" },
+  { value: "kimi-k2", label: "Kimi K2" },
 ];
 
 const BROKER_SUBAGENT_OPTIONS: Array<{

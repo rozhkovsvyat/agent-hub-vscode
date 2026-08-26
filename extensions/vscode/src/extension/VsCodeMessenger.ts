@@ -338,14 +338,23 @@ export class VsCodeMessenger {
       );
     });
     this.onWebview("cukii/getBrokerPreferences", () => ({
-      brokerModel: this.context.globalState.get(
-        "cukii.brokerModel",
-        "codex-5-6-terra",
-      ),
-      brokerSubagent: this.context.globalState.get(
-        "cukii.brokerSubagent",
-        "auto",
-      ),
+      brokerModel: this.context.globalState.get<
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5"
+        | "kimi-k2"
+      >("cukii.brokerModel", "codex-5-6-terra"),
+      brokerSubagent: this.context.globalState.get<
+        | "auto"
+        | "opus-5"
+        | "fable-5"
+        | "codex-5-6-terra"
+        | "grok-4-6"
+        | "composer-2-5"
+        | "kimi-k2"
+      >("cukii.brokerSubagent", "auto"),
     }));
     this.onWebview("cukii/setBrokerPreferences", async (msg) => {
       await Promise.all([

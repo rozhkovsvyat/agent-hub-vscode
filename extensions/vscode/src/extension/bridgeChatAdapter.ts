@@ -26,7 +26,8 @@ type BrokerModel =
   | "fable-5"
   | "codex-5-6-terra"
   | "grok-4-6"
-  | "composer-2-5";
+  | "composer-2-5"
+  | "kimi-k2";
 
 type BrokerSubagent = "auto" | BrokerModel;
 
@@ -53,7 +54,38 @@ const MODEL_LABELS: Record<BrokerModel, string> = {
   "codex-5-6-terra": "Codex 5.6 Terra",
   "grok-4-6": "Grok 4.6",
   "composer-2-5": "Composer 2.5",
+  "kimi-k2": "Kimi K2",
 };
+
+// Kimi K2 (Moonshot) прячется за Anthropic-совместимым эндпоинтом, поэтому едет
+// тем же `claude` CLI, что Opus/Fable, но с подменёнными base URL/токеном/моделью.
+// Ключ берём из среды или файла (по конвенции машины, как .gitlab-token), сам
+// секрет в лог и в UI не попадает.
+const MOONSHOT_ANTHROPIC_BASE_URL = "https://api.moonshot.ai/anthropic";
+
+function moonshotModelId(): string {
+  return (
+    process.env.CUKII_KIMI_MODEL || process.env.MOONSHOT_MODEL || "kimi-k2-0905"
+  );
+}
+
+function moonshotApiKey(): string | undefined {
+  const fromEnv =
+    process.env.MOONSHOT_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
+  if (fromEnv && fromEnv.trim()) {
+    return fromEnv.trim();
+  }
+  const keyFile = path.join(os.homedir(), ".moonshot-key");
+  try {
+    const fromFile = fs.readFileSync(keyFile, "utf8").trim();
+    if (fromFile) {
+      return fromFile;
+    }
+  } catch {
+    // отсутствие файла — не ошибка чтения, а просто «ключа нет»
+  }
+  return undefined;
+}
 
 function windowsCmdPath(): string {
   const fallback = "C:\\Windows\\System32\\cmd.exe";
@@ -140,6 +172,9 @@ function brokerAgentId(
       return "grok";
     case "composer-2-5":
       return "cursor";
+    // Kimi едет через тот же claude CLI, поэтому worker-канал у него claude.
+    case "kimi-k2":
+      return "claude";
   }
 }
 
@@ -155,6 +190,13 @@ function nativeDelegateHint(model: BrokerModel, cwd: string): string {
       return `grok --model grok-4.6 --cwd "${cwd}" --prompt-file <task-file>`;
     case "composer-2-5":
       return "cursor-agent -p --output-format text --model composer-2.5 --trust";
+    case "kimi-k2":
+      return (
+        `set ANTHROPIC_BASE_URL=${MOONSHOT_ANTHROPIC_BASE_URL} & ` +
+        `set ANTHROPIC_MODEL=${moonshotModelId()} & ` +
+        "set ANTHROPIC_AUTH_TOKEN=<moonshot-key> & " +
+        'claude -p "<task>"'
+      );
   }
 }
 
@@ -259,7 +301,7 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     appendPathSegment(segments, path.join(home, ".local", "bin"));
   }
 
-  return {
+  const env: BridgeEnv = {
     ...process.env,
     [pathKey]: segments.join(path.delimiter),
     ...(process.platform === "win32" ? { ComSpec: windowsCmdPath() } : {}),
@@ -267,6 +309,19 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     CUKII_BROKER_MODEL: model,
     CUKII_SUBAGENT_MODEL: subagent,
   };
+
+  // Kimi: перенаправляем claude CLI на Moonshot. small-fast тоже на Kimi —
+  // иначе фоновые вызовы claude бьют в несуществующую на Moonshot дефолт-модель.
+  // ANTHROPIC_API_KEY чистим, чтобы CLI использовал bearer ANTHROPIC_AUTH_TOKEN.
+  if (model === "kimi-k2") {
+    env.ANTHROPIC_BASE_URL = MOONSHOT_ANTHROPIC_BASE_URL;
+    env.ANTHROPIC_AUTH_TOKEN = moonshotApiKey() ?? "";
+    env.ANTHROPIC_MODEL = moonshotModelId();
+    env.ANTHROPIC_SMALL_FAST_MODEL = moonshotModelId();
+    delete env.ANTHROPIC_API_KEY;
+  }
+
+  return env;
 }
 
 function ensureProgramAvailable(route: BridgeRoute): ResolvedCommand {
@@ -322,6 +377,24 @@ function routeForModel(
           "stream-json",
           "--verbose",
         ],
+        format: "anthropic-envelope",
+        logFile,
+      };
+    // Kimi K2 = claude CLI + Moonshot Anthropic endpoint. Модель задаётся через
+    // ANTHROPIC_MODEL в bridgeEnv, а НЕ через --model: иначе claude валидирует
+    // алиас по своему списку и отвергает внешний id. Ключа нет — падаем сразу с
+    // понятным текстом, а не молча уводим запрос на дефолтный Anthropic.
+    case "kimi-k2":
+      if (!moonshotApiKey()) {
+        throw new Error(
+          "Kimi K2 bridge is unavailable: no Moonshot API key. " +
+            "Set MOONSHOT_API_KEY or put the key in ~/.moonshot-key, then retry.",
+        );
+      }
+      return {
+        label: MODEL_LABELS[model],
+        program: "claude",
+        args: ["-p", "--output-format", "stream-json", "--verbose"],
         format: "anthropic-envelope",
         logFile,
       };
