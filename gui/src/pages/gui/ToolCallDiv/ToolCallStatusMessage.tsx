@@ -52,9 +52,7 @@ export function ToolCallStatusMessage({
     tool?.displayTitle ?? toolCallState.toolCall.function?.name ?? "tool";
   const arg = principalArg(toolCallState.parsedArgs);
   const lines = outputLineCount(toolCallState);
-  const pending = toolCallState.status === "generated";
   const interrupted = toolCallState.status === "canceled";
-  const failed = toolCallState.status === "errored";
   const isShell =
     toolCallState.toolCall.function?.name === "run_terminal_command";
 
@@ -65,12 +63,6 @@ export function ToolCallStatusMessage({
       }`}
       data-testid="tool-call-title"
     >
-      {pending && (
-        <span className="text-description-muted flex-shrink-0">wants</span>
-      )}
-      {failed && (
-        <span className="text-description-muted flex-shrink-0">tried</span>
-      )}
       <span className="text-foreground flex-shrink-0 font-medium">{name}</span>
       {arg && (
         <span

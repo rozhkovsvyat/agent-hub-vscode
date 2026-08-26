@@ -11,26 +11,11 @@ import Spinner from "../../../components/gui/Spinner";
 
 // Helper function to determine the intro verb based on tool call status
 export function getStatusIntro(
-  status: ToolCallState["status"],
-  isInstant?: boolean,
+  _status: ToolCallState["status"],
+  _isInstant?: boolean,
 ): string {
-  if (status === "done" || (isInstant && status === "calling")) {
-    return "";
-  }
-
-  switch (status) {
-    case "generating":
-      return "will";
-    case "generated":
-      return "wants to";
-    case "calling":
-      return "is";
-    case "canceled":
-    case "errored":
-      return "tried to";
-    default:
-      return "";
-  }
+  // Status is conveyed by the timeline dot color; no intro verb needed.
+  return "";
 }
 
 // Helper function to get the appropriate verb for group actions

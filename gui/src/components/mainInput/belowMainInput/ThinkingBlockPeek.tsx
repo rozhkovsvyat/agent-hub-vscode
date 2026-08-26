@@ -109,7 +109,7 @@ function ThinkingBlockPeek({
               Thinking content redacted due to safety reasons.
             </div>
           ) : (
-            <MarkdownWrapper>
+            <MarkdownWrapper className="text-description">
               <StyledMarkdownPreview
                 isRenderingInStepContainer
                 source={content}

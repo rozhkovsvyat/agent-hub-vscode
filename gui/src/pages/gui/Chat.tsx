@@ -1,5 +1,6 @@
 import { Editor, JSONContent } from "@tiptap/react";
 import { ChatHistoryItem, InputModifiers } from "core";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { renderChatMessage } from "core/util/messageContent";
 import {
   useCallback,
@@ -454,6 +455,27 @@ export function Chat() {
           );
         });
 
+        // Turn-level "Interrupted" marker (Claude parity). Always shown when
+        // the user canceled this turn, so the label is visible regardless of
+        // whether an in-flight tool call already carries the per-tool label.
+        if (item.interrupted) {
+          rows.push(
+            <div
+              key={`${message.id}-interrupted`}
+              className={`cukii-timeline-item cukii-timeline-failed shrink-0 ${
+                isBeforeLatestSummary ? "opacity-50" : ""
+              }`}
+            >
+              <span
+                className="text-description-muted flex min-w-0 items-baseline"
+                data-testid="turn-interrupted"
+              >
+                {TOOL_INTERRUPTED_MESSAGE}
+              </span>
+            </div>,
+          );
+        }
+
         return rows;
       }
 
@@ -477,7 +499,7 @@ export function Chat() {
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`cukii-transcript flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
+        className={`cukii-transcript ${isStreaming ? "cukii-transcript-streaming" : ""} flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
       >
         <DeprecationBanner dismissable={true} />
         {highlights}

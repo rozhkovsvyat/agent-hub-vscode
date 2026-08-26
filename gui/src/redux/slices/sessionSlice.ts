@@ -200,6 +200,10 @@ export function handleStreamingToolCallUpdates(
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
   isSteer?: boolean;
+  // Set on the last kept assistant turn when the user cancels (Esc). Drives the
+  // turn-level "Interrupted" marker for text/thinking streams that have no
+  // in-flight tool call to carry the label.
+  interrupted?: boolean;
 };
 
 type SessionState = {
@@ -315,8 +319,13 @@ export const sessionSlice = createSlice({
         // worth keeping: we mark it canceled below so the transcript shows
         // "Tool interrupted", instead of silently deleting the turn on Esc.
         const hasToolCalls = (message.toolCallStates?.length ?? 0) > 0;
-        if (message.message.content || hasToolCalls) {
+        const hasReasoning = !!message.reasoning?.text?.trim();
+        if (message.message.content || hasToolCalls || hasReasoning) {
           validAssistantMessageIdx = i;
+          // Mark the turn interrupted so the transcript shows "Interrupted"
+          // even when the cancel happened mid text/thinking (no tool call to
+          // carry the per-tool label).
+          message.interrupted = true;
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {
