@@ -37,6 +37,10 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     "file:///Users/user/workspace2",
   ],
   "history/list": [],
+  "cukii/getBrokerPreferences": {
+    brokerModel: "codex-5-6-terra",
+    brokerSubagent: "auto",
+  },
   "docs/getIndexedPages": [],
   "history/save": undefined,
   "config/getSerializedProfileInfo": {
