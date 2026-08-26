@@ -76,7 +76,7 @@ function ThinkingBlockPeek({
             // ghost, а не outline: у Клода пилюля размышлений без рамки —
             // видна только надпись, а фон появляется лишь на hover.
             variant="ghost"
-            className="text-description flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
+            className="text-description-muted flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
             data-testid="thinking-block-peek"
             aria-expanded={open}
             aria-controls={`thinking-block-content-${index}`}
@@ -105,11 +105,11 @@ function ThinkingBlockPeek({
           }`}
         >
           {redactedThinking ? (
-            <div className="text-description pl-5 text-xs italic">
+            <div className="text-description-muted pl-5 text-xs italic">
               Thinking content redacted due to safety reasons.
             </div>
           ) : (
-            <MarkdownWrapper className="text-description">
+            <MarkdownWrapper className="text-description-muted">
               <StyledMarkdownPreview
                 isRenderingInStepContainer
                 source={content}

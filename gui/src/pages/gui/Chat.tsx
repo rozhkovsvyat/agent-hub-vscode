@@ -398,7 +398,7 @@ export function Chat() {
           />
         );
 
-        return [
+        const thinkingRows: JSX.Element[] = [
           <div
             key={message.id}
             className={`cukii-timeline-item cukii-timeline-event shrink-0 ${
@@ -408,6 +408,27 @@ export function Chat() {
             {errorBoundary(thinkingBody)}
           </div>,
         ];
+
+        // Turn-level "Interrupted" marker for canceled thinking-only streams.
+        if (item.interrupted) {
+          thinkingRows.push(
+            <div
+              key={`${message.id}-interrupted`}
+              className={`cukii-timeline-item cukii-timeline-failed shrink-0 ${
+                isBeforeLatestSummary ? "opacity-50" : ""
+              }`}
+            >
+              <span
+                className="text-description-muted flex min-w-0 items-baseline"
+                data-testid="turn-interrupted"
+              >
+                {TOOL_INTERRUPTED_MESSAGE}
+              </span>
+            </div>,
+          );
+        }
+
+        return thinkingRows;
       }
 
       if (message.role === "assistant") {
