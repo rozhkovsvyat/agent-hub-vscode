@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { Tool, ToolCallState } from "core";
 import { describe, expect, it } from "vitest";
 import { ToolCallStatusMessage } from "./ToolCallStatusMessage";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 
 function state(
   overrides: Partial<ToolCallState> & {
@@ -52,7 +53,7 @@ describe("ToolCallStatusMessage", () => {
     expect(title).toHaveTextContent("a.ts");
   });
 
-  it("shows Tool interrupted on canceled calls", () => {
+  it("shows interrupted message on canceled calls", () => {
     render(
       <ToolCallStatusMessage
         tool={registeredTool}
@@ -60,7 +61,7 @@ describe("ToolCallStatusMessage", () => {
       />,
     );
     const title = screen.getByTestId("tool-call-title");
-    expect(title).toHaveTextContent("Tool interrupted");
+    expect(title).toHaveTextContent(TOOL_INTERRUPTED_MESSAGE);
     expect(title.textContent).not.toMatch(/tried/);
   });
 });

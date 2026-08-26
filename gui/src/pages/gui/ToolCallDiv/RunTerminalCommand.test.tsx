@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RunTerminalCommand } from "./RunTerminalCommand";
 import { ToolCallState } from "core";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 
 // Mock the UnifiedTerminalCommand component since it requires Redux
 vi.mock("../../../components/UnifiedTerminal/UnifiedTerminal", () => ({
@@ -289,9 +290,9 @@ describe("RunTerminalCommand", () => {
       parsedArgs: { command: "sleep 30" },
       output: [
         {
-          name: "Tool interrupted",
-          description: "Tool interrupted",
-          content: "Tool interrupted",
+          name: TOOL_INTERRUPTED_MESSAGE,
+          description: TOOL_INTERRUPTED_MESSAGE,
+          content: TOOL_INTERRUPTED_MESSAGE,
         },
       ],
     };
@@ -306,8 +307,10 @@ describe("RunTerminalCommand", () => {
 
     expect(screen.getByTestId("status").textContent).toBe("failed");
     expect(screen.getByTestId("status-message").textContent).toBe(
-      "Tool interrupted",
+      TOOL_INTERRUPTED_MESSAGE,
     );
-    expect(screen.getByTestId("output").textContent).toBe("Tool interrupted");
+    expect(screen.getByTestId("output").textContent).toBe(
+      TOOL_INTERRUPTED_MESSAGE,
+    );
   });
 });
