@@ -1,4 +1,3 @@
-import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { Editor, JSONContent } from "@tiptap/react";
 import { ChatHistoryItem, InputModifiers } from "core";
 import { renderChatMessage } from "core/util/messageContent";
@@ -14,7 +13,6 @@ import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
 import { useFindWidget } from "../../components/find/FindWidget";
-import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
 import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
 import { useOnboardingCard } from "../../components/OnboardingCard";
@@ -35,7 +33,6 @@ import {
 } from "../../redux/slices/sessionSlice";
 
 import { streamEditThunk } from "../../redux/thunks/edit";
-import { loadLastSession } from "../../redux/thunks/session";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
 import { isMetaEquivalentKeyPressed } from "../../util";
 import { SingleToolCallDiv } from "./ToolCallDiv";
@@ -148,14 +145,12 @@ export function Chat() {
   const history = useAppSelector((state) => state.session.history);
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
   const focusView = useAppSelector((state) => state.ui.focusView);
-  const hasThinking = history.some((item) => item.message.role === "thinking");
   const showChatScrollbar = useAppSelector(
     (state) => state.config.config.ui?.showChatScrollbar,
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
 
-  const lastSessionId = useAppSelector((state) => state.session.lastSessionId);
   const hasDismissedExploreDialog = useAppSelector(
     (state) => state.ui.hasDismissedExploreDialog,
   );
@@ -512,45 +507,6 @@ export function Chat() {
             pointerEvents: isStreaming ? "none" : "auto",
           }}
         >
-          <div className="flex flex-row items-center justify-between pb-1 pl-0.5 pr-2">
-            <div className="xs:inline hidden">
-              {history.length === 0 && lastSessionId && !isInEdit && (
-                <NewSessionButton
-                  onClick={async () => {
-                    await dispatch(loadLastSession());
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <ArrowLeftIcon className="h-3 w-3" />
-                  <span className="text-xs">Last Session</span>
-                </NewSessionButton>
-              )}
-              {hasThinking && (
-                <button
-                  type="button"
-                  className="text-description hover:text-foreground ml-2 text-xs"
-                  data-testid="collapse-all-thinking"
-                  onClick={() =>
-                    dispatch(setThinkingCollapse(!thinkingCollapse.open))
-                  }
-                >
-                  {thinkingCollapse.open
-                    ? "Collapse thoughts"
-                    : "Expand thoughts"}
-                </button>
-              )}
-              {history.length > 0 && (
-                <button
-                  type="button"
-                  className="text-description hover:text-foreground ml-2 text-xs"
-                  data-testid="focus-view-toggle"
-                  onClick={() => dispatch(setFocusView(!focusView))}
-                >
-                  {focusView ? "Focus" : "Focus on"}
-                </button>
-              )}
-            </div>
-          </div>
           <FatalErrorIndicator />
           {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
         </div>

@@ -780,7 +780,7 @@ const getCommandsMap: (
       let panel = vscode.window.createWebviewPanel(
         "continue.continueGUIView",
         "Cukii",
-        vscode.ViewColumn.One,
+        vscode.ViewColumn.Beside,
         {
           retainContextWhenHidden: true,
           enableScripts: true,

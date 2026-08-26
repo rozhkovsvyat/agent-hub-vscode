@@ -42,6 +42,10 @@ const saveSubsetFilters = [
     // Persist edit mode in case closes in middle
     "mode",
 
+    // Remember broker model/subagent picks across window reloads
+    "brokerModel",
+    "brokerSubagent",
+
     // higher risk to persist
     // codeBlockApplyStates
     // symbols

@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.37",
+  "version": "2.0.38",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -388,6 +388,18 @@
       }
     ],
     "keybindings": [
+      {
+        "command": "continue.openInNewWindow",
+        "mac": "shift+alt+c shift+alt+u",
+        "key": "shift+alt+c shift+alt+u",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "continue.openInNewWindow",
+        "mac": "ctrl+alt+c ctrl+alt+u",
+        "key": "ctrl+alt+c ctrl+alt+u",
+        "when": "!terminalFocus"
+      },
       {
         "command": "continue.focusCuKiiInput",
         "mac": "cmd+l",

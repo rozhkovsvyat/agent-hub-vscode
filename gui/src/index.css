@@ -420,6 +420,22 @@ button.bg-primary:hover,
   padding-left: 30px;
 }
 
+/* Claude keeps every timeline caption on one text column.  Markdown replies
+   already have 14px of StepContainer inset; compact tool rows do not, which
+   made commands begin 14px closer to the rail than prose. */
+.cukii-timeline-item:has(
+    [data-testid="tool-call-row"],
+    [data-testid="context-items-peek"]
+  ) {
+  padding-left: 44px;
+}
+
+/* A timeline event is a discrete checkpoint, not a line of a paragraph.
+   Leave Claude-like breathing room between consecutive events. */
+.cukii-timeline-item + .cukii-timeline-item {
+  margin-top: 6px;
+}
+
 .cukii-timeline-item .thread-message > div {
   padding: 0 !important;
 }

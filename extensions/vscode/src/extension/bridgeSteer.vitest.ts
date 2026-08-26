@@ -27,7 +27,8 @@ describe("bridgeSteer", () => {
     const instruction = steerPromptInstruction("C:\\tmp\\steer.txt");
     expect(instruction).toContain("C:\\tmp\\steer.txt");
     expect(instruction).toMatch(/WHILE you work/i);
-    expect(instruction).toMatch(/After every tool batch/i);
+    expect(instruction).toMatch(/after every completed tool call/i);
+    expect(instruction).toMatch(/before starting the next one/i);
   });
 
   it("appends USER blocks only while a session is active", () => {
