@@ -486,7 +486,7 @@ button.bg-primary:hover,
   content: "";
   position: absolute;
   left: 9px;
-  top: 7px;
+  top: 5px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -531,16 +531,16 @@ button.bg-primary:hover,
   );
 }
 
-/* Первый элемент: линия начинается от ЦЕНТРА точки (10.5px), а не от верха
+/* Первый элемент: линия начинается от ЦЕНТРА точки (8.5px), а не от верха
    блока — иначе над первой точкой торчит стуб-разрыв. */
 .cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item)::after {
-  top: 10px;
+  top: 8px;
 }
 
 /* Последний элемент: линия заканчивается НА центре точки, а не ниже — иначе
-   «последняя точка выше конца линии». Центр точки = top(7) + height(7)/2. */
+   «последняя точка выше конца линии». Центр точки = top(5) + height(7)/2. */
 .cukii-timeline-item:not(:has(+ .cukii-timeline-item))::after {
-  height: 11px;
+  height: 9px;
   bottom: auto;
 }
 

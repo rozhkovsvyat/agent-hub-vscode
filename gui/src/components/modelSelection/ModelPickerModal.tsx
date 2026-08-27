@@ -65,43 +65,73 @@ export function ModelPickerModal({ onClose }: ModelPickerModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[0.5px]"
+      className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Switch model"
     >
       <div
-        className="bg-vsc-background flex max-h-[80vh] w-full max-w-[720px] flex-col overflow-hidden rounded-lg shadow-xl"
+        className="flex max-h-[min(80vh,520px)] w-full max-w-[540px] flex-col overflow-hidden rounded-lg shadow-2xl"
+        style={{
+          backgroundColor: "var(--vscode-panel-background, #1e1e1e)",
+          border: "1px solid var(--vscode-panel-border, #333333)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-[var(--vscode-panel-border,#333)] px-4 py-3">
-          <h2 className="text-foreground text-base font-medium">
+        <div
+          className="flex shrink-0 items-center justify-between border-b px-4 py-3"
+          style={{ borderColor: "var(--vscode-panel-border, #333333)" }}
+        >
+          <h2
+            className="text-base font-medium"
+            style={{ color: "var(--vscode-foreground, #cccccc)" }}
+          >
             Switch model
           </h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="m-0 rounded p-1"
+            style={{ color: "var(--vscode-foreground, #cccccc)" }}
+          >
             <XMarkIcon className="h-4 w-4" />
           </Button>
         </div>
 
         <div className="flex min-h-0 flex-1">
           {/* Vendor list */}
-          <div className="w-[180px] min-w-0 overflow-y-auto border-r border-[var(--vscode-panel-border,#333)] py-2">
-            {VENDORS.map((vendor) => (
-              <button
-                key={vendor.id}
-                type="button"
-                onClick={() => setSelectedVendorId(vendor.id)}
-                className={cn(
-                  "w-full px-4 py-2 text-left text-sm transition-colors",
-                  selectedVendorId === vendor.id
-                    ? "text-foreground bg-[var(--vscode-list-activeSelectionBackground,#37373d)]"
-                    : "text-description hover:bg-[var(--vscode-list-hoverBackground,#2a2d2e)]",
-                )}
-              >
-                {vendor.label}
-              </button>
-            ))}
+          <div
+            className="w-[140px] min-w-0 shrink-0 overflow-y-auto border-r py-2"
+            style={{ borderColor: "var(--vscode-panel-border, #333333)" }}
+          >
+            {VENDORS.map((vendor) => {
+              const isSelected = vendor.id === selectedVendorId;
+              return (
+                <button
+                  key={vendor.id}
+                  type="button"
+                  onClick={() => setSelectedVendorId(vendor.id)}
+                  className={cn(
+                    "w-full px-3 py-2 text-left text-sm transition-colors",
+                    isSelected
+                      ? "font-medium"
+                      : "hover:bg-[color:var(--vscode-list-hoverBackground,#2a2d2e)]",
+                  )}
+                  style={{
+                    color: isSelected
+                      ? "var(--vscode-list-activeSelectionForeground, #ffffff)"
+                      : "var(--vscode-descriptionForeground, #979797)",
+                    backgroundColor: isSelected
+                      ? "var(--vscode-list-activeSelectionBackground, #094771)"
+                      : undefined,
+                  }}
+                >
+                  {vendor.label}
+                </button>
+              );
+            })}
           </div>
 
           {/* Model list */}
@@ -115,23 +145,45 @@ export function ModelPickerModal({ onClose }: ModelPickerModalProps) {
                   disabled={model.disabled}
                   onClick={() => handleSelectModel(model.value)}
                   className={cn(
-                    "flex items-center justify-between px-4 py-2 text-left text-sm transition-colors",
+                    "flex min-h-0 items-center justify-between px-4 py-2 text-left text-sm transition-colors",
                     isSelected
-                      ? "text-foreground bg-[var(--vscode-list-activeSelectionBackground,#37373d)]"
-                      : "text-description hover:bg-[var(--vscode-list-hoverBackground,#2a2d2e)]",
-                    model.disabled && "cursor-not-allowed opacity-40",
+                      ? "font-medium"
+                      : !model.disabled &&
+                          "hover:bg-[color:var(--vscode-list-hoverBackground,#2a2d2e)]",
+                    model.disabled && "cursor-not-allowed opacity-50",
                   )}
+                  style={{
+                    color: isSelected
+                      ? "var(--vscode-list-activeSelectionForeground, #ffffff)"
+                      : model.disabled
+                        ? "var(--vscode-disabledForeground, #666666)"
+                        : "var(--vscode-foreground, #cccccc)",
+                    backgroundColor: isSelected
+                      ? "var(--vscode-list-activeSelectionBackground, #094771)"
+                      : undefined,
+                  }}
                 >
-                  <span className="truncate">
+                  <span className="min-w-0 truncate">
                     {model.label}
                     {model.disabled && (
-                      <span className="text-description-muted ml-2 text-xs">
+                      <span
+                        className="ml-2 text-xs"
+                        style={{
+                          color: "var(--vscode-descriptionForeground, #979797)",
+                        }}
+                      >
                         (soon)
                       </span>
                     )}
                   </span>
                   {isSelected && (
-                    <CheckIcon className="text-foreground h-4 w-4 flex-shrink-0" />
+                    <CheckIcon
+                      className="ml-2 h-4 w-4 flex-shrink-0"
+                      style={{
+                        color:
+                          "var(--vscode-list-activeSelectionForeground, #ffffff)",
+                      }}
+                    />
                   )}
                 </button>
               );
