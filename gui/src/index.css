@@ -567,9 +567,9 @@ button.bg-primary:hover,
   align-items: flex-start;
   min-height: 1.5em;
   margin-top: 6px;
-  /* Текст лоадера выравнивается по левому краю строк сообщений (30px), как у
-     Claude. Глиф уходит в левый жёлоб (абсолют), а не толкает текст вправо. */
-  padding-left: 30px;
+  /* Глиф в жёлобе таймлайна (left: 8px, 12px), текст начинается ближе к нему,
+     чтобы ровняться с текстом строк выше, как у Claude. */
+  padding-left: 24px;
 }
 
 .cukii-spinner-row .cukii-thinking-row {
