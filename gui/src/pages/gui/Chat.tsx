@@ -534,7 +534,7 @@ export function Chat() {
         <InlineErrorMessage />
         {isStreaming && !isInEdit && (
           <div className="cukii-spinner-row" data-testid="cukii-spinner-row">
-            <CukiiStreamingToolbar />
+            <CukiiStreamingToolbar active={isStreaming} />
           </div>
         )}
       </StepsDiv>

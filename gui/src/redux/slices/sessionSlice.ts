@@ -571,6 +571,10 @@ export const sessionSlice = createSlice({
     abortStream: (state) => {
       state.streamAborter.abort();
       state.streamAborter = new AbortController();
+      // Safety: any path that aborts the stream must also clear the streaming
+      // flag. This prevents the bottom loader from staying visible if a race
+      // or bridge error leaves isStreaming stuck to true.
+      state.isStreaming = false;
     },
     streamUpdate: (state, action: PayloadAction<ChatMessage[]>) => {
       if (state.history.length) {

@@ -114,9 +114,7 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
       }`}
       data-testid={`continue-input-box-${props.inputId}`}
     >
-      <div
-        className={`relative flex flex-col ${props.isMainInput ? "px-2" : ""}`}
-      >
+      <div className="relative flex flex-col">
         {props.isMainInput && <Lump />}
         {props.isMainInput ? (
           <GradientBorder

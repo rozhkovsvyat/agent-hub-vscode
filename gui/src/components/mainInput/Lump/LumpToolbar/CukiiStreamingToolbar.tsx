@@ -6,8 +6,8 @@ import { CukiiThinkingGlyph } from "../../../cukii/CukiiThinkingGlyph";
  *
  * Thinking — отдельная надпись выше. Стоп — квадрат в поле ввода, Esc.
  */
-export function CukiiStreamingToolbar() {
-  const phrase = useThinkingPhrase();
+export function CukiiStreamingToolbar({ active = true }: { active?: boolean }) {
+  const phrase = useThinkingPhrase(active);
 
   return (
     <div
@@ -15,7 +15,7 @@ export function CukiiStreamingToolbar() {
       data-testid="cukii-streaming-toolbar"
     >
       <div className="cukii-thinking-row min-w-0">
-        <CukiiThinkingGlyph />
+        <CukiiThinkingGlyph active={active} />
         <span className="cukii-thinking-text truncate">{phrase}..</span>
       </div>
     </div>

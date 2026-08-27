@@ -14,7 +14,35 @@ import {
   streamUpdate,
   updateToolCallOutput,
 } from "../slices/sessionSlice";
-import { ThunkApiType } from "../store";
+import { RootState, ThunkApiType } from "../store";
+
+type RaceResult<T> =
+  | { kind: "value"; value: IteratorResult<T, PromptLog | undefined> }
+  | { kind: "cancelled" };
+
+/**
+ * Позволяет выйти из await gen.next(), если стрим отменили (кнопка Stop / Esc).
+ * Без этого GUI мог застрять в ожидании зависшего нативного worker-а и не сбросить
+ * isStreaming — лоадер продолжал крутиться после остановки сессии.
+ */
+function raceNextOrCancellation<T>(
+  nextPromise: Promise<IteratorResult<T, PromptLog | undefined>>,
+  getState: () => RootState,
+): Promise<RaceResult<T>> {
+  return Promise.race([
+    nextPromise.then((value) => ({ kind: "value" as const, value })),
+    new Promise<RaceResult<T>>((resolve) => {
+      const check = () => {
+        if (!getState().session.isStreaming) {
+          resolve({ kind: "cancelled" as const });
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      check();
+    }),
+  ]);
+}
 
 /**
  * Инструменты, которые пришли из моста, УЖЕ выполнены нативным worker-ом.
@@ -93,20 +121,25 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       streamAborter.signal,
     );
 
-    let next = await gen.next();
-    while (!next.done) {
+    while (true) {
+      const result = await raceNextOrCancellation(gen.next(), getState);
+      if (result.kind === "cancelled") {
+        dispatch(abortStream());
+        break;
+      }
+      if (result.value.done) {
+        if (result.value.value) {
+          dispatch(addPromptCompletionPair([result.value.value]));
+        }
+        break;
+      }
       if (!getState().session.isStreaming) {
         dispatch(abortStream());
         break;
       }
 
-      dispatch(streamUpdate(next.value));
-      settleObservedToolCalls(next.value, dispatch);
-      next = await gen.next();
-    }
-
-    if (next.done && next.value) {
-      dispatch(addPromptCompletionPair([next.value as PromptLog]));
+      dispatch(streamUpdate(result.value.value));
+      settleObservedToolCalls(result.value.value, dispatch);
     }
   } finally {
     dispatch(setInactive());

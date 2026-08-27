@@ -12,10 +12,12 @@ const glyphMask = {
   mask: `url("${activityIcon}") center / contain no-repeat`,
 } as CSSProperties;
 
-export function CukiiThinkingGlyph() {
+export function CukiiThinkingGlyph({ active = true }: { active?: boolean }) {
   return (
     <span
-      className="cukii-thinking-glyph"
+      className={`cukii-thinking-glyph ${
+        active ? "cukii-thinking-glyph-active" : "cukii-thinking-glyph-inactive"
+      }`}
       style={glyphMask}
       aria-hidden="true"
     />

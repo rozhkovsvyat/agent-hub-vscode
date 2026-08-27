@@ -211,8 +211,8 @@ button,
 }
 
 .cukii-main-input-shell [data-testid^="continue-input-box-"] > div.relative {
-  padding-left: 14px;
-  padding-right: 14px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 [data-testid^="continue-input-box-"] [contenteditable="true"] {
@@ -259,7 +259,7 @@ button,
 
 .cukii-main-input-shell {
   margin-top: auto;
-  padding-bottom: 8px;
+  padding: 18px 20px 20px;
 }
 
 .cukii-editor-stack,
@@ -564,9 +564,9 @@ button.bg-primary:hover,
   position: relative;
   display: flex;
   animation: fadeIn 0.3s ease-in-out;
-  align-items: center;
-  height: 1.85em;
-  margin-top: 4px;
+  align-items: flex-start;
+  min-height: 1.5em;
+  margin-top: 6px;
   /* Текст лоадера выравнивается по левому краю строк сообщений (30px), как у
      Claude. Глиф уходит в левый жёлоб (абсолют), а не толкает текст вправо. */
   padding-left: 30px;
@@ -574,6 +574,7 @@ button.bg-primary:hover,
 
 .cukii-spinner-row .cukii-thinking-row {
   min-height: 0;
+  align-items: flex-start;
 }
 
 /* Turn-level "Interrupted" fact — Claude renders it as plain muted text,
@@ -584,12 +585,12 @@ button.bg-primary:hover,
   padding-left: 30px;
 }
 
-/* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста. */
+/* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста.
+   Размер чуть крупнее точки таймлайна (7px), но заметно меньше прежнего. */
 .cukii-spinner-row .cukii-thinking-glyph {
   position: absolute;
-  left: 5px;
-  top: 50%;
-  margin-top: -9px;
+  left: 8px;
+  top: 3px;
 }
 
 .cukii-thinking-row,
@@ -597,15 +598,15 @@ button.bg-primary:hover,
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #a7a29a;
-}
-
-.cukii-thinking-row {
-  min-height: 28px;
+  color: var(--vscode-descriptionForeground, #c4beb5);
+  font-size: 0.8125rem;
+  font-weight: 350;
+  line-height: 1.5;
 }
 
 .cukii-thinking-text {
   min-width: 15ch;
+  padding-top: 1px;
   animation: cukiiThinkingText 4000ms ease-in-out infinite;
 }
 
@@ -614,13 +615,20 @@ button.bg-primary:hover,
 }
 
 .cukii-thinking-glyph {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
   background: #e3a867;
   filter: drop-shadow(0 0 1px #c9873f);
   transform-origin: center;
+}
+
+.cukii-thinking-glyph-active {
   animation: cukiiCookiePulse 2600ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+.cukii-thinking-glyph-inactive {
+  animation: none;
 }
 
 @keyframes cukiiCookiePulse {
