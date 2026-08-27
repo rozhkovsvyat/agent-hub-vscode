@@ -285,6 +285,10 @@ export interface Session {
   mode?: MessageModes;
   /** Optional: title of the selected chat model for this session */
   chatModelTitle?: string | null;
+  /** Cukii vendor/model route preserved with this session. */
+  brokerModel?: import("./protocol/ideWebview").BrokerModel;
+  /** Optional subagent route preserved with this session. */
+  brokerSubagent?: import("./protocol/ideWebview").BrokerSubagent;
   /** Optional: cumulative usage and cost for all LLM API calls in this session */
   usage?: SessionUsage;
 }

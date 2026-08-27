@@ -30,6 +30,12 @@ export type BrokerModel =
 
 export type BrokerSubagent = "auto" | BrokerModel;
 
+export type CukiiOpenChatPanel = {
+  panelId: string;
+  sessionId?: string;
+  title: string;
+};
+
 export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   openUrl: [string, void];
   applyToFile: [ApplyToFilePayload, void];
@@ -72,6 +78,17 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     AsyncGenerator<ChatMessage, PromptLog>,
   ];
   "cukii/steerDuringStream": [{ text: string }, boolean];
+  "cukii/openChatPanel": [
+    {
+      panelId?: string;
+      sessionId?: string;
+      title?: string;
+      forceNew?: boolean;
+    },
+    void,
+  ];
+  "cukii/listOpenChatPanels": [undefined, CukiiOpenChatPanel[]];
+  "cukii/panelSessionChanged": [{ sessionId: string; title?: string }, void];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [
     undefined,
@@ -114,6 +131,7 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   focusContinueSessionId: [{ sessionId: string | undefined }, void];
   newSession: [undefined, void];
   "cukii/getActiveSessionId": [undefined, string];
+  "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];
   "jetbrains/editorInsetRefresh": [undefined, void];

@@ -19,6 +19,7 @@ import { stripImages } from "core/util/messageContent";
 import * as vscode from "vscode";
 
 import { ApplyManager } from "../apply";
+import { cukiiPanelRegistry, listOpenCukiiPanels } from "../cukiiPanelRegistry";
 import { VerticalDiffManager } from "../diff/vertical/manager";
 import { addCurrentSelectionToEdit } from "../quickEdit/AddCurrentSelection";
 import EditDecorationManager from "../quickEdit/EditDecorationManager";
@@ -34,6 +35,16 @@ import { appendSteerMessage } from "./bridgeSteer";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
+
+function sourceProtocol(
+  message: Message,
+  fallback: VsCodeWebviewProtocol,
+): VsCodeWebviewProtocol {
+  return (
+    (message as Message & { __cukiiWebviewProtocol?: VsCodeWebviewProtocol })
+      .__cukiiWebviewProtocol ?? fallback
+  );
+}
 
 /**
  * A shared messenger class between Core and Webview
@@ -115,6 +126,12 @@ export class VsCodeMessenger {
       vscode.commands.executeCommand("continue.openInNewWindow");
     });
 
+    this.onWebview("cukii/openChatPanel", async ({ data }) => {
+      await vscode.commands.executeCommand("continue.openInNewWindow", data);
+    });
+
+    this.onWebview("cukii/listOpenChatPanels", () => listOpenCukiiPanels());
+
     this.onWebview("acceptDiff", async ({ data: { filepath, streamId } }) => {
       await vscode.commands.executeCommand(
         "continue.acceptDiff",
@@ -131,7 +148,8 @@ export class VsCodeMessenger {
       );
     });
 
-    this.onWebview("applyToFile", async ({ data }) => {
+    this.onWebview("applyToFile", async (message) => {
+      const { data } = message;
       const [verticalDiffManager, configHandler] = await Promise.all([
         verticalDiffManagerPromise,
         configHandlerPromise,
@@ -139,7 +157,7 @@ export class VsCodeMessenger {
 
       const applyManager = new ApplyManager(
         this.ide,
-        webviewProtocol,
+        sourceProtocol(message, webviewProtocol),
         verticalDiffManager,
         configHandler,
       );
@@ -199,7 +217,7 @@ export class VsCodeMessenger {
       await addCurrentSelectionToEdit({
         args: undefined,
         editDecorationManager,
-        webviewProtocol: this.webviewProtocol,
+        webviewProtocol: sourceProtocol(msg, this.webviewProtocol),
         verticalDiffManager,
       });
     });
@@ -275,7 +293,11 @@ export class VsCodeMessenger {
     /** PASS THROUGH FROM CORE TO WEBVIEW AND BACK **/
     CORE_TO_WEBVIEW_PASS_THROUGH.forEach((messageType) => {
       this.onCore(messageType, async (msg) => {
-        return this.webviewProtocol.request(messageType, msg.data);
+        const target = cukiiPanelRegistry.lastActive()?.panel.protocol;
+        if (!target) {
+          return undefined as any;
+        }
+        return target.request(messageType, msg.data);
       });
     });
 
@@ -341,7 +363,7 @@ export class VsCodeMessenger {
     this.onWebview("cukii/getBrokerPreferences", () => ({
       brokerModel: this.context.globalState.get<BrokerModel>(
         "cukii.brokerModel",
-        "codex-5-6-terra",
+        "opus-5",
       ),
       brokerSubagent: this.context.globalState.get<BrokerSubagent>(
         "cukii.brokerSubagent",

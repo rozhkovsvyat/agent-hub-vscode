@@ -35,6 +35,11 @@ import {
 } from "./autocomplete/statusBar";
 import { ContinueConsoleWebviewViewProvider } from "./ContinueConsoleWebviewViewProvider";
 import { ContinueGUIWebviewViewProvider } from "./ContinueGUIWebviewViewProvider";
+import {
+  cukiiPanelRegistry as fullScreenPanels,
+  listOpenCukiiPanels,
+  type CukiiPanelHost,
+} from "./cukiiPanelRegistry";
 import { processDiff } from "./diff/processDiff";
 import { VerticalDiffManager } from "./diff/vertical/manager";
 import EditDecorationManager from "./quickEdit/EditDecorationManager";
@@ -51,18 +56,7 @@ import { VsCodeIde } from "./VsCodeIde";
 
 export const FULL_SCREEN_VIEW_TYPE = "cukii.fullScreenChat";
 
-let fullScreenPanel: vscode.WebviewPanel | undefined;
-
-function getFullScreenTab() {
-  const tabs = vscode.window.tabGroups.all.flatMap((tabGroup) => tabGroup.tabs);
-  return tabs.find((tab) => {
-    const vt = (tab.input as any)?.viewType;
-    return (
-      vt?.endsWith(FULL_SCREEN_VIEW_TYPE) ||
-      vt?.endsWith("continue.continueGUIView")
-    );
-  });
-}
+let nextFullScreenPanelId = 1;
 
 /**
  * Наполняет полноэкранную панель и берёт её под учёт.
@@ -75,8 +69,33 @@ function attachFullScreenPanel(
   panel: vscode.WebviewPanel,
   extensionContext: vscode.ExtensionContext,
   sidebar: ContinueGUIWebviewViewProvider,
+  initialSessionId?: string,
+  initialTitle?: string,
 ) {
-  fullScreenPanel = panel;
+  const panelId = `cukii-panel-${nextFullScreenPanelId++}`;
+  const protocol = sidebar.webviewProtocol.cloneHandlers();
+  fullScreenPanels.add(panelId, { panel, protocol }, initialSessionId);
+
+  const notifyPanelList = () => {
+    sidebar.webviewProtocol.send(
+      "cukii/openChatPanelsChanged",
+      listOpenCukiiPanels(),
+    );
+  };
+
+  notifyPanelList();
+
+  if (initialTitle) {
+    panel.title = initialTitle;
+  }
+
+  protocol.on("cukii/panelSessionChanged", ({ data }) => {
+    fullScreenPanels.updateSession(panelId, data.sessionId);
+    if (data.title?.trim()) {
+      panel.title = data.title.trim();
+    }
+    notifyPanelList();
+  });
 
   panel.webview.html = sidebar.getSidebarContent(
     extensionContext,
@@ -84,15 +103,23 @@ function attachFullScreenPanel(
     undefined,
     undefined,
     true,
+    protocol,
+    "chat",
+    initialSessionId,
+    panelId,
   );
 
-  // Closing an editor tab must not mutate the sidebar session or its
-  // protocol. Multiple Cukii tabs are ordinary independent editor tabs.
+  panel.onDidChangeViewState(({ webviewPanel }) => {
+    if (webviewPanel.active) {
+      fullScreenPanels.markActive(panelId);
+    }
+  });
+
   panel.onDidDispose(
     () => {
-      if (fullScreenPanel === panel) {
-        fullScreenPanel = undefined;
-      }
+      protocol.dispose();
+      fullScreenPanels.remove(panelId);
+      notifyPanelList();
     },
     null,
     extensionContext.subscriptions,
@@ -114,37 +141,35 @@ export function registerFullScreenPanelSerializer(
 ) {
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer(FULL_SCREEN_VIEW_TYPE, {
-      async deserializeWebviewPanel(panel: vscode.WebviewPanel) {
-        // Протокол GUI↔core — одиночка на одну панель. Если живая панель уже
-        // есть, второй восстановленный таб её перехватит, поэтому лишний
-        // закрывается, а не наполняется.
-        if (fullScreenPanel && fullScreenPanel !== panel) {
-          panel.dispose();
-          return;
-        }
+      async deserializeWebviewPanel(
+        panel: vscode.WebviewPanel,
+        state: { sessionId?: string } | undefined,
+      ) {
         panel.webview.options = { enableScripts: true };
-        attachFullScreenPanel(panel, extensionContext, sidebar);
+        attachFullScreenPanel(
+          panel,
+          extensionContext,
+          sidebar,
+          state?.sessionId,
+        );
       },
     }),
   );
 }
 
 function focusGUI() {
-  // Опора на ЖИВУЮ панель, а не на наличие таба. Раньше здесь стояло
-  // `getFullScreenTab()` + `fullScreenPanel?.reveal()`: после перезапуска окна
-  // таб существовал, ссылка на панель была потеряна, и вызов превращался в
-  // тихий no-op — до сайдбара дело не доходило, и плагин переставал
-  // открываться вообще.
-  if (fullScreenPanel) {
-    fullScreenPanel.reveal();
+  const activePanel = fullScreenPanels.lastActive();
+  if (activePanel) {
+    activePanel.panel.panel.reveal();
     return;
   }
   vscode.commands.executeCommand("continue.continueGUIView.focus");
 }
 
 function hideGUI() {
-  if (fullScreenPanel) {
-    fullScreenPanel.dispose();
+  const activePanel = fullScreenPanels.lastActive();
+  if (activePanel) {
+    activePanel.panel.panel.dispose();
     return;
   }
   vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
@@ -196,6 +221,16 @@ const getCommandsMap: (
   core,
   editDecorationManager,
 ) => {
+  async function ensureActiveChatPanel(): Promise<CukiiPanelHost | undefined> {
+    const active = fullScreenPanels.lastActive();
+    if (active) {
+      active.panel.panel.reveal();
+      return active.panel;
+    }
+    await vscode.commands.executeCommand("continue.openInNewWindow");
+    return fullScreenPanels.lastActive()?.panel;
+  }
+
   /**
    * Streams an inline edit to the vertical diff manager.
    *
@@ -307,79 +342,24 @@ const getCommandsMap: (
       core.invoke("context/indexDocs", { reIndex: true });
     },
     "continue.focusContinueInput": async () => {
-      const isContinueInputFocused = await sidebar.webviewProtocol.request(
-        "isContinueInputFocused",
+      const host = await ensureActiveChatPanel();
+      if (!host) {
+        return;
+      }
+      void host.protocol.request(
+        "focusContinueInputWithNewSession",
         undefined,
         false,
       );
-
-      // This is a temporary fix—sidebar.webviewProtocol.request is blocking
-      // when the GUI hasn't yet been setup and we should instead be
-      // immediately throwing an error, or returning a Result object
-      focusGUI();
-      if (!sidebar.isReady) {
-        const isReady = await waitForSidebarReady(sidebar, 5000, 100);
-        if (!isReady) {
-          return;
-        }
-      }
-
-      const historyLength = await sidebar.webviewProtocol.request(
-        "getWebviewHistoryLength",
-        undefined,
-        false,
-      );
-
-      if (isContinueInputFocused) {
-        if (historyLength === 0) {
-          hideGUI();
-        } else {
-          void sidebar.webviewProtocol?.request(
-            "focusContinueInputWithNewSession",
-            undefined,
-            false,
-          );
-        }
-      } else {
-        focusGUI();
-        sidebar.webviewProtocol?.request(
-          "focusContinueInputWithNewSession",
-          undefined,
-          false,
-        );
-        void addHighlightedCodeToContext(sidebar.webviewProtocol);
-      }
+      void addHighlightedCodeToContext(host.protocol);
     },
     "continue.focusContinueInputWithoutClear": async () => {
-      const isContinueInputFocused = await sidebar.webviewProtocol.request(
-        "isContinueInputFocused",
-        undefined,
-        false,
-      );
-
-      // This is a temporary fix—sidebar.webviewProtocol.request is blocking
-      // when the GUI hasn't yet been setup and we should instead be
-      // immediately throwing an error, or returning a Result object
-      focusGUI();
-      if (!sidebar.isReady) {
-        const isReady = await waitForSidebarReady(sidebar, 5000, 100);
-        if (!isReady) {
-          return;
-        }
+      const host = await ensureActiveChatPanel();
+      if (!host) {
+        return;
       }
-
-      if (isContinueInputFocused) {
-        hideGUI();
-      } else {
-        focusGUI();
-
-        sidebar.webviewProtocol?.request(
-          "focusContinueInputWithoutClear",
-          undefined,
-        );
-
-        void addHighlightedCodeToContext(sidebar.webviewProtocol);
-      }
+      void host.protocol.request("focusContinueInputWithoutClear", undefined);
+      void addHighlightedCodeToContext(host.protocol);
     },
     "continue.focusCuKiiInput": async () => {
       await vscode.commands.executeCommand("continue.focusContinueInput");
@@ -392,12 +372,14 @@ const getCommandsMap: (
     // QuickEditShowParams are passed from CodeLens, temp fix
     // until we update to new params specific to Edit
     "continue.focusEdit": async (args?: QuickEditShowParams) => {
-      focusGUI();
-      sidebar.webviewProtocol?.request("focusEdit", undefined);
+      const host = await ensureActiveChatPanel();
+      void host?.protocol.request("focusEdit", undefined);
     },
     "continue.exitEditMode": async () => {
       editDecorationManager.clear();
-      void sidebar.webviewProtocol?.request("exitEditMode", undefined);
+      void fullScreenPanels
+        .lastActive()
+        ?.panel.protocol.request("exitEditMode", undefined);
     },
     "continue.writeCommentsForCode": async () => {
       streamInlineEdit(
@@ -453,7 +435,7 @@ const getCommandsMap: (
       sidebar.webviewProtocol?.request("addModel", undefined);
     },
     "continue.newSession": () => {
-      sidebar.webviewProtocol?.request("newSession", undefined);
+      void vscode.commands.executeCommand("continue.openInNewWindow");
     },
 
     "continue.shareSession": async (sessionId: string | undefined) => {
@@ -824,30 +806,33 @@ const getCommandsMap: (
         vscode.ConfigurationTarget.Global,
       );
     },
-    "continue.openInNewWindow": async () => {
-      // Cukii lives in exactly one full-screen tab at a time. The GUI↔core
-      // protocol is a singleton bound to a single webview; creating a second
-      // panel rebinds (hijacks) it and breaks both surfaces — that's the
-      // "second window then errors, stops opening" bug. So: if a tab already
-      // exists, just reveal it instead of creating another.
-      if (fullScreenPanel) {
-        try {
-          fullScreenPanel.reveal();
+    "continue.openInNewWindow": async (
+      options: {
+        panelId?: string;
+        sessionId?: string;
+        title?: string;
+        forceNew?: boolean;
+      } = {},
+    ) => {
+      if (options.panelId) {
+        const existing = fullScreenPanels.get(options.panelId);
+        if (existing) {
+          existing.panel.panel.reveal();
+          fullScreenPanels.markActive(existing.id);
           return;
-        } catch {
-          // Reference is stale (panel was disposed) — recreate below.
-          fullScreenPanel = undefined;
         }
       }
 
-      // Distinct viewType (NOT the sidebar view id) so opening the tab does not
-      // also reveal the sidebar view container — that collision was the extra
-      // "шторка" that slid out next to the tab.
-      // Мёртвая оболочка восстановленного таба, которую не удалось оживить,
-      // иначе останется висеть рядом с новой панелью пустым серым дублем.
-      const staleTab = getFullScreenTab();
-      if (staleTab) {
-        void vscode.window.tabGroups.close(staleTab);
+      // Navigator clicks focus the already-open tab for that persisted
+      // session. The command/chord path has no session id and therefore always
+      // creates another independent blank tab.
+      if (options.sessionId && !options.forceNew) {
+        const existing = fullScreenPanels.forSession(options.sessionId);
+        if (existing) {
+          existing.panel.panel.reveal();
+          fullScreenPanels.markActive(existing.id);
+          return;
+        }
       }
 
       const panel = vscode.window.createWebviewPanel(
@@ -860,7 +845,13 @@ const getCommandsMap: (
         },
       );
 
-      attachFullScreenPanel(panel, extensionContext, sidebar);
+      attachFullScreenPanel(
+        panel,
+        extensionContext,
+        sidebar,
+        options.sessionId,
+        options.title,
+      );
     },
     "continue.forceNextEdit": async () => {
       // This is basically the same logic as forceAutocomplete.

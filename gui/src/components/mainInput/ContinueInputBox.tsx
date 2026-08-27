@@ -88,7 +88,9 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   }, [availableContextProviders, isInEdit]);
 
   const historyKey = isInEdit ? "edit" : "chat";
-  const placeholder = isInEdit ? "Edit selected code" : undefined;
+  const placeholder = isInEdit
+    ? "Edit selected code"
+    : "ctrl esc to focus or unfocus Cukii";
 
   const toolbarOptions: ToolbarOptions = useMemo(() => {
     if (isInEdit) {

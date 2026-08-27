@@ -1,23 +1,20 @@
 import {
   ArrowPathIcon,
   ArrowUpIcon,
-  AtSymbolIcon,
-  LightBulbIcon as LightBulbIconOutline,
+  CheckIcon,
+  PaperClipIcon,
   PencilIcon,
   PhotoIcon,
+  PlusIcon,
+  ShareIcon,
 } from "@heroicons/react/24/outline";
-import { LightBulbIcon as LightBulbIconSolid } from "@heroicons/react/24/solid";
 import { InputModifiers } from "core";
-import {
-  modelSupportsImages,
-  modelSupportsReasoning,
-} from "core/llm/autodetect";
-import { memo, useContext, useEffect, useRef, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
-import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import {
+  newSession,
   setBrokerModel,
   setBrokerSubagent,
   setHasReasoningEnabled,
@@ -27,19 +24,16 @@ import type {
   BrokerModel,
   BrokerSubagent,
 } from "../../redux/slices/sessionSlice";
-import { setReasoningSetting } from "../../redux/slices/uiSlice";
+import { setAllowAllPermissions } from "../../redux/slices/uiSlice";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
-import { getMetaKeyLabel, isMetaEquivalentKeyPressed } from "../../util";
+import { saveCurrentSession } from "../../redux/thunks/session";
+import { isMetaEquivalentKeyPressed } from "../../util";
 import { ToolTip } from "../gui/Tooltip";
-import ModelSelect from "../modelSelection/ModelSelect";
 import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
-import { modelInfo } from "../modelSelection/vendors";
-import { ModeSelect } from "../ModeSelect";
+import { modelInfo, vendorForModel } from "../modelSelection/vendors";
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
-import ContextStatus from "./ContextStatus";
-import HoverItem from "./InputToolbar/HoverItem";
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -62,36 +56,53 @@ interface InputToolbarProps {
   isInputEmpty?: boolean;
 }
 
+const menuItemClass =
+  "flex w-full items-center justify-between gap-5 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+
 function InputToolbar(props: InputToolbarProps) {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const defaultModel = useAppSelector(selectSelectedChatModel);
   const useActiveFile = useAppSelector(selectUseActiveFile);
-  const isInEdit = useAppSelector((store) => store.session.isInEdit);
-  const isStreaming = useAppSelector((store) => store.session.isStreaming);
-  const mode = useAppSelector((store) => store.session.mode);
-  const brokerModel = useAppSelector((store) => store.session.brokerModel);
+  const isInEdit = useAppSelector((state) => state.session.isInEdit);
+  const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const historyLength = useAppSelector((state) => state.session.history.length);
+  const brokerModel = useAppSelector((state) => state.session.brokerModel);
   const brokerSubagent = useAppSelector(
-    (store) => store.session.brokerSubagent,
+    (state) => state.session.brokerSubagent,
   );
+  const hasReasoningEnabled = useAppSelector(
+    (state) => state.session.hasReasoningEnabled,
+  );
+  const allowAllPermissions = useAppSelector(
+    (state) => state.ui.allowAllPermissions,
+  );
+  const tools = useAppSelector((state) => state.config.config.tools);
+  const toolNames = useMemo(
+    () => (tools ?? []).map((tool) => tool.function.name),
+    [tools],
+  );
+  const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  // Once the user picks a model in this session, the in-flight mount request
-  // (which reads globalState that may pre-date the pick) must not clobber it.
+  const [actionQuery, setActionQuery] = useState("");
   const userTouchedBrokerRef = useRef(false);
+
   useEffect(() => {
+    dispatch(setMode("broker"));
     void ideMessenger
       .request("cukii/getBrokerPreferences", undefined)
       .then((result) => {
-        if (result.status === "success" && !userTouchedBrokerRef.current) {
+        if (
+          result.status === "success" &&
+          !userTouchedBrokerRef.current &&
+          !window.initialSessionId &&
+          historyLength === 0
+        ) {
           dispatch(setBrokerModel(result.content.brokerModel));
           dispatch(setBrokerSubagent(result.content.brokerSubagent));
-          if (result.content.mode) {
-            dispatch(setMode(result.content.mode));
-          }
         }
       });
-  }, [dispatch, ideMessenger]);
+  }, [dispatch, historyLength, ideMessenger]);
 
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
@@ -105,275 +116,309 @@ function InputToolbar(props: InputToolbarProps) {
       brokerSubagent: nextSubagent,
       mode: "broker",
     });
+    if (historyLength > 0) {
+      void dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      );
+    }
   };
-  const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
-  const hasReasoningEnabled = useAppSelector(
-    (store) => store.session.hasReasoningEnabled,
-  );
+
   const isEnterDisabled =
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
   const isRetry = props.toolbarOptions?.enterText === "Retry";
-  // Stop показываем только когда идёт ход И поле пустое. Есть текст во время
-  // хода — кнопка «отправить» (steering-сообщение в ленту), как у Claude.
-  const isInputEmpty = props.isInputEmpty ?? true;
-  const showStop = isStreaming && isInputEmpty;
-  const submitButtonLabel = showStop
-    ? "Stop response"
-    : isInEdit
-      ? isRetry
-        ? "Retry edit"
-        : "Edit selection"
-      : "Send message";
-
-  const supportsImages =
-    defaultModel &&
-    modelSupportsImages(
-      defaultModel.provider,
-      defaultModel.model,
-      defaultModel.title,
-      defaultModel.capabilities,
-    );
-
-  const supportsReasoning = modelSupportsReasoning(defaultModel);
-
+  const showStop = isStreaming && (props.isInputEmpty ?? true);
+  const currentModel = brokerModel ?? "opus-5";
+  const currentLabel = `${vendorForModel(currentModel)?.label ?? "Claude"} · ${
+    modelInfo(currentModel)?.label ?? "Opus 5"
+  }`;
   const smallFont = useFontSize(-2);
-  const tinyFont = useFontSize(-3);
+  const showAction = (label: string) =>
+    label.toLowerCase().includes(actionQuery.trim().toLowerCase());
+
+  const selectFiles = (files: FileList | null) => {
+    for (const file of Array.from(files ?? [])) {
+      props.onImageFileSelected?.(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   return (
     <>
       <div
         onClick={props.onClick}
-        // min-w-0 на самой строке: без него flex-контейнер не может стать уже
-        // суммы min-content своих групп и выдавливает содержимое за панель —
-        // именно так обрезались и кнопка отправки, и текст сообщений.
-        className={`find-widget-skip bg-vsc-input-background flex min-w-0 select-none flex-row items-center justify-between gap-1 pt-1 ${props.hidden ? "pointer-events-none h-0 cursor-default opacity-0" : "pointer-events-auto mt-2 cursor-text opacity-100"}`}
-        style={{
-          fontSize: smallFont,
-        }}
+        className={`find-widget-skip flex min-w-0 select-none items-center justify-between gap-2 border-t border-[var(--vscode-panel-border)] px-2 pb-1 pt-2 ${
+          props.hidden
+            ? "pointer-events-none h-0 opacity-0"
+            : "pointer-events-auto mt-2 opacity-100"
+        }`}
+        style={{ fontSize: smallFont }}
       >
-        <div className="xs:gap-1.5 flex min-w-0 flex-row items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            multiple
+            accept=".jpg,.jpeg,.png,.gif,.svg,.webp"
+            onChange={(event) => selectFiles(event.target.files)}
+          />
+
           {!isInEdit && (
-            <ToolTip place="top" content="Select Mode">
-              <HoverItem className="!p-0">
-                <ModeSelect />
-              </HoverItem>
-            </ToolTip>
+            <Popover className="relative">
+              <PopoverButton
+                data-testid="cukii-attach-menu-button"
+                className="flex h-8 w-8 items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+                aria-label="Attach"
+              >
+                <PlusIcon className="h-5 w-5" />
+              </PopoverButton>
+              <PopoverPanel className="absolute bottom-full left-0 z-[1000] mb-2 w-52 rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-xl">
+                {({ close }) => (
+                  <>
+                    <button
+                      className={menuItemClass}
+                      type="button"
+                      onClick={() => {
+                        close();
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <PhotoIcon className="h-4 w-4" /> Attach image
+                      </span>
+                    </button>
+                    <button
+                      className={menuItemClass}
+                      type="button"
+                      onClick={() => {
+                        close();
+                        props.onAddContextItem?.();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <PaperClipIcon className="h-4 w-4" /> Attach context
+                      </span>
+                    </button>
+                  </>
+                )}
+              </PopoverPanel>
+            </Popover>
           )}
-          {mode === "broker" && !isInEdit ? (
-            <div className="flex min-w-0 flex-row items-center gap-1.5">
-              <Popover className="relative">
-                <PopoverButton
-                  data-testid="broker-menu-button"
-                  className="text-description hover:text-foreground flex h-[22px] w-[22px] items-center justify-center rounded border border-[var(--vscode-descriptionForeground,#55524c)] bg-transparent text-xs font-medium transition-colors"
-                  title="Model menu"
-                >
+
+          {!isInEdit && (
+            <Popover className="relative">
+              <PopoverButton
+                data-testid="broker-menu-button"
+                onClick={() => setActionQuery("")}
+                className="flex h-8 w-8 items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+                aria-label="Commands and model"
+              >
+                <span className="flex h-[21px] w-[21px] items-center justify-center rounded-sm border border-current text-[14px] leading-none">
                   /
-                </PopoverButton>
-                <PopoverPanel className="bg-vsc-background absolute bottom-full left-0 z-50 mb-1 min-w-[180px] rounded border border-[var(--vscode-panel-border,#333)] shadow-lg">
-                  {({ close }) => (
-                    <div className="py-1">
+                </span>
+              </PopoverButton>
+              <PopoverPanel className="absolute bottom-full left-0 z-[1000] mb-2 max-h-[min(62vh,520px)] w-[min(690px,calc(100vw-64px))] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl">
+                {({ close }) => (
+                  <div data-testid="cukii-slash-menu">
+                    <div className="sticky top-0 z-10 bg-[var(--vscode-menu-background)] p-1">
+                      <input
+                        autoFocus
+                        value={actionQuery}
+                        onChange={(event) => setActionQuery(event.target.value)}
+                        placeholder="Filter actions..."
+                        className="w-full rounded border border-[var(--vscode-input-border)] bg-[var(--vscode-input-background)] px-3 py-2 text-[13px] text-[var(--vscode-input-foreground)] outline-none focus:border-[var(--vscode-focusBorder)]"
+                      />
+                    </div>
+                    <div className="px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
+                      Context
+                    </div>
+                    {showAction("Attach file") && (
                       <button
+                        className={menuItemClass}
                         type="button"
+                        onClick={() => {
+                          close();
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        Attach file…
+                      </button>
+                    )}
+                    {showAction("Mention file from this project") && (
+                      <button
+                        className={menuItemClass}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          props.onAddContextItem?.();
+                        }}
+                      >
+                        Mention file from this project…
+                      </button>
+                    )}
+                    {showAction("Clear conversation") && (
+                      <button
+                        className={menuItemClass}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          dispatch(newSession());
+                        }}
+                      >
+                        Clear conversation
+                      </button>
+                    )}
+                    {showAction("Rewind") && (
+                      <button className={menuItemClass} type="button" disabled>
+                        Rewind
+                      </button>
+                    )}
+
+                    <div className="my-1 border-t border-[var(--vscode-menu-separatorBackground)]" />
+                    <div className="px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
+                      Model
+                    </div>
+                    {showAction("Switch model") && (
+                      <button
                         data-testid="broker-switch-model"
-                        className="text-description w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--vscode-list-hoverBackground,#2a2d2e)]"
+                        className={menuItemClass}
+                        type="button"
                         onClick={() => {
                           close();
                           setModelPickerOpen(true);
                         }}
                       >
-                        Switch model…
+                        <span>Switch model…</span>
+                        <span className="text-[var(--vscode-descriptionForeground)]">
+                          {currentLabel}
+                        </span>
                       </button>
-                    </div>
-                  )}
-                </PopoverPanel>
-              </Popover>
-              <span
-                className="text-description-muted truncate text-xs"
-                data-testid="broker-model-label"
-                title={modelInfo(brokerModel ?? "codex-5-6-terra")?.label}
-              >
-                {modelInfo(brokerModel ?? "codex-5-6-terra")?.label ??
-                  "Select model"}
-              </span>
-              {modelPickerOpen && (
-                <ModelPickerModal onClose={() => setModelPickerOpen(false)} />
-              )}
-            </div>
-          ) : (
-            <ToolTip place="top" content="Select Model">
-              <HoverItem className="!p-0">
-                <ModelSelect />
-              </HoverItem>
-            </ToolTip>
+                    )}
+                    {showAction("Thinking") && (
+                      <button
+                        className={menuItemClass}
+                        type="button"
+                        role="switch"
+                        aria-checked={Boolean(hasReasoningEnabled)}
+                        onClick={() =>
+                          dispatch(setHasReasoningEnabled(!hasReasoningEnabled))
+                        }
+                      >
+                        <span>Thinking</span>
+                        <span
+                          className={`flex h-5 w-9 items-center rounded-full px-0.5 ${hasReasoningEnabled ? "justify-end bg-[var(--vscode-button-background)]" : "justify-start bg-[var(--vscode-input-background)]"}`}
+                        >
+                          <span className="h-4 w-4 rounded-full bg-[var(--vscode-button-foreground)]" />
+                        </span>
+                      </button>
+                    )}
+                    {showAction("Switch models when a message is flagged") && (
+                      <button className={menuItemClass} type="button" disabled>
+                        <span>Switch models when a message is flagged</span>
+                        <span className="flex h-5 w-9 items-center justify-start rounded-full bg-[var(--vscode-input-background)] px-0.5">
+                          <span className="h-4 w-4 rounded-full bg-[var(--vscode-descriptionForeground)]" />
+                        </span>
+                      </button>
+                    )}
+                    {showAction("Account & usage") && (
+                      <button className={menuItemClass} type="button" disabled>
+                        Account &amp; usage…
+                      </button>
+                    )}
+                  </div>
+                )}
+              </PopoverPanel>
+            </Popover>
           )}
-          <div className="xs:flex text-description -mb-1 hidden items-center transition-colors duration-200">
-            {props.toolbarOptions?.hideImageUpload ||
-              (supportsImages && (
-                <>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    style={{ display: "none" }}
-                    accept=".jpg,.jpeg,.png,.gif,.svg,.webp"
-                    onChange={(e) => {
-                      const files = e.target?.files ?? [];
-                      for (const file of files) {
-                        props.onImageFileSelected?.(file);
-                      }
-                      if (fileInputRef.current) {
-                        fileInputRef.current.value = "";
-                      }
-                    }}
-                  />
 
-                  <ToolTip place="top" content="Attach Image">
-                    <HoverItem className="">
-                      <PhotoIcon
-                        className="h-3 w-3 hover:brightness-125"
-                        onClick={(e) => {
-                          fileInputRef.current?.click();
-                        }}
-                      />
-                    </HoverItem>
-                  </ToolTip>
-                </>
-              ))}
-            {props.toolbarOptions?.hideAddContext || (
-              <ToolTip place="top" content="Attach Context">
-                <HoverItem onClick={props.onAddContextItem}>
-                  <AtSymbolIcon className="h-3 w-3 hover:brightness-125" />
-                </HoverItem>
-              </ToolTip>
-            )}
-            {supportsReasoning && (
-              <HoverItem
-                onClick={() => {
-                  dispatch(setHasReasoningEnabled(!hasReasoningEnabled));
-                  if (defaultModel?.title) {
-                    dispatch(
-                      setReasoningSetting({
-                        modelTitle: defaultModel.title,
-                        enabled: !hasReasoningEnabled,
-                      }),
-                    );
-                  }
-                }}
-              >
-                <ToolTip
-                  place="top"
-                  content={
-                    hasReasoningEnabled
-                      ? "Disable model reasoning"
-                      : "Enable model reasoning"
-                  }
-                >
-                  {hasReasoningEnabled ? (
-                    <LightBulbIconSolid className="h-3 w-3 brightness-200 hover:brightness-150" />
-                  ) : (
-                    <LightBulbIconOutline className="h-3 w-3 hover:brightness-150" />
-                  )}
-                </ToolTip>
-              </HoverItem>
-            )}
-          </div>
-        </div>
-
-        <div
-          // flex-shrink-0 у правой группы: она короткая и обязана остаться целой,
-          // сжиматься должна левая (у пилюль моделей есть truncate и max-width).
-          className="text-description flex min-w-0 flex-shrink-0 items-center gap-2 whitespace-nowrap"
-          style={{
-            fontSize: tinyFont,
-          }}
-        >
-          {!isInEdit && <ContextStatus />}
-          {!props.toolbarOptions?.hideUseCodebase && !isInEdit && (
-            <div className="hidden transition-colors duration-200 hover:underline md:flex">
-              <HoverItem
-                className={
-                  props.activeKey === "Meta" ||
-                  props.activeKey === "Control" ||
-                  props.activeKey === "Alt"
-                    ? "underline"
-                    : ""
-                }
-                onClick={(e) =>
-                  props.onEnter?.({
-                    useCodebase: false,
-                    noContext: !useActiveFile,
-                  })
-                }
-              >
-                <ToolTip
-                  place="top-end"
-                  content={`${
-                    useActiveFile
-                      ? "Send Without Active File"
-                      : "Send With Active File"
-                  } (${getMetaKeyLabel()}⏎)`}
-                >
-                  <span>
-                    {getMetaKeyLabel()}⏎{" "}
-                    {useActiveFile ? "No active file" : "Active file"}
-                  </span>
-                </ToolTip>
-              </HoverItem>
-            </div>
-          )}
           {isInEdit && (
-            <HoverItem
-              className="hidden hover:underline sm:flex"
-              onClick={async () => {
+            <button
+              className={menuItemClass}
+              type="button"
+              onClick={() => {
                 void dispatch(exitEdit({}));
                 ideMessenger.post("focusEditor", undefined);
               }}
             >
-              <span>
-                <i>Esc</i> to exit Edit
-              </span>
-            </HoverItem>
+              Esc to exit Edit
+            </button>
           )}
-          <ToolTip place="top" content={submitButtonLabel}>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {!isInEdit && (
+            <button
+              type="button"
+              className={`flex h-8 items-center gap-2 rounded px-2 text-xs hover:bg-[var(--vscode-toolbar-hoverBackground)] ${allowAllPermissions ? "text-[var(--vscode-foreground)]" : "text-[var(--vscode-descriptionForeground)]"}`}
+              aria-pressed={allowAllPermissions}
+              onClick={() =>
+                dispatch(
+                  setAllowAllPermissions({
+                    enabled: !allowAllPermissions,
+                    toolNames,
+                  }),
+                )
+              }
+            >
+              {allowAllPermissions ? (
+                <CheckIcon className="h-4 w-4" />
+              ) : (
+                <ShareIcon className="h-4 w-4" />
+              )}
+              Bypass permissions
+            </button>
+          )}
+
+          <ToolTip
+            place="top"
+            content={showStop ? "Stop response" : "Send message"}
+          >
             <Button
               variant={props.isMainInput ? "primary" : "secondary"}
               size="sm"
               className="cukii-submit-button"
               data-testid="submit-input-button"
-              aria-label={submitButtonLabel}
-              onClick={async (e) => {
+              aria-label={showStop ? "Stop response" : "Send message"}
+              onClick={(event) => {
                 if (showStop) {
                   void dispatch(cancelStream());
                   return;
                 }
-                if (props.onEnter) {
-                  props.onEnter({
-                    useCodebase: false,
-                    noContext: useActiveFile
-                      ? isMetaEquivalentKeyPressed(e as any) || e.altKey
-                      : !(isMetaEquivalentKeyPressed(e as any) || e.altKey),
-                  });
-                }
+                props.onEnter?.({
+                  useCodebase: false,
+                  noContext: useActiveFile
+                    ? isMetaEquivalentKeyPressed(event as any) || event.altKey
+                    : !(
+                        isMetaEquivalentKeyPressed(event as any) || event.altKey
+                      ),
+                });
               }}
               disabled={isEnterDisabled}
             >
               {showStop ? (
-                <span
-                  className="h-2.5 w-2.5 rounded-[1px] bg-white"
-                  aria-hidden="true"
-                />
+                <span className="h-2.5 w-2.5 rounded-[1px] bg-white" />
               ) : isInEdit ? (
                 isRetry ? (
-                  <ArrowPathIcon className="h-4 w-4" aria-hidden="true" />
+                  <ArrowPathIcon className="h-4 w-4" />
                 ) : (
-                  <PencilIcon className="h-4 w-4" aria-hidden="true" />
+                  <PencilIcon className="h-4 w-4" />
                 )
               ) : (
-                <ArrowUpIcon className="h-4 w-4" aria-hidden="true" />
+                <ArrowUpIcon className="h-4 w-4" />
               )}
             </Button>
           </ToolTip>
         </div>
       </div>
+
+      {modelPickerOpen && (
+        <ModelPickerModal
+          onClose={() => setModelPickerOpen(false)}
+          onSelect={(model) =>
+            updateBrokerPreferences(model, brokerSubagent ?? "auto")
+          }
+        />
+      )}
     </>
   );
 }

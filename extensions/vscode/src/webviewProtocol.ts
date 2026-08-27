@@ -58,6 +58,10 @@ export class VsCodeWebviewProtocol
 
       const handlers =
         this.listeners.get(msg.messageType as keyof FromWebviewProtocol) || [];
+      Object.defineProperty(msg, "__cukiiWebviewProtocol", {
+        value: this,
+        enumerable: false,
+      });
       for (const handler of handlers) {
         try {
           const response = await handler(msg);
@@ -117,6 +121,28 @@ export class VsCodeWebviewProtocol
     };
 
     this._webviewListener = this._webview.onDidReceiveMessage(handleMessage);
+  }
+
+  /**
+   * Create an independent transport with the same request handlers.
+   *
+   * Handlers are immutable registrations after extension activation, while the
+   * webview binding is deliberately *not* shared. This lets every Cukii editor
+   * tab talk to the core without stealing the sidebar's onDidReceiveMessage
+   * listener (the old singleton failure mode).
+   */
+  cloneHandlers(): VsCodeWebviewProtocol {
+    const clone = new VsCodeWebviewProtocol();
+    for (const [messageType, handlers] of this.listeners) {
+      clone.listeners.set(messageType, [...handlers]);
+    }
+    return clone;
+  }
+
+  dispose(): void {
+    this._webviewListener?.dispose();
+    this._webviewListener = undefined;
+    this._webview = undefined;
   }
 
   constructor() {}

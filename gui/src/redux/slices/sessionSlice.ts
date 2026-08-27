@@ -245,8 +245,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   id: uuidv4(),
   streamAborter: new AbortController(),
   symbols: {},
-  mode: "agent",
-  brokerModel: "codex-5-6-terra",
+  mode: "broker",
+  brokerModel: "opus-5",
   brokerSubagent: "auto",
   isInEdit: false,
   codeBlockApplyStates: {
@@ -758,10 +758,15 @@ export const sessionSlice = createSlice({
         if (payload.mode) {
           state.mode = payload.mode;
         }
+        state.brokerModel = payload.brokerModel ?? "opus-5";
+        state.brokerSubagent = payload.brokerSubagent ?? "auto";
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
         state.id = uuidv4();
+        state.mode = "broker";
+        state.brokerModel = "opus-5";
+        state.brokerSubagent = "auto";
       }
     },
     updateSessionTitle: (state, { payload }: PayloadAction<string>) => {

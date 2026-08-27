@@ -70,6 +70,10 @@ export class ContinueGUIWebviewViewProvider
     page: string | undefined = undefined,
     edits: FileEdit[] | undefined = undefined,
     isFullScreen = false,
+    protocol: VsCodeWebviewProtocol = this.webviewProtocol,
+    surface: "sidebar" | "chat" = isFullScreen ? "chat" : "sidebar",
+    initialSessionId?: string,
+    panelId: string = surface,
   ): string {
     const extensionUri = getExtensionUri();
     let scriptUri: string;
@@ -110,7 +114,7 @@ export class ContinueGUIWebviewViewProvider
     const nonce = getNonce();
 
     const currentTheme = getTheme();
-    vscode.workspace.onDidChangeConfiguration((e) => {
+    const themeListener = vscode.workspace.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration("workbench.colorTheme") ||
         e.affectsConfiguration("window.autoDetectColorScheme") ||
@@ -121,18 +125,24 @@ export class ContinueGUIWebviewViewProvider
         e.affectsConfiguration("workbench.preferredHighContrastLightColorTheme")
       ) {
         // Send new theme to GUI to update embedded Monaco themes
-        void this.webviewProtocol?.request("setTheme", { theme: getTheme() });
+        void protocol.request("setTheme", { theme: getTheme() });
       }
     });
+    panel.onDidDispose(() => themeListener.dispose());
 
-    this.webviewProtocol.webview = panel.webview;
+    protocol.webview = panel.webview;
+
+    const serializedSessionId = JSON.stringify(
+      initialSessionId ?? null,
+    ).replace(/</g, "\\u003c");
+    const serializedPanelId = JSON.stringify(panelId).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
     <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script>const vscode = acquireVsCodeApi();</script>
+        <script>const vscode = acquireVsCodeApi(); window.cukiiVscode = vscode;</script>
         <link href="${styleMainUri}" rel="stylesheet">
 
         <title>Continue</title>
@@ -169,6 +179,13 @@ export class ContinueGUIWebviewViewProvider
           ) || [],
         )}</script>
         <script>window.isFullScreen = ${isFullScreen}</script>
+        <script>window.cukiiSurface = "${surface}"</script>
+        <script>window.cukiiPanelId = ${serializedPanelId}</script>
+        <script>
+          const restoredCukiiState = window.cukiiVscode.getState() || {};
+          window.initialSessionId = ${serializedSessionId} || restoredCukiiState.sessionId || null;
+          window.cukiiVscode.setState({ ...restoredCukiiState, sessionId: window.initialSessionId });
+        </script>
 
         ${
           edits

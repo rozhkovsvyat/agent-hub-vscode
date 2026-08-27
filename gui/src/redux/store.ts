@@ -41,13 +41,8 @@ const saveSubsetFilters = [
 
     // Persist edit mode in case closes in middle
     "mode",
-
-    // NB: brokerModel/brokerSubagent are intentionally NOT persisted here.
-    // globalState (extension host) is the single source of truth, applied on
-    // mount via cukii/getBrokerPreferences. Persisting them to localStorage too
-    // created two sources that raced on reload — rehydrate (stale localStorage)
-    // vs getBrokerPreferences (fresh globalState) — and the stale value often
-    // won, silently resetting the user's model pick (e.g. Opus → Terra).
+    "brokerModel",
+    "brokerSubagent",
 
     // higher risk to persist
     // codeBlockApplyStates
@@ -99,7 +94,9 @@ const migrations: MigrationManifest = {
 
 const persistConfig = {
   version: 1,
-  key: "root",
+  // All Cukii webviews share one extension origin. Namespace persisted state
+  // so independent editor tabs cannot overwrite each other's session/model.
+  key: `root:${window.cukiiPanelId ?? "sidebar"}`,
   storage,
   transforms: [...saveSubsetFilters],
   stateReconciler: autoMergeLevel2,

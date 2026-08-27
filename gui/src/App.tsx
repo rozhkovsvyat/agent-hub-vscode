@@ -11,6 +11,7 @@ import History from "./pages/history";
 import Stats from "./pages/stats";
 import ThemePage from "./styles/ThemePage";
 import { ROUTES } from "./util/navigation";
+import CukiiSessionNavigator from "./pages/sessions/CukiiSessionNavigator";
 
 const router = createMemoryRouter([
   {
@@ -51,6 +52,14 @@ const router = createMemoryRouter([
   most of which interact with redux etc.
 */
 function App() {
+  if (window.cukiiSurface === "sidebar") {
+    return (
+      <VscThemeProvider>
+        <CukiiSessionNavigator />
+      </VscThemeProvider>
+    );
+  }
+
   return (
     <VscThemeProvider>
       <MainEditorProvider>

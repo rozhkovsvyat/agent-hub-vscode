@@ -211,8 +211,8 @@ button,
 }
 
 .cukii-main-input-shell [data-testid^="continue-input-box-"] > div.relative {
-  padding-left: 18px;
-  padding-right: 18px;
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
 [data-testid^="continue-input-box-"] [contenteditable="true"] {
@@ -224,10 +224,11 @@ button,
 }
 
 .cukii-main-input-shell .cukii-input-box {
-  background: var(--cukii-shell) !important;
-  border: 1px solid var(--cukii-line) !important;
-  border-radius: 9px !important;
-  box-shadow: var(--cukii-shadow);
+  background: var(--vscode-input-background, #3b3b3b) !important;
+  border: 1px solid var(--vscode-widget-border, #555) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  min-height: 112px;
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
@@ -259,7 +260,7 @@ button,
 
 .cukii-main-input-shell {
   margin-top: auto;
-  padding: 18px 20px 20px;
+  padding: 12px 16px 16px;
 }
 
 .cukii-editor-stack,
@@ -268,9 +269,11 @@ button,
 }
 
 .cukii-main-input-shell .cukii-input-box:focus-within {
-  border-color: var(--cukii-accent-strong) !important;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
-  transform: translateY(-1px);
+  border-color: #d97757 !important;
+  box-shadow:
+    0 0 0 2px rgba(217, 119, 87, 0.25),
+    0 10px 24px rgba(0, 0, 0, 0.34);
+  transform: none;
 }
 
 .cukii-submit-button {

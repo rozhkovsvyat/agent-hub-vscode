@@ -49,10 +49,24 @@ function ParallelListeners() {
 
   // Load symbols for chat on any session change
   const sessionId = useAppSelector((state) => state.session.id);
+  const sessionTitle = useAppSelector((state) => state.session.title);
   const lastSessionId = useAppSelector((store) => store.session.lastSessionId);
-  const [initialSessionId] = useState(sessionId || lastSessionId);
+  const [initialSessionId] = useState(
+    window.cukiiSurface === "chat"
+      ? window.initialSessionId || undefined
+      : sessionId || lastSessionId,
+  );
 
   useWebviewListener("cukii/getActiveSessionId", async () => sessionId || "");
+
+  useEffect(() => {
+    if (window.cukiiSurface !== "chat" || !sessionId) return;
+    window.cukiiVscode?.setState({ sessionId });
+    ideMessenger.post("cukii/panelSessionChanged", {
+      sessionId,
+      title: sessionTitle,
+    });
+  }, [ideMessenger, sessionId, sessionTitle]);
 
   const handleConfigUpdate = useCallback(
     async (isInitial: boolean, result: FromCoreProtocol["configUpdate"][0]) => {
@@ -123,6 +137,8 @@ function ParallelListeners() {
             saveCurrentSession: false,
           }),
         );
+      } else if (window.cukiiSurface === "chat") {
+        dispatch(newSession());
       }
     }
     void initialLoadConfig();

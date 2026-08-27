@@ -518,7 +518,9 @@ export function Chat() {
 
   return (
     <>
-      {!!showSessionTabs && !isInEdit && <TabBar ref={tabsRef} />}
+      {!!showSessionTabs && window.cukiiSurface !== "chat" && !isInEdit && (
+        <TabBar ref={tabsRef} />
+      )}
       {widget}
 
       <StepsDiv

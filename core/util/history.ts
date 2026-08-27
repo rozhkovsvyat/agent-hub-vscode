@@ -124,6 +124,12 @@ export class HistoryManager {
     if (session.chatModelTitle !== undefined) {
       orderedSession.chatModelTitle = session.chatModelTitle;
     }
+    if (session.brokerModel !== undefined) {
+      orderedSession.brokerModel = session.brokerModel;
+    }
+    if (session.brokerSubagent !== undefined) {
+      orderedSession.brokerSubagent = session.brokerSubagent;
+    }
     if (session.usage !== undefined) {
       orderedSession.usage = session.usage;
     }
