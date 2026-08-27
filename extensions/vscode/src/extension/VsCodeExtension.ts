@@ -327,7 +327,7 @@ export class VsCodeExtension {
           );
           if (!parent) return;
           const requestedWorker = await vscode.window.showQuickPick(
-            ["auto", "deepseek", "claude", "codex", "grok", "cursor"],
+            ["auto", "deepseek", "claude", "codex", "grok", "cursor", "qwen"],
             {
               placeHolder: "Cukii: выберите vendor worker-а",
             },
@@ -414,6 +414,7 @@ export class VsCodeExtension {
             "codex",
             "grok",
             "cursor",
+            "qwen",
           ] as const;
           const agent =
             typeof requestedAgent === "string" &&
@@ -521,7 +522,8 @@ export class VsCodeExtension {
               (agent === "claude" ||
                 agent === "codex" ||
                 agent === "grok" ||
-                agent === "cursor") &&
+                agent === "cursor" ||
+                agent === "qwen") &&
               bridgeSessionId
             ) {
               // shellPath/args are fixed constants; neither task text nor any user
@@ -551,16 +553,18 @@ export class VsCodeExtension {
                     ? ["--cd", root]
                     : agent === "grok"
                       ? ["--cwd", root]
-                      : agent === "cursor"
-                        ? [
-                            "-d",
-                            "Ubuntu-24.04",
-                            "--",
-                            "bash",
-                            "-lc",
-                            `printf %s ${cursorScript} | base64 -d | bash`,
-                          ]
-                        : [],
+                      : agent === "qwen"
+                        ? ["--model", "qwen3.8-max-preview"]
+                        : agent === "cursor"
+                          ? [
+                              "-d",
+                              "Ubuntu-24.04",
+                              "--",
+                              "bash",
+                              "-lc",
+                              `printf %s ${cursorScript} | base64 -d | bash`,
+                            ]
+                          : [],
                 env: {
                   AGENT_HUB_BRIDGE_SESSION: bridgeSessionId,
                   AGENT_HUB_BRIDGE_ROLE: role,

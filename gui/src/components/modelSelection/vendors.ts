@@ -9,7 +9,8 @@ export type VendorId =
   | "xai"
   | "cursor"
   | "kimi"
-  | "deepseek";
+  | "deepseek"
+  | "qwen";
 
 export interface ModelInfo {
   value: BrokerModel;
@@ -64,6 +65,11 @@ export const VENDORS: VendorInfo[] = [
     id: "deepseek",
     label: "DeepSeek",
     models: [{ value: "deepseek-v4-pro", label: "V4 Pro", disabled: true }],
+  },
+  {
+    id: "qwen",
+    label: "Qwen",
+    models: [{ value: "qwen-3-8-max", label: "Qwen 3.8 Max" }],
   },
 ];
 

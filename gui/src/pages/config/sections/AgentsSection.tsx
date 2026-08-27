@@ -13,6 +13,7 @@ const NATIVE_AGENTS = [
   { id: "codex", title: "Codex", detail: "Native Codex CLI" },
   { id: "grok", title: "Grok", detail: "Native Grok CLI" },
   { id: "cursor", title: "Cursor", detail: "Cursor Agent via WSL" },
+  { id: "qwen", title: "Qwen", detail: "Native Qwen Code CLI" },
 ] as const;
 
 export function AgentsSection() {

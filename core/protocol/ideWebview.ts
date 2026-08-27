@@ -25,7 +25,8 @@ export type BrokerModel =
   | "composer-2-5"
   | "kimi-k2"
   | "kimi-k3"
-  | "deepseek-v4-pro";
+  | "deepseek-v4-pro"
+  | "qwen-3-8-max";
 
 export type BrokerSubagent = "auto" | BrokerModel;
 
@@ -42,7 +43,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   insertAtCursor: [{ text: string }, void];
   copyText: [{ text: string }, void];
   "cukii/openBridgeSession": [
-    { agent: "deepseek" | "claude" | "codex" | "grok" | "cursor" },
+    { agent: "deepseek" | "claude" | "codex" | "grok" | "cursor" | "qwen" },
     void,
   ];
   "cukii/delegateBridgeWorker": [{}, void];

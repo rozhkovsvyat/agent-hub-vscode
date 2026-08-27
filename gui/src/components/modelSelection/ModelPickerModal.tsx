@@ -31,6 +31,7 @@ const VENDOR_META: Record<
   cursor: { initials: "Cu", bg: "#5c5cff", fg: "#fff" },
   kimi: { initials: "K", bg: "#e3a867", fg: "#1a1a1a" },
   deepseek: { initials: "D", bg: "#4d6bfa", fg: "#fff" },
+  qwen: { initials: "Q", bg: "#615ced", fg: "#fff" },
 };
 
 function VendorIcon({ vendor }: { vendor: VendorInfo }) {

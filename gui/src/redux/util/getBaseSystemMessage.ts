@@ -14,6 +14,7 @@ export const BROKER_MODEL_LABELS: Record<string, string> = {
   "codex-5-6-terra": "Codex 5.6 Terra",
   "grok-4-6": "Grok 4.6",
   "composer-2-5": "Composer 2.5",
+  "qwen-3-8-max": "Qwen 3.8 Max",
 };
 
 const BROKER_MODEL_AGENTS: Record<string, string> = {
@@ -22,6 +23,7 @@ const BROKER_MODEL_AGENTS: Record<string, string> = {
   "codex-5-6-terra": "codex",
   "grok-4-6": "grok",
   "composer-2-5": "cursor",
+  "qwen-3-8-max": "qwen",
 };
 
 function brokerModelLabel(value?: string): string | undefined {

@@ -58,6 +58,7 @@ const MODEL_LABELS: Record<BrokerModel, string> = {
   "kimi-k2": "Kimi K2.7",
   "kimi-k3": "Kimi K3",
   "deepseek-v4-pro": "DeepSeek V4 Pro",
+  "qwen-3-8-max": "Qwen 3.8 Max",
 };
 
 // Kimi едет собственным ПОДПИСОЧНЫМ CLI `kimi` (Kimi Code, device-login на
@@ -201,7 +202,7 @@ function buildPrompt(
 /** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
 function brokerAgentId(
   model: BrokerModel,
-): "codex" | "claude" | "grok" | "cursor" | "deepseek" {
+): "codex" | "claude" | "grok" | "cursor" | "deepseek" | "qwen" {
   switch (model) {
     case "opus-5":
     case "sonnet-5":
@@ -220,6 +221,8 @@ function brokerAgentId(
       return "claude";
     case "deepseek-v4-pro":
       return "deepseek";
+    case "qwen-3-8-max":
+      return "qwen";
   }
 }
 
@@ -245,6 +248,8 @@ function nativeDelegateHint(model: BrokerModel, cwd: string): string {
       return 'kimi -p "<task>" -m kimi-code/k3 --output-format stream-json';
     case "deepseek-v4-pro":
       return "deepseek bridge is not connected yet";
+    case "qwen-3-8-max":
+      return 'qwen --model qwen3.8-max-preview --prompt "<task>" --output-format stream-json --approval-mode yolo';
   }
 }
 
@@ -604,6 +609,25 @@ function routeForModel(
       throw new Error(
         "DeepSeek bridge is not connected yet. Select another model.",
       );
+    case "qwen-3-8-max":
+      return {
+        label: MODEL_LABELS[model],
+        program: "qwen",
+        args: [
+          "--model",
+          "qwen3.8-max-preview",
+          "--prompt",
+          "Follow the Cukii broker instructions supplied on stdin.",
+          "--output-format",
+          "stream-json",
+          "--approval-mode",
+          "yolo",
+        ],
+        // Qwen Code stream-json follows the assistant/user/result envelope
+        // consumed by the same parser as Claude and Grok.
+        format: "anthropic-envelope",
+        logFile,
+      };
   }
 }
 
