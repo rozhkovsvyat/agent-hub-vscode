@@ -2,9 +2,6 @@ import {
   ArrowPathIcon,
   ArrowUpIcon,
   AtSymbolIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CubeIcon,
   LightBulbIcon as LightBulbIconOutline,
   PencilIcon,
   PhotoIcon,
@@ -15,7 +12,7 @@ import {
   modelSupportsImages,
   modelSupportsReasoning,
 } from "core/llm/autodetect";
-import { memo, useContext, useEffect, useRef } from "react";
+import { memo, useContext, useEffect, useRef, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
@@ -36,29 +33,13 @@ import { exitEdit } from "../../redux/thunks/edit";
 import { getMetaKeyLabel, isMetaEquivalentKeyPressed } from "../../util";
 import { ToolTip } from "../gui/Tooltip";
 import ModelSelect from "../modelSelection/ModelSelect";
+import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
+import { modelInfo } from "../modelSelection/vendors";
 import { ModeSelect } from "../ModeSelect";
-import { Button } from "../ui";
-import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "../ui";
+import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
 import ContextStatus from "./ContextStatus";
 import HoverItem from "./InputToolbar/HoverItem";
-
-const BROKER_MODEL_OPTIONS: Array<{
-  value: BrokerModel;
-  label: string;
-}> = [
-  { value: "opus-5", label: "Opus 5" },
-  { value: "fable-5", label: "Fable 5" },
-  { value: "codex-5-6-terra", label: "Codex 5.6 Terra" },
-  { value: "grok-4-6", label: "Grok 4.6" },
-  { value: "composer-2-5", label: "Composer 2.5" },
-  { value: "kimi-k2", label: "Kimi K2.7" },
-];
-
-const BROKER_SUBAGENT_OPTIONS: Array<{
-  value: BrokerSubagent;
-  label: string;
-}> = [{ value: "auto", label: "Auto" }, ...BROKER_MODEL_OPTIONS];
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -94,6 +75,7 @@ function InputToolbar(props: InputToolbarProps) {
   const brokerSubagent = useAppSelector(
     (store) => store.session.brokerSubagent,
   );
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   // Once the user picks a model in this session, the in-flight mount request
   // (which reads globalState that may pre-date the pick) must not clobber it.
   const userTouchedBrokerRef = useRef(false);
@@ -156,72 +138,6 @@ function InputToolbar(props: InputToolbarProps) {
 
   const smallFont = useFontSize(-2);
   const tinyFont = useFontSize(-3);
-  const selectedBrokerModel =
-    BROKER_MODEL_OPTIONS.find((option) => option.value === brokerModel) ??
-    BROKER_MODEL_OPTIONS[1];
-  const selectedBrokerSubagent =
-    BROKER_SUBAGENT_OPTIONS.find((option) => option.value === brokerSubagent) ??
-    BROKER_SUBAGENT_OPTIONS[0];
-
-  const renderBrokerPicker = <T extends BrokerModel | BrokerSubagent>({
-    value,
-    options,
-    selectedLabel,
-    heading,
-    testId,
-    tooltip,
-    segment,
-    onChange,
-  }: {
-    value: T | undefined;
-    options: Array<{ value: T; label: string }>;
-    selectedLabel: string;
-    heading: string;
-    testId: string;
-    tooltip: string;
-    segment?: "left" | "right";
-    onChange: (value: T) => void;
-  }) => (
-    <ToolTip place="top" content={tooltip}>
-      <HoverItem className="!p-0">
-        <Listbox value={value} onChange={onChange}>
-          <div className="relative flex min-w-0">
-            <ListboxButton
-              data-testid={testId}
-              className={`text-description h-[22px] max-w-[180px] gap-1 border-none px-2 ${segment === "left" ? "cukii-segment-left" : ""} ${segment === "right" ? "cukii-segment-right" : ""}`}
-            >
-              <CubeIcon className="h-3 w-3 flex-shrink-0" />
-              <span className="min-w-0 truncate hover:brightness-110">
-                {selectedLabel}
-              </span>
-              <ChevronDownIcon
-                className="hidden h-2 w-2 flex-shrink-0 hover:brightness-110 min-[250px]:flex"
-                aria-hidden="true"
-              />
-            </ListboxButton>
-            <ListboxOptions className="min-w-[210px]">
-              <div className="text-description-muted px-2 py-1 text-xs font-medium">
-                {heading}
-              </div>
-              {options.map((option) => (
-                <ListboxOption key={option.value} value={option.value}>
-                  <div className="flex min-w-0 items-center gap-2 py-0.5">
-                    <CubeIcon className="h-3 w-3 flex-shrink-0" />
-                    <span className="truncate">{option.label}</span>
-                  </div>
-                  <CheckIcon
-                    className={`ml-auto h-3 w-3 ${
-                      option.value === value ? "" : "opacity-0"
-                    }`}
-                  />
-                </ListboxOption>
-              ))}
-            </ListboxOptions>
-          </div>
-        </Listbox>
-      </HoverItem>
-    </ToolTip>
-  );
 
   return (
     <>
@@ -244,32 +160,44 @@ function InputToolbar(props: InputToolbarProps) {
             </ToolTip>
           )}
           {mode === "broker" && !isInEdit ? (
-            <div className="cukii-broker-segmented flex min-w-0 flex-row items-center">
-              {renderBrokerPicker<BrokerModel>({
-                value: brokerModel,
-                options: BROKER_MODEL_OPTIONS,
-                selectedLabel: selectedBrokerModel.label,
-                heading: "Broker model",
-                testId: "broker-model-select-button",
-                tooltip: "Select Broker Model",
-                segment: "left",
-                onChange: (value) =>
-                  updateBrokerPreferences(value, brokerSubagent ?? "auto"),
-              })}
-              {renderBrokerPicker<BrokerSubagent>({
-                value: brokerSubagent,
-                options: BROKER_SUBAGENT_OPTIONS,
-                selectedLabel: selectedBrokerSubagent.label,
-                heading: "Subagent model",
-                testId: "broker-subagent-select-button",
-                tooltip: "Select Subagent Model",
-                segment: "right",
-                onChange: (value) =>
-                  updateBrokerPreferences(
-                    brokerModel ?? "codex-5-6-terra",
-                    value,
-                  ),
-              })}
+            <div className="flex min-w-0 flex-row items-center gap-1.5">
+              <Popover className="relative">
+                <PopoverButton
+                  data-testid="broker-menu-button"
+                  className="text-description hover:text-foreground flex h-[22px] w-[22px] items-center justify-center rounded border border-[var(--vscode-descriptionForeground,#55524c)] bg-transparent text-xs font-medium transition-colors"
+                  title="Model menu"
+                >
+                  /
+                </PopoverButton>
+                <PopoverPanel className="bg-vsc-background absolute bottom-full left-0 z-50 mb-1 min-w-[180px] rounded border border-[var(--vscode-panel-border,#333)] shadow-lg">
+                  {({ close }) => (
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        data-testid="broker-switch-model"
+                        className="text-description w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--vscode-list-hoverBackground,#2a2d2e)]"
+                        onClick={() => {
+                          close();
+                          setModelPickerOpen(true);
+                        }}
+                      >
+                        Switch model…
+                      </button>
+                    </div>
+                  )}
+                </PopoverPanel>
+              </Popover>
+              <span
+                className="text-description-muted truncate text-xs"
+                data-testid="broker-model-label"
+                title={modelInfo(brokerModel ?? "codex-5-6-terra")?.label}
+              >
+                {modelInfo(brokerModel ?? "codex-5-6-terra")?.label ??
+                  "Select model"}
+              </span>
+              {modelPickerOpen && (
+                <ModelPickerModal onClose={() => setModelPickerOpen(false)} />
+              )}
             </div>
           ) : (
             <ToolTip place="top" content="Select Model">

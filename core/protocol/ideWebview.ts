@@ -15,6 +15,20 @@ import {
   ShowFilePayload,
 } from "../";
 
+export type BrokerModel =
+  | "opus-5"
+  | "sonnet-5"
+  | "fable-5"
+  | "codex-5-6-terra"
+  | "codex-5-6-sol"
+  | "grok-4-6"
+  | "composer-2-5"
+  | "kimi-k2"
+  | "kimi-k3"
+  | "deepseek-v4-pro";
+
+export type BrokerSubagent = "auto" | BrokerModel;
+
 export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   openUrl: [string, void];
   applyToFile: [ApplyToFilePayload, void];
@@ -35,41 +49,15 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/getBrokerPreferences": [
     undefined,
     {
-      brokerModel:
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
-      brokerSubagent:
-        | "auto"
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
+      brokerModel: BrokerModel;
+      brokerSubagent: BrokerSubagent;
       mode?: "chat" | "plan" | "agent" | "broker";
     },
   ];
   "cukii/setBrokerPreferences": [
     {
-      brokerModel:
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
-      brokerSubagent:
-        | "auto"
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
+      brokerModel: BrokerModel;
+      brokerSubagent: BrokerSubagent;
       mode?: "chat" | "plan" | "agent" | "broker";
     },
     void,
@@ -77,21 +65,8 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/streamBridgeChat": [
     {
       messages: ChatMessage[];
-      brokerModel:
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
-      brokerSubagent:
-        | "auto"
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2";
+      brokerModel: BrokerModel;
+      brokerSubagent: BrokerSubagent;
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];

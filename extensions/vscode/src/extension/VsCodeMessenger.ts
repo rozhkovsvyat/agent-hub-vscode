@@ -9,6 +9,7 @@ import {
 import { ToWebviewFromCoreProtocol } from "core/protocol/coreWebview";
 import { ToIdeFromWebviewOrCoreProtocol } from "core/protocol/ide";
 import { ToIdeFromCoreProtocol } from "core/protocol/ideCore";
+import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
 import {
   CORE_TO_WEBVIEW_PASS_THROUGH,
@@ -338,23 +339,14 @@ export class VsCodeMessenger {
       );
     });
     this.onWebview("cukii/getBrokerPreferences", () => ({
-      brokerModel: this.context.globalState.get<
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2"
-      >("cukii.brokerModel", "codex-5-6-terra"),
-      brokerSubagent: this.context.globalState.get<
-        | "auto"
-        | "opus-5"
-        | "fable-5"
-        | "codex-5-6-terra"
-        | "grok-4-6"
-        | "composer-2-5"
-        | "kimi-k2"
-      >("cukii.brokerSubagent", "auto"),
+      brokerModel: this.context.globalState.get<BrokerModel>(
+        "cukii.brokerModel",
+        "codex-5-6-terra",
+      ),
+      brokerSubagent: this.context.globalState.get<BrokerSubagent>(
+        "cukii.brokerSubagent",
+        "auto",
+      ),
       mode: this.context.globalState.get<"chat" | "plan" | "agent" | "broker">(
         "cukii.brokerMode",
         "broker",

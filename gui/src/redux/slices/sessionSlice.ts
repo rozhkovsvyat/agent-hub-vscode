@@ -33,6 +33,7 @@ import {
 } from "core/util/messageContent";
 import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { findUriInDirs, getUriPathBasename } from "core/util/uri";
+import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
@@ -233,15 +234,7 @@ type SessionState = {
   compactionLoading: Record<number, boolean>; // Track compaction loading by message index
 };
 
-export type BrokerModel =
-  | "opus-5"
-  | "fable-5"
-  | "codex-5-6-terra"
-  | "grok-4-6"
-  | "composer-2-5"
-  | "kimi-k2";
-
-export type BrokerSubagent = "auto" | BrokerModel;
+export type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
 
 export const INITIAL_SESSION_STATE: SessionState = {
   isSessionMetadataLoading: false,

@@ -23,11 +23,15 @@ import {
 
 type BrokerModel =
   | "opus-5"
+  | "sonnet-5"
   | "fable-5"
   | "codex-5-6-terra"
+  | "codex-5-6-sol"
   | "grok-4-6"
   | "composer-2-5"
-  | "kimi-k2";
+  | "kimi-k2"
+  | "kimi-k3"
+  | "deepseek-v4-pro";
 
 type BrokerSubagent = "auto" | BrokerModel;
 
@@ -55,15 +59,18 @@ type BridgeEnv = NodeJS.ProcessEnv;
 
 const MODEL_LABELS: Record<BrokerModel, string> = {
   "opus-5": "Opus 5",
+  "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
   "codex-5-6-terra": "Codex 5.6 Terra",
+  "codex-5-6-sol": "Codex 5.6 Sol",
   "grok-4-6": "Grok 4.6",
   "composer-2-5": "Composer 2.5",
   // Enum id остаётся kimi-k2 ради совместимости с persist'ом globalState.
   // Дефолт подписки — kimi-code/kimi-for-coding (K2.7 Coding), поэтому витрина —
-  // «Kimi K2.7». K3 у подписки тоже есть (kimi-code/k3), выбирается через
-  // CUKII_KIMI_MODEL; отдельной кнопкой станет в двухпанельном пикере моделей.
+  // «Kimi K2.7». K3 у подписки тоже есть (kimi-code/k3).
   "kimi-k2": "Kimi K2.7",
+  "kimi-k3": "Kimi K3",
+  "deepseek-v4-pro": "DeepSeek V4 Pro",
 };
 
 // Kimi едет собственным ПОДПИСОЧНЫМ CLI `kimi` (Kimi Code, device-login на
@@ -162,12 +169,14 @@ function buildPrompt(
 /** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
 function brokerAgentId(
   model: BrokerModel,
-): "codex" | "claude" | "grok" | "cursor" {
+): "codex" | "claude" | "grok" | "cursor" | "deepseek" {
   switch (model) {
     case "opus-5":
+    case "sonnet-5":
     case "fable-5":
       return "claude";
     case "codex-5-6-terra":
+    case "codex-5-6-sol":
       return "codex";
     case "grok-4-6":
       return "grok";
@@ -175,7 +184,10 @@ function brokerAgentId(
       return "cursor";
     // Kimi едет через тот же claude CLI, поэтому worker-канал у него claude.
     case "kimi-k2":
+    case "kimi-k3":
       return "claude";
+    case "deepseek-v4-pro":
+      return "deepseek";
   }
 }
 
@@ -183,16 +195,24 @@ function nativeDelegateHint(model: BrokerModel, cwd: string): string {
   switch (model) {
     case "opus-5":
       return 'claude --model opus -p "<task>"';
+    case "sonnet-5":
+      return 'claude --model sonnet -p "<task>"';
     case "fable-5":
       return 'claude --model fable -p "<task>"';
     case "codex-5-6-terra":
       return `codex -m gpt-5.6-terra exec -s danger-full-access --cd "${cwd}" -`;
+    case "codex-5-6-sol":
+      return `codex -m gpt-5.6-sol exec -s danger-full-access --cd "${cwd}" -`;
     case "grok-4-6":
       return `grok --model grok-4.6 --cwd "${cwd}" --prompt-file <task-file>`;
     case "composer-2-5":
       return "cursor-agent -p --output-format text --model composer-2.5 --trust";
     case "kimi-k2":
       return 'kimi -p "<task>" --output-format stream-json';
+    case "kimi-k3":
+      return 'kimi -p "<task>" -m kimi-code/k3 --output-format stream-json';
+    case "deepseek-v4-pro":
+      return "deepseek bridge is not connected yet";
   }
 }
 
@@ -373,13 +393,30 @@ function routeForModel(
         format: "anthropic-envelope",
         logFile,
       };
+    case "sonnet-5":
+      return {
+        label: MODEL_LABELS[model],
+        program: "claude",
+        args: [
+          "--model",
+          "sonnet",
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        format: "anthropic-envelope",
+        logFile,
+      };
     // Kimi = подписочный CLI `kimi` (device-login), поток stream-json в формате
     // kimi-ndjson. Модель НЕ форсируем — берётся default_model из config.toml
     // (то, что реально даёт подписка); override только через CUKII_KIMI_MODEL.
     // `-p` берёт промпт аргументом и stdin не читает, поэтому большой транскрипт
     // уходит в файл, а kimi получает короткую инструкцию прочитать его тулом.
-    case "kimi-k2": {
-      const modelArg = kimiModelOverride();
+    case "kimi-k2":
+    case "kimi-k3": {
+      const modelArg =
+        model === "kimi-k3" ? "kimi-code/k3" : kimiModelOverride();
       const inline =
         Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
       let promptArg = prompt;
@@ -421,6 +458,24 @@ function routeForModel(
         args: [
           "-m",
           "gpt-5.6-terra",
+          "exec",
+          "--json",
+          "-s",
+          "danger-full-access",
+          "--cd",
+          cwd,
+          "-",
+        ],
+        format: "codex-thread",
+        logFile,
+      };
+    case "codex-5-6-sol":
+      return {
+        label: MODEL_LABELS[model],
+        program: "codex",
+        args: [
+          "-m",
+          "gpt-5.6-sol",
           "exec",
           "--json",
           "-s",
@@ -511,6 +566,10 @@ function routeForModel(
         format: "anthropic-envelope",
         logFile,
       };
+    case "deepseek-v4-pro":
+      throw new Error(
+        "DeepSeek bridge is not connected yet. Select another model.",
+      );
   }
 }
 
