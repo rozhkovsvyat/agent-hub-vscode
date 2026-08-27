@@ -48,7 +48,12 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByTestId("cukii-slash-menu")).toBeDefined();
     expect(
       (await getElementByTestId("cukii-thinking-track")).className,
-    ).toContain("bg-[var(--cukii-accent)]");
+    ).toContain("cukii-toggle-track-on");
+    expect(
+      (await getElementByTestId("cukii-thinking-track")).querySelector(
+        ".cukii-toggle-thumb",
+      ),
+    ).not.toBeNull();
 
     const filter = document.querySelector(
       'input[placeholder="Filter actions..."]',

@@ -4,8 +4,11 @@ const [extensionId, needle] = process.argv.slice(2);
 const sidebar = process.argv.includes("--sidebar");
 const rightClick = process.argv.includes("--right");
 if (!extensionId || !needle)
-  throw new Error("usage: click-webview-control.mjs <extensionId> <aria/title/text>");
-const targets = (await listTargets("http://127.0.0.1:9222")).filter(
+  throw new Error(
+    "usage: click-webview-control.mjs <extensionId> <aria/title/text>",
+  );
+const endpoint = process.env.CUKII_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
+const targets = (await listTargets(endpoint)).filter(
   (candidate) =>
     candidate.type === "iframe" &&
     candidate.url.includes(`extensionId=${extensionId}`) &&
@@ -43,7 +46,9 @@ for (const target of targets) {
   client.close();
   if (response.result.value?.matches === 1) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    process.stdout.write(`${JSON.stringify({ status: "CLICKED", targetId: target.id })}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ status: "CLICKED", targetId: target.id })}\n`,
+    );
     process.exit(0);
   }
 }

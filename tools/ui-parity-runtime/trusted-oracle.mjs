@@ -279,7 +279,8 @@ async function inspectVisibleMatches(target, descriptor) {
         return { visibleCount: matches.length, matches };
       })()`,
     });
-    if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails));
+    if (response.exceptionDetails)
+      throw new Error(JSON.stringify(response.exceptionDetails));
     return response.result.value;
   } finally {
     client.close();
@@ -362,7 +363,8 @@ await workbenchClient.connect();
 
 async function ensureActivity(label, selector) {
   const locator = page.locator(selector).filter({ visible: true });
-  const box = (await locator.count()) === 1 ? await locator.boundingBox() : null;
+  const box =
+    (await locator.count()) === 1 ? await locator.boundingBox() : null;
   const visible =
     box &&
     box.x >= 0 &&
@@ -380,21 +382,113 @@ async function ensureActivity(label, selector) {
 const assertions = [];
 const interactions = [];
 
+async function inspectPermissionControl(
+  id,
+  selector,
+  vendor,
+  viewportWidth = null,
+) {
+  const locator = page.locator(selector).filter({ visible: true });
+  if ((await locator.count()) !== 1)
+    throw new Error(`${id}: expected one visible editor iframe`);
+  const src = await locator.getAttribute("src");
+  if (!src) throw new Error(`${id}: editor iframe src unavailable`);
+  const originalStyle =
+    viewportWidth !== null ? await locator.getAttribute("style") : null;
+  if (viewportWidth !== null) {
+    await locator.evaluate((element, width) => {
+      element.style.setProperty("width", `${width}px`, "important");
+      element.style.setProperty("min-width", `${width}px`, "important");
+      element.style.setProperty("max-width", `${width}px`, "important");
+    }, viewportWidth);
+    await page.waitForTimeout(250);
+  }
+  const correlated = await correlateTarget(src);
+  const client = new CdpClient(correlated.target.webSocketDebuggerUrl);
+  await client.connect();
+  try {
+    const response = await client.send("Runtime.evaluate", {
+      returnByValue: true,
+      expression: `(() => {
+        const doc = document.querySelector("#active-frame")?.contentDocument;
+        if (!doc) return null;
+        const isVisible = (element) => {
+          const rect = element.getBoundingClientRect();
+          const hit = doc.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          return Boolean(
+            rect.width > 0 &&
+            rect.height > 0 &&
+            hit &&
+            (hit === element || element.contains(hit))
+          );
+        };
+        const button = ${JSON.stringify(vendor)} === "claude"
+          ? [...doc.querySelectorAll("button")].find((element) =>
+              (element.title ?? "").includes("Claude will") && isVisible(element))
+          : [...doc.querySelectorAll("button.cukii-permission-button")].find(isVisible);
+        if (!button) return null;
+        const rect = button.getBoundingClientRect();
+        const hit = doc.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        const label = button.querySelector("span");
+        const labelRect = label?.getBoundingClientRect();
+        const labelStyle = label ? getComputedStyle(label) : null;
+        return {
+          viewportWidth: doc.defaultView.innerWidth,
+          button: {
+            width: rect.width,
+            height: rect.height,
+            visible: Boolean(hit && (hit === button || button.contains(hit))),
+          },
+          label: {
+            display: labelStyle?.display ?? null,
+            width: labelRect?.width ?? 0,
+            visible: Boolean(
+              labelStyle &&
+              labelStyle.display !== "none" &&
+              labelRect &&
+              labelRect.width > 0 &&
+              labelRect.height > 0
+            ),
+          },
+        };
+      })()`,
+    });
+    return response.result.value;
+  } finally {
+    client.close();
+    if (viewportWidth !== null) {
+      await locator.evaluate((element, style) => {
+        if (style === null) element.removeAttribute("style");
+        else element.setAttribute("style", style);
+      }, originalStyle);
+      await page.waitForTimeout(250);
+    }
+  }
+}
+
 async function replaceVisibleSearchValue(id, selector, value) {
   const locator = page.locator(selector).filter({ visible: true });
   if ((await locator.count()) !== 1)
     throw new Error(`${id}: expected one sidebar iframe`);
   const outerBox = await locator.boundingBox();
   const outerSrc = await locator.getAttribute("src");
-  if (!outerBox || !outerSrc) throw new Error(`${id}: sidebar iframe unavailable`);
+  if (!outerBox || !outerSrc)
+    throw new Error(`${id}: sidebar iframe unavailable`);
   const correlated = await correlateTarget(outerSrc);
   const client = new CdpClient(correlated.target.webSocketDebuggerUrl);
   await client.connect();
   let field;
   try {
-    const response = await client.send("Runtime.evaluate", {
-      returnByValue: true,
-      expression: `(() => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const response = await client.send("Runtime.evaluate", {
+        returnByValue: true,
+        expression: `(() => {
         const doc = document.querySelector("#active-frame")?.contentDocument;
         const inputs = [...(doc?.querySelectorAll("input") ?? [])]
           .filter((input) => (input.placeholder ?? "").includes("Search sessions"));
@@ -412,8 +506,11 @@ async function replaceVisibleSearchValue(id, selector, value) {
           point: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
         };
       })()`,
-    });
-    field = response.result.value;
+      });
+      field = response.result.value;
+      if (field.matches === 1) break;
+      await page.waitForTimeout(150);
+    }
   } finally {
     client.close();
   }
@@ -421,12 +518,20 @@ async function replaceVisibleSearchValue(id, selector, value) {
     throw new Error(
       `${id}: search input not uniquely visible (visible matches: ${field.matches})`,
     );
-  await page.mouse.click(outerBox.x + field.point.x, outerBox.y + field.point.y);
+  await page.mouse.click(
+    outerBox.x + field.point.x,
+    outerBox.y + field.point.y,
+  );
   await page.keyboard.press("Control+A");
   await page.keyboard.press("Backspace");
   if (value) await page.keyboard.type(value);
   await page.waitForTimeout(200);
-  interactions.push({ id, action: "replace-search", from: field.value, to: value });
+  interactions.push({
+    id,
+    action: "replace-search",
+    from: field.value,
+    to: value,
+  });
   return field.value;
 }
 
@@ -446,17 +551,30 @@ async function captureState({ id, selector, activityLabel = null }) {
     dpr: devicePixelRatio,
   }));
   const before = await correlateTarget(outerSrc);
-  const runtime = await inspectTarget(before.target);
+  const viewportRoundingTolerance = 1.5;
+  let runtime;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    runtime = await inspectTarget(before.target);
+    const viewportMatches =
+      Math.abs(runtime.viewport.width - box.width) <=
+        viewportRoundingTolerance &&
+      Math.abs(runtime.viewport.height - box.height) <=
+        viewportRoundingTolerance;
+    if (viewportMatches) break;
+    await page.waitForTimeout(150);
+  }
+  if (
+    Math.abs(runtime.viewport.width - box.width) > viewportRoundingTolerance ||
+    Math.abs(runtime.viewport.height - box.height) > viewportRoundingTolerance
+  ) {
+    throw new Error(
+      `${id}: inner viewport does not match outer iframe box: ${JSON.stringify({ runtime: runtime.viewport, outer: box, viewportRoundingTolerance })}`,
+    );
+  }
   const resourceEvidence = assertExactResourceBinding(
     runtime,
     before.tuple.extensionId,
   );
-  if (
-    Math.abs(runtime.viewport.width - box.width) > 1 ||
-    Math.abs(runtime.viewport.height - box.height) > 1
-  ) {
-    throw new Error(`${id}: inner viewport does not match outer iframe box`);
-  }
   const screenshot = await workbenchClient.send("Page.captureScreenshot", {
     format: "png",
     fromSurface: true,
@@ -714,13 +832,22 @@ async function assertVisibleState(id, selector, match, expectedVisible) {
   if (!outerSrc) throw new Error(`${id}: outer iframe is unavailable`);
   const correlated = await correlateTarget(outerSrc);
   const state = await inspectVisibleMatches(correlated.target, match);
-  const pass = expectedVisible ? state.visibleCount >= 1 : state.visibleCount === 0;
+  const pass = expectedVisible
+    ? state.visibleCount >= 1
+    : state.visibleCount === 0;
   if (!pass) {
     throw new Error(
       `${id}: expected visible=${expectedVisible}, got ${state.visibleCount}`,
     );
   }
-  assertions.push({ id, kind: "visible-state", match, expectedVisible, state, pass });
+  assertions.push({
+    id,
+    kind: "visible-state",
+    match,
+    expectedVisible,
+    state,
+    pass,
+  });
 }
 
 async function inspectThinkingState(selector) {
@@ -737,13 +864,21 @@ async function inspectThinkingState(selector) {
         const doc = document.querySelector("#active-frame")?.contentDocument;
         const toggle = doc?.querySelector('[data-testid="cukii-thinking-toggle"]');
         const track = doc?.querySelector('[data-testid="cukii-thinking-track"]');
+        const thumb = track?.querySelector('.cukii-toggle-thumb');
         const filter = doc?.querySelector('input[placeholder*="Filter actions"]');
-        if (!toggle || !track || !filter) return null;
+        if (!toggle || !track || !thumb || !filter) return null;
         const rect = filter.getBoundingClientRect();
         const hit = doc.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const trackStyle = getComputedStyle(track);
+        const thumbStyle = getComputedStyle(thumb);
         return {
           checked: toggle.getAttribute("aria-checked") === "true",
-          trackBackground: getComputedStyle(track).backgroundColor,
+          trackBackground: trackStyle.backgroundColor,
+          trackTransitionProperty: trackStyle.transitionProperty,
+          trackTransitionDuration: trackStyle.transitionDuration,
+          thumbTransform: thumbStyle.transform,
+          thumbTransitionProperty: thumbStyle.transitionProperty,
+          thumbTransitionDuration: thumbStyle.transitionDuration,
           menuVisible: Boolean(hit && (hit === filter || filter.contains(hit))),
         };
       })()`,
@@ -783,11 +918,34 @@ async function assertMenuOccludesTimeline(id, selector) {
             occludedByMenu: Boolean(hit && menu.contains(hit)),
           }];
         });
+        const voice = doc.querySelector('.cukii-voice-button');
+        const voiceRect = voice?.getBoundingClientRect();
+        const voicePoint = voiceRect
+          ? { x: voiceRect.left + voiceRect.width / 2, y: voiceRect.top + voiceRect.height / 2 }
+          : null;
+        const voiceInsideMenu = Boolean(
+          voicePoint &&
+          voicePoint.x >= menuRect.left && voicePoint.x <= menuRect.right &&
+          voicePoint.y >= menuRect.top && voicePoint.y <= menuRect.bottom
+        );
+        const voiceHit = voicePoint ? doc.elementFromPoint(voicePoint.x, voicePoint.y) : null;
+        const voiceOccludedByMenu = Boolean(voiceInsideMenu && voiceHit && menu.contains(voiceHit));
         return {
           menuVisible: true,
           menuRect: { x: menuRect.x, y: menuRect.y, width: menuRect.width, height: menuRect.height },
           overlaps,
-          pass: overlaps.every((entry) => entry.occludedByMenu),
+          voice: {
+            point: voicePoint,
+            insideMenu: voiceInsideMenu,
+            hitTag: voiceHit?.tagName ?? null,
+            hitClass: String(voiceHit?.className ?? ""),
+            occludedByMenu: voiceOccludedByMenu,
+          },
+          pass:
+            overlaps.length >= 1 &&
+            overlaps.every((entry) => entry.occludedByMenu) &&
+            voiceInsideMenu &&
+            voiceOccludedByMenu,
         };
       })()`,
     });
@@ -796,7 +954,9 @@ async function assertMenuOccludesTimeline(id, selector) {
     client.close();
   }
   if (!state.pass) {
-    throw new Error(`${id}: timeline dots pierce menu: ${JSON.stringify(state)}`);
+    throw new Error(
+      `${id}: timeline dots pierce menu: ${JSON.stringify(state)}`,
+    );
   }
   assertions.push({ id, kind: "overlay-occlusion", state, pass: true });
 }
@@ -818,7 +978,10 @@ async function focusAndDismiss(id, selector) {
     throw new Error(`${id}: expected one outer iframe`);
   const box = await locator.boundingBox();
   if (!box) throw new Error(`${id}: outer iframe is unavailable`);
-  await page.mouse.click(box.x + Math.min(12, box.width / 2), box.y + Math.min(24, box.height / 2));
+  await page.mouse.click(
+    box.x + Math.min(12, box.width / 2),
+    box.y + Math.min(24, box.height / 2),
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(350);
   interactions.push({
@@ -952,11 +1115,11 @@ try {
     id: "claude-hover-bypass",
     selector:
       'iframe[src*="extensionId=Anthropic.claude-code"]:not([src*="purpose=webviewView"])',
-    match: { tag: "button", titleIncludes: "will not ask for approval" },
+    match: { tag: "button", titleIncludes: "Claude will" },
     action: "hover",
     postcondition: {
       kind: "style-changes",
-      match: { tag: "button", titleIncludes: "will not ask for approval" },
+      match: { tag: "button", titleIncludes: "Claude will" },
       property: "backgroundColor",
     },
   });
@@ -976,7 +1139,7 @@ try {
     button: "right",
     postcondition: {
       kind: "becomes-visible",
-      match: { tag: "button", textExact: "Switch to session" },
+      match: { tag: "button", textExact: "Resume session" },
     },
   });
   states.push(
@@ -991,7 +1154,7 @@ try {
   await assertVisibleState(
     "claude-context-menu-closed",
     'iframe[src*="extensionId=Anthropic.claude-code"][src*="purpose=webviewView"]',
-    { tag: "button", textExact: "Switch to session" },
+    { tag: "button", textExact: "Resume session" },
     false,
   );
   states.push(
@@ -1013,6 +1176,83 @@ try {
         'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
     }),
   );
+  const claudePermissionControl = await inspectPermissionControl(
+    "claude-responsive-permission",
+    'iframe[src*="extensionId=Anthropic.claude-code"]:not([src*="purpose=webviewView"])',
+    "claude",
+  );
+  const cukiiPermissionControl = await inspectPermissionControl(
+    "cukii-responsive-permission",
+    'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
+    "cukii",
+  );
+  if (
+    !claudePermissionControl?.button.visible ||
+    !cukiiPermissionControl?.button.visible
+  )
+    throw new Error("responsive-permission: controls are not both visible");
+  if (
+    claudePermissionControl.label.visible !==
+    cukiiPermissionControl.label.visible
+  )
+    throw new Error(
+      "responsive-permission: label collapse differs from Claude",
+    );
+  if (
+    !claudePermissionControl.label.visible &&
+    (Math.abs(
+      claudePermissionControl.button.width -
+        cukiiPermissionControl.button.width,
+    ) > 0.75 ||
+      Math.abs(
+        claudePermissionControl.button.height -
+          cukiiPermissionControl.button.height,
+      ) > 0.75)
+  )
+    throw new Error("responsive-permission: collapsed button geometry differs");
+  assertions.push({
+    id: "cukii-responsive-permission-parity",
+    kind: "runtime-state",
+    claude: claudePermissionControl,
+    cukii: cukiiPermissionControl,
+    pass: true,
+  });
+  const claudeNarrowPermissionControl = await inspectPermissionControl(
+    "claude-narrow-responsive-permission",
+    'iframe[src*="extensionId=Anthropic.claude-code"]:not([src*="purpose=webviewView"])',
+    "claude",
+    280,
+  );
+  const cukiiNarrowPermissionControl = await inspectPermissionControl(
+    "cukii-narrow-responsive-permission",
+    'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
+    "cukii",
+    280,
+  );
+  if (
+    !claudeNarrowPermissionControl?.button.visible ||
+    !cukiiNarrowPermissionControl?.button.visible ||
+    claudeNarrowPermissionControl.label.visible ||
+    cukiiNarrowPermissionControl.label.visible ||
+    Math.abs(
+      claudeNarrowPermissionControl.button.width -
+        cukiiNarrowPermissionControl.button.width,
+    ) > 0.75 ||
+    Math.abs(
+      claudeNarrowPermissionControl.button.height -
+        cukiiNarrowPermissionControl.button.height,
+    ) > 0.75
+  )
+    throw new Error(
+      "narrow-responsive-permission: labels or collapsed geometry differ",
+    );
+  assertions.push({
+    id: "cukii-narrow-responsive-permission-parity",
+    kind: "runtime-state",
+    claude: claudeNarrowPermissionControl,
+    cukii: cukiiNarrowPermissionControl,
+    pass: true,
+  });
   await gesture({
     id: "cukii-start-voice-input",
     selector:
@@ -1021,7 +1261,9 @@ try {
     action: "click",
   });
   const activeCukiiEditorSrc = await page
-    .locator('iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])')
+    .locator(
+      'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
+    )
     .filter({ visible: true })
     .getAttribute("src");
   if (!activeCukiiEditorSrc)
@@ -1035,7 +1277,9 @@ try {
     { tag: "button", titleExact: "Microphone permission is required" },
   );
   if (voiceListening.visibleCount + voicePermissionDenied.visibleCount !== 1)
-    throw new Error("cukii-voice-input: click produced neither listening nor explicit permission state");
+    throw new Error(
+      "cukii-voice-input: click produced neither listening nor explicit permission state",
+    );
   assertions.push({
     id: "cukii-voice-input-runtime",
     kind: "runtime-state",
@@ -1095,7 +1339,9 @@ try {
     'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
   );
   if (!thinkingBefore?.menuVisible)
-    throw new Error("cukii-thinking-toggle: slash menu is not visible before toggle");
+    throw new Error(
+      "cukii-thinking-toggle: slash menu is not visible before toggle",
+    );
   if (!thinkingBefore.checked) {
     await gesture({
       id: "cukii-enable-thinking",
@@ -1111,10 +1357,15 @@ try {
   if (
     !thinkingEnabled?.checked ||
     !thinkingEnabled.menuVisible ||
-    thinkingEnabled.trackBackground !== "rgb(244, 135, 113)"
+    thinkingEnabled.trackBackground !== "rgb(244, 135, 113)" ||
+    !thinkingEnabled.trackTransitionProperty.includes("background-color") ||
+    thinkingEnabled.trackTransitionDuration === "0s" ||
+    !thinkingEnabled.thumbTransitionProperty.includes("transform") ||
+    thinkingEnabled.thumbTransitionDuration === "0s" ||
+    thinkingEnabled.thumbTransform === "none"
   ) {
     throw new Error(
-      `cukii-thinking-toggle: expected open menu and orange enabled track, got ${JSON.stringify(thinkingEnabled)}`,
+      `cukii-thinking-toggle: expected animated open-menu orange enabled track, got ${JSON.stringify(thinkingEnabled)}`,
     );
   }
   assertions.push({
@@ -1135,8 +1386,13 @@ try {
   const thinkingRestored = await inspectThinkingState(
     'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
   );
-  if (!thinkingRestored?.menuVisible || thinkingRestored.checked !== thinkingBefore.checked)
-    throw new Error("cukii-thinking-toggle: state was not restored with menu left open");
+  if (
+    !thinkingRestored?.menuVisible ||
+    thinkingRestored.checked !== thinkingBefore.checked
+  )
+    throw new Error(
+      "cukii-thinking-toggle: state was not restored with menu left open",
+    );
   await gesture({
     id: "cukii-click-switch-model",
     selector:
@@ -1166,11 +1422,11 @@ try {
     id: "cukii-hover-bypass",
     selector:
       'iframe[src*="extensionId=cukii.cukii-vscode"]:not([src*="purpose=webviewView"])',
-    match: { tag: "button", textExact: "Bypass permissions" },
+    match: { tag: "button", titleExact: "Toggle permission mode" },
     action: "hover",
     postcondition: {
       kind: "style-changes",
-      match: { tag: "button", textExact: "Bypass permissions" },
+      match: { tag: "button", titleExact: "Toggle permission mode" },
       property: "backgroundColor",
     },
   });
@@ -1350,7 +1606,9 @@ const receipt = {
     installedResourceAndManifestHashesCaptured:
       !failure && resourcesMatchLocalCli,
     semanticPostconditionsPassed:
-      !failure && assertions.length >= 12 && assertions.every((item) => item.pass),
+      !failure &&
+      assertions.length >= 12 &&
+      assertions.every((item) => item.pass),
     sameWorkbenchTargetAliveAfterRun: Boolean(finalWorkbench),
     originalActivityRestored:
       finalWorkbenchState.activeActivity === initialWorkbench.activeActivity,

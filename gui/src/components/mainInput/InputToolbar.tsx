@@ -323,23 +323,25 @@ function InputToolbar(props: InputToolbarProps) {
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          dispatch(setHasReasoningEnabled(!hasReasoningEnabled));
+                          dispatch(
+                            setHasReasoningEnabled(!hasReasoningEnabled),
+                          );
                         }}
                       >
                         <span>Thinking</span>
                         <span
                           data-testid="cukii-thinking-track"
-                          className={`flex h-5 w-9 items-center rounded-full px-0.5 ${hasReasoningEnabled ? "justify-end bg-[var(--cukii-accent)]" : "justify-start bg-[var(--vscode-input-background)]"}`}
+                          className={`cukii-toggle-track ${hasReasoningEnabled ? "cukii-toggle-track-on" : ""}`}
                         >
-                          <span className="h-4 w-4 rounded-full bg-[var(--vscode-button-foreground)]" />
+                          <span className="cukii-toggle-thumb" />
                         </span>
                       </button>
                     )}
                     {showAction("Switch models when a message is flagged") && (
                       <button className={menuItemClass} type="button" disabled>
                         <span>Switch models when a message is flagged</span>
-                        <span className="flex h-5 w-9 items-center justify-start rounded-full bg-[var(--vscode-input-background)] px-0.5">
-                          <span className="h-4 w-4 rounded-full bg-[var(--vscode-descriptionForeground)]" />
+                        <span className="cukii-toggle-track cukii-toggle-track-disabled">
+                          <span className="cukii-toggle-thumb" />
                         </span>
                       </button>
                     )}
@@ -389,7 +391,7 @@ function InputToolbar(props: InputToolbarProps) {
               ) : (
                 <ShareIcon className="h-4 w-4" />
               )}
-              Bypass permissions
+              <span className="cukii-permission-label">Bypass permissions</span>
             </button>
           )}
 

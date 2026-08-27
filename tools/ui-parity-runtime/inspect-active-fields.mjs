@@ -2,10 +2,13 @@ import { CdpClient, listTargets } from "./cdp-client.mjs";
 
 const extensionId = process.argv[2] ?? "Anthropic.claude-code";
 const sidebar = process.argv[3] === "sidebar";
-const target = (await listTargets("http://127.0.0.1:9222")).find((candidate) =>
-  candidate.type === "iframe" &&
-  candidate.url.includes(`extensionId=${extensionId}`) &&
-  candidate.url.includes("purpose=webviewView") === sidebar);
+const endpoint = process.env.CUKII_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
+const target = (await listTargets(endpoint)).find(
+  (candidate) =>
+    candidate.type === "iframe" &&
+    candidate.url.includes(`extensionId=${extensionId}`) &&
+    candidate.url.includes("purpose=webviewView") === sidebar,
+);
 if (!target) throw new Error(`${extensionId}: editor target missing`);
 const client = new CdpClient(target.webSocketDebuggerUrl);
 await client.connect();
