@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ChatMessage, PromptLog } from "core";
+import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
 import * as vscode from "vscode";
 
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
@@ -20,20 +21,6 @@ import {
   endSteerSession,
   steerPromptInstruction,
 } from "./bridgeSteer";
-
-type BrokerModel =
-  | "opus-5"
-  | "sonnet-5"
-  | "fable-5"
-  | "codex-5-6-terra"
-  | "codex-5-6-sol"
-  | "grok-4-6"
-  | "composer-2-5"
-  | "kimi-k2"
-  | "kimi-k3"
-  | "deepseek-v4-pro";
-
-type BrokerSubagent = "auto" | BrokerModel;
 
 type BridgeRoute = {
   label: string;
@@ -93,6 +80,51 @@ function kimiCliProgram(): string {
 function kimiModelOverride(): string | undefined {
   const m = process.env.CUKII_KIMI_MODEL || process.env.MOONSHOT_MODEL;
   return m && m.trim() ? m.trim() : undefined;
+}
+
+/**
+ * Skills для Kimi CLI (`--skills-dir`). Паритет с Claude/Codex: те же каталоги,
+ * что подключаются через `.claude/skills` и `.codex/skills`. Разрешаем симлинки
+ * сами и возвращаем только директории, содержащие `SKILL.md`/`skill.md` — так
+ * битые symlink'и внутри skill-рута не ломают запуск Kimi.
+ */
+function getKimiSkillDirs(): string[] {
+  const home = os.homedir();
+  const roots = [
+    path.join(home, ".claude", "skills"),
+    path.join(home, ".codex", "skills"),
+    "D:\\Brain\\repo\\personal\\agent-hub-vscode\\skills",
+    "D:\\Brain\\vault\\fm-reboot\\.claude\\skills",
+  ];
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const root of roots) {
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      try {
+        const candidate = path.join(root, entry);
+        const real = fs.realpathSync(candidate);
+        if (seen.has(real.toLowerCase())) continue;
+        if (!fs.statSync(real).isDirectory()) continue;
+        if (
+          !fs.existsSync(path.join(real, "SKILL.md")) &&
+          !fs.existsSync(path.join(real, "skill.md"))
+        ) {
+          continue;
+        }
+        seen.add(real.toLowerCase());
+        dirs.push(real);
+      } catch {
+        // skip broken symlinks or unreadable entries
+      }
+    }
+  }
+  return dirs;
 }
 
 function windowsCmdPath(): string {
@@ -434,6 +466,7 @@ function routeForModel(
           "latest user message. Answer in the user's language.";
         extraArgs.push("--add-dir", os.tmpdir());
       }
+      const skillDirs = getKimiSkillDirs();
       return {
         label: MODEL_LABELS[model],
         program: kimiCliProgram(),
@@ -444,6 +477,7 @@ function routeForModel(
           "stream-json",
           ...(modelArg ? ["-m", modelArg] : []),
           ...extraArgs,
+          ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
         ],
         format: "kimi-ndjson",
         promptFile: kimiPromptFile,
