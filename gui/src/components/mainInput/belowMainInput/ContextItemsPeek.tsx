@@ -127,7 +127,9 @@ export function ContextItemsPeekItem({
       data-testid="context-items-peek-item"
     >
       {getContextItemIcon()}
-      <span className={`line-clamp-1 max-w-[130px] flex-shrink-0`}>
+      <span
+        className={`text-description-muted line-clamp-1 max-w-[130px] flex-shrink-0`}
+      >
         {contextItem.name}
       </span>
       <div

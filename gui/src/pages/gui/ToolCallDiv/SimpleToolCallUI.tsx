@@ -50,7 +50,7 @@ export function SimpleToolCallUI({
     <div className="flex flex-col px-0 py-0.5">
       <div className="flex min-w-0 flex-row items-center justify-between gap-2">
         <div
-          className={`text-description flex min-w-0 flex-row items-center justify-between gap-1.5 text-xs transition-colors duration-200 ease-in-out ${
+          className={`text-description-muted flex min-w-0 flex-row items-center justify-between gap-1.5 text-xs transition-colors duration-200 ease-in-out ${
             isClickable ? "cursor-pointer hover:brightness-125" : ""
           }`}
           onClick={isClickable ? handleClick : undefined}
@@ -83,7 +83,7 @@ export function SimpleToolCallUI({
               <ContextItemsPeekItem key={idx} contextItem={contextItem} />
             ))
           ) : (
-            <div className="text-description pl-5 text-xs italic">
+            <div className="text-description-muted pl-5 text-xs italic">
               No tool call output
             </div>
           )}
