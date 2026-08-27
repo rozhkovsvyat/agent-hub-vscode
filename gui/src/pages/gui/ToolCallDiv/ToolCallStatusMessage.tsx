@@ -58,7 +58,7 @@ export function ToolCallStatusMessage({
 
   return (
     <span
-      className={`flex min-w-0 items-baseline gap-1.5 ${
+      className={`flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0 ${
         isShell ? "cukii-shell-tool-call" : ""
       }`}
       data-testid="tool-call-title"
@@ -75,7 +75,7 @@ export function ToolCallStatusMessage({
         </span>
       )}
       {lines > 0 && (
-        <span className="text-description-muted text-2xs flex-shrink-0">
+        <span className="text-description-muted text-2xs w-full">
           {lines} lines
         </span>
       )}
