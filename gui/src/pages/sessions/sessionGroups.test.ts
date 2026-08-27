@@ -1,7 +1,10 @@
 import type { BaseSessionMetadata } from "core";
 import { describe, expect, it } from "vitest";
 import { groupSessions, parseSessionGroups } from "./sessionGroups";
-import { mergeSessionsWithOpenPanels } from "./CukiiSessionNavigator";
+import {
+  formatSessionAge,
+  mergeSessionsWithOpenPanels,
+} from "./CukiiSessionNavigator";
 
 const sessions: BaseSessionMetadata[] = [
   {
@@ -57,5 +60,10 @@ describe("Cukii session groups", () => {
     expect(
       merged.find((session) => session.sessionId === "two")?.openPanelId,
     ).toBeUndefined();
+  });
+
+  it("never renders NaN for malformed session dates", () => {
+    expect(formatSessionAge("not-a-date")).toBe("");
+    expect(formatSessionAge(new Date().toISOString())).toMatch(/^\d+m$/u);
   });
 });

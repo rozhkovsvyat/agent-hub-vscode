@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.59",
+  "version": "2.0.61",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -383,7 +383,11 @@
       {
         "command": "continue.openInNewWindow",
         "category": "Cukii",
-        "title": "Open in new window",
+        "title": "Open Cukii in a New Tab",
+        "icon": {
+          "light": "media/cukii-title.svg",
+          "dark": "media/cukii-title.svg"
+        },
         "group": "Cukii"
       }
     ],
@@ -392,6 +396,18 @@
         "command": "continue.openInNewWindow",
         "mac": "shift+alt+c u",
         "key": "shift+alt+c u",
+        "args": {
+          "suppressInitialChordCharacter": true
+        },
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "continue.openInNewWindow",
+        "mac": "ctrl+shift+c u",
+        "key": "ctrl+shift+c u",
+        "args": {
+          "suppressInitialChordCharacter": true
+        },
         "when": "!terminalFocus"
       },
       {
@@ -597,6 +613,10 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "continue.openInNewWindow",
+          "group": "navigation"
+        },
         {
           "command": "continue.newSession",
           "group": "navigation@1",

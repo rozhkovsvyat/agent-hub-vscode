@@ -19,11 +19,13 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(
       document.querySelector('[data-testid="mode-select-button"]'),
     ).toBeNull();
-    expect(await getElementByTestId("cukii-attach-menu-button")).toBeDefined();
-    expect(await getElementByTestId("broker-menu-button")).toBeDefined();
+    const attach = await getElementByTestId("cukii-attach-menu-button");
+    const commands = await getElementByTestId("broker-menu-button");
+    expect(attach.querySelector('svg[viewBox="0 0 20 20"]')).not.toBeNull();
+    expect(commands.querySelector('svg[viewBox="0 0 20 20"]')).not.toBeNull();
     expect(await getElementByText("Bypass permissions")).toBeDefined();
 
-    await user.click(await getElementByTestId("cukii-attach-menu-button"));
+    await user.click(attach);
     expect(await getElementByText("Attach image")).toBeDefined();
     expect(await getElementByText("Attach context")).toBeDefined();
   });
@@ -35,8 +37,18 @@ describe("Cukii Claude-parity input toolbar", () => {
 
     await user.click(await getElementByTestId("broker-menu-button"));
     expect(await getElementByText("Clear conversation")).toBeDefined();
-    expect(await getElementByText("Switch model…")).toBeDefined();
+    const switchModel = await getElementByText("Switch model…");
+    const switchModelText = switchModel.closest("button")?.textContent ?? "";
+    expect(switchModelText.length).toBeGreaterThan("Switch model…".length);
+    expect(switchModelText).not.toContain("·");
     expect(await getElementByText("Thinking")).toBeDefined();
+
+    await user.click(await getElementByTestId("cukii-thinking-toggle"));
+    expect(store.getState().session.hasReasoningEnabled).toBe(true);
+    expect(await getElementByTestId("cukii-slash-menu")).toBeDefined();
+    expect(
+      (await getElementByTestId("cukii-thinking-track")).className,
+    ).toContain("bg-[var(--cukii-accent)]");
 
     const filter = document.querySelector(
       'input[placeholder="Filter actions..."]',

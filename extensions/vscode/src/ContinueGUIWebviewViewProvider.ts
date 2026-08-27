@@ -74,6 +74,7 @@ export class ContinueGUIWebviewViewProvider
     surface: "sidebar" | "chat" = isFullScreen ? "chat" : "sidebar",
     initialSessionId?: string,
     panelId: string = surface,
+    suppressInitialChordCharacter = false,
   ): string {
     const extensionUri = getExtensionUri();
     let scriptUri: string;
@@ -143,6 +144,30 @@ export class ContinueGUIWebviewViewProvider
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script>const vscode = acquireVsCodeApi(); window.cukiiVscode = vscode;</script>
+        ${
+          suppressInitialChordCharacter
+            ? `<script>
+          (() => {
+            const deadline = performance.now() + 750;
+            const suppress = (event) => {
+              const isChordSuffix =
+                performance.now() <= deadline &&
+                event.inputType === "insertText" &&
+                String(event.data || "").toLowerCase() === "u";
+              if (!isChordSuffix) return;
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              document.removeEventListener("beforeinput", suppress, true);
+            };
+            document.addEventListener("beforeinput", suppress, true);
+            setTimeout(
+              () => document.removeEventListener("beforeinput", suppress, true),
+              800,
+            );
+          })();
+        </script>`
+            : ""
+        }
         <link href="${styleMainUri}" rel="stylesheet">
 
         <title>Continue</title>

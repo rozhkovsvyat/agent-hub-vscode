@@ -58,14 +58,14 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[100000] bg-black/15"
+      className="cukii-model-picker-backdrop fixed inset-0 z-[100000] bg-black/15"
       role="dialog"
       aria-modal="true"
       aria-label="Select a model"
       onMouseDown={onClose}
     >
       <div
-        className="absolute bottom-[86px] left-3 right-3 max-h-[min(64vh,570px)] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl"
+        className="cukii-model-picker cukii-menu-surface absolute bottom-[86px] left-[18px] right-[18px] max-h-[min(64vh,570px)] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="sticky top-0 z-10 bg-[var(--vscode-menu-background)] px-3 pb-2 pt-3 text-xs text-[var(--vscode-descriptionForeground)]">
@@ -85,9 +85,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
                   type="button"
                   disabled={model.disabled}
                   onClick={() => selectModel(model.value)}
-                  className={`flex w-full items-center justify-between rounded px-3 py-2 text-left hover:bg-[var(--vscode-list-hoverBackground)] ${
+                  className={`cukii-menu-item flex w-full items-center justify-between rounded px-3 py-2 text-left hover:bg-[var(--vscode-list-hoverBackground)] ${
                     selected
-                      ? "bg-[var(--vscode-list-activeSelectionBackground)]"
+                      ? "cukii-model-option-selected"
                       : ""
                   } ${model.disabled ? "cursor-not-allowed opacity-45" : ""}`}
                 >

@@ -167,6 +167,11 @@ extensions/.continue-debug/
 
 *.vsix
 
+# Local live-webview acceptance evidence (receipts/screenshots are machine-bound).
+design/ui-parity/runtime-runs/
+design/ui-parity/runtime-baseline/
+tools/ui-parity-runtime/*.png
+
 # intellij module library files
 *.iml
 

@@ -16,6 +16,7 @@ import { useAppDispatch, useAppSelector } from "../../../redux/hooks";
 import { selectSelectedChatModel } from "../../../redux/slices/configSlice";
 import InputToolbar, { ToolbarOptions } from "../InputToolbar";
 import { ComboBoxItem } from "../types";
+import { VoiceInputButton } from "../VoiceInputButton";
 import { DragOverlay } from "./components/DragOverlay";
 import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
@@ -296,6 +297,22 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       }}
     >
       <div className="cukii-editor-stack px-2.5 pb-1 pt-2">
+        {props.isMainInput && (
+          <VoiceInputButton
+            onTranscript={(text) => {
+              if (!editor) return;
+              const { from } = editor.state.selection;
+              const previousCharacter = editor.state.doc.textBetween(
+                Math.max(0, from - 1),
+                from,
+                "",
+              );
+              const prefix =
+                previousCharacter && !/\s/.test(previousCharacter) ? " " : "";
+              editor.chain().focus().insertContent(`${prefix}${text}`).run();
+            }}
+          />
+        )}
         <EditorContent
           className={`scroll-container overflow-y-scroll ${props.isMainInput ? "max-h-[70vh]" : ""}`}
           spellCheck={false}

@@ -1,5 +1,5 @@
 import { BuiltInToolNames } from "core/tools/builtIn";
-import { useContext, useEffect } from "react";
+import { type ReactNode, useContext, useEffect } from "react";
 import { IdeMessengerContext } from "../../../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../../../redux/hooks";
 import {
@@ -12,7 +12,6 @@ import { callToolById } from "../../../../redux/thunks/callToolById";
 import { cancelStream } from "../../../../redux/thunks/cancelStream";
 import { logToolUsage } from "../../../../redux/util";
 import { useMainEditor } from "../../TipTapEditor";
-import { BlockSettingsTopToolbar } from "./BlockSettingsTopToolbar";
 import { EditOutcomeToolbar } from "./EditOutcomeToolbar";
 import { EditToolbar } from "./EditToolbar";
 import { IsApplyingToolbar } from "./IsApplyingToolbar";
@@ -64,6 +63,11 @@ export function LumpToolbar() {
   );
   const isApplying = applyStates.some((state) => state.status === "streaming");
   const editor = useMainEditor();
+  const wrap = (toolbar: ReactNode) => (
+    <div className="bg-input rounded-t-default border-command-border mx-1.5 border-l border-r border-t">
+      <div className="xs:px-2 px-1 py-0.5">{toolbar}</div>
+    </div>
+  );
 
   // Get ALL running terminal commands
   const runningToolCalls = useAppSelector((state) =>
@@ -167,39 +171,39 @@ export function LumpToolbar() {
   ]);
 
   if (isApplying) {
-    return <IsApplyingToolbar />;
+    return wrap(<IsApplyingToolbar />);
   }
 
   if (isInEdit) {
     if (editApplyState.status === "done") {
-      return <EditOutcomeToolbar />;
+      return wrap(<EditOutcomeToolbar />);
     }
 
-    return <EditToolbar />;
+    return wrap(<EditToolbar />);
   }
 
   if (ttsActive) {
-    return <TtsActiveToolbar />;
+    return wrap(<TtsActiveToolbar />);
   }
 
   // Only show terminal streaming for actual terminal commands
   if (hasRunningTerminalCommand) {
     const count = runningTerminalCalls.length;
     const stopText = `Stop Terminal${count > 1 ? ` (${count})` : ""}`;
-    return (
+    return wrap(
       <StreamingToolbar onStop={handleStopAction} displayText={stopText} />
     );
   }
 
   if (pendingToolCalls.length > 0) {
-    return <PendingToolCallToolbar />;
+    return wrap(<PendingToolCallToolbar />);
   }
 
   if (pendingApplyStates.length > 0) {
-    return (
+    return wrap(
       <PendingApplyStatesToolbar pendingApplyStates={pendingApplyStates} />
     );
   }
 
-  return <BlockSettingsTopToolbar />;
+  return null;
 }

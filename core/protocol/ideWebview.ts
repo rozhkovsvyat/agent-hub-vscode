@@ -84,6 +84,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       sessionId?: string;
       title?: string;
       forceNew?: boolean;
+      suppressInitialChordCharacter?: boolean;
     },
     void,
   ];

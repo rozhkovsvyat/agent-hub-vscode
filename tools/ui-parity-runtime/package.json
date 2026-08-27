@@ -1,0 +1,23 @@
+{
+  "name": "cukii-ui-parity-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "inspect": "node inspect.mjs",
+    "inspect:targets": "node inspect-targets.mjs",
+    "inspect:workbench": "node inspect-workbench.mjs",
+    "verify:installed": "node verify-installed-cukii.mjs",
+    "measure:cukii": "node measure-cukii.mjs",
+    "measure:composer": "node measure-composer-parity.mjs",
+    "reload:workbench": "node reload-workbench.mjs",
+    "gate:multitab": "node multitab-gate.mjs",
+    "selftest:negative": "node oracle-negative-selftest.mjs",
+    "capture:probe": "node capture-probe.mjs",
+    "capture:baseline": "node capture-live-baseline.mjs",
+    "oracle:run": "node trusted-oracle.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1",
+    "pngjs": "7.0.0"
+  }
+}

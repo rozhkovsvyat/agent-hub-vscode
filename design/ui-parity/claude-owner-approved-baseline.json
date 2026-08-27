@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "status": "owner-approved-reference",
+  "approvedProduct": "Anthropic Claude Code",
+  "approvedVersion": "2.1.247",
+  "ownerEvidence": [
+    {
+      "date": "2026-08-27",
+      "scope": "sidebar",
+      "quote": "рис 4 - вот эталонная шторка клода"
+    },
+    {
+      "date": "2026-08-27",
+      "scope": "composer, slash menu, model picker and hover behavior",
+      "quote": "мне нужна нормальная верстка окна ввода сообщений и контекстного меню с выбором модели — паритет с клодом 1 к 1"
+    }
+  ],
+  "capture": {
+    "oracle": "trusted-playwright-raw-cdp-vscode-live-webview",
+    "runId": "2026-08-27T15-58-07.778Z-0ac1c70b0325",
+    "receipt": "runtime-runs/2026-08-27T15-58-07.778Z-0ac1c70b0325/receipt.json",
+    "environment": {
+      "vscodeVersion": "1.134.0",
+      "vscodeCommit": "110a328ea54b42367b803ec53ee0bf52ef26b419",
+      "platform": "win32 10.0.26200 x64",
+      "viewport": "1707x959",
+      "dpr": 1.5
+    }
+  },
+  "installedReferenceBinding": {
+    "manifestSha256": "ddda9fa4f73766b141d887fdd6c17ade3f47264b67cbc270689764fd6cd91174",
+    "webviewCssSha256": "13c56847ed1a1cf0d714874a8258e376306056d5a796473066c88a4829e3f6a0",
+    "webviewJsSha256": "31b4fa25b8e799a0e6bc31d6544513152a8b960f69a843c3c7df91a399630559"
+  },
+  "states": [
+    {
+      "id": "claude-sidebar-default",
+      "screenshotSha256": "61c09def24cd6b300e314b2abb386dd97b1c2824340deea5e0861b365950dee0",
+      "snapshotSha256": "562b59f39d4409827c01eb869c303d3899a63fdf728a3b0fa46400a10ca105e8"
+    },
+    {
+      "id": "claude-editor-default",
+      "screenshotSha256": "b6157c2436f304106f1992673560f4d4a34045f19acafb3f1182783deee486c2",
+      "snapshotSha256": "96a00e7256ba023fd7644ead6fea4cc8ba200c54c3bd2a8ce598bd09d3818543"
+    },
+    {
+      "id": "claude-editor-hover-add",
+      "screenshotSha256": "dc62efb54925eb3b17b2e518eda1036f5b5fc29ceddaf47a604818a3d40435fd",
+      "snapshotSha256": "2bdb5db43dd2e99bfe74c5cabeb168eb321f833314bacec86cfd2f69527eeae0"
+    },
+    {
+      "id": "claude-editor-slash-menu",
+      "screenshotSha256": "2d96db5bb2be7d0a0930716cad8b4dabf23fc4d5181efdc7c738b66179d6101b",
+      "snapshotSha256": "efbbd573c508ee4af96aa8ffbb89ea7b024f90c35d9bd8100c2ff44f0a611622"
+    },
+    {
+      "id": "claude-editor-model-picker",
+      "screenshotSha256": "c40287cb948e34d9300b3c41cd4a325790b6be93749ce121b05590760a33b607",
+      "snapshotSha256": "e37aa464ef3121e918a8d7b1656f42758a5577d175573552a9203468fc7ef8f4"
+    },
+    {
+      "id": "claude-editor-hover-bypass",
+      "screenshotSha256": "ecfb88ab7c768ffaea71548ab5f968cf4e72feaa3559614c0a2e243e93304874",
+      "snapshotSha256": "503a4a5afa7024543c739d08f8a7953866b245103d7668981b6fe0efc38adb72c"
+    },
+    {
+      "id": "claude-sidebar-context-menu",
+      "screenshotSha256": "3ce1e4dccd7508381c6a0ca89fa3a1a9e7a82619e54804eedae8d9f9266673af",
+      "snapshotSha256": "6aa152207315bec8899c1c15d0df7bdcd72c46b22d170d3f962780730a0b88b8"
+    }
+  ]
+}

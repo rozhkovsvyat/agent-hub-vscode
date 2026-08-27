@@ -71,6 +71,7 @@ function attachFullScreenPanel(
   sidebar: ContinueGUIWebviewViewProvider,
   initialSessionId?: string,
   initialTitle?: string,
+  suppressInitialChordCharacter = false,
 ) {
   const panelId = `cukii-panel-${nextFullScreenPanelId++}`;
   const protocol = sidebar.webviewProtocol.cloneHandlers();
@@ -107,6 +108,7 @@ function attachFullScreenPanel(
     "chat",
     initialSessionId,
     panelId,
+    suppressInitialChordCharacter,
   );
 
   panel.onDidChangeViewState(({ webviewPanel }) => {
@@ -812,6 +814,7 @@ const getCommandsMap: (
         sessionId?: string;
         title?: string;
         forceNew?: boolean;
+        suppressInitialChordCharacter?: boolean;
       } = {},
     ) => {
       if (options.panelId) {
@@ -851,6 +854,7 @@ const getCommandsMap: (
         sidebar,
         options.sessionId,
         options.title,
+        options.suppressInitialChordCharacter,
       );
     },
     "continue.forceNextEdit": async () => {
