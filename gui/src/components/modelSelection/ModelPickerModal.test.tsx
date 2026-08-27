@@ -54,4 +54,39 @@ describe("ModelPickerModal", () => {
     // Selection should not change from the default.
     expect(store.getState().session.brokerModel).toBe("codex-5-6-terra");
   });
+
+  it("filters models with the search input", async () => {
+    const { user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+
+    await user.click(await getElementByText("Claude"));
+    const search = await getElementByTestId("model-picker-search");
+    await user.type(search, "Opus");
+
+    expect(await getElementByText("Opus 5")).toBeDefined();
+    expect(
+      document.querySelector('[data-testid="model-picker-empty"]'),
+    ).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, "zzz");
+
+    expect(
+      document.querySelector('[data-testid="model-picker-empty"]'),
+    ).not.toBeNull();
+  });
+
+  it("clears search when switching vendor", async () => {
+    const { user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+
+    const search = await getElementByTestId("model-picker-search");
+    await user.type(search, "Opus");
+    await user.click(await getElementByText("XAI"));
+
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(await getElementByText("Grok 4.6")).toBeDefined();
+  });
 });
