@@ -7,6 +7,7 @@ import {
 } from "core";
 import { memo, useMemo } from "react";
 import { defaultBorderRadius, vscBackground } from "..";
+import { cukiiComposerPlaceholder } from "../cukii/cukiiComposerPlaceholder";
 import { useAppSelector } from "../../redux/hooks";
 import { selectSlashCommandComboBoxInputs } from "../../redux/selectors";
 import { ContextItemsPeek } from "./belowMainInput/ContextItemsPeek";
@@ -61,6 +62,8 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
     (state) => state.config.config.contextProviders,
   );
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const historyLength = useAppSelector((store) => store.session.history.length);
+  const sessionId = useAppSelector((store) => store.session.id);
   const editModeState = useAppSelector((state) => state.editModeState);
 
   const filteredSlashCommands = useMemo(() => {
@@ -88,9 +91,17 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   }, [availableContextProviders, isInEdit]);
 
   const historyKey = isInEdit ? "edit" : "chat";
-  const placeholder = isInEdit
-    ? "Edit selected code"
-    : "ctrl esc to focus or unfocus Cukii";
+  const placeholder = useMemo(
+    () =>
+      cukiiComposerPlaceholder({
+        isInEdit,
+        isStreaming,
+        isMainInput: props.isMainInput ?? false,
+        historyLength,
+        sessionId,
+      }),
+    [historyLength, isInEdit, isStreaming, props.isMainInput, sessionId],
+  );
 
   const toolbarOptions: ToolbarOptions = useMemo(() => {
     if (isInEdit) {

@@ -8,9 +8,9 @@ export function CukiiCrumbs({ active = true }: { active?: boolean }) {
       viewBox="0 0 16 16"
     >
       <g className="cukii-crumbs-orbit">
-        <circle data-cukii-crumb="large" cx="5" cy="9.5" r="3.1" />
-        <circle data-cukii-crumb="medium" cx="10.5" cy="5" r="2.25" />
-        <circle data-cukii-crumb="small" cx="12" cy="11.5" r="1.45" />
+        <circle data-cukii-crumb="large" cx="4.4" cy="9.5" r="3.1" />
+        <circle data-cukii-crumb="medium" cx="9.9" cy="5" r="2.25" />
+        <circle data-cukii-crumb="small" cx="11.4" cy="11.5" r="1.45" />
       </g>
     </svg>
   );

@@ -12,10 +12,16 @@ describe("CukiiCrumbs", () => {
     expect(mark).toHaveAttribute("aria-hidden", "true");
     expect(mark).toHaveClass("cukii-crumbs-active");
     expect(
-      [...mark.querySelectorAll("[data-cukii-crumb]")].map((crumb) =>
-        crumb.getAttribute("r"),
-      ),
-    ).toEqual(["3.1", "2.25", "1.45"]);
+      [...mark.querySelectorAll("[data-cukii-crumb]")].map((crumb) => ({
+        cx: crumb.getAttribute("cx"),
+        cy: crumb.getAttribute("cy"),
+        r: crumb.getAttribute("r"),
+      })),
+    ).toEqual([
+      { cx: "4.4", cy: "9.5", r: "3.1" },
+      { cx: "9.9", cy: "5", r: "2.25" },
+      { cx: "11.4", cy: "11.5", r: "1.45" },
+    ]);
   });
 
   it("keeps the calm orbit and a reduced-motion fallback in CSS", () => {
