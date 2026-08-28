@@ -10,20 +10,23 @@ export const NO_TOOL_WARNING =
 
 export const BROKER_MODEL_LABELS: Record<string, string> = {
   "opus-5": "Opus 5",
+  "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
-  "codex-5-6-terra": "Codex 5.6 Terra",
+  "haiku-4-5": "Haiku 4.5",
+  "codex-5-6-sol": "GPT-5.6 Sol",
+  "codex-5-6-terra": "GPT-5.6 Terra",
+  "codex-5-6-luna": "GPT-5.6 Luna",
+  "codex-5-5": "GPT-5.5",
+  "codex-5-4": "GPT-5.4",
+  "codex-5-4-mini": "GPT-5.4 Mini",
   "grok-4-6": "Grok 4.6",
+  "grok-4-5": "Grok 4.5",
   "composer-2-5": "Composer 2.5",
+  "kimi-k2": "K2.7 Coding",
+  "kimi-k2-highspeed": "K2.7 Coding Highspeed",
+  "kimi-k3": "K3",
+  "kimi-k3-256k": "K3-256K",
   "qwen-3-8-max": "Qwen 3.8 Max",
-};
-
-const BROKER_MODEL_AGENTS: Record<string, string> = {
-  "opus-5": "claude",
-  "fable-5": "claude",
-  "codex-5-6-terra": "codex",
-  "grok-4-6": "grok",
-  "composer-2-5": "cursor",
-  "qwen-3-8-max": "qwen",
 };
 
 function brokerModelLabel(value?: string): string | undefined {
@@ -31,7 +34,25 @@ function brokerModelLabel(value?: string): string | undefined {
     return undefined;
   }
 
-  return BROKER_MODEL_LABELS[value] ?? value;
+  return (
+    BROKER_MODEL_LABELS[value] ??
+    value.replace(/^(?:codex|kimi|grok):/, "").replaceAll("-", " ")
+  );
+}
+
+function brokerModelAgent(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(value)) {
+    return "claude";
+  }
+  if (value.startsWith("codex")) return "codex";
+  if (value.startsWith("grok")) return "grok";
+  if (value.startsWith("composer") || value.startsWith("cursor:"))
+    return "cursor";
+  if (value.startsWith("kimi")) return "claude";
+  if (value.startsWith("deepseek")) return "deepseek";
+  if (value.startsWith("qwen")) return "qwen";
+  return undefined;
 }
 
 export function getBaseSystemMessage(
@@ -53,7 +74,7 @@ export function getBaseSystemMessage(
         : "auto-select the strongest available worker";
     const subagentAgent =
       brokerSubagent && brokerSubagent !== "auto"
-        ? BROKER_MODEL_AGENTS[brokerSubagent]
+        ? brokerModelAgent(brokerSubagent)
         : undefined;
     const broker = brokerModelLabel(brokerModel) || "Fable 5";
     baseMessage += `\n\nYou are running in Cukii Broker mode. Broker model intent: ${broker}. Coordinate execution through the Cukii broker MCP tools when delegation is useful. Prefer broker_delegate for isolated worker tasks, broker_status to inspect work, and broker_accept only after reviewing results. Preferred subagent model: ${subagent}.${subagentAgent ? ` For broker_delegate use agent=\"${subagentAgent}\" and model=\"${subagent}\".` : " If Auto is selected, choose the strongest appropriate worker and explain the choice briefly."}`;

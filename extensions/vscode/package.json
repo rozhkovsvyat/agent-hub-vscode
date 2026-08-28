@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.63",
+  "version": "2.0.65",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -592,21 +592,6 @@
       ],
       "view/title": [
         {
-          "command": "continue.newSession",
-          "group": "navigation@1",
-          "when": "view == continue.continueGUIView"
-        },
-        {
-          "command": "continue.viewHistory",
-          "group": "navigation@2",
-          "when": "view == continue.continueGUIView"
-        },
-        {
-          "command": "continue.openConfigPage",
-          "group": "navigation@4",
-          "when": "view == continue.continueGUIView"
-        },
-        {
           "command": "continue.clearConsole",
           "group": "navigation@1",
           "when": "view == continue.continueConsoleView"
@@ -616,16 +601,6 @@
         {
           "command": "continue.openInNewWindow",
           "group": "navigation"
-        },
-        {
-          "command": "continue.newSession",
-          "group": "navigation@1",
-          "when": "activeWebviewPanelId == continue.continueGUIView || activeWebviewPanelId == cukii.fullScreenChat"
-        },
-        {
-          "command": "continue.viewHistory",
-          "group": "navigation@2",
-          "when": "activeWebviewPanelId == continue.continueGUIView || activeWebviewPanelId == cukii.fullScreenChat"
         }
       ],
       "terminal/context": [
@@ -701,6 +676,7 @@
     "lint": "eslint src --ext ts",
     "lint:fix": "eslint . --ext ts --fix",
     "test": "vitest run",
+    "probe:voice-package": "node scripts/probe-voice-package.js",
     "vitest": "vitest run",
     "write-build-timestamp": "node scripts/write-build-timestamp.js",
     "prepackage": "node scripts/prepackage.js",
@@ -766,6 +742,7 @@
     "@electron/rebuild": "^4.0.3",
     "@reduxjs/toolkit": "^1.9.3",
     "@vscode/ripgrep": "^1.15.9",
+    "@xenova/transformers": "^2.14.0",
     "axios": "^1.13.1",
     "core": "file:../../core",
     "cors": "^2.8.5",
@@ -773,6 +750,7 @@
     "diff": "^8.0.4",
     "downshift": "^7.6.0",
     "express": "^4.18.2",
+    "ffmpeg-static": "^5.3.0",
     "fkill": "^8.1.0",
     "follow-redirects": "^1.15.4",
     "handlebars": "^4.7.8",

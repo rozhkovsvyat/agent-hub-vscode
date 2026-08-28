@@ -130,6 +130,15 @@ export class HistoryManager {
     if (session.brokerSubagent !== undefined) {
       orderedSession.brokerSubagent = session.brokerSubagent;
     }
+    if (session.brokerEffort !== undefined) {
+      orderedSession.brokerEffort = session.brokerEffort;
+    }
+    if (session.brokerSpeed !== undefined) {
+      orderedSession.brokerSpeed = session.brokerSpeed;
+    }
+    if (session.hasReasoningEnabled !== undefined) {
+      orderedSession.hasReasoningEnabled = session.hasReasoningEnabled;
+    }
     if (session.usage !== undefined) {
       orderedSession.usage = session.usage;
     }

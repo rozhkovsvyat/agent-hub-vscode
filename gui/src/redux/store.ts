@@ -43,6 +43,9 @@ const saveSubsetFilters = [
     "mode",
     "brokerModel",
     "brokerSubagent",
+    "brokerEffort",
+    "brokerSpeed",
+    "hasReasoningEnabled",
 
     // higher risk to persist
     // codeBlockApplyStates

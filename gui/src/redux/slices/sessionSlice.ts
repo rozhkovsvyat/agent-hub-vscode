@@ -33,7 +33,12 @@ import {
 } from "core/util/messageContent";
 import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { findUriInDirs, getUriPathBasename } from "core/util/uri";
-import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
+import type {
+  BrokerEffort,
+  BrokerModel,
+  BrokerSpeed,
+  BrokerSubagent,
+} from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
@@ -209,6 +214,7 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
 
 type SessionState = {
   lastSessionId?: string;
+  isSessionLoading: boolean;
   isSessionMetadataLoading: boolean;
   allSessionMetadata: BaseSessionMetadata[];
   history: ChatHistoryItemWithMessageId[];
@@ -221,22 +227,33 @@ type SessionState = {
   mode: MessageModes;
   brokerModel?: BrokerModel;
   brokerSubagent?: BrokerSubagent;
+  brokerEffort: BrokerEffort;
+  brokerSpeed: BrokerSpeed;
   isInEdit: boolean;
   codeBlockApplyStates: {
     states: ApplyState[];
     curIndex: number;
   };
   newestToolbarPreviewForInput: Record<string, string>;
-  hasReasoningEnabled?: boolean;
+  hasReasoningEnabled: boolean;
   isPruned?: boolean;
   contextPercentage?: number;
   inlineErrorMessage?: InlineErrorMessageType;
   compactionLoading: Record<number, boolean>; // Track compaction loading by message index
 };
 
-export type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
+export type {
+  BrokerEffort,
+  BrokerModel,
+  BrokerSpeed,
+  BrokerSubagent,
+} from "core/protocol/ideWebview";
 
 export const INITIAL_SESSION_STATE: SessionState = {
+  isSessionLoading:
+    typeof window !== "undefined" &&
+    window.cukiiSurface === "chat" &&
+    Boolean(window.initialSessionId),
   isSessionMetadataLoading: false,
   allSessionMetadata: [],
   history: [],
@@ -248,6 +265,9 @@ export const INITIAL_SESSION_STATE: SessionState = {
   mode: "broker",
   brokerModel: "opus-5",
   brokerSubagent: "auto",
+  brokerEffort: "high",
+  brokerSpeed: "standard",
+  hasReasoningEnabled: true,
   isInEdit: false,
   codeBlockApplyStates: {
     states: [],
@@ -745,6 +765,7 @@ export const sessionSlice = createSlice({
       state.streamAborter = new AbortController();
 
       state.isStreaming = false;
+      state.isSessionLoading = false;
       state.symbols = {};
 
       state.inlineErrorMessage = undefined;
@@ -760,6 +781,9 @@ export const sessionSlice = createSlice({
         }
         state.brokerModel = payload.brokerModel ?? "opus-5";
         state.brokerSubagent = payload.brokerSubagent ?? "auto";
+        state.brokerEffort = payload.brokerEffort ?? "high";
+        state.brokerSpeed = payload.brokerSpeed ?? "standard";
+        state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
@@ -767,6 +791,9 @@ export const sessionSlice = createSlice({
         state.mode = "broker";
         state.brokerModel = "opus-5";
         state.brokerSubagent = "auto";
+        state.brokerEffort = "high";
+        state.brokerSpeed = "standard";
+        state.hasReasoningEnabled = true;
       }
     },
     updateSessionTitle: (state, { payload }: PayloadAction<string>) => {
@@ -777,6 +804,9 @@ export const sessionSlice = createSlice({
       { payload }: PayloadAction<boolean>,
     ) => {
       state.isSessionMetadataLoading = payload;
+    },
+    setIsSessionLoading: (state, { payload }: PayloadAction<boolean>) => {
+      state.isSessionLoading = payload;
     },
     setAllSessionMetadata: (
       state,
@@ -1026,6 +1056,12 @@ export const sessionSlice = createSlice({
     setBrokerSubagent: (state, action: PayloadAction<BrokerSubagent>) => {
       state.brokerSubagent = action.payload;
     },
+    setBrokerEffort: (state, action: PayloadAction<BrokerEffort>) => {
+      state.brokerEffort = action.payload;
+    },
+    setBrokerSpeed: (state, action: PayloadAction<BrokerSpeed>) => {
+      state.brokerSpeed = action.payload;
+    },
     setIsInEdit: (state, action: PayloadAction<boolean>) => {
       state.isInEdit = action.payload;
     },
@@ -1147,6 +1183,9 @@ export const {
   setMode,
   setBrokerModel,
   setBrokerSubagent,
+  setBrokerEffort,
+  setBrokerSpeed,
+  setIsSessionLoading,
   setIsSessionMetadataLoading,
   setAllSessionMetadata,
   addSessionMetadata,

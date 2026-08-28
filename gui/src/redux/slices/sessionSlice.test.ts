@@ -57,6 +57,7 @@ describe("sessionSlice streamUpdate", () => {
 
   const createInitialState = () => ({
     lastSessionId: undefined,
+    isSessionLoading: false,
     allSessionMetadata: [],
     history: [
       {
@@ -74,6 +75,9 @@ describe("sessionSlice streamUpdate", () => {
     streamAborter: new AbortController(),
     symbols: {},
     mode: "chat" as const,
+    brokerEffort: "high" as const,
+    brokerSpeed: "standard" as const,
+    hasReasoningEnabled: true,
     isInEdit: false,
     codeBlockApplyStates: {
       states: [],
@@ -82,6 +86,31 @@ describe("sessionSlice streamUpdate", () => {
     newestToolbarPreviewForInput: {},
     isSessionMetadataLoading: false,
     compactionLoading: {},
+  });
+
+  it("restores effort and speed per session and resets new tabs to defaults", () => {
+    const restored = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "effort-speed-session",
+        title: "Independent controls",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "codex-5-6-terra",
+        brokerSubagent: "auto",
+        brokerEffort: "medium",
+        brokerSpeed: "fast",
+        hasReasoningEnabled: false,
+      }),
+    );
+    expect(restored.brokerEffort).toBe("medium");
+    expect(restored.brokerSpeed).toBe("fast");
+    expect(restored.hasReasoningEnabled).toBe(false);
+
+    const blank = sessionSlice.reducer(restored, newSession(undefined));
+    expect(blank.brokerEffort).toBe("high");
+    expect(blank.brokerSpeed).toBe("standard");
+    expect(blank.hasReasoningEnabled).toBe(true);
   });
 
   describe("Basic Chat Message", () => {

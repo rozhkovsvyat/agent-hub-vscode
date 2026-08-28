@@ -256,6 +256,9 @@ export const saveCurrentSession = createAsyncThunk<
       chatModelTitle: selectedChatModel?.title ?? null,
       brokerModel: session.brokerModel,
       brokerSubagent: session.brokerSubagent,
+      brokerEffort: session.brokerEffort,
+      brokerSpeed: session.brokerSpeed,
+      hasReasoningEnabled: session.hasReasoningEnabled,
     };
 
     const result = await dispatch(updateSession(updatedSession));

@@ -64,6 +64,26 @@ describe("Full session lifecycle", () => {
     expect(session.title).toBe(modifiedSession.title);
   });
 
+  test("Broker controls survive the persisted session round trip", () => {
+    const controlledSession: Session = {
+      ...testSession,
+      sessionId: `${testSession.sessionId}-controls`,
+      mode: "broker",
+      brokerModel: "codex-5-6-terra",
+      brokerSubagent: "auto",
+      brokerEffort: "medium",
+      brokerSpeed: "fast",
+      hasReasoningEnabled: false,
+    };
+
+    historyManager.save(controlledSession);
+
+    expect(historyManager.load(controlledSession.sessionId)).toEqual(
+      controlledSession,
+    );
+    historyManager.delete(controlledSession.sessionId);
+  });
+
   test("Deleting session", () => {
     historyManager.delete(testSession.sessionId);
     const sessions = historyManager.list({});

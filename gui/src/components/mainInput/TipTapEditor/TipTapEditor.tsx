@@ -328,28 +328,24 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           isInputEmpty={isEditorEmpty}
           hidden={shouldHideToolbar && !props.isMainInput}
           onAddContextItem={() => insertCharacterWithWhitespace("@")}
-          onEnter={onEnter}
-          onImageFileSelected={(file) => {
-            void handleImageFile(
-              ideMessenger,
-              file,
-              imageResolution,
-              imageMaxChars,
-            ).then((result) => {
-              if (!editor) {
-                return;
-              }
-              if (result) {
-                const [_, dataUrl] = result;
-                const { schema } = editor.state;
-                const node = schema.nodes.image.create({ src: dataUrl });
-                editor.commands.command(({ tr }) => {
-                  tr.insert(0, node);
-                  return true;
-                });
-              }
-            });
+          onFilesSelected={(files) => {
+            if (!editor) return;
+            const nodes = files.map((file) => ({
+              type: "code-block",
+              attrs: {
+                inputId: props.inputId,
+                item: {
+                  id: { providerTitle: "file", itemId: file.path },
+                  name: file.name,
+                  description: file.path,
+                  content: `Attached local file: ${file.path}`,
+                  uri: { type: "file", value: file.path },
+                },
+              },
+            }));
+            editor.chain().focus().insertContent(nodes).run();
           }}
+          onEnter={onEnter}
           disabled={isStreaming && !props.isMainInput}
         />
       </div>

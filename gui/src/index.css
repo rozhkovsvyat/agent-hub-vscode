@@ -163,6 +163,30 @@ body,
   color: var(--vscode-foreground, #cccccc);
 }
 
+/* Runtime oracle: Claude's dark sidebar is #191a1b; its first editor is
+   #121314 and the next is #191a1b.  These are extension-surface colors, not
+   VS Code theme fallbacks: binding them to --vscode-* made Cukii drift to
+   #1e1e1e in Dark+. */
+:root {
+  --cukii-chat-dark: #121314;
+  --cukii-chat-light: #191a1b;
+}
+
+html[data-cukii-surface="sidebar"],
+html[data-cukii-surface="sidebar"] body,
+html[data-cukii-surface="sidebar"] #root,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"],
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"] body,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"] #root {
+  background: var(--cukii-chat-light) !important;
+}
+
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"],
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] body,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
+  background: var(--cukii-chat-dark) !important;
+}
+
 .cukii-ui-button,
 .cukii-icon-button,
 .cukii-permission-button,
@@ -336,6 +360,10 @@ body,
   color: var(--cukii-accent);
 }
 
+.cukii-voice-button-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
 .cukii-toggle-track {
   position: relative;
   display: inline-flex;
@@ -360,6 +388,20 @@ body,
   will-change: transform;
 }
 
+.cukii-vendor-state-connected {
+  background: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.cukii-vendor-state-disconnected,
+.cukii-vendor-state-unavailable {
+  background: var(--vscode-testing-iconFailed, #f14c4c);
+}
+
+.cukii-vendor-state-postponed,
+.cukii-vendor-state-unknown {
+  background: var(--vscode-descriptionForeground, #999);
+}
+
 .cukii-toggle-track-on {
   background: var(--cukii-accent);
 }
@@ -374,6 +416,62 @@ body,
 
 .cukii-toggle-track-disabled .cukii-toggle-thumb {
   background: var(--vscode-descriptionForeground, #8b8b8b);
+}
+
+.cukii-effort-slider {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 18px;
+  margin: 0 5px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(204, 204, 204, 0.2);
+  color: var(--vscode-foreground, #bfbfbf);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.cukii-effort-slider:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.cukii-effort-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #007acc;
+  transition: width 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cukii-effort-notch {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(204, 204, 204, 0.28);
+  transform: translate(-50%, -50%);
+}
+
+.cukii-effort-notch-ultra {
+  background: #b180d7;
+}
+
+.cukii-effort-thumb {
+  position: absolute;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--vscode-foreground, #cccccc);
+  transform: translateX(-50%);
+  transition: left 160ms cubic-bezier(0.2, 0, 0, 1);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 
 .cukii-input-footer {
@@ -531,9 +629,122 @@ body,
   background: transparent !important;
 }
 
+.cukii-account-overlay {
+  background: rgb(0 0 0 / 75%);
+}
+
+.cukii-account-dialog {
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  border: 1px solid
+    var(--vscode-sideBarActivityBarTop-border, var(--vscode-widget-border));
+  font-family: var(--vscode-chat-font-family, var(--vscode-font-family));
+  font-size: var(--vscode-chat-font-size, 13px);
+  line-height: 19.5px;
+  outline: 0;
+  user-select: text;
+}
+
+.cukii-account-section-title {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 18px;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.cukii-account-row {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.cukii-account-state {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.cukii-account-icon-button,
+.cukii-vendor-action {
+  appearance: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--vscode-descriptionForeground) !important;
+  background: transparent !important;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.cukii-account-icon-button {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px !important;
+  border-radius: 4px;
+}
+
+.cukii-account-icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cukii-vendor-action {
+  border-radius: 4px;
+  padding: 4px 8px !important;
+  font-size: 13px;
+  line-height: 19.5px;
+}
+
+.cukii-account-icon-button:hover,
+.cukii-vendor-action:hover:not(:disabled) {
+  color: var(--vscode-foreground) !important;
+  background: var(--vscode-toolbar-hoverBackground) !important;
+}
+
+.cukii-account-icon-button:focus-visible,
+.cukii-vendor-action:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.cukii-vendor-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .cukii-model-option-selected {
   background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
   color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
+.cukii-capability-rating {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  opacity: 0.88;
+}
+
+.cukii-capability-milk {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+}
+
+.cukii-model-option-selected .cukii-capability-rating {
+  color: currentColor;
+  opacity: 0.76;
 }
 
 [data-testid="mode-select-button"],
@@ -853,6 +1064,57 @@ button.cukii-submit-button:hover {
   align-items: flex-start;
 }
 
+.cukii-crumbs {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  overflow: visible;
+  color: var(--cukii-accent, #e3a867);
+}
+
+.cukii-crumbs circle {
+  fill: currentColor;
+}
+
+.cukii-crumbs-active .cukii-crumbs-orbit {
+  transform-origin: 8px 8px;
+  animation: cukiiCrumbsOrbit 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes cukiiCrumbsOrbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cukii-crumbs-active .cukii-crumbs-orbit {
+    animation: none;
+  }
+
+  .cukii-crumbs-active circle {
+    animation: cukiiCrumbRest 1.8s ease-in-out infinite;
+  }
+
+  .cukii-crumbs-active circle:nth-child(2) {
+    animation-delay: 0.25s;
+  }
+
+  .cukii-crumbs-active circle:nth-child(3) {
+    animation-delay: 0.5s;
+  }
+}
+
+@keyframes cukiiCrumbRest {
+  0%,
+  100% {
+    opacity: 0.48;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Turn-level "Interrupted" fact — Claude renders it as plain muted text,
    not as a timeline event with a red dot. Align with the prose column. */
 .cukii-interrupted-fact {
@@ -863,10 +1125,11 @@ button.cukii-submit-button:hover {
 
 /* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста.
    Размер чуть крупнее точки таймлайна (7px), но заметно меньше прежнего. */
-.cukii-spinner-row .cukii-thinking-glyph {
+.cukii-spinner-row .cukii-thinking-glyph,
+.cukii-spinner-row .cukii-crumbs {
   position: absolute;
-  left: 8px;
-  top: 3px;
+  left: 6px;
+  top: 1px;
 }
 
 .cukii-thinking-row,

@@ -289,6 +289,12 @@ export interface Session {
   brokerModel?: import("./protocol/ideWebview").BrokerModel;
   /** Optional subagent route preserved with this session. */
   brokerSubagent?: import("./protocol/ideWebview").BrokerSubagent;
+  /** Cukii effort budget preserved independently for every session/tab. */
+  brokerEffort?: import("./protocol/ideWebview").BrokerEffort;
+  /** Cukii service speed preserved independently for every session/tab. */
+  brokerSpeed?: import("./protocol/ideWebview").BrokerSpeed;
+  /** Native reasoning enablement preserved independently for every session/tab. */
+  hasReasoningEnabled?: boolean;
   /** Optional: cumulative usage and cost for all LLM API calls in this session */
   usage?: SessionUsage;
 }

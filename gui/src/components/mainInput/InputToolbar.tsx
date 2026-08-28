@@ -1,28 +1,32 @@
 import {
   ArrowPathIcon,
+  ArrowUpTrayIcon,
   ArrowUpIcon,
   CheckIcon,
-  PaperClipIcon,
+  DocumentPlusIcon,
   PencilIcon,
-  PhotoIcon,
   ShareIcon,
 } from "@heroicons/react/24/outline";
 import { InputModifiers } from "core";
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useContext, useMemo, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
 import {
   newSession,
+  setBrokerEffort,
   setBrokerModel,
+  setBrokerSpeed,
   setBrokerSubagent,
   setHasReasoningEnabled,
-  setMode,
 } from "../../redux/slices/sessionSlice";
 import type {
+  BrokerEffort,
   BrokerModel,
+  BrokerSpeed,
   BrokerSubagent,
 } from "../../redux/slices/sessionSlice";
+import type { CukiiPickedFile } from "core/protocol/ideWebview";
 import { setAllowAllPermissions } from "../../redux/slices/uiSlice";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
@@ -30,7 +34,13 @@ import { saveCurrentSession } from "../../redux/thunks/session";
 import { isMetaEquivalentKeyPressed } from "../../util";
 import { ToolTip } from "../gui/Tooltip";
 import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
-import { modelInfo } from "../modelSelection/vendors";
+import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
+import {
+  displayModelLabel,
+  modelInfo,
+  supportsNativeSpeed,
+  supportsNativeThinking,
+} from "../modelSelection/vendors";
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
 
@@ -45,8 +55,8 @@ export interface ToolbarOptions {
 interface InputToolbarProps {
   onEnter?: (modifiers: InputModifiers) => void;
   onAddContextItem?: () => void;
+  onFilesSelected?: (files: CukiiPickedFile[]) => void;
   onClick?: () => void;
-  onImageFileSelected?: (file: File) => void;
   hidden?: boolean;
   activeKey: string | null;
   toolbarOptions?: ToolbarOptions;
@@ -57,6 +67,24 @@ interface InputToolbarProps {
 
 const menuItemClass =
   "cukii-menu-item flex w-full items-center justify-between gap-5 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+
+const EFFORT_LEVELS: readonly BrokerEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+];
+
+const EFFORT_LABELS: Record<BrokerEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra",
+};
 
 function AddControlIcon() {
   return (
@@ -83,7 +111,6 @@ function CommandControlIcon() {
 function InputToolbar(props: InputToolbarProps) {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const isInEdit = useAppSelector((state) => state.session.isInEdit);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
@@ -92,6 +119,8 @@ function InputToolbar(props: InputToolbarProps) {
   const brokerSubagent = useAppSelector(
     (state) => state.session.brokerSubagent,
   );
+  const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
+  const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
   const hasReasoningEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
@@ -105,36 +134,26 @@ function InputToolbar(props: InputToolbarProps) {
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
   const [actionQuery, setActionQuery] = useState("");
-  const userTouchedBrokerRef = useRef(false);
-
-  useEffect(() => {
-    dispatch(setMode("broker"));
-    void ideMessenger
-      .request("cukii/getBrokerPreferences", undefined)
-      .then((result) => {
-        if (
-          result.status === "success" &&
-          !userTouchedBrokerRef.current &&
-          !window.initialSessionId &&
-          historyLength === 0
-        ) {
-          dispatch(setBrokerModel(result.content.brokerModel));
-          dispatch(setBrokerSubagent(result.content.brokerSubagent));
-        }
-      });
-  }, [dispatch, historyLength, ideMessenger]);
-
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
     nextSubagent: BrokerSubagent,
+    nextEffort: BrokerEffort = brokerEffort,
+    nextSpeed: BrokerSpeed = brokerSpeed,
+    nextThinking: boolean = hasReasoningEnabled,
   ) => {
-    userTouchedBrokerRef.current = true;
     dispatch(setBrokerModel(nextModel));
     dispatch(setBrokerSubagent(nextSubagent));
+    dispatch(setBrokerEffort(nextEffort));
+    dispatch(setBrokerSpeed(nextSpeed));
+    dispatch(setHasReasoningEnabled(nextThinking));
     ideMessenger.post("cukii/setBrokerPreferences", {
       brokerModel: nextModel,
       brokerSubagent: nextSubagent,
+      brokerEffort: nextEffort,
+      brokerSpeed: nextSpeed,
+      thinkingEnabled: nextThinking,
       mode: "broker",
     });
     if (historyLength > 0) {
@@ -149,16 +168,44 @@ function InputToolbar(props: InputToolbarProps) {
   const isRetry = props.toolbarOptions?.enterText === "Retry";
   const showStop = isStreaming && (props.isInputEmpty ?? true);
   const currentModel = brokerModel ?? "opus-5";
-  const currentLabel = modelInfo(currentModel)?.label ?? "Opus 5";
+  const currentModelInfo = modelInfo(currentModel);
+  const currentLabel = currentModelInfo
+    ? displayModelLabel(currentModelInfo)
+    : "Opus 5 (1M)";
+  const effortIndex = EFFORT_LEVELS.indexOf(brokerEffort);
+  const effortFraction = effortIndex / (EFFORT_LEVELS.length - 1);
+  const effortPosition = `calc(${effortFraction * 100}% ${9 - effortFraction * 18 >= 0 ? "+" : "-"} ${Math.abs(9 - effortFraction * 18)}px)`;
+  const effortFillWidth = `calc(${effortFraction * 100}% + ${18 - effortFraction * 18}px)`;
+  const nativeFastAvailable = supportsNativeSpeed(currentModel);
+  const nativeThinkingAvailable = supportsNativeThinking(currentModel);
   const smallFont = useFontSize(-2);
   const showAction = (label: string) =>
     label.toLowerCase().includes(actionQuery.trim().toLowerCase());
 
-  const selectFiles = (files: FileList | null) => {
-    for (const file of Array.from(files ?? [])) {
-      props.onImageFileSelected?.(file);
+  const updateEffortFromClientX = (clientX: number, rect: DOMRect) => {
+    const trackStart = rect.left + 9;
+    const trackWidth = Math.max(1, rect.width - 18);
+    const fraction = Math.max(
+      0,
+      Math.min(1, (clientX - trackStart) / trackWidth),
+    );
+    const nextIndex = Math.round(fraction * (EFFORT_LEVELS.length - 1));
+    updateBrokerPreferences(
+      currentModel,
+      brokerSubagent ?? "auto",
+      EFFORT_LEVELS[nextIndex],
+      brokerSpeed,
+    );
+  };
+
+  const pickFiles = async () => {
+    const result = await ideMessenger.request(
+      "cukii/pickAttachmentFiles",
+      undefined,
+    );
+    if (result.status === "success" && result.content.length > 0) {
+      props.onFilesSelected?.(result.content);
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -173,15 +220,6 @@ function InputToolbar(props: InputToolbarProps) {
         style={{ fontSize: smallFont }}
       >
         <div className="flex min-w-0 items-center gap-1">
-          <input
-            ref={fileInputRef}
-            type="file"
-            hidden
-            multiple
-            accept=".jpg,.jpeg,.png,.gif,.svg,.webp"
-            onChange={(event) => selectFiles(event.target.files)}
-          />
-
           {!isInEdit && (
             <Popover className="relative">
               <PopoverButton
@@ -192,7 +230,7 @@ function InputToolbar(props: InputToolbarProps) {
               >
                 <AddControlIcon />
               </PopoverButton>
-              <PopoverPanel className="cukii-menu-surface absolute bottom-full left-0 z-[1000] mb-2 w-52 rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-xl">
+              <PopoverPanel className="cukii-menu-surface absolute bottom-full left-0 z-[1000] mb-2 w-64 rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-xl">
                 {({ close }) => (
                   <>
                     <button
@@ -200,11 +238,12 @@ function InputToolbar(props: InputToolbarProps) {
                       type="button"
                       onClick={() => {
                         close();
-                        fileInputRef.current?.click();
+                        void pickFiles();
                       }}
                     >
                       <span className="flex items-center gap-2">
-                        <PhotoIcon className="h-4 w-4" /> Attach image
+                        <ArrowUpTrayIcon className="h-[17px] w-[17px]" /> Upload
+                        from computer
                       </span>
                     </button>
                     <button
@@ -216,7 +255,8 @@ function InputToolbar(props: InputToolbarProps) {
                       }}
                     >
                       <span className="flex items-center gap-2">
-                        <PaperClipIcon className="h-4 w-4" /> Attach context
+                        <DocumentPlusIcon className="h-[17px] w-[17px]" /> Add
+                        context
                       </span>
                     </button>
                   </>
@@ -257,7 +297,7 @@ function InputToolbar(props: InputToolbarProps) {
                         type="button"
                         onClick={() => {
                           close();
-                          fileInputRef.current?.click();
+                          void pickFiles();
                         }}
                       >
                         Attach file…
@@ -313,18 +353,142 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
-                    {showAction("Thinking") && (
+                    {showAction("Effort") && (
+                      <div
+                        className={menuItemClass}
+                        title="Set how hard the model tries"
+                      >
+                        <span>
+                          Effort
+                          <span className="ml-1 text-[var(--vscode-descriptionForeground)]">
+                            ({EFFORT_LABELS[brokerEffort]})
+                          </span>
+                        </span>
+                        <button
+                          data-testid="cukii-effort-slider"
+                          type="button"
+                          className="cukii-effort-slider"
+                          title="Click or drag to set effort level"
+                          aria-label="Effort"
+                          aria-valuemin={0}
+                          aria-valuemax={EFFORT_LEVELS.length - 1}
+                          aria-valuenow={effortIndex}
+                          aria-valuetext={EFFORT_LABELS[brokerEffort]}
+                          role="slider"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateEffortFromClientX(
+                              event.clientX,
+                              event.currentTarget.getBoundingClientRect(),
+                            );
+                          }}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.currentTarget.setPointerCapture(
+                              event.pointerId,
+                            );
+                            updateEffortFromClientX(
+                              event.clientX,
+                              event.currentTarget.getBoundingClientRect(),
+                            );
+                          }}
+                          onPointerMove={(event) => {
+                            if (
+                              !event.currentTarget.hasPointerCapture(
+                                event.pointerId,
+                              )
+                            )
+                              return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateEffortFromClientX(
+                              event.clientX,
+                              event.currentTarget.getBoundingClientRect(),
+                            );
+                          }}
+                          onPointerUp={(event) => {
+                            if (
+                              event.currentTarget.hasPointerCapture(
+                                event.pointerId,
+                              )
+                            ) {
+                              event.currentTarget.releasePointerCapture(
+                                event.pointerId,
+                              );
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              ![
+                                "ArrowLeft",
+                                "ArrowRight",
+                                "Home",
+                                "End",
+                              ].includes(event.key)
+                            )
+                              return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const nextIndex =
+                              event.key === "Home"
+                                ? 0
+                                : event.key === "End"
+                                  ? EFFORT_LEVELS.length - 1
+                                  : Math.max(
+                                      0,
+                                      Math.min(
+                                        EFFORT_LEVELS.length - 1,
+                                        effortIndex +
+                                          (event.key === "ArrowRight" ? 1 : -1),
+                                      ),
+                                    );
+                            updateBrokerPreferences(
+                              currentModel,
+                              brokerSubagent ?? "auto",
+                              EFFORT_LEVELS[nextIndex],
+                              brokerSpeed,
+                            );
+                          }}
+                        >
+                          <span
+                            className="cukii-effort-fill"
+                            style={{ width: effortFillWidth }}
+                          />
+                          {EFFORT_LEVELS.map((level, index) => (
+                            <span
+                              key={level}
+                              className={`cukii-effort-notch ${level === "ultra" ? "cukii-effort-notch-ultra" : ""}`}
+                              style={{
+                                left: `calc(${(index / (EFFORT_LEVELS.length - 1)) * 100}% ${9 - (index / (EFFORT_LEVELS.length - 1)) * 18 >= 0 ? "+" : "-"} ${Math.abs(9 - (index / (EFFORT_LEVELS.length - 1)) * 18)}px)`,
+                              }}
+                            />
+                          ))}
+                          <span
+                            className="cukii-effort-thumb"
+                            style={{ left: effortPosition }}
+                          />
+                        </button>
+                      </div>
+                    )}
+                    {nativeThinkingAvailable && showAction("Thinking") && (
                       <button
                         data-testid="cukii-thinking-toggle"
                         className={menuItemClass}
                         type="button"
                         role="switch"
-                        aria-checked={Boolean(hasReasoningEnabled)}
+                        aria-checked={hasReasoningEnabled}
+                        title="Enable or disable the vendor's native reasoning mode"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          dispatch(
-                            setHasReasoningEnabled(!hasReasoningEnabled),
+                          updateBrokerPreferences(
+                            currentModel,
+                            brokerSubagent ?? "auto",
+                            brokerEffort,
+                            brokerSpeed,
+                            !hasReasoningEnabled,
                           );
                         }}
                       >
@@ -337,17 +501,55 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
-                    {showAction("Switch models when a message is flagged") && (
-                      <button className={menuItemClass} type="button" disabled>
-                        <span>Switch models when a message is flagged</span>
-                        <span className="cukii-toggle-track cukii-toggle-track-disabled">
-                          <span className="cukii-toggle-thumb" />
-                        </span>
+                    {showAction("Fast mode") && (
+                      <button
+                        data-testid="cukii-speed-toggle"
+                        className={menuItemClass}
+                        type="button"
+                        role="switch"
+                        aria-checked={
+                          nativeFastAvailable && brokerSpeed === "fast"
+                        }
+                        disabled={!nativeFastAvailable}
+                        title={
+                          nativeFastAvailable
+                            ? "Use the vendor's native accelerated service tier"
+                            : "This model has no native accelerated service tier"
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (!nativeFastAvailable) return;
+                          updateBrokerPreferences(
+                            currentModel,
+                            brokerSubagent ?? "auto",
+                            brokerEffort,
+                            brokerSpeed === "fast" ? "standard" : "fast",
+                          );
+                        }}
+                      >
+                        <span>Fast mode</span>
+                        {nativeFastAvailable ? (
+                          <span
+                            data-testid="cukii-speed-track"
+                            className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                          >
+                            <span className="cukii-toggle-thumb" />
+                          </span>
+                        ) : (
+                          <span className="text-[var(--vscode-descriptionForeground)]">
+                            Unavailable
+                          </span>
+                        )}
                       </button>
                     )}
-                    {showAction("Account & usage") && (
-                      <button className={menuItemClass} type="button" disabled>
-                        Account &amp; usage…
+                    {showAction("Manage accounts") && (
+                      <button
+                        className={menuItemClass}
+                        type="button"
+                        onClick={() => setVendorAccountsOpen(true)}
+                      >
+                        Manage accounts…
                       </button>
                     )}
                   </div>
@@ -444,6 +646,9 @@ function InputToolbar(props: InputToolbarProps) {
             updateBrokerPreferences(model, brokerSubagent ?? "auto")
           }
         />
+      )}
+      {vendorAccountsOpen && (
+        <VendorAccountsModal onClose={() => setVendorAccountsOpen(false)} />
       )}
     </>
   );

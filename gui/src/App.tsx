@@ -13,6 +13,11 @@ import ThemePage from "./styles/ThemePage";
 import { ROUTES } from "./util/navigation";
 import CukiiSessionNavigator from "./pages/sessions/CukiiSessionNavigator";
 
+document.documentElement.dataset.cukiiSurface = window.cukiiSurface ?? "chat";
+const panelSequence = Number(window.cukiiPanelId?.match(/(\d+)$/)?.[1] ?? 1);
+document.documentElement.dataset.cukiiPanelTone =
+  panelSequence % 2 === 0 ? "light" : "dark";
+
 const router = createMemoryRouter([
   {
     path: ROUTES.HOME,

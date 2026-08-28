@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
@@ -16,7 +17,6 @@ import { Button, lightGray, vscBackground } from "../../components";
 import { useFindWidget } from "../../components/find/FindWidget";
 import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
-import { useOnboardingCard } from "../../components/OnboardingCard";
 import StepContainer from "../../components/StepContainer";
 import { TabBar } from "../../components/TabBar/TabBar";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
@@ -45,7 +45,6 @@ import {
 import { useStore } from "react-redux";
 import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 
-import { DeprecationBanner } from "../../components/DeprecationBanner";
 import { FatalErrorIndicator } from "../../components/config/FatalErrorNotice";
 import InlineErrorMessage from "../../components/mainInput/InlineErrorMessage";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
@@ -62,6 +61,7 @@ import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
 import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
+import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import {
   getLastInProgressToolCallId,
   getToolTimelineClass,
@@ -110,6 +110,7 @@ const StepsDiv = styled.div`
 `;
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
+export const INITIAL_TRANSCRIPT_WINDOW = 160;
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
@@ -135,7 +136,6 @@ export function Chat() {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
   const reduxStore = useStore<RootState>();
-  const onboardingCard = useOnboardingCard();
   const showSessionTabs = useAppSelector(
     (store) => store.config.config.ui?.showSessionTabs,
   );
@@ -144,6 +144,19 @@ export function Chat() {
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const history = useAppSelector((state) => state.session.history);
+  const sessionId = useAppSelector((state) => state.session.id);
+  const isSessionLoading = useAppSelector(
+    (state) => state.session.isSessionLoading,
+  );
+  const [transcriptWindow, setTranscriptWindow] = useState(() => ({
+    sessionId,
+    visibleCount: INITIAL_TRANSCRIPT_WINDOW,
+  }));
+  const visibleTranscriptCount =
+    transcriptWindow.sessionId === sessionId
+      ? transcriptWindow.visibleCount
+      : INITIAL_TRANSCRIPT_WINDOW;
+  const transcriptStart = Math.max(0, history.length - visibleTranscriptCount);
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
   const focusView = useAppSelector((state) => state.ui.focusView);
   const showChatScrollbar = useAppSelector(
@@ -316,11 +329,16 @@ export function Chat() {
   );
 
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
-    const visibleHistory = history.filter(
+    const transcriptHistory = history.slice(transcriptStart);
+    const visibleHistory = transcriptHistory.filter(
       (item) => item.message.role !== "system",
     );
+    const visibleIndexById = new Map(
+      visibleHistory.map((entry, index) => [entry.message.id, index]),
+    );
 
-    return history.flatMap((item, historyIndex): JSX.Element[] => {
+    return transcriptHistory.flatMap((item, relativeIndex): JSX.Element[] => {
+      const historyIndex = transcriptStart + relativeIndex;
       const {
         message,
         editorState,
@@ -333,9 +351,7 @@ export function Chat() {
         return [];
       }
 
-      const visibleIndex = visibleHistory.findIndex(
-        (entry) => entry.message.id === message.id,
-      );
+      const visibleIndex = visibleIndexById.get(message.id) ?? -1;
       const isBeforeLatestSummary =
         latestSummaryIndex !== -1 && historyIndex < latestSummaryIndex;
       const isLiveTurn =
@@ -512,6 +528,7 @@ export function Chat() {
     isStreaming,
     latestSummaryIndex,
     sendInput,
+    transcriptStart,
   ]);
 
   const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
@@ -527,12 +544,38 @@ export function Chat() {
         ref={stepsDivRef}
         className={`cukii-transcript ${isStreaming ? "cukii-transcript-streaming" : ""} flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
       >
-        <DeprecationBanner dismissable={true} />
         {highlights}
-        {history.length === 0 && (
-          <EmptyChatBody showOnboardingCard={onboardingCard.show} />
+        {isSessionLoading ? (
+          <div
+            aria-live="polite"
+            className="flex min-h-0 flex-1 items-center justify-center gap-2 text-[13px] text-[var(--vscode-descriptionForeground)]"
+            data-testid="cukii-session-loading"
+            role="status"
+          >
+            <CukiiCrumbs />
+            <span>Loading…</span>
+          </div>
+        ) : (
+          <>
+            {history.length === 0 && <EmptyChatBody sessionId={sessionId} />}
+            {transcriptStart > 0 && (
+              <button
+                type="button"
+                className="cukii-load-earlier mx-auto my-3 rounded px-3 py-1 text-[12px] text-[var(--vscode-descriptionForeground)]"
+                onClick={() =>
+                  setTranscriptWindow({
+                    sessionId,
+                    visibleCount:
+                      visibleTranscriptCount + INITIAL_TRANSCRIPT_WINDOW,
+                  })
+                }
+              >
+                Load earlier messages
+              </button>
+            )}
+            {renderTranscriptRows()}
+          </>
         )}
-        {renderTranscriptRows()}
         <InlineErrorMessage />
         {isStreaming && !isInEdit && (
           <div className="cukii-spinner-row" data-testid="cukii-spinner-row">
@@ -540,25 +583,27 @@ export function Chat() {
           </div>
         )}
       </StepsDiv>
-      <div className={"cukii-main-input-shell relative shrink-0"}>
-        <ContinueInputBox
-          isMainInput
-          isLastUserInput={false}
-          onEnter={(editorState, modifiers, editor) =>
-            sendInput(editorState, modifiers, undefined, editor)
-          }
-          inputId={MAIN_EDITOR_INPUT_ID}
-        />
+      {!isSessionLoading && (
+        <div className={"cukii-main-input-shell relative shrink-0"}>
+          <ContinueInputBox
+            isMainInput
+            isLastUserInput={false}
+            onEnter={(editorState, modifiers, editor) =>
+              sendInput(editorState, modifiers, undefined, editor)
+            }
+            inputId={MAIN_EDITOR_INPUT_ID}
+          />
 
-        <div
-          style={{
-            pointerEvents: isStreaming ? "none" : "auto",
-          }}
-        >
-          <FatalErrorIndicator />
-          {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
+          <div
+            style={{
+              pointerEvents: isStreaming ? "none" : "auto",
+            }}
+          >
+            <FatalErrorIndicator />
+            {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

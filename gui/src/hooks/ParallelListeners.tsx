@@ -15,6 +15,7 @@ import {
   addContextItemsAtIndex,
   newSession,
   setHasReasoningEnabled,
+  setIsSessionLoading,
   setIsSessionMetadataLoading,
   setMode,
 } from "../redux/slices/sessionSlice";
@@ -23,7 +24,11 @@ import { setTTSActive } from "../redux/slices/uiSlice";
 import { modelSupportsReasoning } from "core/llm/autodetect";
 import { cancelStream } from "../redux/thunks/cancelStream";
 import { handleApplyStateUpdate } from "../redux/thunks/handleApplyStateUpdate";
-import { loadSession, refreshSessionMetadata } from "../redux/thunks/session";
+import {
+  getSession,
+  refreshSessionMetadata,
+  selectChatModelForProfile,
+} from "../redux/thunks/session";
 import { updateFileSymbolsFromHistory } from "../redux/thunks/updateFileSymbols";
 import {
   setDocumentStylesFromLocalStorage,
@@ -39,6 +44,7 @@ function ParallelListeners() {
   const ideMessenger = useContext(IdeMessengerContext);
   const history = useAppSelector((store) => store.session.history);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const mode = useAppSelector((store) => store.session.mode);
   const selectedProfileId = useAppSelector(
     (store) => store.profiles.selectedProfileId,
   );
@@ -46,6 +52,7 @@ function ParallelListeners() {
     (store) => store.ui.reasoningSettings,
   );
   const hasDoneInitialConfigLoad = useRef(false);
+  const initialLoadInFlight = useRef(false);
 
   // Load symbols for chat on any session change
   const sessionId = useAppSelector((state) => state.session.id);
@@ -99,46 +106,76 @@ function ParallelListeners() {
         document.body.style.fontSize = `${configResult.config.ui.fontSize}px`;
       }
 
-      const chatModel = configResult.config?.selectedModelByRole.chat;
-      const supportsReasoning = modelSupportsReasoning(chatModel);
-      const isReasoningDisabled =
-        chatModel?.completionOptions?.reasoning === false;
-      const wasReasoningPreviouslyEnabled = chatModel?.title
-        ? reasoningSettings[chatModel.title] !== false
-        : true;
-      dispatch(
-        setHasReasoningEnabled(
-          supportsReasoning &&
-            !isReasoningDisabled &&
-            wasReasoningPreviouslyEnabled,
-        ),
-      );
+      if (mode !== "broker") {
+        const chatModel = configResult.config?.selectedModelByRole.chat;
+        const supportsReasoning = modelSupportsReasoning(chatModel);
+        const isReasoningDisabled =
+          chatModel?.completionOptions?.reasoning === false;
+        const wasReasoningPreviouslyEnabled = chatModel?.title
+          ? reasoningSettings[chatModel.title] !== false
+          : true;
+        dispatch(
+          setHasReasoningEnabled(
+            supportsReasoning &&
+              !isReasoningDisabled &&
+              wasReasoningPreviouslyEnabled,
+          ),
+        );
+      }
     },
-    [dispatch, hasDoneInitialConfigLoad, selectedProfileId, reasoningSettings],
+    [
+      dispatch,
+      hasDoneInitialConfigLoad,
+      mode,
+      selectedProfileId,
+      reasoningSettings,
+    ],
   );
 
   // Load config from the IDE
   useEffect(() => {
     async function initialLoadConfig() {
+      if (initialLoadInFlight.current) return;
+      initialLoadInFlight.current = true;
       dispatch(setIsSessionMetadataLoading(true));
       dispatch(setConfigLoading(true));
-      const result = await ideMessenger.request(
-        "config/getSerializedProfileInfo",
-        undefined,
-      );
-      if (result.status === "success") {
-        await handleConfigUpdate(true, result.content);
-      }
-      dispatch(setConfigLoading(false));
-      if (initialSessionId) {
-        await dispatch(
-          loadSession({
-            sessionId: initialSessionId,
-            saveCurrentSession: false,
-          }),
-        );
-      } else if (window.cukiiSurface === "chat") {
-        dispatch(newSession());
+      if (initialSessionId) dispatch(setIsSessionLoading(true));
+      try {
+        // Large saved chats can be tens of megabytes. Fetch config and history
+        // concurrently, while the chat shows one centered Loading… state.
+        const [configResult, sessionResult] = await Promise.all([
+          ideMessenger.request("config/getSerializedProfileInfo", undefined),
+          initialSessionId
+            ? getSession(ideMessenger, initialSessionId).then(
+                (session) => ({ session }),
+                (error: unknown) => ({ error }),
+              )
+            : Promise.resolve(undefined),
+        ]);
+        if (configResult.status === "success") {
+          await handleConfigUpdate(true, configResult.content);
+        }
+        if (sessionResult && "session" in sessionResult) {
+          dispatch(newSession(sessionResult.session));
+          if (sessionResult.session.chatModelTitle) {
+            void dispatch(
+              selectChatModelForProfile(sessionResult.session.chatModelTitle),
+            );
+          }
+        } else if (
+          initialSessionId &&
+          sessionResult &&
+          "error" in sessionResult
+        ) {
+          console.error("Failed to load Cukii session", sessionResult.error);
+          dispatch(newSession());
+        } else if (window.cukiiSurface === "chat") {
+          dispatch(newSession());
+        }
+      } finally {
+        dispatch(setConfigLoading(false));
+        dispatch(setIsSessionLoading(false));
+        initialLoadInFlight.current = false;
       }
     }
     void initialLoadConfig();

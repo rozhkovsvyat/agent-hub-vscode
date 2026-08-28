@@ -99,6 +99,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   const state = getState();
   const brokerModel = state.session.brokerModel ?? "fable-5";
   const brokerSubagent = state.session.brokerSubagent ?? "auto";
+  const brokerEffort = state.session.brokerEffort;
+  const brokerSpeed = state.session.brokerSpeed;
+  const thinkingEnabled = state.session.hasReasoningEnabled;
   const streamAborter = state.session.streamAborter;
 
   const messages: ChatMessage[] = state.session.history
@@ -117,6 +120,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         messages,
         brokerModel,
         brokerSubagent,
+        brokerEffort,
+        brokerSpeed,
+        thinkingEnabled,
       },
       streamAborter.signal,
     );

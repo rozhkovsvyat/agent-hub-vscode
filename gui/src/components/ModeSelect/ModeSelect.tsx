@@ -25,6 +25,11 @@ export function ModeSelect() {
   const brokerSubagent = useAppSelector(
     (store) => store.session.brokerSubagent,
   );
+  const brokerEffort = useAppSelector((store) => store.session.brokerEffort);
+  const brokerSpeed = useAppSelector((store) => store.session.brokerSpeed);
+  const thinkingEnabled = useAppSelector(
+    (store) => store.session.hasReasoningEnabled,
+  );
   const selectedModel = useAppSelector(selectSelectedChatModel);
 
   const isGoodAtAgentMode = useMemo(() => {
@@ -48,10 +53,21 @@ export function ModeSelect() {
       ideMessenger.post("cukii/setBrokerPreferences", {
         brokerModel: brokerModel ?? "opus-5",
         brokerSubagent: brokerSubagent ?? "auto",
+        brokerEffort,
+        brokerSpeed,
+        thinkingEnabled,
         mode: nextMode,
       });
     },
-    [brokerModel, brokerSubagent, dispatch, ideMessenger],
+    [
+      brokerEffort,
+      brokerModel,
+      brokerSpeed,
+      brokerSubagent,
+      dispatch,
+      ideMessenger,
+      thinkingEnabled,
+    ],
   );
 
   const cycleMode = useCallback(() => {

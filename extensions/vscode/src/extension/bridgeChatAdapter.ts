@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { ChatMessage, PromptLog } from "core";
-import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
+import type {
+  BrokerEffort,
+  BrokerModel,
+  BrokerSpeed,
+  BrokerSubagent,
+} from "core/protocol/ideWebview";
 import * as vscode from "vscode";
 
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
@@ -21,8 +26,22 @@ import {
   endSteerSession,
   steerPromptInstruction,
 } from "./bridgeSteer";
+import {
+  bridgeControlPrompt,
+  bridgeControlSummary,
+  claudeControlArgs,
+  codexControlArgs,
+  cursorModelId,
+  grokControlArgs,
+  resolveBridgeControls,
+  type BridgeControlResolution,
+} from "./bridgeControls";
+import {
+  ensureCursorCatalogVariants,
+  resolveCursorCatalogModel,
+} from "./bridgeModelCatalog";
 
-type BridgeRoute = {
+export type BridgeRoute = {
   label: string;
   program: string;
   args: string[];
@@ -44,22 +63,73 @@ type ResolvedCommand = {
 
 type BridgeEnv = NodeJS.ProcessEnv;
 
-const MODEL_LABELS: Record<BrokerModel, string> = {
+const MODEL_LABELS: Record<string, string> = {
   "opus-5": "Opus 5",
   "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
-  "codex-5-6-terra": "Codex 5.6 Terra",
-  "codex-5-6-sol": "Codex 5.6 Sol",
+  "haiku-4-5": "Haiku 4.5",
+  "codex-5-6-terra": "GPT-5.6 Terra",
+  "codex-5-6-sol": "GPT-5.6 Sol",
+  "codex-5-6-luna": "GPT-5.6 Luna",
+  "codex-5-5": "GPT-5.5",
+  "codex-5-4": "GPT-5.4",
+  "codex-5-4-mini": "GPT-5.4 Mini",
   "grok-4-6": "Grok 4.6",
+  "grok-4-5": "Grok 4.5",
   "composer-2-5": "Composer 2.5",
   // Enum id остаётся kimi-k2 ради совместимости с persist'ом globalState.
   // Дефолт подписки — kimi-code/kimi-for-coding (K2.7 Coding), поэтому витрина —
   // «Kimi K2.7». K3 у подписки тоже есть (kimi-code/k3).
   "kimi-k2": "Kimi K2.7",
+  "kimi-k2-highspeed": "Kimi K2.7 Highspeed",
   "kimi-k3": "Kimi K3",
+  "kimi-k3-256k": "Kimi K3-256K",
   "deepseek-v4-pro": "DeepSeek V4 Pro",
   "qwen-3-8-max": "Qwen 3.8 Max",
 };
+
+const CODEX_NATIVE_MODELS: Record<string, string> = {
+  "codex-5-6-sol": "gpt-5.6-sol",
+  "codex-5-6-terra": "gpt-5.6-terra",
+  "codex-5-6-luna": "gpt-5.6-luna",
+  "codex-5-5": "gpt-5.5",
+  "codex-5-4": "gpt-5.4",
+  "codex-5-4-mini": "gpt-5.4-mini",
+};
+
+const KIMI_NATIVE_MODELS: Record<string, string | undefined> = {
+  "kimi-k2": "kimi-code/kimi-for-coding",
+  "kimi-k2-highspeed": "kimi-code/kimi-for-coding-highspeed",
+  "kimi-k3": "kimi-code/k3",
+  "kimi-k3-256k": "kimi-code/k3-256k",
+};
+
+function displayBridgeModel(model: BrokerModel): string {
+  return (
+    MODEL_LABELS[model] ??
+    model.replace(/^(?:codex|kimi|grok|cursor):/, "").replaceAll("-", " ")
+  );
+}
+
+function codexNativeModel(model: BrokerModel): string | undefined {
+  return (
+    CODEX_NATIVE_MODELS[model] ??
+    (model.startsWith("codex:") ? model.slice("codex:".length) : undefined)
+  );
+}
+
+function kimiNativeModel(model: BrokerModel): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(KIMI_NATIVE_MODELS, model)) {
+    return KIMI_NATIVE_MODELS[model];
+  }
+  return model.startsWith("kimi:") ? model.slice("kimi:".length) : undefined;
+}
+
+function grokNativeModel(model: BrokerModel): string | undefined {
+  if (model === "grok-4-6") return "grok-4.6";
+  if (model === "grok-4-5") return "grok-4.5";
+  return model.startsWith("grok:") ? model.slice("grok:".length) : undefined;
+}
 
 // Kimi едет собственным ПОДПИСОЧНЫМ CLI `kimi` (Kimi Code, device-login на
 // kimi.ai/global — flat-fee + квота), а НЕ платным per-token API и НЕ через
@@ -76,11 +146,6 @@ const KIMI_INLINE_PROMPT_BUDGET = 24_000;
 
 function kimiCliProgram(): string {
   return "kimi";
-}
-
-function kimiModelOverride(): string | undefined {
-  const m = process.env.CUKII_KIMI_MODEL || process.env.MOONSHOT_MODEL;
-  return m && m.trim() ? m.trim() : undefined;
 }
 
 /**
@@ -148,14 +213,15 @@ function buildPrompt(
   brokerSubagent: BrokerSubagent,
   cwd: string,
   steerPath: string,
+  controls: BridgeControlResolution,
 ): string {
   const subagent =
-    brokerSubagent === "auto" ? "Auto" : MODEL_LABELS[brokerSubagent];
+    brokerSubagent === "auto" ? "Auto" : displayBridgeModel(brokerSubagent);
   const selectedSubagentGuidance =
     brokerSubagent === "auto"
       ? "Subagent routing is Auto: choose the strongest appropriate native worker and say which one you chose."
       : [
-          `Subagent routing is locked to ${MODEL_LABELS[brokerSubagent]}.`,
+          `Subagent routing is locked to ${displayBridgeModel(brokerSubagent)}.`,
           "If the user asks you to delegate, you MUST use that selected native worker.",
           "Do not use Claude Code's built-in Agent/Explore/Task subagent as a substitute for a selected Cukii subagent.",
           "If the selected native worker cannot be launched, report that failure explicitly instead of silently falling back.",
@@ -165,7 +231,7 @@ function buildPrompt(
           "Two delegation mechanisms exist; pick by where the work lives.",
           "(1) Work inside a Cukii vault scope (work, fm, housing, agents, hub):" +
             ` call mcp__cukii-broker__broker_delegate with agent="${brokerAgentId(brokerSubagent)}",` +
-            ` model="${MODEL_LABELS[brokerSubagent]}" and an EXPLICIT scope argument,` +
+            ` model="${displayBridgeModel(brokerSubagent)}" and an EXPLICIT scope argument,` +
             " then poll broker_status and finish with broker_accept." +
             " The scope argument is mandatory unless the task text names the scope itself:" +
             " without it routing cannot resolve and delegation is refused.",
@@ -187,7 +253,8 @@ function buildPrompt(
 
   return [
     "You are Cukii Broker running through a native bridge, not through the Continue chat model.",
-    `Broker model: ${MODEL_LABELS[brokerModel]}.`,
+    `Broker model: ${displayBridgeModel(brokerModel)}.`,
+    ...bridgeControlPrompt(controls),
     `Preferred subagent model: ${subagent}.`,
     selectedSubagentGuidance,
     "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
@@ -203,60 +270,56 @@ function buildPrompt(
 function brokerAgentId(
   model: BrokerModel,
 ): "codex" | "claude" | "grok" | "cursor" | "deepseek" | "qwen" {
-  switch (model) {
-    case "opus-5":
-    case "sonnet-5":
-    case "fable-5":
-      return "claude";
-    case "codex-5-6-terra":
-    case "codex-5-6-sol":
-      return "codex";
-    case "grok-4-6":
-      return "grok";
-    case "composer-2-5":
-      return "cursor";
-    // Kimi едет через тот же claude CLI, поэтому worker-канал у него claude.
-    case "kimi-k2":
-    case "kimi-k3":
-      return "claude";
-    case "deepseek-v4-pro":
-      return "deepseek";
-    case "qwen-3-8-max":
-      return "qwen";
+  if (["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(model)) {
+    return "claude";
   }
+  if (codexNativeModel(model)) return "codex";
+  if (grokNativeModel(model)) return "grok";
+  if (model === "composer-2-5" || model.startsWith("cursor:")) return "cursor";
+  // Broker protocol пока использует claude worker-channel для Moonshot.
+  if (kimiNativeModel(model) !== undefined || model === "kimi-k2")
+    return "claude";
+  if (model === "deepseek-v4-pro") return "deepseek";
+  return "qwen";
 }
 
 function nativeDelegateHint(model: BrokerModel, cwd: string): string {
+  const codexModel = codexNativeModel(model);
+  if (codexModel) {
+    return `codex -m ${codexModel} exec -s danger-full-access --cd "${cwd}" -`;
+  }
+  const grokModel = grokNativeModel(model);
+  if (grokModel) {
+    return `grok --model ${grokModel} --cwd "${cwd}" --prompt-file <task-file>`;
+  }
+  const kimiModel = kimiNativeModel(model);
+  if (kimiModel || model === "kimi-k2") {
+    return `kimi -p "<task>"${kimiModel ? ` -m ${kimiModel}` : ""} --output-format stream-json`;
+  }
   switch (model) {
     case "opus-5":
-      return 'claude --model opus -p "<task>"';
+      return 'claude --model claude-opus-5 -p "<task>"';
     case "sonnet-5":
-      return 'claude --model sonnet -p "<task>"';
+      return 'claude --model claude-sonnet-5 -p "<task>"';
     case "fable-5":
-      return 'claude --model fable -p "<task>"';
-    case "codex-5-6-terra":
-      return `codex -m gpt-5.6-terra exec -s danger-full-access --cd "${cwd}" -`;
-    case "codex-5-6-sol":
-      return `codex -m gpt-5.6-sol exec -s danger-full-access --cd "${cwd}" -`;
-    case "grok-4-6":
-      return `grok --model grok-4.6 --cwd "${cwd}" --prompt-file <task-file>`;
+      return 'claude --model claude-fable-5 -p "<task>"';
+    case "haiku-4-5":
+      return 'claude --model claude-haiku-4-5 -p "<task>"';
     case "composer-2-5":
       return "cursor-agent -p --output-format text --model composer-2.5 --trust";
-    case "kimi-k2":
-      return 'kimi -p "<task>" --output-format stream-json';
-    case "kimi-k3":
-      return 'kimi -p "<task>" -m kimi-code/k3 --output-format stream-json';
     case "deepseek-v4-pro":
       return "deepseek bridge is not connected yet";
     case "qwen-3-8-max":
       return 'qwen --model qwen3.8-max-preview --prompt "<task>" --output-format stream-json --approval-mode yolo';
+    default:
+      return `${displayBridgeModel(model)} bridge route`;
   }
 }
 
 function bridgeLogFile(model: BrokerModel): string {
   return path.join(
     os.tmpdir(),
-    `cukii-${model}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
+    `cukii-${model.replace(/[^a-z0-9._-]/gi, "-")}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
   );
 }
 
@@ -391,22 +454,191 @@ function ensureProgramAvailable(route: BridgeRoute): ResolvedCommand {
   return resolveCommand(route.program, route.args);
 }
 
-function routeForModel(
+export function routeForModel(
   model: BrokerModel,
   cwd: string,
   prompt: string,
   messages: ChatMessage[],
+  controls: BridgeControlResolution,
 ): BridgeRoute {
   const logFile = bridgeLogFile(model);
+  const claudeModel = {
+    "opus-5": "claude-opus-5",
+    "sonnet-5": "claude-sonnet-5",
+    "fable-5": "claude-fable-5",
+    "haiku-4-5": "claude-haiku-4-5",
+  }[model];
+  if (claudeModel) {
+    return {
+      label: displayBridgeModel(model),
+      program: "claude",
+      args: [
+        "--model",
+        claudeModel,
+        ...claudeControlArgs(controls),
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+      ],
+      format: "anthropic-envelope",
+      logFile,
+    };
+  }
+  const codexModel = codexNativeModel(model);
+  if (codexModel) {
+    return {
+      label: displayBridgeModel(model),
+      program: "codex",
+      args: [
+        "-m",
+        codexModel,
+        ...codexControlArgs(controls),
+        "exec",
+        "--json",
+        "-s",
+        "danger-full-access",
+        "--cd",
+        cwd,
+        "-",
+      ],
+      format: "codex-thread",
+      logFile,
+    };
+  }
+  const nativeGrokModel = grokNativeModel(model);
+  if (nativeGrokModel) {
+    const promptFile = path.join(
+      os.tmpdir(),
+      `cukii-grok-transcript-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+    );
+    fs.writeFileSync(promptFile, prompt, "utf8");
+    let promptJson: string;
+    try {
+      promptJson = grokPromptJson(messages, promptFile);
+    } catch (error) {
+      fs.rmSync(promptFile, { force: true });
+      throw error;
+    }
+    return {
+      label: displayBridgeModel(model),
+      program: "grok",
+      args: [
+        "--model",
+        nativeGrokModel,
+        ...grokControlArgs(controls),
+        "--cwd",
+        cwd,
+        "--prompt-json",
+        promptJson,
+        "--output-format",
+        "streaming-messages-json",
+        "--always-approve",
+      ],
+      format: "anthropic-envelope",
+      promptFile,
+      logFile,
+    };
+  }
+  const nativeCursorModel = resolveCursorCatalogModel(
+    model,
+    controls.nativeEffort ?? controls.requestedEffort,
+    controls.effectiveSpeed,
+    controls.effectiveThinking,
+  );
+  if (nativeCursorModel) {
+    if (process.platform === "win32") {
+      const wslCwd = cwd
+        .replace(
+          /^([A-Za-z]):\\/,
+          (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
+        )
+        .replace(/\\/g, "/");
+      return {
+        label: displayBridgeModel(model),
+        program: "wsl.exe",
+        args: [
+          "-d",
+          "Ubuntu-24.04",
+          "--",
+          "bash",
+          "-lc",
+          `cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model ${nativeCursorModel} --trust "$(cat)"`,
+          "cukii-cursor",
+          wslCwd,
+        ],
+        format: "anthropic-envelope",
+        logFile,
+      };
+    }
+    return {
+      label: displayBridgeModel(model),
+      program: "cursor-agent",
+      args: [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--stream-partial-output",
+        "--model",
+        nativeCursorModel,
+        "--trust",
+      ],
+      format: "anthropic-envelope",
+      logFile,
+    };
+  }
+  // Live Kimi provider discovery may return additional managed subscription
+  // aliases.  They must retain the exact native alias selected in the picker:
+  // falling back to K2 here would make a visible model a decorative option.
+  const liveKimiModel =
+    model.startsWith("kimi:") ? kimiNativeModel(model) : undefined;
+  if (liveKimiModel) {
+    const inline = Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
+    let promptArg = prompt;
+    let kimiPromptFile: string | undefined;
+    const extraArgs: string[] = [];
+    if (!inline) {
+      kimiPromptFile = path.join(
+        os.tmpdir(),
+        `cukii-kimi-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+      );
+      fs.writeFileSync(kimiPromptFile, prompt, "utf8");
+      promptArg =
+        "Your full broker instructions and the conversation transcript are in " +
+        `the file \"${kimiPromptFile}\". Read that file first, then act on the ` +
+        "latest user message. Answer in the user's language.";
+      extraArgs.push("--add-dir", os.tmpdir());
+    }
+    const skillDirs = getKimiSkillDirs();
+    return {
+      label: displayBridgeModel(model),
+      program: kimiCliProgram(),
+      args: [
+        "-p",
+        promptArg,
+        "--output-format",
+        "stream-json",
+        "-m",
+        liveKimiModel,
+        ...extraArgs,
+        ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
+      ],
+      format: "kimi-ndjson",
+      promptFile: kimiPromptFile,
+      logFile,
+      noStdin: true,
+    };
+  }
   switch (model) {
     // `--verbose` обязателен: без него `claude -p` не отдаёт stream-json.
     case "opus-5":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "claude",
         args: [
           "--model",
-          "opus",
+          "claude-opus-5",
+          ...claudeControlArgs(controls),
           "-p",
           "--output-format",
           "stream-json",
@@ -417,11 +649,12 @@ function routeForModel(
       };
     case "fable-5":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "claude",
         args: [
           "--model",
-          "fable",
+          "claude-fable-5",
+          ...claudeControlArgs(controls),
           "-p",
           "--output-format",
           "stream-json",
@@ -432,11 +665,12 @@ function routeForModel(
       };
     case "sonnet-5":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "claude",
         args: [
           "--model",
-          "sonnet",
+          "claude-sonnet-5",
+          ...claudeControlArgs(controls),
           "-p",
           "--output-format",
           "stream-json",
@@ -446,14 +680,15 @@ function routeForModel(
         logFile,
       };
     // Kimi = подписочный CLI `kimi` (device-login), поток stream-json в формате
-    // kimi-ndjson. Модель НЕ форсируем — берётся default_model из config.toml
-    // (то, что реально даёт подписка); override только через CUKII_KIMI_MODEL.
+    // kimi-ndjson. Выбранная модель всегда передаётся exact native alias через
+    // `-m`; иначе пользовательский K2 мог молча превратиться в default K3.
     // `-p` берёт промпт аргументом и stdin не читает, поэтому большой транскрипт
     // уходит в файл, а kimi получает короткую инструкцию прочитать его тулом.
     case "kimi-k2":
-    case "kimi-k3": {
-      const modelArg =
-        model === "kimi-k3" ? "kimi-code/k3" : kimiModelOverride();
+    case "kimi-k2-highspeed":
+    case "kimi-k3":
+    case "kimi-k3-256k": {
+      const modelArg = kimiNativeModel(model);
       const inline =
         Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
       let promptArg = prompt;
@@ -473,7 +708,7 @@ function routeForModel(
       }
       const skillDirs = getKimiSkillDirs();
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: kimiCliProgram(),
         args: [
           "-p",
@@ -492,11 +727,12 @@ function routeForModel(
     }
     case "codex-5-6-terra":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "codex",
         args: [
           "-m",
           "gpt-5.6-terra",
+          ...codexControlArgs(controls),
           "exec",
           "--json",
           "-s",
@@ -510,11 +746,12 @@ function routeForModel(
       };
     case "codex-5-6-sol":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "codex",
         args: [
           "-m",
           "gpt-5.6-sol",
+          ...codexControlArgs(controls),
           "exec",
           "--json",
           "-s",
@@ -540,11 +777,12 @@ function routeForModel(
         throw error;
       }
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "grok",
         args: [
           "--model",
           "grok-4.6",
+          ...grokControlArgs(controls),
           "--cwd",
           cwd,
           "--prompt-json",
@@ -564,6 +802,7 @@ function routeForModel(
         logFile,
       };
     case "composer-2-5":
+      const cursorModel = cursorModelId(controls);
       if (process.platform === "win32") {
         const wslCwd = cwd
           .replace(
@@ -572,7 +811,7 @@ function routeForModel(
           )
           .replace(/\\/g, "/");
         return {
-          label: MODEL_LABELS[model],
+          label: displayBridgeModel(model),
           program: "wsl.exe",
           args: [
             "-d",
@@ -580,7 +819,7 @@ function routeForModel(
             "--",
             "bash",
             "-lc",
-            'cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model composer-2.5 --trust "$(cat)"',
+            `cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model ${cursorModel} --trust "$(cat)"`,
             "cukii-cursor",
             wslCwd,
           ],
@@ -591,7 +830,7 @@ function routeForModel(
         };
       }
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "cursor-agent",
         args: [
           "-p",
@@ -599,7 +838,7 @@ function routeForModel(
           "stream-json",
           "--stream-partial-output",
           "--model",
-          "composer-2.5",
+          cursorModel,
           "--trust",
         ],
         format: "anthropic-envelope",
@@ -611,7 +850,7 @@ function routeForModel(
       );
     case "qwen-3-8-max":
       return {
-        label: MODEL_LABELS[model],
+        label: displayBridgeModel(model),
         program: "qwen",
         args: [
           "--model",
@@ -628,6 +867,26 @@ function routeForModel(
         format: "anthropic-envelope",
         logFile,
       };
+    default:
+      if (model.startsWith("kimi:")) {
+        const modelArg = kimiNativeModel(model);
+        return routeForModel(
+          modelArg === "kimi-code/k3"
+            ? "kimi-k3"
+            : modelArg === "kimi-code/k3-256k"
+              ? "kimi-k3-256k"
+              : modelArg === "kimi-code/kimi-for-coding-highspeed"
+                ? "kimi-k2-highspeed"
+                : "kimi-k2",
+          cwd,
+          prompt,
+          messages,
+          controls,
+        );
+      }
+      throw new Error(
+        `${displayBridgeModel(model)} is not wired to a native Cukii bridge route.`,
+      );
   }
 }
 
@@ -681,6 +940,9 @@ export async function* streamBridgeChat(args: {
   messages: ChatMessage[];
   brokerModel: BrokerModel;
   brokerSubagent: BrokerSubagent;
+  brokerEffort: BrokerEffort;
+  brokerSpeed: BrokerSpeed;
+  thinkingEnabled: boolean;
 }): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
@@ -701,24 +963,46 @@ async function* streamBridgeChatWithSteer(
     messages: ChatMessage[];
     brokerModel: BrokerModel;
     brokerSubagent: BrokerSubagent;
+    brokerEffort: BrokerEffort;
+    brokerSpeed: BrokerSpeed;
+    thinkingEnabled: boolean;
   },
   cwd: string,
   steerPath: string,
 ): AsyncGenerator<ChatMessage, PromptLog> {
+  // The model picker fills this cache in the normal path. A restored saved
+  // session may send before that picker opens, so rebuild it on demand.
+  await ensureCursorCatalogVariants(args.brokerModel);
+  const controls = resolveBridgeControls(
+    args.brokerModel,
+    args.brokerEffort,
+    args.brokerSpeed,
+    args.thinkingEnabled,
+  );
   const prompt = buildPrompt(
     args.messages,
     args.brokerModel,
     args.brokerSubagent,
     cwd,
     steerPath,
+    controls,
   );
-  const route = routeForModel(args.brokerModel, cwd, prompt, args.messages);
+  const route = routeForModel(
+    args.brokerModel,
+    cwd,
+    prompt,
+    args.messages,
+    controls,
+  );
   const subagentLabel =
-    args.brokerSubagent === "auto" ? "Auto" : MODEL_LABELS[args.brokerSubagent];
+    args.brokerSubagent === "auto"
+      ? "Auto"
+      : displayBridgeModel(args.brokerSubagent);
   yield {
     role: "thinking",
     content:
       `Starting ${route.label} broker bridge.\n` +
+      `${bridgeControlSummary(controls)}\n` +
       `Subagent route: ${subagentLabel}.\n` +
       (args.brokerSubagent === "auto"
         ? "Auto routing may choose the strongest available native worker.\n"

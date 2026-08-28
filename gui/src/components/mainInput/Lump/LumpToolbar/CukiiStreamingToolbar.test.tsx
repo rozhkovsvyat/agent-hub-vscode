@@ -7,6 +7,10 @@ describe("CukiiStreamingToolbar", () => {
     render(<CukiiStreamingToolbar />);
 
     const toolbar = screen.getByTestId("cukii-streaming-toolbar");
+    expect(screen.getByTestId("cukii-crumbs")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     expect(toolbar.textContent).toMatch(
       /(?:Thinking|Combulating|Sussing|Sifting|Warming|Checking).*\.\.(?!\.)/,
     );

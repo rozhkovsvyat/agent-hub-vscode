@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 
 const { writeBuildTimestamp } = require("./utils");
 
@@ -6,11 +7,74 @@ const esbuild = require("esbuild");
 
 const flags = process.argv.slice(2);
 
+function copyVoiceRuntime() {
+  const source = require("ffmpeg-static");
+  const runtimeDir = path.join(__dirname, "..", "out", "runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.copyFileSync(source, path.join(runtimeDir, path.basename(source)));
+
+  const outputModules = path.join(__dirname, "..", "out", "node_modules");
+  for (const packageName of ["onnxruntime-node", "onnxruntime-common"]) {
+    const packageRoot = path.dirname(
+      require.resolve(`${packageName}/package.json`),
+    );
+    fs.cpSync(packageRoot, path.join(outputModules, packageName), {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  const copiedPackages = new Set();
+  function copyPackageTree(packageName, resolveFrom = __dirname) {
+    if (copiedPackages.has(packageName)) return;
+    const packageJson = require.resolve(`${packageName}/package.json`, {
+      paths: [resolveFrom],
+    });
+    const packageRoot = path.dirname(packageJson);
+    const manifest = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+    copiedPackages.add(packageName);
+    fs.cpSync(
+      packageRoot,
+      path.join(outputModules, ...packageName.split("/")),
+      { recursive: true, force: true },
+    );
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      copyPackageTree(dependency, packageRoot);
+    }
+  }
+  copyPackageTree("sharp");
+
+  const nativeRoot = path.join(
+    outputModules,
+    "onnxruntime-node",
+    "bin",
+    "napi-v3",
+  );
+  for (const platform of fs.readdirSync(nativeRoot)) {
+    if (platform !== process.platform) {
+      fs.rmSync(path.join(nativeRoot, platform), { recursive: true, force: true });
+    }
+  }
+  const platformRoot = path.join(nativeRoot, process.platform);
+  for (const arch of fs.readdirSync(platformRoot)) {
+    if (arch !== process.arch) {
+      fs.rmSync(path.join(platformRoot, arch), { recursive: true, force: true });
+    }
+  }
+}
+
 const esbuildConfig = {
   entryPoints: ["src/extension.ts"],
   bundle: true,
   outfile: "out/extension.js",
-  external: ["vscode", "esbuild", "./xhr-sync-worker.js"],
+  external: [
+    "vscode",
+    "esbuild",
+    "onnxruntime-node",
+    "sharp",
+    "./xhr-sync-worker.js",
+    "./voiceDictation",
+  ],
   format: "cjs",
   platform: "node",
   sourcemap: flags.includes("--sourcemap"),
@@ -35,6 +99,7 @@ const esbuildConfig = {
             throw new Error(result.errors);
           } else {
             try {
+              copyVoiceRuntime();
               fs.writeFileSync(
                 "./build/meta.json",
                 JSON.stringify(result.metafile, null, 2),
@@ -50,13 +115,36 @@ const esbuildConfig = {
   ],
 };
 
+const voiceEsbuildConfig = {
+  ...esbuildConfig,
+  entryPoints: ["src/extension/voiceDictation.ts"],
+  outfile: "out/voiceDictation.js",
+  external: ["vscode", "onnxruntime-node", "sharp"],
+  plugins: [
+    {
+      name: "voice-runtime-on-end-plugin",
+      setup(build) {
+        build.onEnd((result) => {
+          if (result.errors.length > 0) {
+            throw new Error(result.errors);
+          }
+          copyVoiceRuntime();
+        });
+      },
+    },
+  ],
+};
+
 void (async () => {
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
   // Bundles the extension into one file
   if (flags.includes("--watch")) {
-    const ctx = await esbuild.context(esbuildConfig);
-    await ctx.watch();
+    const [extensionContext, voiceContext] = await Promise.all([
+      esbuild.context(esbuildConfig),
+      esbuild.context(voiceEsbuildConfig),
+    ]);
+    await Promise.all([extensionContext.watch(), voiceContext.watch()]);
   } else if (flags.includes("--notify")) {
     const inFile = esbuildConfig.entryPoints[0];
     const outFile = esbuildConfig.outfile;
@@ -80,6 +168,7 @@ void (async () => {
     console.log("Triggering VS Code Extension esbuild rebuild...");
     writeBuildTimestamp();
   } else {
+    await esbuild.build(voiceEsbuildConfig);
     await esbuild.build(esbuildConfig);
   }
 })();

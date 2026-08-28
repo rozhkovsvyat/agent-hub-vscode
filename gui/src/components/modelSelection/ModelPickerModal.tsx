@@ -1,5 +1,5 @@
 import { CheckIcon } from "@heroicons/react/24/outline";
-import { useContext, useEffect } from "react";
+import { useContext, useEffect, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import {
@@ -8,37 +8,44 @@ import {
   type BrokerModel,
   type BrokerSubagent,
 } from "../../redux/slices/sessionSlice";
-import { VENDORS } from "./vendors";
+import { applyRuntimeVendorCatalog, VENDORS } from "./vendors";
+import { ModelCapabilityRating } from "./ModelCapabilityRating";
 
 interface ModelPickerModalProps {
   onClose: () => void;
   onSelect?: (model: BrokerModel) => void;
 }
 
-const DESCRIPTIONS: Partial<Record<BrokerModel, string>> = {
-  "opus-5": "1M context · Best for everyday, complex tasks",
-  "fable-5": "Most capable for the hardest and longest-running tasks",
-  "sonnet-5": "Efficient for routine tasks",
-  "codex-5-6-sol": "Frontier Codex agent for difficult engineering work",
-  "codex-5-6-terra": "Balanced Codex agent for everyday work",
-  "grok-4-6": "xAI agent through the Cukii bridge",
-  "composer-2-5": "Cursor agent through the Cukii bridge",
-  "qwen-3-8-max": "Qwen Max agent through the Cukii bridge",
-};
-
 export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
   const currentModel =
     useAppSelector((state) => state.session.brokerModel) ?? "opus-5";
+  const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
+  const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
+  const thinkingEnabled = useAppSelector(
+    (state) => state.session.hasReasoningEnabled,
+  );
+  const [, setCatalogVersion] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    void ideMessenger
+      .request("cukii/listBrokerModelCatalog", undefined)
+      .then((response) => {
+        if (cancelled || response.status !== "success") return;
+        applyRuntimeVendorCatalog(response.content);
+        setCatalogVersion((version) => version + 1);
+      });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [ideMessenger, onClose]);
 
   const selectModel = (model: BrokerModel) => {
     const nextSubagent: BrokerSubagent = "auto";
@@ -50,6 +57,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
       ideMessenger.post("cukii/setBrokerPreferences", {
         brokerModel: model,
         brokerSubagent: nextSubagent,
+        brokerEffort,
+        brokerSpeed,
+        thinkingEnabled,
         mode: "broker",
       });
     }
@@ -74,7 +84,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
 
         {VENDORS.map((vendor) => (
           <section key={vendor.id}>
-            <div className="px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
+            <div className="cursor-default select-none px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
               {vendor.label}
             </div>
             {vendor.models.map((model) => {
@@ -86,19 +96,19 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
                   disabled={model.disabled}
                   onClick={() => selectModel(model.value)}
                   className={`cukii-menu-item flex w-full items-center justify-between rounded px-3 py-2 text-left hover:bg-[var(--vscode-list-hoverBackground)] ${
-                    selected
-                      ? "cukii-model-option-selected"
-                      : ""
+                    selected ? "cukii-model-option-selected" : ""
                   } ${model.disabled ? "cursor-not-allowed opacity-45" : ""}`}
                 >
                   <span className="min-w-0">
-                    <span className="block text-[15px] text-[var(--vscode-foreground)]">
-                      {model.label}
-                      {model.disabled ? " (soon)" : ""}
+                    <span className="flex min-w-0 items-center gap-[5px] text-[15px] text-[var(--vscode-foreground)]">
+                      <span className="truncate">
+                        {model.label}
+                        {model.disabled ? " (soon)" : ""}
+                      </span>
+                      <ModelCapabilityRating model={model} />
                     </span>
                     <span className="block truncate text-xs text-[var(--vscode-descriptionForeground)]">
-                      {DESCRIPTIONS[model.value] ??
-                        `${vendor.label} model through the Cukii bridge`}
+                      {model.contextWindowLabel} context — {model.description}
                     </span>
                   </span>
                   {selected && (

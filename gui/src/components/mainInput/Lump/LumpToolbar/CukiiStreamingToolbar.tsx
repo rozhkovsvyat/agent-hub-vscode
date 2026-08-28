@@ -1,5 +1,5 @@
 import { useThinkingPhrase } from "../../../cukii/useThinkingPhrase";
-import { CukiiThinkingGlyph } from "../../../cukii/CukiiThinkingGlyph";
+import { CukiiCrumbs } from "../../../cukii/CukiiCrumbs";
 
 /**
  * Живой лоадер текущего ответа: самая нижняя строка хода.
@@ -15,7 +15,7 @@ export function CukiiStreamingToolbar({ active = true }: { active?: boolean }) {
       data-testid="cukii-streaming-toolbar"
     >
       <div className="cukii-thinking-row min-w-0">
-        <CukiiThinkingGlyph active={active} />
+        <CukiiCrumbs active={active} />
         <span className="cukii-thinking-text truncate">{phrase}..</span>
       </div>
     </div>

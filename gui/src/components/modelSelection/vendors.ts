@@ -1,20 +1,19 @@
 import type {
+  BrokerVendorId,
+  BrokerVendorModelCatalog,
   BrokerModel,
   BrokerSubagent,
-} from "../../redux/slices/sessionSlice";
+} from "core/protocol/ideWebview";
+import { CUKII_VENDOR_REGISTRY } from "core/cukiiVendorRegistry";
+import { canonicalCukiiModelDescription } from "core/cukiiModelPresentation";
 
-export type VendorId =
-  | "claude"
-  | "codex"
-  | "xai"
-  | "cursor"
-  | "kimi"
-  | "deepseek"
-  | "qwen";
+export type VendorId = BrokerVendorId;
 
 export interface ModelInfo {
   value: BrokerModel;
   label: string;
+  contextWindowLabel: string;
+  description: string;
   /** If true, the model is shown but cannot be selected (e.g. not wired yet). */
   disabled?: boolean;
 }
@@ -25,53 +24,132 @@ export interface VendorInfo {
   models: ModelInfo[];
 }
 
-export const VENDORS: VendorInfo[] = [
+type BootstrapVendorInfo = Omit<VendorInfo, "models"> & {
+  models: Array<Omit<ModelInfo, "description"> & { description?: string }>;
+};
+
+const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
   {
     id: "claude",
-    label: "Claude",
+    label: "Anthropic",
     models: [
-      { value: "opus-5", label: "Opus 5" },
-      { value: "sonnet-5", label: "Sonnet 5" },
-      { value: "fable-5", label: "Fable 5" },
+      { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
+      { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
+      { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
+      {
+        value: "haiku-4-5",
+        label: "Haiku 4.5",
+        contextWindowLabel: "200K",
+      },
     ],
   },
   {
     id: "codex",
-    label: "Codex",
+    label: "OpenAI",
     models: [
-      { value: "codex-5-6-sol", label: "5.6 Sol" },
-      { value: "codex-5-6-terra", label: "5.6 Terra" },
+      {
+        value: "codex-5-6-sol",
+        label: "GPT-5.6 Sol",
+        contextWindowLabel: "1M",
+      },
+      {
+        value: "codex-5-6-terra",
+        label: "GPT-5.6 Terra",
+        contextWindowLabel: "1M",
+      },
+      {
+        value: "codex-5-6-luna",
+        label: "GPT-5.6 Luna",
+        contextWindowLabel: "1M",
+      },
+      { value: "codex-5-5", label: "GPT-5.5", contextWindowLabel: "1M" },
+      { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "1M" },
+      {
+        value: "codex-5-4-mini",
+        label: "GPT-5.4 Mini",
+        contextWindowLabel: "400K",
+      },
     ],
   },
   {
-    id: "xai",
-    label: "XAI",
-    models: [{ value: "grok-4-6", label: "Grok 4.6" }],
+    id: "grok",
+    label: "xAI",
+    models: [
+      { value: "grok-4-6", label: "Grok 4.6", contextWindowLabel: "500K" },
+      { value: "grok-4-5", label: "Grok 4.5", contextWindowLabel: "500K" },
+    ],
   },
   {
     id: "cursor",
     label: "Cursor",
-    models: [{ value: "composer-2-5", label: "Composer 2.5" }],
+    models: [
+      {
+        value: "composer-2-5",
+        label: "Composer 2.5",
+        contextWindowLabel: "200K",
+      },
+    ],
   },
   {
     id: "kimi",
-    label: "Moonshot",
+    label: "Moonshot AI",
     models: [
-      { value: "kimi-k2", label: "Kimi K2.7" },
-      { value: "kimi-k3", label: "Kimi K3" },
+      { value: "kimi-k2", label: "K2.7 Coding", contextWindowLabel: "256K" },
+      {
+        value: "kimi-k2-highspeed",
+        label: "K2.7 Coding Highspeed",
+        contextWindowLabel: "256K",
+      },
+      { value: "kimi-k3", label: "K3", contextWindowLabel: "1M" },
+      {
+        value: "kimi-k3-256k",
+        label: "K3-256K",
+        contextWindowLabel: "256K",
+      },
     ],
   },
   {
     id: "deepseek",
     label: "DeepSeek",
-    models: [{ value: "deepseek-v4-pro", label: "V4 Pro", disabled: true }],
+    models: [
+      {
+        value: "deepseek-v4-pro",
+        label: "V4 Pro",
+        contextWindowLabel: "1M",
+        disabled: true,
+      },
+    ],
   },
   {
     id: "qwen",
-    label: "Qwen",
-    models: [{ value: "qwen-3-8-max", label: "Qwen 3.8 Max" }],
+    label: "Alibaba Cloud",
+    models: [
+      {
+        value: "qwen-3-8-max",
+        label: "Qwen 3.8 Max",
+        contextWindowLabel: "1M",
+      },
+    ],
   },
 ];
+
+export const VENDORS: VendorInfo[] = CUKII_VENDOR_REGISTRY.map((registered) => {
+  const vendor = FALLBACK_VENDORS.find(
+    (candidate) => candidate.id === registered.id,
+  );
+  if (!vendor) throw new Error(`Missing Cukii vendor ${registered.id}`);
+  return {
+    ...vendor,
+    label: registered.label,
+    models: vendor.models.map((model) => ({
+      ...model,
+      contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
+      description:
+        model.description?.trim() ||
+        canonicalCukiiModelDescription(model.value, model.label),
+    })),
+  };
+});
 
 export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
 
@@ -80,7 +158,85 @@ export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
 export const BROKER_SUBAGENT_OPTIONS: Array<{
   value: BrokerSubagent;
   label: string;
-}> = [{ value: "auto", label: "Auto" }, ...BROKER_MODEL_OPTIONS];
+}> = [
+  { value: "auto", label: "Auto" },
+  ...BROKER_MODEL_OPTIONS.map((model) => ({
+    value: model.value,
+    label: displayModelLabel(model),
+  })),
+];
+
+export function applyRuntimeVendorCatalog(
+  catalog: BrokerVendorModelCatalog[],
+): void {
+  const byId = new Map(catalog.map((vendor) => [vendor.id, vendor]));
+  const next = CUKII_VENDOR_REGISTRY.map((registered) => {
+    const live = byId.get(registered.id);
+    const fallback = FALLBACK_VENDORS.find(
+      (vendor) => vendor.id === registered.id,
+    );
+    return {
+      id: registered.id,
+      label: registered.label,
+      models: (live?.models ?? fallback?.models ?? []).map((model) => ({
+        ...model,
+        contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
+        description:
+          model.description?.trim() ||
+          canonicalCukiiModelDescription(model.value, model.label),
+      })),
+    };
+  }).filter((vendor) => vendor.models.length > 0);
+  if (next.length === 0) return;
+  VENDORS.splice(0, VENDORS.length, ...next);
+  ALL_MODELS.splice(0, ALL_MODELS.length, ...VENDORS.flatMap((v) => v.models));
+  BROKER_MODEL_OPTIONS.splice(
+    0,
+    BROKER_MODEL_OPTIONS.length,
+    ...ALL_MODELS.filter((model) => !model.disabled),
+  );
+  BROKER_SUBAGENT_OPTIONS.splice(
+    0,
+    BROKER_SUBAGENT_OPTIONS.length,
+    { value: "auto", label: "Auto" },
+    ...BROKER_MODEL_OPTIONS.map((model) => ({
+      value: model.value,
+      label: displayModelLabel(model),
+    })),
+  );
+}
+
+export function displayModelLabel(model: ModelInfo): string {
+  return model.label;
+}
+
+/** Product-level capability tier, independent of vendor pricing and context. */
+export function cukiiCapabilityRating(
+  model: Pick<ModelInfo, "value" | "label">,
+): 1 | 2 | 3 | 4 {
+  const stableId = model.value.toLowerCase().replace(/^cursor:/, "");
+  const fallbackLabel = model.label.toLowerCase();
+  const matches = (pattern: RegExp) =>
+    pattern.test(stableId) || pattern.test(fallbackLabel);
+
+  if (matches(/(?:^|[-\s])fable(?:[-\s]|$)/)) return 4;
+  if (
+    matches(/(?:^|[-\s])opus(?:[-\s]|$)/) ||
+    matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
+    matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
+    matches(/qwen[-\s]?3[.-]8[-\s]max/)
+  ) {
+    return 3;
+  }
+  if (
+    matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
+    matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
+    matches(/(?:^|[-\s])grok(?:[-\s]|$)/)
+  ) {
+    return 2;
+  }
+  return 1;
+}
 
 export function vendorForModel(model: BrokerModel): VendorInfo | undefined {
   return VENDORS.find((vendor) => vendor.models.some((m) => m.value === model));
@@ -88,4 +244,26 @@ export function vendorForModel(model: BrokerModel): VendorInfo | undefined {
 
 export function modelInfo(model: BrokerModel): ModelInfo | undefined {
   return ALL_MODELS.find((m) => m.value === model);
+}
+
+/** Native vendor acceleration, as opposed to a prompt-level approximation. */
+export function supportsNativeSpeed(model: BrokerModel): boolean {
+  return (
+    model === "opus-5" ||
+    model.startsWith("codex-") ||
+    model.startsWith("codex:") ||
+    model === "composer-2-5" ||
+    model.startsWith("cursor:")
+  );
+}
+
+/** Native reasoning on/off, separate from the effort level. */
+export function supportsNativeThinking(model: BrokerModel): boolean {
+  return (
+    model === "opus-5" ||
+    model === "sonnet-5" ||
+    model.startsWith("codex-") ||
+    model.startsWith("codex:") ||
+    model.startsWith("cursor:claude-")
+  );
 }

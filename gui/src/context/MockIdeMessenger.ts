@@ -40,6 +40,53 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
   "cukii/getBrokerPreferences": {
     brokerModel: "codex-5-6-terra",
     brokerSubagent: "auto",
+    brokerEffort: "high",
+    brokerSpeed: "standard",
+    thinkingEnabled: true,
+  },
+  "cukii/listVendorAccounts": [
+    {
+      id: "claude",
+      label: "Anthropic",
+      state: "connected",
+      accountLabel: "owner@example.com",
+      actions: ["logout"],
+    },
+    {
+      id: "deepseek",
+      label: "DeepSeek",
+      state: "postponed",
+      accountLabel: "Setup postponed",
+      actions: [],
+    },
+  ],
+  "cukii/listBrokerModelCatalog": [
+    {
+      id: "claude",
+      label: "Anthropic",
+      models: [
+        { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
+        { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
+        { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
+        {
+          value: "haiku-4-5",
+          label: "Haiku 4.5",
+          contextWindowLabel: "200K",
+        },
+      ],
+    },
+  ],
+  "cukii/pickAttachmentFiles": [],
+  "cukii/startVoiceRecording": {
+    recordingId: "mock-recording",
+    device: "Mock microphone",
+  },
+  "cukii/stopVoiceRecording": { text: "привет Куки" },
+  "cukii/cancelVoiceRecording": undefined,
+  "cukii/voiceRecordingStatus": { state: "listening" },
+  "cukii/runVendorAuthAction": {
+    opened: true,
+    message: "Authentication flow opened in the integrated terminal.",
   },
   "docs/getIndexedPages": [],
   "history/save": undefined,
@@ -121,6 +168,12 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
 };
 
 const DEFAULT_MOCK_CORE_RESPONSE_HANDLERS: MockResponseHandlers = {
+  "history/load": async ({ id }) => ({
+    sessionId: id,
+    title: "Mock session",
+    workspaceDirectory: "file:///Users/user/workspace1",
+    history: [],
+  }),
   "tools/evaluatePolicy": async (data) => {
     return {
       policy: data.basePolicy,

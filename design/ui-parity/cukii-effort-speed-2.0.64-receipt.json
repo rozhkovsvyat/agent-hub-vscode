@@ -1,0 +1,136 @@
+{
+  "version": "2.0.64",
+  "capturedAt": "2026-08-28T12:49:00+03:00",
+  "stand": {
+    "endpoint": "http://127.0.0.1:9444",
+    "controllerReloaded": false,
+    "vsix": "extensions/vscode/build/cukii-vscode-2.0.64.vsix",
+    "sha256": "22535FE50E37577603804506FBB8DF1413A574EC0958BB18AB5337C24457191E",
+    "installed": true
+  },
+  "claudeOracle": {
+    "trackCssPx": { "width": 76, "height": 18, "radius": 9 },
+    "trackBackground": "rgba(204, 204, 204, 0.2)",
+    "notchInsetCssPx": 9,
+    "notchStepCssPx": 11.6,
+    "fill": "rgb(0, 122, 204)",
+    "thumbCssPx": 14
+  },
+  "cukiiRuntime": {
+    "trackCssPx": { "width": 76, "height": 18, "radius": 9 },
+    "trackBackground": "rgba(204, 204, 204, 0.2)",
+    "highFillWidthCssPx": 41.19791793823242,
+    "fill": "rgb(0, 122, 204)",
+    "thumbCssPx": 14,
+    "mediumFillWidthCssPx": 29.59375,
+    "menuStayedOpenAfterEffortChange": true,
+    "menuStayedOpenAfterSpeedChange": true,
+    "menuStayedOpenAfterThinkingChange": true,
+    "fastTrackOn": "rgb(244, 135, 113)",
+    "thinkingTrackOn": "rgb(244, 135, 113)",
+    "thinkingControl": "shown only for Claude and Codex models with verified native on/off transport"
+  },
+  "liveCodexTransport": {
+    "model": "gpt-5.6-terra",
+    "requestedEffort": "medium",
+    "requestedSpeed": "fast",
+    "thinkingOffArgvEvidence": [
+      "-c",
+      "model_reasoning_effort=\"none\"",
+      "-c",
+      "service_tier=\"priority\""
+    ],
+    "thinkingOnArgvUnitEvidence": "model_reasoning_effort=\"medium\"",
+    "bridgeSummary": "Effort: medium (saved; inactive while Thinking is off). Speed: fast (native). Thinking: off (native).",
+    "response": "OK",
+    "streamCompleted": true
+  },
+  "liveClaudeTransport": {
+    "model": "claude-opus-5",
+    "requestedEffort": "ultra",
+    "nativeEffortWhileThinkingOff": "high",
+    "requestedSpeed": "fast",
+    "thinking": false,
+    "argvEvidence": [
+      "--model",
+      "claude-opus-5",
+      "--effort",
+      "high",
+      "--settings",
+      "{\"fastMode\":true,\"alwaysThinkingEnabled\":false}"
+    ],
+    "bridgeSummary": "Effort: ultra (saved; inactive while Thinking is off). Speed: fast (native). Thinking: off (native).",
+    "response": "OK",
+    "directCliModelUsageKey": "claude-opus-5"
+  },
+  "perTab": {
+    "first": {
+      "model": "5.6 Terra (1M)",
+      "effort": "medium",
+      "speed": "fast",
+      "thinking": false
+    },
+    "second": {
+      "model": "Opus 5 (1M)",
+      "effort": "high",
+      "speed": "standard",
+      "thinking": true
+    },
+    "independent": true,
+    "survivedIsolatedWindowReload": true
+  },
+  "capabilityPolicy": {
+    "nativeEffort": ["Claude", "Codex", "Grok"],
+    "brokerContractEffort": ["Cursor", "Kimi", "Qwen"],
+    "nativeFast": [
+      "Claude Opus 5",
+      "Codex 5.6 Sol",
+      "Codex 5.6 Terra",
+      "Cursor Composer 2.5"
+    ],
+    "unsupportedFastIsDisabled": true,
+    "nativeThinking": [
+      "Claude Opus 5",
+      "Claude Sonnet 5",
+      "Codex 5.6 Sol",
+      "Codex 5.6 Terra"
+    ],
+    "fableThinking": "always on; toggle hidden and no alwaysThinkingEnabled setting is sent",
+    "opusThinkingOff": "requested effort is preserved but native argv is clamped to high when needed",
+    "unsupportedThinkingIsHidden": true,
+    "deepSeek": "existing disabled route; no false parity claim"
+  },
+  "contextWindowLabels": {
+    "1M": [
+      "Claude Opus 5",
+      "Claude Sonnet 5",
+      "Claude Fable 5",
+      "Codex 5.6 Sol",
+      "Codex 5.6 Terra",
+      "Kimi K3",
+      "DeepSeek V4 Pro",
+      "Qwen 3.8 Max"
+    ],
+    "500K": ["Grok 4.6"],
+    "256K": ["Kimi K2.7"],
+    "200K": ["Cursor Composer 2.5"],
+    "sources": [
+      "https://docs.anthropic.com/en/docs/about-claude/models/migrating-to-claude-4",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "https://docs.x.ai/developers/grok-4-6",
+      "https://prod.cursor.com/docs/models/cursor-composer-2-5",
+      "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+      "https://api-docs.deepseek.com/quick_start/pricing/",
+      "https://docs.qwencloud.com/developer-guides/getting-started/latest-model"
+    ],
+    "localKimiConfig": { "k3": 1048576, "kimi-for-coding": 262144 }
+  },
+  "tests": {
+    "extension": "14 files, 150 passed",
+    "targetedGui": "5 files, 20 passed",
+    "historyRoundTrip": "core/util/history.test.ts: 19 passed, including persisted broker controls",
+    "extensionTypecheck": "passed",
+    "guiProductionBuild": "passed",
+    "knownBaseline": "Full legacy GUI suite remains red outside this change: old tests expect pre-existing non-broker mode/tool flow; impacted targeted tests pass."
+  }
+}

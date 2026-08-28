@@ -9,7 +9,14 @@ import {
 import { ToWebviewFromCoreProtocol } from "core/protocol/coreWebview";
 import { ToIdeFromWebviewOrCoreProtocol } from "core/protocol/ide";
 import { ToIdeFromCoreProtocol } from "core/protocol/ideCore";
-import type { BrokerModel, BrokerSubagent } from "core/protocol/ideWebview";
+import type {
+  BrokerEffort,
+  BrokerModel,
+  BrokerSpeed,
+  BrokerSubagent,
+  BrokerVendorAuthAction,
+  BrokerVendorId,
+} from "core/protocol/ideWebview";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
 import {
   CORE_TO_WEBVIEW_PASS_THROUGH,
@@ -31,7 +38,18 @@ import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
 import { streamBridgeChat } from "./bridgeChatAdapter";
+import { listBrokerModelCatalog } from "./bridgeModelCatalog";
+import {
+  cancelVoiceRecording,
+  startVoiceRecording,
+  stopVoiceRecording,
+  voiceRecordingStatus,
+} from "./voiceDictation";
 import { appendSteerMessage } from "./bridgeSteer";
+import {
+  listBrokerVendorAccounts,
+  vendorAuthTerminalCommand,
+} from "./bridgeVendorAuth";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -369,6 +387,18 @@ export class VsCodeMessenger {
         "cukii.brokerSubagent",
         "auto",
       ),
+      brokerEffort: this.context.globalState.get<BrokerEffort>(
+        "cukii.brokerEffort",
+        "high",
+      ),
+      brokerSpeed: this.context.globalState.get<BrokerSpeed>(
+        "cukii.brokerSpeed",
+        "standard",
+      ),
+      thinkingEnabled: this.context.globalState.get<boolean>(
+        "cukii.thinkingEnabled",
+        true,
+      ),
       mode: this.context.globalState.get<"chat" | "plan" | "agent" | "broker">(
         "cukii.brokerMode",
         "broker",
@@ -384,10 +414,91 @@ export class VsCodeMessenger {
           "cukii.brokerSubagent",
           msg.data.brokerSubagent,
         ),
+        this.context.globalState.update(
+          "cukii.brokerEffort",
+          msg.data.brokerEffort,
+        ),
+        this.context.globalState.update(
+          "cukii.brokerSpeed",
+          msg.data.brokerSpeed,
+        ),
+        this.context.globalState.update(
+          "cukii.thinkingEnabled",
+          msg.data.thinkingEnabled,
+        ),
         ...(msg.data.mode
           ? [this.context.globalState.update("cukii.brokerMode", msg.data.mode)]
           : []),
       ]);
+    });
+    this.onWebview("cukii/listVendorAccounts", async () => {
+      return listBrokerVendorAccounts();
+    });
+    this.onWebview("cukii/listBrokerModelCatalog", async () => {
+      return listBrokerModelCatalog();
+    });
+    this.onWebview("cukii/pickAttachmentFiles", async () => {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: true,
+        openLabel: "Upload",
+        title: "Upload files to Cukii",
+      });
+      return (picked ?? []).map((uri) => ({
+        path: uri.fsPath,
+        name: uri.fsPath.split(/[\\/]/).at(-1) ?? uri.fsPath,
+      }));
+    });
+    this.onWebview("cukii/startVoiceRecording", async (msg) => {
+      try {
+        return await startVoiceRecording(msg.data.recordingId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`Cukii voice input: ${message}`);
+        throw error;
+      }
+    });
+    this.onWebview("cukii/stopVoiceRecording", async (msg) => {
+      try {
+        return { text: await stopVoiceRecording(msg.data.recordingId) };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`Cukii voice input: ${message}`);
+        throw error;
+      }
+    });
+    this.onWebview("cukii/cancelVoiceRecording", async (msg) => {
+      await cancelVoiceRecording(msg.data.recordingId);
+    });
+    this.onWebview("cukii/voiceRecordingStatus", async (msg) =>
+      voiceRecordingStatus(msg.data.recordingId),
+    );
+    this.onWebview("cukii/runVendorAuthAction", async (msg) => {
+      const spec = vendorAuthTerminalCommand(
+        msg.data.vendor as BrokerVendorId,
+        msg.data.action as BrokerVendorAuthAction,
+      );
+      if (!spec) {
+        return {
+          opened: false,
+          message:
+            "This vendor does not expose that CLI authentication action.",
+        };
+      }
+      const terminal = vscode.window.createTerminal({ name: spec.name });
+      terminal.show();
+      terminal.sendText(spec.command, true);
+      if (spec.followup) {
+        setTimeout(() => terminal.sendText(spec.followup!, true), 1_500);
+      }
+      return {
+        opened: true,
+        message:
+          msg.data.action === "install"
+            ? "Latest CLI installation opened in the integrated terminal."
+            : "Authentication flow opened in the integrated terminal.",
+      };
     });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       return streamBridgeChat(msg.data);

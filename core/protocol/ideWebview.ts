@@ -1,5 +1,7 @@
 import { ToIdeFromWebviewOrCoreProtocol } from "./ide";
 import { ToWebviewFromIdeOrCoreProtocol } from "./webview";
+import type { BrokerVendorId } from "../cukiiVendorRegistry";
+export type { BrokerVendorId } from "../cukiiVendorRegistry";
 
 import {
   AcceptOrRejectDiffPayload,
@@ -15,25 +17,55 @@ import {
   ShowFilePayload,
 } from "../";
 
-export type BrokerModel =
-  | "opus-5"
-  | "sonnet-5"
-  | "fable-5"
-  | "codex-5-6-terra"
-  | "codex-5-6-sol"
-  | "grok-4-6"
-  | "composer-2-5"
-  | "kimi-k2"
-  | "kimi-k3"
-  | "deepseek-v4-pro"
-  | "qwen-3-8-max";
+/** Stable ids for built-ins plus vendor-prefixed ids discovered from live CLIs. */
+export type BrokerModel = string;
 
 export type BrokerSubagent = "auto" | BrokerModel;
+
+export type BrokerEffort =
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra";
+
+export type BrokerSpeed = "standard" | "fast";
+
+export type BrokerVendorAuthAction = "install" | "login" | "logout";
+
+export type BrokerModelCatalogEntry = {
+  value: BrokerModel;
+  label: string;
+  contextWindowLabel: string;
+  description?: string;
+  disabled?: boolean;
+};
+
+export type BrokerVendorModelCatalog = {
+  id: BrokerVendorId;
+  label: string;
+  models: BrokerModelCatalogEntry[];
+};
+
+export type BrokerVendorAuthStatus = {
+  id: BrokerVendorId;
+  label: string;
+  state: "connected" | "disconnected" | "unavailable" | "postponed" | "unknown";
+  /** Account identity shown below the vendor name. Never put transport/auth diagnostics here. */
+  accountLabel: string;
+  actions: BrokerVendorAuthAction[];
+};
 
 export type CukiiOpenChatPanel = {
   panelId: string;
   sessionId?: string;
   title: string;
+};
+
+export type CukiiPickedFile = {
+  path: string;
+  name: string;
 };
 
 export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
@@ -58,6 +90,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     {
       brokerModel: BrokerModel;
       brokerSubagent: BrokerSubagent;
+      brokerEffort: BrokerEffort;
+      brokerSpeed: BrokerSpeed;
+      thinkingEnabled: boolean;
       mode?: "chat" | "plan" | "agent" | "broker";
     },
   ];
@@ -65,15 +100,41 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     {
       brokerModel: BrokerModel;
       brokerSubagent: BrokerSubagent;
+      brokerEffort: BrokerEffort;
+      brokerSpeed: BrokerSpeed;
+      thinkingEnabled: boolean;
       mode?: "chat" | "plan" | "agent" | "broker";
     },
     void,
+  ];
+  "cukii/listVendorAccounts": [undefined, BrokerVendorAuthStatus[]];
+  "cukii/listBrokerModelCatalog": [undefined, BrokerVendorModelCatalog[]];
+  "cukii/pickAttachmentFiles": [undefined, CukiiPickedFile[]];
+  "cukii/startVoiceRecording": [
+    { recordingId: string },
+    { recordingId: string; device: string },
+  ];
+  "cukii/stopVoiceRecording": [{ recordingId: string }, { text: string }];
+  "cukii/cancelVoiceRecording": [{ recordingId: string }, void];
+  "cukii/voiceRecordingStatus": [
+    { recordingId: string },
+    {
+      state: "starting" | "listening" | "expired" | "error" | "unknown";
+      message?: string;
+    },
+  ];
+  "cukii/runVendorAuthAction": [
+    { vendor: BrokerVendorId; action: BrokerVendorAuthAction },
+    { opened: boolean; message: string },
   ];
   "cukii/streamBridgeChat": [
     {
       messages: ChatMessage[];
       brokerModel: BrokerModel;
       brokerSubagent: BrokerSubagent;
+      brokerEffort: BrokerEffort;
+      brokerSpeed: BrokerSpeed;
+      thinkingEnabled: boolean;
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];

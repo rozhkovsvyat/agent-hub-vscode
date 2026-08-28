@@ -135,12 +135,14 @@ const GroupHeader = styled.button`
 `;
 const Count = styled.span`
   display: inline-flex;
+  width: 20px;
   min-width: 20px;
   height: 20px;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
-  padding: 0 6px;
-  border-radius: 999px;
+  padding: 0;
+  border-radius: 50%;
   background: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
   font-size: 11px;
