@@ -140,6 +140,10 @@ export class VsCodeMessenger {
     this.onWebview("focusEditor", (msg) => {
       vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
     });
+    this.onWebview("cukii/getActiveEditorSelectionState", () => {
+      const editor = vscode.window.activeTextEditor;
+      return { hasSelection: !!editor && !editor.selection.isEmpty };
+    });
     this.onWebview("toggleFullScreen", (msg) => {
       vscode.commands.executeCommand("continue.openInNewWindow");
     });

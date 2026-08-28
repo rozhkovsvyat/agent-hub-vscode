@@ -44,6 +44,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     brokerSpeed: "standard",
     thinkingEnabled: true,
   },
+  "cukii/getActiveEditorSelectionState": { hasSelection: false },
   "cukii/listVendorAccounts": [
     {
       id: "claude",

@@ -26,12 +26,18 @@ export function cukiiComposerPlaceholder({
   isMainInput,
   historyLength,
   sessionId,
+  hasActiveEditorSelection = false,
+  isComposerFocused = false,
+  isWebviewFocused = false,
 }: {
   isInEdit: boolean;
   isStreaming: boolean;
   isMainInput: boolean;
   historyLength: number;
   sessionId?: string;
+  hasActiveEditorSelection?: boolean;
+  isComposerFocused?: boolean;
+  isWebviewFocused?: boolean;
 }): string {
   if (isInEdit) {
     return "Edit selected code";
@@ -41,9 +47,16 @@ export function cukiiComposerPlaceholder({
     return "Queue another message…";
   }
 
+  if (hasActiveEditorSelection && !isComposerFocused && !isWebviewFocused) {
+    return "ctrl esc to attach selected text";
+  }
+
   if (historyLength > 0) {
     return "ctrl esc to focus or unfocus Cukii";
   }
 
+  // Cukii has no prompt-suggestion provider in the IDE protocol. The native
+  // TipTap placeholder is only rendered for an empty composer, so do not
+  // synthesize a suggestion until the host supplies one.
   return composerEmptyMessage(sessionId);
 }

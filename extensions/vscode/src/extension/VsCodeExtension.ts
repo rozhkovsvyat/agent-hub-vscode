@@ -25,6 +25,7 @@ import {
 import { registerAllCommands } from "../commands";
 import { ContinueConsoleWebviewViewProvider } from "../ContinueConsoleWebviewViewProvider";
 import { ContinueGUIWebviewViewProvider } from "../ContinueGUIWebviewViewProvider";
+import { cukiiPanelRegistry } from "../cukiiPanelRegistry";
 import { VerticalDiffManager } from "../diff/vertical/manager";
 import { registerAllCodeLensProviders } from "../lang-server/codeLens";
 import { registerAllPromptFilesCompletionProviders } from "../lang-server/promptFileCompletions";
@@ -85,6 +86,20 @@ export class VsCodeExtension {
   private fileSearch: FileSearch;
   private uriHandler = new UriEventHandler();
   private completionProvider: ContinueCompletionProvider;
+
+  private broadcastActiveEditorSelection(): void {
+    const editor = vscode.window.activeTextEditor;
+    const data = {
+      hasSelection: !!editor && !editor.selection.isEmpty,
+    };
+    this.sidebar.webviewProtocol.send(
+      "cukii/activeEditorSelectionChanged",
+      data,
+    );
+    for (const entry of cukiiPanelRegistry.values()) {
+      entry.panel.protocol.send("cukii/activeEditorSelectionChanged", data);
+    }
+  }
 
   public async shutdown(): Promise<void> {
     await this.core.shutdown();
@@ -910,9 +925,15 @@ export class VsCodeExtension {
     });
 
     // Listen for selection changes to hide tooltip when cursor moves.
-    vscode.window.onDidChangeTextEditorSelection(async (e) => {
-      await selectionManager.handleSelectionChange(e);
-    });
+    context.subscriptions.push(
+      vscode.window.onDidChangeTextEditorSelection(async (e) => {
+        this.broadcastActiveEditorSelection();
+        await selectionManager.handleSelectionChange(e);
+      }),
+      vscode.window.onDidChangeActiveTextEditor(() => {
+        this.broadcastActiveEditorSelection();
+      }),
+    );
 
     // Refresh index when branch is changed
     void this.ide.getWorkspaceDirs().then((dirs) =>

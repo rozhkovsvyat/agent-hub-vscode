@@ -41,6 +41,7 @@ export interface TipTapEditorProps {
   editorState?: JSONContent;
   toolbarOptions?: ToolbarOptions;
   placeholder?: string;
+  onComposerFocusChange?: (isFocused: boolean) => void;
   historyKey: string;
 
   // TODO: This isn't actually used anywhere in this component, but it appears
@@ -217,13 +218,15 @@ function TipTapEditorInner(props: TipTapEditorProps) {
 
   const handleBlur = useCallback(
     (e: React.FocusEvent) => {
+      const currentTarget = e.currentTarget;
+      const relatedTarget = e.relatedTarget as Node | null;
+      if (!relatedTarget || !currentTarget?.contains(relatedTarget)) {
+        props.onComposerFocusChange?.(false);
+      }
       if (isInEdit) {
         return;
       }
       // Check if the new focus target is within our InputBoxDiv
-      const currentTarget = e.currentTarget;
-      const relatedTarget = e.relatedTarget as Node | null;
-
       if (relatedTarget && currentTarget?.contains(relatedTarget)) {
         return;
       }
@@ -232,13 +235,14 @@ function TipTapEditorInner(props: TipTapEditorProps) {
         setShouldHideToolbar(true);
       }, 100);
     },
-    [isInEdit, blurTimeout],
+    [isInEdit, blurTimeout, props.onComposerFocusChange],
   );
 
   const handleFocus = useCallback(() => {
     cancelBlurTimeout();
     setShouldHideToolbar(false);
-  }, [cancelBlurTimeout]);
+    props.onComposerFocusChange?.(true);
+  }, [cancelBlurTimeout, props.onComposerFocusChange]);
 
   return (
     <InputBoxDiv
@@ -375,6 +379,7 @@ const MemoInner = memo(
   (prev, next) =>
     prev.isMainInput === next.isMainInput &&
     prev.placeholder === next.placeholder &&
+    prev.onComposerFocusChange === next.onComposerFocusChange &&
     prev.historyKey === next.historyKey &&
     prev.inputId === next.inputId &&
     toolbarOptionsEqual(prev.toolbarOptions, next.toolbarOptions) &&

@@ -28,6 +28,73 @@ describe("cukiiComposerPlaceholder", () => {
     ).toBe("Queue another message…");
   });
 
+  it("attaches selected editor text only when Cukii is completely unfocused", () => {
+    expect(
+      cukiiComposerPlaceholder({
+        isInEdit: false,
+        isStreaming: false,
+        isMainInput: true,
+        historyLength: 1,
+        sessionId: "session-a",
+        hasActiveEditorSelection: true,
+        isComposerFocused: false,
+        isWebviewFocused: false,
+      }),
+    ).toBe("ctrl esc to attach selected text");
+
+    expect(
+      cukiiComposerPlaceholder({
+        isInEdit: false,
+        isStreaming: false,
+        isMainInput: true,
+        historyLength: 1,
+        sessionId: "session-a",
+        hasActiveEditorSelection: true,
+        isComposerFocused: true,
+        isWebviewFocused: false,
+      }),
+    ).toBe("ctrl esc to focus or unfocus Cukii");
+
+    expect(
+      cukiiComposerPlaceholder({
+        isInEdit: false,
+        isStreaming: false,
+        isMainInput: true,
+        historyLength: 1,
+        sessionId: "session-a",
+        hasActiveEditorSelection: true,
+        isComposerFocused: false,
+        isWebviewFocused: true,
+      }),
+    ).toBe("ctrl esc to focus or unfocus Cukii");
+  });
+
+  it("keeps edit and busy states ahead of the selection hint", () => {
+    expect(
+      cukiiComposerPlaceholder({
+        isInEdit: true,
+        isStreaming: true,
+        isMainInput: true,
+        historyLength: 1,
+        hasActiveEditorSelection: true,
+        isComposerFocused: false,
+        isWebviewFocused: false,
+      }),
+    ).toBe("Edit selected code");
+
+    expect(
+      cukiiComposerPlaceholder({
+        isInEdit: false,
+        isStreaming: true,
+        isMainInput: true,
+        historyLength: 1,
+        hasActiveEditorSelection: true,
+        isComposerFocused: false,
+        isWebviewFocused: false,
+      }),
+    ).toBe("Queue another message…");
+  });
+
   it("shows the focus hint for resumed chats with history", () => {
     expect(
       cukiiComposerPlaceholder({

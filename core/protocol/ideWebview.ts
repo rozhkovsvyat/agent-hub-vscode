@@ -77,6 +77,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   toggleDevTools: [undefined, void];
   reloadWindow: [undefined, void];
   focusEditor: [undefined, void];
+  "cukii/getActiveEditorSelectionState": [undefined, { hasSelection: boolean }];
   toggleFullScreen: [{ newWindow?: boolean } | undefined, void];
   insertAtCursor: [{ text: string }, void];
   copyText: [{ text: string }, void];
@@ -194,6 +195,7 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   newSession: [undefined, void];
   "cukii/getActiveSessionId": [undefined, string];
   "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
+  "cukii/activeEditorSelectionChanged": [{ hasSelection: boolean }, void];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];
   "jetbrains/editorInsetRefresh": [undefined, void];

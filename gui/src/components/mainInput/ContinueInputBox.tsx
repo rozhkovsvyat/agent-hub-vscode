@@ -5,10 +5,21 @@ import {
   RuleMetadata,
   SlashCommandSource,
 } from "core";
-import { memo, useMemo } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { defaultBorderRadius, vscBackground } from "..";
+import { CukiiActiveEditorSelectionState } from "../cukii/cukiiActiveEditorSelection";
 import { cukiiComposerPlaceholder } from "../cukii/cukiiComposerPlaceholder";
 import { useAppSelector } from "../../redux/hooks";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { useWebviewListener } from "../../hooks/useWebviewListener";
 import { selectSlashCommandComboBoxInputs } from "../../redux/selectors";
 import { ContextItemsPeek } from "./belowMainInput/ContextItemsPeek";
 import { RulesPeek } from "./belowMainInput/RulesPeek";
@@ -54,6 +65,7 @@ const EDIT_ALLOWED_SLASH_COMMAND_SOURCES: SlashCommandSource[] = [
 ];
 
 function ContinueInputBox(props: ContinueInputBoxProps) {
+  const ideMessenger = useContext(IdeMessengerContext);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const availableSlashCommands = useAppSelector(
     selectSlashCommandComboBoxInputs,
@@ -65,6 +77,70 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   const historyLength = useAppSelector((store) => store.session.history.length);
   const sessionId = useAppSelector((store) => store.session.id);
   const editModeState = useAppSelector((state) => state.editModeState);
+  const [hasActiveEditorSelection, setHasActiveEditorSelection] =
+    useState(false);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [isWebviewFocused, setIsWebviewFocused] = useState(() =>
+    document.hasFocus(),
+  );
+  const selectionState = useRef(new CukiiActiveEditorSelectionState());
+
+  useEffect(() => {
+    const onFocus = () => setIsWebviewFocused(true);
+    const onBlur = () => setIsWebviewFocused(false);
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  useWebviewListener(
+    "cukii/activeEditorSelectionChanged",
+    async ({ hasSelection }) => {
+      if (props.isMainInput) {
+        selectionState.current.applyLiveUpdate(hasSelection);
+        setHasActiveEditorSelection(hasSelection);
+      }
+    },
+    [props.isMainInput],
+    !props.isMainInput,
+  );
+
+  useEffect(() => {
+    if (!props.isMainInput) {
+      selectionState.current.clear();
+      setHasActiveEditorSelection(false);
+      return;
+    }
+
+    let disposed = false;
+    const epoch = selectionState.current.beginInitialQuery();
+    void ideMessenger
+      .request("cukii/getActiveEditorSelectionState", undefined)
+      .then((response) => {
+        if (
+          !disposed &&
+          response.status === "success" &&
+          selectionState.current.applyInitialResponse(
+            epoch,
+            response.content.hasSelection,
+          )
+        ) {
+          setHasActiveEditorSelection(response.content.hasSelection);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [ideMessenger, props.isMainInput]);
+
+  const handleComposerFocusChange = useCallback((isFocused: boolean) => {
+    setIsComposerFocused(isFocused);
+  }, []);
 
   const filteredSlashCommands = useMemo(() => {
     if (isInEdit) {
@@ -99,8 +175,20 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
         isMainInput: props.isMainInput ?? false,
         historyLength,
         sessionId,
+        hasActiveEditorSelection,
+        isComposerFocused,
+        isWebviewFocused,
       }),
-    [historyLength, isInEdit, isStreaming, props.isMainInput, sessionId],
+    [
+      hasActiveEditorSelection,
+      historyLength,
+      isComposerFocused,
+      isWebviewFocused,
+      isInEdit,
+      isStreaming,
+      props.isMainInput,
+      sessionId,
+    ],
   );
 
   const toolbarOptions: ToolbarOptions = useMemo(() => {
@@ -149,6 +237,7 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
               historyKey={historyKey}
               toolbarOptions={toolbarOptions}
               inputId={props.inputId}
+              onComposerFocusChange={handleComposerFocusChange}
             />
           </GradientBorder>
         ) : (
