@@ -4,6 +4,7 @@ import { MainEditorProvider } from "./components/mainInput/TipTapEditor";
 import { SubmenuContextProvidersProvider } from "./context/SubmenuContextProviders";
 import { VscThemeProvider } from "./context/VscTheme";
 import ParallelListeners from "./hooks/ParallelListeners";
+import { ClaudePermissionPrompt } from "./components/mainInput/ClaudePermissionPrompt";
 import ConfigPage from "./pages/config";
 import ErrorPage from "./pages/error";
 import Chat from "./pages/gui";
@@ -73,6 +74,7 @@ function App() {
         </SubmenuContextProvidersProvider>
       </MainEditorProvider>
       <ParallelListeners />
+      <ClaudePermissionPrompt />
     </VscThemeProvider>
   );
 }

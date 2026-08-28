@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
-import { newSession } from "../slices/sessionSlice";
+import {
+  abortStream,
+  newSession,
+  setBrokerPermissionMode,
+  streamUpdate,
+} from "../slices/sessionSlice";
 import { setupStore } from "../store";
 import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
 
@@ -31,6 +36,7 @@ describe("streamBrokerBridgeInput controls", () => {
         brokerEffort: "medium",
         brokerSpeed: "fast",
         hasReasoningEnabled: false,
+        brokerPermissionMode: "auto",
       }),
     );
 
@@ -45,7 +51,58 @@ describe("streamBrokerBridgeInput controls", () => {
         brokerEffort: "medium",
         brokerSpeed: "fast",
         thinkingEnabled: false,
+        brokerPermissionMode: "auto",
       }),
     });
+  });
+
+  it("keeps a blank-tab permission draft through its first send without persisting a sidebar entry", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: unknown[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      return undefined;
+    }) as typeof ideMessenger.streamRequest;
+
+    const store = setupStore({ ideMessenger });
+    store.dispatch(newSession(undefined));
+    store.dispatch(setBrokerPermissionMode("bypass"));
+    expect(store.getState().session.history).toHaveLength(0);
+    expect(store.getState().session.allSessionMetadata).toHaveLength(0);
+
+    // The normal submit path has already placed the first user message in
+    // state when the streaming thunk reads the per-tab draft.
+    store.dispatch(
+      streamUpdate([{ role: "user", content: "Use the selected mode" }]),
+    );
+    await store.dispatch(streamBrokerBridgeInput());
+
+    expect(captured).toEqual([
+      expect.objectContaining({ brokerPermissionMode: "bypass" }),
+    ]);
+    expect(store.getState().session.allSessionMetadata).toHaveLength(0);
+  });
+
+  it("awaits generator return when Stop cancels a live bridge", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const returned = vi.fn(async () => ({ done: true, value: undefined }));
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: () => new Promise(() => {}),
+      return: returned,
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(newSession(undefined));
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.isStreaming).toBe(true),
+    );
+    store.dispatch(abortStream());
+    await running;
+    expect(returned).toHaveBeenCalled();
+    expect(store.getState().session.isStreaming).toBe(false);
   });
 });

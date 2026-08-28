@@ -10,6 +10,9 @@ import { handleLLMError } from "./util/errorHandling";
 export class VsCodeWebviewProtocol
   implements IMessenger<FromWebviewProtocol, ToWebviewProtocol>
 {
+  private readonly disposeListeners = new Set<
+    (protocol: VsCodeWebviewProtocol) => void
+  >();
   listeners = new Map<
     keyof FromWebviewProtocol,
     ((message: Message) => any)[]
@@ -136,10 +139,19 @@ export class VsCodeWebviewProtocol
     for (const [messageType, handlers] of this.listeners) {
       clone.listeners.set(messageType, [...handlers]);
     }
+    for (const listener of this.disposeListeners) {
+      clone.disposeListeners.add(listener);
+    }
     return clone;
   }
 
+  onDispose(listener: (protocol: VsCodeWebviewProtocol) => void): void {
+    this.disposeListeners.add(listener);
+  }
+
   dispose(): void {
+    for (const listener of this.disposeListeners) listener(this);
+    this.disposeListeners.clear();
     this._webviewListener?.dispose();
     this._webviewListener = undefined;
     this._webview = undefined;

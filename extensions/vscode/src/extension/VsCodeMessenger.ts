@@ -16,7 +16,9 @@ import type {
   BrokerSubagent,
   BrokerVendorAuthAction,
   BrokerVendorId,
+  CukiiPermissionMode,
 } from "core/protocol/ideWebview";
+import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
 import {
   CORE_TO_WEBVIEW_PASS_THROUGH,
@@ -37,7 +39,11 @@ import { VsCodeIde } from "../VsCodeIde";
 import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
-import { streamBridgeChat } from "./bridgeChatAdapter";
+import {
+  streamBridgeChat,
+  type ClaudePermissionTransport,
+} from "./bridgeChatAdapter";
+import type { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { listBrokerModelCatalog } from "./bridgeModelCatalog";
 import {
   cancelVoiceRecording,
@@ -46,10 +52,12 @@ import {
   voiceRecordingStatus,
 } from "./voiceDictation";
 import { appendSteerMessage } from "./bridgeSteer";
+import { allVendorPermissionCapabilities } from "./permissionCapabilities";
 import {
   listBrokerVendorAccounts,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
+import { isRealPanelSessionTransition } from "./panelSessionTransition";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -69,6 +77,44 @@ function sourceProtocol(
  * so we don't have to rewrite some of the handlers
  */
 export class VsCodeMessenger {
+  /** Brokers are scoped to the exact webview protocol that created the run. */
+  private readonly claudePermissionBrokers = new Map<
+    VsCodeWebviewProtocol,
+    Set<ClaudePermissionBroker>
+  >();
+  private readonly panelSessionIds = new Map<VsCodeWebviewProtocol, string>();
+  private readonly activeBridgeRuns = new Map<
+    VsCodeWebviewProtocol,
+    { controller: AbortController; done: Promise<void> }
+  >();
+
+  private panelIdForProtocol(protocol: VsCodeWebviewProtocol): string {
+    return (
+      cukiiPanelRegistry
+        .values()
+        .find((entry) => entry.panel.protocol === protocol)?.id ?? "sidebar"
+    );
+  }
+
+  private addPermissionBroker(
+    protocol: VsCodeWebviewProtocol,
+    broker: ClaudePermissionBroker,
+  ): void {
+    const brokers = this.claudePermissionBrokers.get(protocol) ?? new Set();
+    brokers.add(broker);
+    this.claudePermissionBrokers.set(protocol, brokers);
+  }
+
+  private removePermissionBroker(
+    protocol: VsCodeWebviewProtocol,
+    broker: ClaudePermissionBroker,
+  ): void {
+    const brokers = this.claudePermissionBrokers.get(protocol);
+    if (!brokers) return;
+    brokers.delete(broker);
+    if (brokers.size === 0) this.claudePermissionBrokers.delete(protocol);
+  }
+
   onWebview<T extends keyof FromWebviewProtocol>(
     messageType: T,
     handler: (
@@ -114,6 +160,19 @@ export class VsCodeMessenger {
     private readonly context: vscode.ExtensionContext,
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
+    this.webviewProtocol.onDispose((protocol) => {
+      const run = this.activeBridgeRuns.get(protocol);
+      run?.controller.abort();
+      const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
+      for (const broker of brokers) broker.denyAll();
+      void Promise.all(brokers.map((broker) => broker.dispose())).finally(
+        () => {
+          this.claudePermissionBrokers.delete(protocol);
+          this.activeBridgeRuns.delete(protocol);
+          this.panelSessionIds.delete(protocol);
+        },
+      );
+    });
     /** WEBVIEW ONLY LISTENERS **/
     this.onWebview("showFile", (msg) => {
       this.ide.openFile(msg.data.filepath);
@@ -403,6 +462,15 @@ export class VsCodeMessenger {
         "cukii.thinkingEnabled",
         true,
       ),
+      brokerPermissionMode: coerceStoredPermissionMode(
+        this.context.globalState.get<CukiiPermissionMode | boolean>(
+          "cukii.brokerPermissionMode",
+        ),
+        this.context.globalState.get<boolean>(
+          "cukii.allowAllPermissions",
+          false,
+        ),
+      ),
       mode: this.context.globalState.get<"chat" | "plan" | "agent" | "broker">(
         "cukii.brokerMode",
         "broker",
@@ -430,10 +498,32 @@ export class VsCodeMessenger {
           "cukii.thinkingEnabled",
           msg.data.thinkingEnabled,
         ),
+        ...(msg.data.brokerPermissionMode
+          ? [
+              this.context.globalState.update(
+                "cukii.brokerPermissionMode",
+                msg.data.brokerPermissionMode,
+              ),
+              this.context.globalState.update(
+                "cukii.allowAllPermissions",
+                msg.data.brokerPermissionMode === "bypass",
+              ),
+            ]
+          : []),
         ...(msg.data.mode
           ? [this.context.globalState.update("cukii.brokerMode", msg.data.mode)]
           : []),
       ]);
+    });
+    this.onWebview("cukii/listPermissionCapabilities", async () => {
+      const capabilities = await allVendorPermissionCapabilities();
+      return Object.values(capabilities).map(
+        ({ vendor, supportedModes, cliVersion }) => ({
+          vendor,
+          supportedModes,
+          cliVersion,
+        }),
+      );
     });
     this.onWebview("cukii/listVendorAccounts", async () => {
       return listBrokerVendorAccounts();
@@ -504,8 +594,80 @@ export class VsCodeMessenger {
             : "Authentication flow opened in the integrated terminal.",
       };
     });
+    this.onWebview("cukii/respondClaudePermission", (msg) => {
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const accepted = [
+        ...(this.claudePermissionBrokers.get(protocol) ?? []),
+      ].some((broker) => broker.respond(msg.data));
+      // A forged or stale response must be silent and fail closed. In
+      // particular, never relay it to a different panel's pending request.
+      if (!accepted) return;
+    });
+    const disposePermissionBrokersFor = async (
+      protocol: VsCodeWebviewProtocol,
+    ) => {
+      const run = this.activeBridgeRuns.get(protocol);
+      if (run) {
+        run.controller.abort();
+        await run.done;
+      }
+      const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
+      for (const broker of brokers) {
+        // Stop/session replacement is an authority boundary: do not leave an
+        // MCP worker waiting behind a closed chat or retain its private config.
+        await broker.dispose();
+        this.removePermissionBroker(protocol, broker);
+      }
+    };
+    this.onWebview("abort", async (msg) => {
+      await disposePermissionBrokersFor(
+        sourceProtocol(msg, this.webviewProtocol),
+      );
+    });
+    this.onWebview("cukii/panelSessionChanged", async (msg) => {
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const previous = this.panelSessionIds.get(protocol);
+      this.panelSessionIds.set(protocol, msg.data.sessionId);
+      if (isRealPanelSessionTransition(previous, msg.data.sessionId)) {
+        await disposePermissionBrokersFor(protocol);
+      }
+    });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
-      return streamBridgeChat(msg.data);
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const previous = this.activeBridgeRuns.get(protocol);
+      previous?.controller.abort();
+      const controller = new AbortController();
+      let resolveDone!: () => void;
+      const done = new Promise<void>((resolve) => {
+        resolveDone = resolve;
+      });
+      const permissionTransport: ClaudePermissionTransport = {
+        panelId: this.panelIdForProtocol(protocol),
+        sessionId: msg.data.sessionId,
+        onRequest: async (request) => {
+          protocol.send("cukii/claudePermissionRequested", request);
+        },
+        onBrokerCreated: (broker) => this.addPermissionBroker(protocol, broker),
+        onBrokerDisposed: (broker) =>
+          this.removePermissionBroker(protocol, broker),
+        abortSignal: controller.signal,
+      };
+      const stream = streamBridgeChat(msg.data, permissionTransport);
+      const wrapped = (async function* () {
+        if (previous) await previous.done;
+        try {
+          return yield* stream;
+        } finally {
+          resolveDone();
+        }
+      })();
+      this.activeBridgeRuns.set(protocol, { controller, done });
+      void done.finally(() => {
+        if (this.activeBridgeRuns.get(protocol)?.controller === controller) {
+          this.activeBridgeRuns.delete(protocol);
+        }
+      });
+      return wrapped;
     });
     this.onWebview("cukii/steerDuringStream", (msg) => {
       return appendSteerMessage(msg.data.text);

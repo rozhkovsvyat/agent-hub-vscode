@@ -2,7 +2,14 @@ import type {
   BrokerEffort,
   BrokerModel,
   BrokerSpeed,
+  CukiiPermissionMode,
 } from "core/protocol/ideWebview";
+import {
+  brokerVendorForModel,
+  permissionArgvForVendor,
+  resolvePermissionModeForVendor,
+} from "core/cukiiPermissionModes";
+import { cachedVendorPermissionCapabilities } from "./permissionCapabilities";
 
 export type BridgeControlResolution = {
   requestedEffort: BrokerEffort;
@@ -184,4 +191,29 @@ export function cursorModelId(controls: BridgeControlResolution): string {
   return controls.effectiveSpeed === "fast"
     ? "composer-2.5-fast"
     : "composer-2.5";
+}
+
+export function permissionControlArgs(
+  model: BrokerModel,
+  mode: CukiiPermissionMode,
+): string[] {
+  const vendor = brokerVendorForModel(model);
+  // Claude's non-bypass modes are made real by the per-run MCP broker in
+  // bridgeChatAdapter. Discovery remains responsible for UI visibility, but a
+  // restored session must not race its asynchronous capability probe.
+  if (vendor === "claude") {
+    return permissionArgvForVendor(vendor, mode).args;
+  }
+  const capabilities = cachedVendorPermissionCapabilities(vendor) ?? {
+    vendor,
+    supportedModes: [],
+    helpSource: "unavailable-route",
+  };
+  const resolved = resolvePermissionModeForVendor(capabilities, mode);
+  if (!capabilities.supportedModes.includes(resolved)) {
+    throw new Error(
+      `${vendor} has no verified permission mode for this noninteractive bridge route.`,
+    );
+  }
+  return permissionArgvForVendor(vendor, resolved).args;
 }

@@ -52,13 +52,19 @@ function copyVoiceRuntime() {
   );
   for (const platform of fs.readdirSync(nativeRoot)) {
     if (platform !== process.platform) {
-      fs.rmSync(path.join(nativeRoot, platform), { recursive: true, force: true });
+      fs.rmSync(path.join(nativeRoot, platform), {
+        recursive: true,
+        force: true,
+      });
     }
   }
   const platformRoot = path.join(nativeRoot, process.platform);
   for (const arch of fs.readdirSync(platformRoot)) {
     if (arch !== process.arch) {
-      fs.rmSync(path.join(platformRoot, arch), { recursive: true, force: true });
+      fs.rmSync(path.join(platformRoot, arch), {
+        recursive: true,
+        force: true,
+      });
     }
   }
 }
@@ -135,16 +141,36 @@ const voiceEsbuildConfig = {
   ],
 };
 
+// Claude starts this as a standalone stdio MCP child. Keep it separate from
+// the extension bundle so `process.execPath <worker>` has no VS Code runtime
+// dependency and stdout remains exclusively JSON-RPC.
+const claudePermissionMcpWorkerEsbuildConfig = {
+  ...esbuildConfig,
+  entryPoints: ["src/extension/claudePermissionMcpWorker.ts"],
+  outfile: "out/claudePermissionMcpWorker.js",
+  external: [],
+  plugins: [],
+};
+
 void (async () => {
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
   // Bundles the extension into one file
-  if (flags.includes("--watch")) {
-    const [extensionContext, voiceContext] = await Promise.all([
-      esbuild.context(esbuildConfig),
-      esbuild.context(voiceEsbuildConfig),
+  if (flags.includes("--permission-worker-only")) {
+    await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
+    console.log("Claude permission MCP worker esbuild complete");
+  } else if (flags.includes("--watch")) {
+    const [extensionContext, voiceContext, permissionWorkerContext] =
+      await Promise.all([
+        esbuild.context(esbuildConfig),
+        esbuild.context(voiceEsbuildConfig),
+        esbuild.context(claudePermissionMcpWorkerEsbuildConfig),
+      ]);
+    await Promise.all([
+      extensionContext.watch(),
+      voiceContext.watch(),
+      permissionWorkerContext.watch(),
     ]);
-    await Promise.all([extensionContext.watch(), voiceContext.watch()]);
   } else if (flags.includes("--notify")) {
     const inFile = esbuildConfig.entryPoints[0];
     const outFile = esbuildConfig.outfile;
@@ -169,6 +195,7 @@ void (async () => {
     writeBuildTimestamp();
   } else {
     await esbuild.build(voiceEsbuildConfig);
+    await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
     await esbuild.build(esbuildConfig);
   }
 })();

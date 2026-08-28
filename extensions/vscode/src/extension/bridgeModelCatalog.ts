@@ -13,6 +13,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
+import { listBrokerVendorAccounts } from "./bridgeVendorAuth";
 
 const execFileAsync = promisify(execFile);
 
@@ -256,9 +257,19 @@ export async function ensureCursorCatalogVariants(
   model: string,
 ): Promise<void> {
   if (!model.startsWith("cursor:")) return;
+  // A restored session cannot use a stale in-memory variant cache as proof
+  // that the native Cursor account is still authenticated. Check first so no
+  // logged-out/unknown state can invoke `agent models`.
+  const cursorConnected = (await listBrokerVendorAccounts()).some(
+    (account) => account.id === "cursor" && account.state === "connected",
+  );
+  if (!cursorConnected)
+    throw new Error(
+      "Cursor is not signed in. Sign in through Manage subscriptions before reopening this Cursor session.",
+    );
   const base = model.slice("cursor:".length);
   if (cursorVariantsByBase.has(base)) return;
-  await liveModels("cursor");
+  await liveModels("cursor", true);
   if (!cursorVariantsByBase.has(base)) {
     throw new Error(
       `Cursor no longer exposes the saved model family "${base}". Open the model picker and select an available Cursor model.`,
@@ -359,11 +370,17 @@ async function run(program: string, args: string[]): Promise<string> {
 
 async function liveModels(
   vendor: BrokerVendorId,
+  canUseMaintainedCatalog = false,
 ): Promise<BrokerModelCatalogEntry[]> {
-  // Claude and Qwen expose no machine-readable subscription catalog in their
-  // native CLI, so their explicitly maintained bootstrap is the source.
+  // Claude/Qwen have no machine-readable subscription enumeration. Maintained
+  // entries are only a usable-account catalog, never a missing-CLI fallback.
   const staticModels = staticCatalogForUnavailableDiscovery(vendor);
-  if (staticModels.length > 0) return staticModels;
+  if (staticModels.length > 0) {
+    return canUseMaintainedCatalog ? staticModels : [];
+  }
+  // Discovery and local model caches are account-scoped. Logged-out vendors
+  // must neither execute a CLI probe nor leak a previously authenticated cache.
+  if (!canUseMaintainedCatalog) return [];
   try {
     if (vendor === "codex") {
       const cache = path.join(os.homedir(), ".codex", "models_cache.json");
@@ -379,15 +396,8 @@ async function liveModels(
       );
     if (vendor === "cursor") {
       const result = await execFileAsync(
-        "wsl.exe",
-        [
-          "-d",
-          "Ubuntu-24.04",
-          "--",
-          "bash",
-          "-lc",
-          '"$HOME/.local/bin/cursor-agent" models',
-        ],
+        process.platform === "win32" ? "agent" : "cursor-agent",
+        ["models"],
         {
           timeout: 12_000,
           windowsHide: true,
@@ -415,11 +425,16 @@ export function staticCatalogForUnavailableDiscovery(
 export async function listBrokerModelCatalog(): Promise<
   BrokerVendorModelCatalog[]
 > {
+  const usable = new Set(
+    (await listBrokerVendorAccounts())
+      .filter((account) => account.state === "connected")
+      .map((account) => account.id),
+  );
   return Promise.all(
     CUKII_VENDOR_REGISTRY.map(async (vendor) => ({
       id: vendor.id,
       label: cukiiVendorLabel(vendor.id),
-      models: await liveModels(vendor.id),
+      models: await liveModels(vendor.id, usable.has(vendor.id)),
     })),
   );
 }

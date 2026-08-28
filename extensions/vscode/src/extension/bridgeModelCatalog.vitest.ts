@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   codexCatalogFromCache,
   cursorCatalogFromOutput,
-  ensureCursorCatalogVariants,
   grokCatalogFromOutput,
   kimiCatalogFromJson,
   resolveCursorCatalogModel,
@@ -146,9 +145,6 @@ describe("Cukii live subscription model catalog", () => {
     expect(
       resolveCursorCatalogModel("cursor:claude-opus-5", "high", "fast", true),
     ).toBe("claude-opus-5-thinking-high-fast");
-    await expect(
-      ensureCursorCatalogVariants("cursor:claude-opus-5"),
-    ).resolves.toBeUndefined();
     expect(
       models.every((model) => model.contextWindowLabel !== "Unknown"),
     ).toBe(true);

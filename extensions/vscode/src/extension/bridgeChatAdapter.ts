@@ -9,9 +9,11 @@ import type {
   BrokerModel,
   BrokerSpeed,
   BrokerSubagent,
+  CukiiPermissionMode,
 } from "core/protocol/ideWebview";
 import * as vscode from "vscode";
 
+import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import { buildBridgeTranscript } from "./bridgeTranscript";
@@ -33,6 +35,7 @@ import {
   codexControlArgs,
   cursorModelId,
   grokControlArgs,
+  permissionControlArgs,
   resolveBridgeControls,
   type BridgeControlResolution,
 } from "./bridgeControls";
@@ -40,6 +43,10 @@ import {
   ensureCursorCatalogVariants,
   resolveCursorCatalogModel,
 } from "./bridgeModelCatalog";
+import {
+  ClaudePermissionBroker,
+  type ClaudePermissionRequest,
+} from "./claudePermissionBroker";
 
 export type BridgeRoute = {
   label: string;
@@ -54,7 +61,27 @@ export type BridgeRoute = {
    * транскрипт нельзя: непрочитанный pipe переполняется и даёт EPIPE/зависание.
    */
   noStdin?: boolean;
+  stdinFormat?: "claude-stream-json";
 };
+
+export type ClaudePermissionTransport = {
+  panelId: string;
+  sessionId: string;
+  onRequest: (request: ClaudePermissionRequest) => Promise<void> | void;
+  onBrokerCreated?: (broker: ClaudePermissionBroker) => void;
+  onBrokerDisposed?: (broker: ClaudePermissionBroker) => void;
+  abortSignal?: AbortSignal;
+};
+
+/** Appends the documented Claude MCP permission transport without ever placing
+ * the pipe token/config content in argv. Exported for exact launch regression
+ * tests; the broker owns config-file lifecycle. */
+export function attachClaudePermissionTransport(
+  route: BridgeRoute,
+  broker: ClaudePermissionBroker,
+): void {
+  route.args.push(...broker.claudeArgs());
+}
 
 type ResolvedCommand = {
   program: string;
@@ -214,6 +241,7 @@ function buildPrompt(
   cwd: string,
   steerPath: string,
   controls: BridgeControlResolution,
+  permissionMode: CukiiPermissionMode,
 ): string {
   const subagent =
     brokerSubagent === "auto" ? "Auto" : displayBridgeModel(brokerSubagent);
@@ -237,7 +265,7 @@ function buildPrompt(
             " without it routing cannot resolve and delegation is refused.",
           `(2) Work outside those vault roots — including this workspace at ${cwd} —` +
             " is not routable by the broker: run the native CLI yourself instead:" +
-            ` ${nativeDelegateHint(brokerSubagent, cwd)}`,
+            ` ${nativeDelegateHint(brokerSubagent, cwd, permissionMode)}`,
           "Report which of the two mechanisms you used.",
           // Вложенный worker пишет в свой процесс, и его ход в ленту не попадает:
           // окно видит только сам вызов и его результат. Пока нет мультиплекса
@@ -283,34 +311,43 @@ function brokerAgentId(
   return "qwen";
 }
 
-function nativeDelegateHint(model: BrokerModel, cwd: string): string {
+export function nativeDelegateHint(
+  model: BrokerModel,
+  cwd: string,
+  permissionMode: CukiiPermissionMode,
+): string {
+  if (model === "deepseek-v4-pro") {
+    return "deepseek bridge is not connected yet";
+  }
+  const permissionFlags = permissionControlArgs(model, permissionMode).join(
+    " ",
+  );
+  const suffix = permissionFlags ? ` ${permissionFlags}` : "";
   const codexModel = codexNativeModel(model);
   if (codexModel) {
-    return `codex -m ${codexModel} exec -s danger-full-access --cd "${cwd}" -`;
+    return `codex -m ${codexModel} exec${suffix} --cd "${cwd}" -`;
   }
   const grokModel = grokNativeModel(model);
   if (grokModel) {
-    return `grok --model ${grokModel} --cwd "${cwd}" --prompt-file <task-file>`;
+    return `grok --model ${grokModel}${suffix} --cwd "${cwd}" --prompt-file <task-file>`;
   }
   const kimiModel = kimiNativeModel(model);
   if (kimiModel || model === "kimi-k2") {
-    return `kimi -p "<task>"${kimiModel ? ` -m ${kimiModel}` : ""} --output-format stream-json`;
+    return `kimi -p "<task>"${kimiModel ? ` -m ${kimiModel}` : ""}${suffix} --output-format stream-json`;
   }
   switch (model) {
     case "opus-5":
-      return 'claude --model claude-opus-5 -p "<task>"';
+      return `claude --model claude-opus-5${suffix} -p "<task>"`;
     case "sonnet-5":
-      return 'claude --model claude-sonnet-5 -p "<task>"';
+      return `claude --model claude-sonnet-5${suffix} -p "<task>"`;
     case "fable-5":
-      return 'claude --model claude-fable-5 -p "<task>"';
+      return `claude --model claude-fable-5${suffix} -p "<task>"`;
     case "haiku-4-5":
-      return 'claude --model claude-haiku-4-5 -p "<task>"';
+      return `claude --model claude-haiku-4-5${suffix} -p "<task>"`;
     case "composer-2-5":
-      return "cursor-agent -p --output-format text --model composer-2.5 --trust";
-    case "deepseek-v4-pro":
-      return "deepseek bridge is not connected yet";
+      return `${process.platform === "win32" ? "agent" : "cursor-agent"} -p --output-format text --model composer-2.5${suffix}`;
     case "qwen-3-8-max":
-      return 'qwen --model qwen3.8-max-preview --prompt "<task>" --output-format stream-json --approval-mode yolo';
+      return `qwen --model qwen3.8-max-preview --prompt "<task>" --output-format stream-json${suffix}`;
     default:
       return `${displayBridgeModel(model)} bridge route`;
   }
@@ -321,6 +358,20 @@ function bridgeLogFile(model: BrokerModel): string {
     os.tmpdir(),
     `cukii-${model.replace(/[^a-z0-9._-]/gi, "-")}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
   );
+}
+
+// Anthropic documents this JSONL envelope for `-p --input-format stream-json`
+// (Claude Code SDK, "Streaming JSON input"). Keeping stdin open is required
+// for its realtime multi-turn transport; it is closed only on CLI completion
+// or cancellation below.
+function claudeStreamingInput(prompt: string): string {
+  return `${JSON.stringify({
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+    },
+  })}\n`;
 }
 
 function commandCandidates(program: string): string[] {
@@ -343,6 +394,22 @@ function commandCandidates(program: string): string[] {
     // .cmd-шим съедает и без того тесный бюджет командной строки под транскрипт.
     ...(program === "kimi"
       ? [path.join(home, ".kimi-code", "bin", "kimi.exe")]
+      : []),
+    ...(program === "agent"
+      ? [
+          path.join(home, ".cursor", "bin", "agent.exe"),
+          path.join(
+            home,
+            "AppData",
+            "Local",
+            "Programs",
+            "Cursor",
+            "resources",
+            "app",
+            "bin",
+            "agent.exe",
+          ),
+        ]
       : []),
     path.join(
       home,
@@ -460,8 +527,16 @@ export function routeForModel(
   prompt: string,
   messages: ChatMessage[],
   controls: BridgeControlResolution,
+  permissionMode: CukiiPermissionMode = "manual",
 ): BridgeRoute {
   const logFile = bridgeLogFile(model);
+  // There is no executable DeepSeek route yet.  Do this before resolving a
+  // permission capability, otherwise a missing capability would disguise the
+  // deliberate transport error below.
+  if (model === "deepseek-v4-pro") {
+    throw new Error("DeepSeek bridge is not connected yet");
+  }
+  const permissionArgs = permissionControlArgs(model, permissionMode);
   const claudeModel = {
     "opus-5": "claude-opus-5",
     "sonnet-5": "claude-sonnet-5",
@@ -476,12 +551,16 @@ export function routeForModel(
         "--model",
         claudeModel,
         ...claudeControlArgs(controls),
+        ...permissionArgs,
         "-p",
+        "--input-format",
+        "stream-json",
         "--output-format",
         "stream-json",
         "--verbose",
       ],
       format: "anthropic-envelope",
+      stdinFormat: "claude-stream-json",
       logFile,
     };
   }
@@ -496,8 +575,7 @@ export function routeForModel(
         ...codexControlArgs(controls),
         "exec",
         "--json",
-        "-s",
-        "danger-full-access",
+        ...permissionArgs,
         "--cd",
         cwd,
         "-",
@@ -527,13 +605,13 @@ export function routeForModel(
         "--model",
         nativeGrokModel,
         ...grokControlArgs(controls),
+        ...permissionArgs,
         "--cwd",
         cwd,
         "--prompt-json",
         promptJson,
         "--output-format",
         "streaming-messages-json",
-        "--always-approve",
       ],
       format: "anthropic-envelope",
       promptFile,
@@ -547,33 +625,9 @@ export function routeForModel(
     controls.effectiveThinking,
   );
   if (nativeCursorModel) {
-    if (process.platform === "win32") {
-      const wslCwd = cwd
-        .replace(
-          /^([A-Za-z]):\\/,
-          (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
-        )
-        .replace(/\\/g, "/");
-      return {
-        label: displayBridgeModel(model),
-        program: "wsl.exe",
-        args: [
-          "-d",
-          "Ubuntu-24.04",
-          "--",
-          "bash",
-          "-lc",
-          `cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model ${nativeCursorModel} --trust "$(cat)"`,
-          "cukii-cursor",
-          wslCwd,
-        ],
-        format: "anthropic-envelope",
-        logFile,
-      };
-    }
     return {
       label: displayBridgeModel(model),
-      program: "cursor-agent",
+      program: process.platform === "win32" ? "agent" : "cursor-agent",
       args: [
         "-p",
         "--output-format",
@@ -581,7 +635,7 @@ export function routeForModel(
         "--stream-partial-output",
         "--model",
         nativeCursorModel,
-        "--trust",
+        ...permissionArgs,
       ],
       format: "anthropic-envelope",
       logFile,
@@ -590,10 +644,12 @@ export function routeForModel(
   // Live Kimi provider discovery may return additional managed subscription
   // aliases.  They must retain the exact native alias selected in the picker:
   // falling back to K2 here would make a visible model a decorative option.
-  const liveKimiModel =
-    model.startsWith("kimi:") ? kimiNativeModel(model) : undefined;
+  const liveKimiModel = model.startsWith("kimi:")
+    ? kimiNativeModel(model)
+    : undefined;
   if (liveKimiModel) {
-    const inline = Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
+    const inline =
+      Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
     let promptArg = prompt;
     let kimiPromptFile: string | undefined;
     const extraArgs: string[] = [];
@@ -620,6 +676,7 @@ export function routeForModel(
         "stream-json",
         "-m",
         liveKimiModel,
+        ...permissionArgs,
         ...extraArgs,
         ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
       ],
@@ -639,6 +696,7 @@ export function routeForModel(
           "--model",
           "claude-opus-5",
           ...claudeControlArgs(controls),
+          ...permissionArgs,
           "-p",
           "--output-format",
           "stream-json",
@@ -655,6 +713,7 @@ export function routeForModel(
           "--model",
           "claude-fable-5",
           ...claudeControlArgs(controls),
+          ...permissionArgs,
           "-p",
           "--output-format",
           "stream-json",
@@ -671,6 +730,7 @@ export function routeForModel(
           "--model",
           "claude-sonnet-5",
           ...claudeControlArgs(controls),
+          ...permissionArgs,
           "-p",
           "--output-format",
           "stream-json",
@@ -716,6 +776,7 @@ export function routeForModel(
           "--output-format",
           "stream-json",
           ...(modelArg ? ["-m", modelArg] : []),
+          ...permissionArgs,
           ...extraArgs,
           ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
         ],
@@ -735,8 +796,7 @@ export function routeForModel(
           ...codexControlArgs(controls),
           "exec",
           "--json",
-          "-s",
-          "danger-full-access",
+          ...permissionArgs,
           "--cd",
           cwd,
           "-",
@@ -754,8 +814,7 @@ export function routeForModel(
           ...codexControlArgs(controls),
           "exec",
           "--json",
-          "-s",
-          "danger-full-access",
+          ...permissionArgs,
           "--cd",
           cwd,
           "-",
@@ -783,18 +842,13 @@ export function routeForModel(
           "--model",
           "grok-4.6",
           ...grokControlArgs(controls),
+          ...permissionArgs,
           "--cwd",
           cwd,
           "--prompt-json",
           promptJson,
           "--output-format",
           "streaming-messages-json",
-          // The VS Code bridge is a headless process: it has no channel for
-          // Grok's per-tool confirmation prompt. Without this Grok resolves
-          // every terminal request as `cancelled` immediately, then the UI
-          // reports a generic worker failure. Broker mode is itself the
-          // explicit approval boundary for this native worker.
-          "--always-approve",
         ],
         // Проверено прогоном: grok отдаёт тот же конверт, что claude stream-json.
         format: "anthropic-envelope",
@@ -803,35 +857,9 @@ export function routeForModel(
       };
     case "composer-2-5":
       const cursorModel = cursorModelId(controls);
-      if (process.platform === "win32") {
-        const wslCwd = cwd
-          .replace(
-            /^([A-Za-z]):\\/,
-            (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
-          )
-          .replace(/\\/g, "/");
-        return {
-          label: displayBridgeModel(model),
-          program: "wsl.exe",
-          args: [
-            "-d",
-            "Ubuntu-24.04",
-            "--",
-            "bash",
-            "-lc",
-            `cd -- "$1"; exec "$HOME/.local/bin/cursor-agent" -p --output-format stream-json --stream-partial-output --model ${cursorModel} --trust "$(cat)"`,
-            "cukii-cursor",
-            wslCwd,
-          ],
-          // Схема снята из живого cursor-bridge прогона: Cursor отдаёт тот же
-          // assistant/user envelope, плюс top-level thinking/tool_call events.
-          format: "anthropic-envelope",
-          logFile,
-        };
-      }
       return {
         label: displayBridgeModel(model),
-        program: "cursor-agent",
+        program: process.platform === "win32" ? "agent" : "cursor-agent",
         args: [
           "-p",
           "--output-format",
@@ -839,7 +867,7 @@ export function routeForModel(
           "--stream-partial-output",
           "--model",
           cursorModel,
-          "--trust",
+          ...permissionArgs,
         ],
         format: "anthropic-envelope",
         logFile,
@@ -859,8 +887,7 @@ export function routeForModel(
           "Follow the Cukii broker instructions supplied on stdin.",
           "--output-format",
           "stream-json",
-          "--approval-mode",
-          "yolo",
+          ...permissionArgs,
         ],
         // Qwen Code stream-json follows the assistant/user/result envelope
         // consumed by the same parser as Claude and Grok.
@@ -882,6 +909,7 @@ export function routeForModel(
           prompt,
           messages,
           controls,
+          permissionMode,
         );
       }
       throw new Error(
@@ -936,14 +964,19 @@ function toChatMessages(event: BridgeEvent): ChatMessage[] {
   }
 }
 
-export async function* streamBridgeChat(args: {
-  messages: ChatMessage[];
-  brokerModel: BrokerModel;
-  brokerSubagent: BrokerSubagent;
-  brokerEffort: BrokerEffort;
-  brokerSpeed: BrokerSpeed;
-  thinkingEnabled: boolean;
-}): AsyncGenerator<ChatMessage, PromptLog> {
+export async function* streamBridgeChat(
+  args: {
+    sessionId: string;
+    messages: ChatMessage[];
+    brokerModel: BrokerModel;
+    brokerSubagent: BrokerSubagent;
+    brokerEffort: BrokerEffort;
+    brokerSpeed: BrokerSpeed;
+    thinkingEnabled: boolean;
+    brokerPermissionMode: CukiiPermissionMode;
+  },
+  permissionTransport?: ClaudePermissionTransport,
+): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
   const steerPath = path.join(
@@ -952,7 +985,12 @@ export async function* streamBridgeChat(args: {
   );
   beginSteerSession(steerPath);
   try {
-    return yield* streamBridgeChatWithSteer(args, cwd, steerPath);
+    return yield* streamBridgeChatWithSteer(
+      args,
+      cwd,
+      steerPath,
+      permissionTransport,
+    );
   } finally {
     endSteerSession();
   }
@@ -960,15 +998,18 @@ export async function* streamBridgeChat(args: {
 
 async function* streamBridgeChatWithSteer(
   args: {
+    sessionId: string;
     messages: ChatMessage[];
     brokerModel: BrokerModel;
     brokerSubagent: BrokerSubagent;
     brokerEffort: BrokerEffort;
     brokerSpeed: BrokerSpeed;
     thinkingEnabled: boolean;
+    brokerPermissionMode: CukiiPermissionMode;
   },
   cwd: string,
   steerPath: string,
+  permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
   // The model picker fills this cache in the normal path. A restored saved
   // session may send before that picker opens, so rebuild it on demand.
@@ -986,6 +1027,7 @@ async function* streamBridgeChatWithSteer(
     cwd,
     steerPath,
     controls,
+    args.brokerPermissionMode,
   );
   const route = routeForModel(
     args.brokerModel,
@@ -993,7 +1035,29 @@ async function* streamBridgeChatWithSteer(
     prompt,
     args.messages,
     controls,
+    args.brokerPermissionMode,
   );
+  let permissionBroker: ClaudePermissionBroker | undefined;
+  if (
+    ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(args.brokerModel) &&
+    args.brokerPermissionMode !== "bypass"
+  ) {
+    if (!permissionTransport) {
+      throw new Error(
+        "Claude permission transport is unavailable for this Cukii panel.",
+      );
+    }
+    permissionBroker = new ClaudePermissionBroker({
+      panelId: permissionTransport.panelId,
+      sessionId: args.sessionId || permissionTransport.sessionId,
+      mode: args.brokerPermissionMode,
+      onRequest: permissionTransport.onRequest,
+    });
+    await permissionBroker.start();
+    attachClaudePermissionTransport(route, permissionBroker);
+    permissionTransport.onBrokerCreated?.(permissionBroker);
+  }
+  permissionTransport?.abortSignal?.throwIfAborted();
   const subagentLabel =
     args.brokerSubagent === "auto"
       ? "Auto"
@@ -1015,6 +1079,10 @@ async function* streamBridgeChatWithSteer(
     if (route.promptFile) {
       fs.rmSync(route.promptFile, { force: true });
     }
+    if (permissionBroker) {
+      await permissionBroker.dispose();
+      permissionTransport?.onBrokerDisposed?.(permissionBroker);
+    }
     throw err;
   }
   yield {
@@ -1028,6 +1096,14 @@ async function* streamBridgeChatWithSteer(
     shell: false,
     windowsHide: true,
   });
+  const abortChild = () => {
+    permissionBroker?.denyAll();
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+  };
+  permissionTransport?.abortSignal?.addEventListener("abort", abortChild, {
+    once: true,
+  });
+  if (permissionTransport?.abortSignal?.aborted) abortChild();
 
   let completion = "";
   let stderr = "";
@@ -1037,9 +1113,13 @@ async function* streamBridgeChatWithSteer(
   let firstOutputAt: number | undefined;
 
   if (!route.noStdin) {
-    child.stdin.write(prompt);
+    child.stdin.write(
+      route.stdinFormat === "claude-stream-json"
+        ? claudeStreamingInput(prompt)
+        : prompt,
+    );
+    if (!route.stdinFormat) child.stdin.end();
   }
-  child.stdin.end();
 
   const parser = new BridgeEventParser(route.format);
   const queue: BridgeEvent[] = [];
@@ -1075,6 +1155,7 @@ async function* streamBridgeChatWithSteer(
     done = true;
   });
   child.once("close", (code) => {
+    child.stdin.end();
     queue.push(...parser.flush());
     if (code && code !== 0) {
       const detail = stderr.trim() || stdoutTail.trim();
@@ -1128,12 +1209,16 @@ async function* streamBridgeChatWithSteer(
       yield { role: "assistant", content: rawStdout };
     }
   } finally {
+    permissionTransport?.abortSignal?.removeEventListener("abort", abortChild);
     closeFollowers(followers);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill();
-    }
+    child.stdin.end();
+    await terminateBridgeChild(child);
     if (route.promptFile) {
       fs.rmSync(route.promptFile, { force: true });
+    }
+    if (permissionBroker) {
+      await permissionBroker.dispose();
+      permissionTransport?.onBrokerDisposed?.(permissionBroker);
     }
   }
 

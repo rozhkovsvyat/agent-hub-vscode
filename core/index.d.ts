@@ -295,6 +295,8 @@ export interface Session {
   brokerSpeed?: import("./protocol/ideWebview").BrokerSpeed;
   /** Native reasoning enablement preserved independently for every session/tab. */
   hasReasoningEnabled?: boolean;
+  /** Cukii permission mode preserved independently for every session/tab. */
+  brokerPermissionMode?: import("./protocol/ideWebview").CukiiPermissionMode;
   /** Optional: cumulative usage and cost for all LLM API calls in this session */
   usage?: SessionUsage;
 }

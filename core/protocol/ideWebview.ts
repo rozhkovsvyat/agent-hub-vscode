@@ -32,6 +32,13 @@ export type BrokerEffort =
 
 export type BrokerSpeed = "standard" | "fast";
 
+export type CukiiPermissionMode =
+  | "manual"
+  | "editAutomatically"
+  | "plan"
+  | "auto"
+  | "bypass";
+
 export type BrokerVendorAuthAction = "install" | "login" | "logout";
 
 export type BrokerModelCatalogEntry = {
@@ -61,6 +68,16 @@ export type CukiiOpenChatPanel = {
   panelId: string;
   sessionId?: string;
   title: string;
+};
+
+export type CukiiClaudePermissionRequest = {
+  runId: string;
+  requestId: string;
+  sessionId: string;
+  inputFingerprint: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  toolUseId?: string;
 };
 
 export type CukiiPickedFile = {
@@ -94,6 +111,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
       thinkingEnabled: boolean;
+      brokerPermissionMode?: CukiiPermissionMode;
       mode?: "chat" | "plan" | "agent" | "broker";
     },
   ];
@@ -104,7 +122,29 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
       thinkingEnabled: boolean;
+      brokerPermissionMode?: CukiiPermissionMode;
       mode?: "chat" | "plan" | "agent" | "broker";
+    },
+    void,
+  ];
+  "cukii/listPermissionCapabilities": [
+    undefined,
+    {
+      vendor: BrokerVendorId;
+      supportedModes: CukiiPermissionMode[];
+      cliVersion?: string;
+    }[],
+  ];
+  /** Reply to a native Claude permission request. The extension verifies the
+   * originating webview, run, request and input fingerprint; this is never an
+   * authority to alter the tool input. */
+  "cukii/respondClaudePermission": [
+    {
+      runId: string;
+      requestId: string;
+      sessionId: string;
+      inputFingerprint: string;
+      decision: "allow" | "deny";
     },
     void,
   ];
@@ -130,12 +170,14 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   ];
   "cukii/streamBridgeChat": [
     {
+      sessionId: string;
       messages: ChatMessage[];
       brokerModel: BrokerModel;
       brokerSubagent: BrokerSubagent;
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
       thinkingEnabled: boolean;
+      brokerPermissionMode: CukiiPermissionMode;
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];
@@ -196,6 +238,11 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   "cukii/getActiveSessionId": [undefined, string];
   "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
   "cukii/activeEditorSelectionChanged": [{ hasSelection: boolean }, void];
+  /** A real Claude `--permission-prompt-tool` request, scoped to this panel. */
+  "cukii/claudePermissionRequested": [
+    CukiiClaudePermissionRequest,
+    { accepted: boolean },
+  ];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];
   "jetbrains/editorInsetRefresh": [undefined, void];

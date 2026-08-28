@@ -26,6 +26,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const thinkingEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
+  const brokerPermissionMode = useAppSelector(
+    (state) => state.session.brokerPermissionMode,
+  );
   const [, setCatalogVersion] = useState(0);
 
   useEffect(() => {
@@ -60,6 +63,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
         brokerEffort,
         brokerSpeed,
         thinkingEnabled,
+        brokerPermissionMode,
         mode: "broker",
       });
     }

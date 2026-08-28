@@ -35,6 +35,7 @@ describe("ModelPickerModal", () => {
       brokerEffort: "high",
       brokerSpeed: "standard",
       thinkingEnabled: true,
+      brokerPermissionMode: "manual",
       mode: "broker",
     });
   });

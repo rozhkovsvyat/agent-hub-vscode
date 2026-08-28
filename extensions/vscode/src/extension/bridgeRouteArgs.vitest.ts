@@ -2,8 +2,25 @@ import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
+vi.mock("./permissionCapabilities", () => ({
+  cachedVendorPermissionCapabilities: (vendor: string) => ({
+    vendor,
+    supportedModes:
+      vendor === "codex"
+        ? ["bypass"]
+        : vendor === "deepseek"
+          ? []
+          : ["plan", "bypass"],
+    helpSource: "test-route",
+  }),
+}));
 
-import { routeForModel } from "./bridgeChatAdapter";
+import {
+  attachClaudePermissionTransport,
+  nativeDelegateHint,
+  routeForModel,
+} from "./bridgeChatAdapter";
+import { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { resolveBridgeControls } from "./bridgeControls";
 import {
   cursorCatalogFromOutput,
@@ -16,6 +33,39 @@ afterEach(() => {
 });
 
 describe("native bridge argv", () => {
+  it("adds the real Claude MCP permission transport without leaking its token", async () => {
+    const route = routeForModel(
+      "opus-5",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("opus-5", "high", "standard"),
+      "manual",
+    );
+    const broker = new ClaudePermissionBroker({
+      panelId: "panel-a",
+      sessionId: "session-a",
+      mode: "manual",
+      onRequest: () => {},
+    });
+    await broker.start();
+    try {
+      attachClaudePermissionTransport(route, broker);
+      expect(route.args.slice(-7)).toEqual([
+        "--mcp-config",
+        broker.configPath,
+        "--strict-mcp-config",
+        "--allowed-tools",
+        "mcp__cukii_permission__request",
+        "--permission-prompt-tool",
+        "mcp__cukii_permission__request",
+      ]);
+      expect(route.args.join(" ")).not.toContain(broker.token);
+    } finally {
+      await broker.dispose();
+    }
+  });
+
   it("wires independent Claude effort and speed into the native CLI", () => {
     const controls = resolveBridgeControls("opus-5", "xhigh", "fast");
     const route = routeForModel(
@@ -32,7 +82,11 @@ describe("native bridge argv", () => {
       "xhigh",
       "--settings",
       '{"fastMode":true,"alwaysThinkingEnabled":true}',
+      "--permission-mode",
+      "manual",
       "-p",
+      "--input-format",
+      "stream-json",
       "--output-format",
       "stream-json",
       "--verbose",
@@ -48,8 +102,9 @@ describe("native bridge argv", () => {
         "prompt",
         [],
         resolveBridgeControls(model, "medium", "fast"),
+        "bypass",
       );
-      expect(route.args.slice(0, 8)).toEqual([
+      expect(route.args.slice(0, 9)).toEqual([
         "-m",
         model === "codex-5-6-terra" ? "gpt-5.6-terra" : "gpt-5.6-sol",
         "-c",
@@ -58,6 +113,7 @@ describe("native bridge argv", () => {
         'service_tier="priority"',
         "exec",
         "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
       ]);
     },
   );
@@ -69,9 +125,78 @@ describe("native bridge argv", () => {
       "prompt",
       [],
       resolveBridgeControls("codex-5-6-terra", "medium", "fast", false),
+      "bypass",
     );
     expect(route.args).toContain('model_reasoning_effort="none"');
     expect(route.args).toContain('service_tier="priority"');
+  });
+
+  it("routes only verified noninteractive modes to non-conflicting flag sets", () => {
+    const cases = [
+      [
+        "opus-5",
+        "plan",
+        "--permission-mode plan",
+        "--dangerously-skip-permissions",
+      ],
+      [
+        "opus-5",
+        "bypass",
+        "--dangerously-skip-permissions",
+        "--permission-mode",
+      ],
+      [
+        "codex-5-6-terra",
+        "bypass",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--approve-for-me",
+      ],
+      ["grok-4-6", "plan", "--permission-mode plan", "--always-approve"],
+      ["composer-2-5", "plan", "--plan", "--trust"],
+      ["kimi-k3", "bypass", "--auto", "--yolo"],
+      [
+        "qwen-3-8-max",
+        "bypass",
+        "--approval-mode yolo",
+        "--approval-mode plan",
+      ],
+    ] as const;
+
+    for (const [model, mode, required, forbidden] of cases) {
+      const route = routeForModel(
+        model,
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls(model, "high", "standard"),
+        mode,
+      );
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(route.args.join(" ")).toContain(required);
+      expect(route.args.join(" ")).not.toContain(forbidden);
+    }
+  });
+
+  it("keeps nested delegate hints on the selected, verified permission route", () => {
+    const codexBypass = nativeDelegateHint(
+      "codex-5-6-terra",
+      "D:/Brain/vault",
+      "bypass",
+    );
+    expect(codexBypass).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(codexBypass).not.toContain("danger-full-access");
+
+    const qwenPlan = nativeDelegateHint(
+      "qwen-3-8-max",
+      "D:/Brain/vault",
+      "plan",
+    );
+    expect(qwenPlan).toContain("--approval-mode plan");
+    expect(qwenPlan).not.toContain("--approval-mode yolo");
+
+    expect(() =>
+      nativeDelegateHint("codex-5-6-terra", "D:/Brain/vault", "manual"),
+    ).toThrow("no verified permission mode");
   });
 
   it("wires Grok reasoning effort and reports no fake fast tier", () => {

@@ -43,8 +43,36 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     brokerEffort: "high",
     brokerSpeed: "standard",
     thinkingEnabled: true,
+    brokerPermissionMode: "manual",
   },
   "cukii/getActiveEditorSelectionState": { hasSelection: false },
+  "cukii/listPermissionCapabilities": [
+    {
+      vendor: "claude",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "codex",
+      supportedModes: ["bypass"],
+    },
+    {
+      vendor: "grok",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "cursor",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "kimi",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "qwen",
+      supportedModes: ["plan", "bypass"],
+    },
+    { vendor: "deepseek", supportedModes: [] },
+  ],
   "cukii/listVendorAccounts": [
     {
       id: "claude",

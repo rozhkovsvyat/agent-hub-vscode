@@ -38,9 +38,12 @@ import type {
   BrokerModel,
   BrokerSpeed,
   BrokerSubagent,
+  CukiiPermissionMode,
+  CukiiClaudePermissionRequest,
 } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
+import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
 import { toolCallCtxItemToCtxItemWithId } from "../../pages/gui/ToolCallDiv/utils";
 import { addToolCallDeltaToState, isEditTool } from "../../util/toolCallState";
@@ -229,6 +232,9 @@ type SessionState = {
   brokerSubagent?: BrokerSubagent;
   brokerEffort: BrokerEffort;
   brokerSpeed: BrokerSpeed;
+  brokerPermissionMode: CukiiPermissionMode;
+  /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */
+  pendingClaudePermissions: Record<string, CukiiClaudePermissionRequest>;
   isInEdit: boolean;
   codeBlockApplyStates: {
     states: ApplyState[];
@@ -247,6 +253,7 @@ export type {
   BrokerModel,
   BrokerSpeed,
   BrokerSubagent,
+  CukiiPermissionMode,
 } from "core/protocol/ideWebview";
 
 export const INITIAL_SESSION_STATE: SessionState = {
@@ -267,6 +274,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   brokerSubagent: "auto",
   brokerEffort: "high",
   brokerSpeed: "standard",
+  brokerPermissionMode: "manual",
+  pendingClaudePermissions: {},
   hasReasoningEnabled: true,
   isInEdit: false,
   codeBlockApplyStates: {
@@ -784,6 +793,12 @@ export const sessionSlice = createSlice({
         state.brokerEffort = payload.brokerEffort ?? "high";
         state.brokerSpeed = payload.brokerSpeed ?? "standard";
         state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
+        // Capability discovery belongs to the native bridge and is async. Do
+        // not use help fixtures here: preserve the session's draft, let the
+        // live capability response reconcile it, and fail closed meanwhile.
+        state.brokerPermissionMode = coerceStoredPermissionMode(
+          payload.brokerPermissionMode,
+        );
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
@@ -793,6 +808,7 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = "auto";
         state.brokerEffort = "high";
         state.brokerSpeed = "standard";
+        state.brokerPermissionMode = "manual";
         state.hasReasoningEnabled = true;
       }
     },
@@ -1068,6 +1084,31 @@ export const sessionSlice = createSlice({
     setHasReasoningEnabled: (state, action: PayloadAction<boolean>) => {
       state.hasReasoningEnabled = action.payload;
     },
+    setBrokerPermissionMode: (
+      state,
+      action: PayloadAction<CukiiPermissionMode>,
+    ) => {
+      state.brokerPermissionMode = action.payload;
+    },
+    enqueueClaudePermission: (
+      state,
+      action: PayloadAction<CukiiClaudePermissionRequest>,
+    ) => {
+      const request = action.payload;
+      state.pendingClaudePermissions[`${request.runId}:${request.requestId}`] =
+        request;
+    },
+    removeClaudePermission: (
+      state,
+      action: PayloadAction<{ runId: string; requestId: string }>,
+    ) => {
+      delete state.pendingClaudePermissions[
+        `${action.payload.runId}:${action.payload.requestId}`
+      ];
+    },
+    clearClaudePermissions: (state) => {
+      state.pendingClaudePermissions = {};
+    },
     setNewestToolbarPreviewForInput: (
       state,
       {
@@ -1194,6 +1235,10 @@ export const {
   setNewestToolbarPreviewForInput,
   setIsInEdit,
   setHasReasoningEnabled,
+  setBrokerPermissionMode,
+  enqueueClaudePermission,
+  removeClaudePermission,
+  clearClaudePermissions,
   setInlineErrorMessage,
   setIsPruned,
   setContextPercentage,

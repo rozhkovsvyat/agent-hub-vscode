@@ -9,6 +9,8 @@ import {
   newSession,
   sessionSlice,
   setActive,
+  setBrokerModel,
+  setBrokerPermissionMode,
 } from "./sessionSlice";
 
 // Mock dependencies
@@ -77,6 +79,7 @@ describe("sessionSlice streamUpdate", () => {
     mode: "chat" as const,
     brokerEffort: "high" as const,
     brokerSpeed: "standard" as const,
+    brokerPermissionMode: "manual" as const,
     hasReasoningEnabled: true,
     isInEdit: false,
     codeBlockApplyStates: {
@@ -86,9 +89,10 @@ describe("sessionSlice streamUpdate", () => {
     newestToolbarPreviewForInput: {},
     isSessionMetadataLoading: false,
     compactionLoading: {},
+    pendingClaudePermissions: {},
   });
 
-  it("restores effort and speed per session and resets new tabs to defaults", () => {
+  it("restores controls per session and resets new tabs to defaults", () => {
     const restored = sessionSlice.reducer(
       undefined,
       newSession({
@@ -100,17 +104,36 @@ describe("sessionSlice streamUpdate", () => {
         brokerSubagent: "auto",
         brokerEffort: "medium",
         brokerSpeed: "fast",
+        brokerPermissionMode: "auto",
         hasReasoningEnabled: false,
       }),
     );
     expect(restored.brokerEffort).toBe("medium");
     expect(restored.brokerSpeed).toBe("fast");
+    expect(restored.brokerPermissionMode).toBe("auto");
     expect(restored.hasReasoningEnabled).toBe(false);
 
     const blank = sessionSlice.reducer(restored, newSession(undefined));
     expect(blank.brokerEffort).toBe("high");
     expect(blank.brokerSpeed).toBe("standard");
+    expect(blank.brokerPermissionMode).toBe("manual");
     expect(blank.hasReasoningEnabled).toBe(true);
+  });
+
+  it("keeps a pending mode on a model switch until the live probe reconciles it", () => {
+    const initial = sessionSlice.getInitialState();
+    const withEditAutomatically = sessionSlice.reducer(
+      initial,
+      setBrokerPermissionMode("editAutomatically"),
+    );
+    const codex = sessionSlice.reducer(
+      withEditAutomatically,
+      setBrokerModel("codex-5-6-terra"),
+    );
+
+    // Reducers have no native CLI facts. The bridge rejects this combination
+    // until PermissionModeControl receives a real capability response.
+    expect(codex.brokerPermissionMode).toBe("editAutomatically");
   });
 
   describe("Basic Chat Message", () => {

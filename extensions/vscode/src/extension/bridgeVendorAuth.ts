@@ -35,29 +35,17 @@ export function isMissingCliError(error: unknown): boolean {
 }
 
 const WINDOWS_PROBES: Record<
-  Exclude<BrokerVendorId, "cursor" | "deepseek" | "qwen">,
+  Exclude<BrokerVendorId, "deepseek" | "qwen">,
   string[]
 > = {
   claude: ["claude", "auth", "status", "--json"],
   codex: ["codex", "login", "status"],
   grok: ["grok", "models"],
+  cursor: ["agent", "status", "--format", "json"],
   kimi: ["kimi", "provider", "list"],
 };
 
 function probeSpec(vendor: BrokerVendorId): ProbeSpec | undefined {
-  if (vendor === "cursor") {
-    return {
-      program: "wsl.exe",
-      args: [
-        "-d",
-        "Ubuntu-24.04",
-        "--",
-        "bash",
-        "-lc",
-        "$HOME/.local/bin/cursor-agent status --format json",
-      ],
-    };
-  }
   if (vendor === "deepseek" || vendor === "qwen") return undefined;
   return {
     program: process.env.ComSpec ?? "cmd.exe",
@@ -187,23 +175,7 @@ async function probeVendor(
 ): Promise<BrokerVendorAuthStatus> {
   let checkingAvailability = true;
   try {
-    if (vendor === "cursor") {
-      await execFileAsync(
-        "wsl.exe",
-        [
-          "-d",
-          "Ubuntu-24.04",
-          "--",
-          "bash",
-          "-lc",
-          'test -x "$HOME/.local/bin/cursor-agent"',
-        ],
-        {
-          timeout: 10_000,
-          windowsHide: true,
-        },
-      );
-    } else {
+    {
       await execFileAsync(
         process.env.ComSpec ?? "cmd.exe",
         [
@@ -218,7 +190,9 @@ async function probeVendor(
                 ? "grok"
                 : vendor === "kimi"
                   ? "kimi"
-                  : "qwen",
+                  : vendor === "cursor"
+                    ? "agent"
+                    : "qwen",
         ],
         {
           timeout: 10_000,
@@ -310,12 +284,11 @@ export function vendorAuthTerminalCommand(
       logout: "grok logout",
     },
     cursor: {
-      install:
-        "wsl.exe -d Ubuntu-24.04 -- bash -lc 'curl -fsS https://cursor.com/install | bash'",
-      login:
-        "wsl.exe -d Ubuntu-24.04 -- bash -lc '$HOME/.local/bin/cursor-agent login'",
-      logout:
-        "wsl.exe -d Ubuntu-24.04 -- bash -lc '$HOME/.local/bin/cursor-agent logout'",
+      // Cursor primary docs: Windows native install and verification use
+      // `irm 'https://cursor.com/install?win32=true' | iex` and `agent`.
+      install: "irm 'https://cursor.com/install?win32=true' | iex",
+      login: "agent login",
+      logout: "agent logout",
     },
     kimi: {
       install: "npm install -g @moonshot-ai/kimi-code@latest",

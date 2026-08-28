@@ -117,35 +117,45 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     const gen = extra.ideMessenger.streamRequest(
       "cukii/streamBridgeChat",
       {
+        sessionId: state.session.id,
         messages,
         brokerModel,
         brokerSubagent,
         brokerEffort,
         brokerSpeed,
         thinkingEnabled,
+        brokerPermissionMode: state.session.brokerPermissionMode,
       },
       streamAborter.signal,
     );
 
-    while (true) {
-      const result = await raceNextOrCancellation(gen.next(), getState);
-      if (result.kind === "cancelled") {
-        dispatch(abortStream());
-        break;
-      }
-      if (result.value.done) {
-        if (result.value.value) {
-          dispatch(addPromptCompletionPair([result.value.value]));
+    let completed = false;
+    try {
+      while (true) {
+        const result = await raceNextOrCancellation(gen.next(), getState);
+        if (result.kind === "cancelled") {
+          dispatch(abortStream());
+          await gen.return(undefined);
+          break;
         }
-        break;
-      }
-      if (!getState().session.isStreaming) {
-        dispatch(abortStream());
-        break;
-      }
+        if (result.value.done) {
+          completed = true;
+          if (result.value.value) {
+            dispatch(addPromptCompletionPair([result.value.value]));
+          }
+          break;
+        }
+        if (!getState().session.isStreaming) {
+          dispatch(abortStream());
+          await gen.return(undefined);
+          break;
+        }
 
-      dispatch(streamUpdate(result.value.value));
-      settleObservedToolCalls(result.value.value, dispatch);
+        dispatch(streamUpdate(result.value.value));
+        settleObservedToolCalls(result.value.value, dispatch);
+      }
+    } finally {
+      if (!completed) await gen.return(undefined);
     }
   } finally {
     dispatch(setInactive());

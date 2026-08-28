@@ -259,6 +259,7 @@ export const saveCurrentSession = createAsyncThunk<
       brokerEffort: session.brokerEffort,
       brokerSpeed: session.brokerSpeed,
       hasReasoningEnabled: session.hasReasoningEnabled,
+      brokerPermissionMode: session.brokerPermissionMode,
     };
 
     const result = await dispatch(updateSession(updatedSession));

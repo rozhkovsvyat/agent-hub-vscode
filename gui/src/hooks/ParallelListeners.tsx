@@ -68,7 +68,10 @@ function ParallelListeners() {
 
   useEffect(() => {
     if (window.cukiiSurface !== "chat" || !sessionId) return;
-    window.cukiiVscode?.setState({ sessionId });
+    window.cukiiVscode?.setState({
+      ...(window.cukiiVscode?.getState() ?? {}),
+      sessionId,
+    });
     ideMessenger.post("cukii/panelSessionChanged", {
       sessionId,
       title: sessionTitle,

@@ -2,13 +2,11 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   ArrowUpIcon,
-  CheckIcon,
   DocumentPlusIcon,
   PencilIcon,
-  ShareIcon,
 } from "@heroicons/react/24/outline";
 import { InputModifiers } from "core";
-import { memo, useContext, useMemo, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
@@ -16,6 +14,7 @@ import {
   newSession,
   setBrokerEffort,
   setBrokerModel,
+  setBrokerPermissionMode,
   setBrokerSpeed,
   setBrokerSubagent,
   setHasReasoningEnabled,
@@ -25,9 +24,9 @@ import type {
   BrokerModel,
   BrokerSpeed,
   BrokerSubagent,
+  CukiiPermissionMode,
 } from "../../redux/slices/sessionSlice";
 import type { CukiiPickedFile } from "core/protocol/ideWebview";
-import { setAllowAllPermissions } from "../../redux/slices/uiSlice";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
 import { saveCurrentSession } from "../../redux/thunks/session";
@@ -43,6 +42,7 @@ import {
 } from "../modelSelection/vendors";
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
+import { PermissionModeControl } from "./PermissionModeControl";
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -124,15 +124,11 @@ function InputToolbar(props: InputToolbarProps) {
   const hasReasoningEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
-  const allowAllPermissions = useAppSelector(
-    (state) => state.ui.allowAllPermissions,
-  );
-  const tools = useAppSelector((state) => state.config.config.tools);
-  const toolNames = useMemo(
-    () => (tools ?? []).map((tool) => tool.function.name),
-    [tools],
+  const brokerPermissionMode = useAppSelector(
+    (state) => state.session.brokerPermissionMode,
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
+  const restoredPanelDraft = useRef(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
   const [actionQuery, setActionQuery] = useState("");
@@ -142,26 +138,69 @@ function InputToolbar(props: InputToolbarProps) {
     nextEffort: BrokerEffort = brokerEffort,
     nextSpeed: BrokerSpeed = brokerSpeed,
     nextThinking: boolean = hasReasoningEnabled,
+    nextPermissionMode: CukiiPermissionMode = brokerPermissionMode,
   ) => {
     dispatch(setBrokerModel(nextModel));
     dispatch(setBrokerSubagent(nextSubagent));
     dispatch(setBrokerEffort(nextEffort));
     dispatch(setBrokerSpeed(nextSpeed));
     dispatch(setHasReasoningEnabled(nextThinking));
-    ideMessenger.post("cukii/setBrokerPreferences", {
-      brokerModel: nextModel,
-      brokerSubagent: nextSubagent,
-      brokerEffort: nextEffort,
-      brokerSpeed: nextSpeed,
-      thinkingEnabled: nextThinking,
-      mode: "broker",
+    dispatch(setBrokerPermissionMode(nextPermissionMode));
+    // VS Code webview state is scoped to this panel/tab. It deliberately
+    // carries a blank-tab draft without writing history metadata or sharing
+    // it through extension globalState with another blank tab.
+    window.cukiiVscode?.setState({
+      ...(window.cukiiVscode?.getState() ?? {}),
+      cukiiBrokerDraft: {
+        brokerModel: nextModel,
+        brokerSubagent: nextSubagent,
+        brokerEffort: nextEffort,
+        brokerSpeed: nextSpeed,
+        thinkingEnabled: nextThinking,
+        brokerPermissionMode: nextPermissionMode,
+      },
     });
     if (historyLength > 0) {
+      ideMessenger.post("cukii/setBrokerPreferences", {
+        brokerModel: nextModel,
+        brokerSubagent: nextSubagent,
+        brokerEffort: nextEffort,
+        brokerSpeed: nextSpeed,
+        thinkingEnabled: nextThinking,
+        brokerPermissionMode: nextPermissionMode,
+        mode: "broker",
+      });
       void dispatch(
         saveCurrentSession({ openNewSession: false, generateTitle: false }),
       );
     }
   };
+
+  useEffect(() => {
+    if (restoredPanelDraft.current || historyLength > 0) return;
+    restoredPanelDraft.current = true;
+    const draft = window.cukiiVscode?.getState()?.cukiiBrokerDraft as
+      | Partial<{
+          brokerModel: BrokerModel;
+          brokerSubagent: BrokerSubagent;
+          brokerEffort: BrokerEffort;
+          brokerSpeed: BrokerSpeed;
+          thinkingEnabled: boolean;
+          brokerPermissionMode: CukiiPermissionMode;
+        }>
+      | undefined;
+    if (!draft) return;
+    if (draft.brokerModel) dispatch(setBrokerModel(draft.brokerModel));
+    if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
+    if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
+    if (draft.brokerSpeed) dispatch(setBrokerSpeed(draft.brokerSpeed));
+    if (typeof draft.thinkingEnabled === "boolean") {
+      dispatch(setHasReasoningEnabled(draft.thinkingEnabled));
+    }
+    if (draft.brokerPermissionMode) {
+      dispatch(setBrokerPermissionMode(draft.brokerPermissionMode));
+    }
+  }, [dispatch, historyLength]);
 
   const isEnterDisabled =
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
@@ -574,27 +613,20 @@ function InputToolbar(props: InputToolbarProps) {
 
         <div className="flex shrink-0 items-center gap-2">
           {!isInEdit && (
-            <button
-              type="button"
-              className={`cukii-permission-button flex items-center gap-2 rounded px-2 text-xs hover:bg-[var(--vscode-toolbar-hoverBackground)] ${allowAllPermissions ? "text-[var(--vscode-foreground)]" : "text-[var(--vscode-descriptionForeground)]"}`}
-              aria-pressed={allowAllPermissions}
-              title="Toggle permission mode"
-              onClick={() =>
-                dispatch(
-                  setAllowAllPermissions({
-                    enabled: !allowAllPermissions,
-                    toolNames,
-                  }),
-                )
-              }
-            >
-              {allowAllPermissions ? (
-                <CheckIcon className="h-4 w-4" />
-              ) : (
-                <ShareIcon className="h-4 w-4" />
-              )}
-              <span className="cukii-permission-label">Bypass permissions</span>
-            </button>
+            <PermissionModeControl
+              brokerModel={currentModel}
+              permissionMode={brokerPermissionMode}
+              onChange={(mode) => {
+                updateBrokerPreferences(
+                  currentModel,
+                  brokerSubagent ?? "auto",
+                  brokerEffort,
+                  brokerSpeed,
+                  hasReasoningEnabled,
+                  mode,
+                );
+              }}
+            />
           )}
 
           <ToolTip

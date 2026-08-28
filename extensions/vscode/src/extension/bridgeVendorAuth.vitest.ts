@@ -62,7 +62,7 @@ describe("Cukii vendor CLI accounts", () => {
       "codex login --device-auth",
     );
     expect(vendorAuthTerminalCommand("cursor", "login")?.command).toContain(
-      "cursor-agent login",
+      "agent login",
     );
     expect(vendorAuthTerminalCommand("kimi", "logout")).toMatchObject({
       command: "kimi",
@@ -89,7 +89,7 @@ describe("Cukii vendor CLI accounts", () => {
       "npm install -g @qwen-code/qwen-code@latest",
     );
     expect(vendorAuthTerminalCommand("cursor", "install")?.command).toContain(
-      "https://cursor.com/install",
+      "https://cursor.com/install?win32=true",
     );
   });
 
