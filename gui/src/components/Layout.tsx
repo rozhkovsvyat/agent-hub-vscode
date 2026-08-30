@@ -114,6 +114,10 @@ const Layout = () => {
   useWebviewListener(
     "navigateTo",
     async (data) => {
+      if (data.path === "/history") {
+        navigate(ROUTES.HOME, { replace: true });
+        return;
+      }
       if (data.toggle && location.pathname === data.path) {
         navigate("/");
       } else {

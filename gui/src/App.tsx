@@ -1,4 +1,4 @@
-import { RouterProvider, createMemoryRouter } from "react-router-dom";
+import { Navigate, RouterProvider, createMemoryRouter } from "react-router-dom";
 import Layout from "./components/Layout";
 import { MainEditorProvider } from "./components/mainInput/TipTapEditor";
 import { SubmenuContextProvidersProvider } from "./context/SubmenuContextProviders";
@@ -8,7 +8,6 @@ import { ClaudePermissionPrompt } from "./components/mainInput/ClaudePermissionP
 import ConfigPage from "./pages/config";
 import ErrorPage from "./pages/error";
 import Chat from "./pages/gui";
-import History from "./pages/history";
 import Stats from "./pages/stats";
 import ThemePage from "./styles/ThemePage";
 import { ROUTES } from "./util/navigation";
@@ -35,7 +34,7 @@ const router = createMemoryRouter([
       },
       {
         path: "/history",
-        element: <History />,
+        element: <Navigate replace to={ROUTES.HOME} />,
       },
       {
         path: ROUTES.STATS,

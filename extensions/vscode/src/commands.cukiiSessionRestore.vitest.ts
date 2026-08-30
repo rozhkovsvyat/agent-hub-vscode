@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   commands: new Map<string, (...args: any[]) => any>(),
   createWebviewPanel: vi.fn(),
+  executeCommand: vi.fn(),
 }));
 
 vi.mock("vscode", () => ({
   commands: {
-    executeCommand: vi.fn(),
+    executeCommand: state.executeCommand,
     registerCommand: vi.fn(
       (name: string, callback: (...args: any[]) => any) => {
         state.commands.set(name, callback);
@@ -45,6 +46,7 @@ function register(core: { invoke: ReturnType<typeof vi.fn> }) {
   const sidebar = {
     webviewProtocol: {
       cloneHandlers: vi.fn(() => ({ on: vi.fn(), dispose: vi.fn() })),
+      request: vi.fn(),
       send: vi.fn(),
     },
     getSidebarContent: vi.fn(() => "<html />"),
@@ -70,9 +72,37 @@ describe("saved Cukii sidebar session opening", () => {
   beforeEach(() => {
     state.commands.clear();
     state.createWebviewPanel.mockReset();
+    state.executeCommand.mockReset();
     for (const entry of cukiiPanelRegistry.values()) {
       cukiiPanelRegistry.remove(entry.id);
     }
+  });
+
+  it("redirects the legacy history command to the session navigator", () => {
+    const sidebar = register({ invoke: vi.fn() });
+
+    state.commands.get("continue.viewHistory")!();
+
+    expect(state.executeCommand).toHaveBeenCalledWith(
+      "continue.continueGUIView.focus",
+    );
+    expect(state.executeCommand).not.toHaveBeenCalledWith(
+      "continue.navigateTo",
+      "/history",
+      expect.anything(),
+    );
+    expect(sidebar.webviewProtocol.request).not.toHaveBeenCalled();
+  });
+
+  it("also redirects direct legacy route invocations without touching chat", () => {
+    const sidebar = register({ invoke: vi.fn() });
+
+    state.commands.get("continue.navigateTo")!("/history", true);
+
+    expect(state.executeCommand).toHaveBeenCalledWith(
+      "continue.continueGUIView.focus",
+    );
+    expect(sidebar.webviewProtocol.request).not.toHaveBeenCalled();
   });
 
   it("opens a nonempty saved sidebar session", async () => {

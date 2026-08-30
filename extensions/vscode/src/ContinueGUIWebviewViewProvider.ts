@@ -4,6 +4,7 @@ import { getTheme } from "./util/getTheme";
 import { getExtensionVersion, getvsCodeUriScheme } from "./util/util";
 import { getExtensionUri, getNonce, getUniqueId } from "./util/vscode";
 import { VsCodeWebviewProtocol } from "./webviewProtocol";
+import { getCukiiWebviewStateBootstrap } from "./cukiiWebviewState";
 
 import type { FileEdit } from "core";
 
@@ -67,7 +68,6 @@ export class ContinueGUIWebviewViewProvider
   getSidebarContent(
     context: vscode.ExtensionContext | undefined,
     panel: vscode.WebviewPanel | vscode.WebviewView,
-    page: string | undefined = undefined,
     edits: FileEdit[] | undefined = undefined,
     isFullScreen = false,
     protocol: VsCodeWebviewProtocol = this.webviewProtocol,
@@ -133,9 +133,6 @@ export class ContinueGUIWebviewViewProvider
 
     protocol.webview = panel.webview;
 
-    const serializedSessionId = JSON.stringify(
-      initialSessionId ?? null,
-    ).replace(/</g, "\\u003c");
     const serializedPanelId = JSON.stringify(panelId).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -207,9 +204,7 @@ export class ContinueGUIWebviewViewProvider
         <script>window.cukiiSurface = "${surface}"</script>
         <script>window.cukiiPanelId = ${serializedPanelId}</script>
         <script>
-          const restoredCukiiState = window.cukiiVscode.getState() || {};
-          window.initialSessionId = ${serializedSessionId} || restoredCukiiState.sessionId || null;
-          window.cukiiVscode.setState({ ...restoredCukiiState, sessionId: window.initialSessionId });
+          ${getCukiiWebviewStateBootstrap(initialSessionId)}
         </script>
 
         ${
@@ -217,7 +212,6 @@ export class ContinueGUIWebviewViewProvider
             ? `<script>window.edits = ${JSON.stringify(edits)}</script>`
             : ""
         }
-        ${page ? `<script>window.location.pathname = "${page}"</script>` : ""}
       </body>
     </html>`;
   }

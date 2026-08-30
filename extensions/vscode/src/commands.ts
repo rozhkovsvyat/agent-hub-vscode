@@ -128,7 +128,6 @@ function attachFullScreenPanel(
     extensionContext,
     panel,
     undefined,
-    undefined,
     true,
     protocol,
     "chat",
@@ -504,7 +503,7 @@ const getCommandsMap: (
       }
     },
     "continue.viewHistory": () => {
-      vscode.commands.executeCommand("continue.navigateTo", "/history", true);
+      void vscode.commands.executeCommand("continue.continueGUIView.focus");
     },
     "continue.focusContinueSessionId": async (
       sessionId: string | undefined,
@@ -721,6 +720,10 @@ const getCommandsMap: (
       quickPick.show();
     },
     "continue.navigateTo": (path: string, toggle: boolean) => {
+      if (path === "/history") {
+        void vscode.commands.executeCommand("continue.continueGUIView.focus");
+        return;
+      }
       sidebar.webviewProtocol?.request("navigateTo", { path, toggle });
       focusGUI();
     },

@@ -262,7 +262,7 @@
       {
         "command": "continue.viewHistory",
         "category": "Cukii",
-        "title": "View History",
+        "title": "Show Session Navigator",
         "icon": "$(history)",
         "group": "Cukii"
       },
