@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -9,6 +9,7 @@ import {
   cancelVoiceRecording,
   assertVoiceTranscriptIsUsable,
   MAX_VOICE_RECORDING_MS,
+  MAX_WEBVIEW_VOICE_BYTES,
   parseDirectShowAudioDevices,
   requestRecorderQuit,
   startVoiceRecording,
@@ -167,6 +168,105 @@ describe("voice dictation runtime", () => {
         durationMs: 1,
       }),
     ).rejects.toThrow(message);
+  });
+
+  it.each(["AAA", "AB==", "AAAA="])(
+    "rejects non-canonical base64 %s",
+    async (audioBase64) => {
+      await expect(
+        transcribeWebviewVoiceAudio({
+          recordingId: "canonical-base64-test",
+          audioBase64,
+          mimeType: "audio/webm",
+          durationMs: 1,
+        }),
+      ).rejects.toThrow("recording data was invalid");
+    },
+  );
+
+  it.each([
+    [{ sampleRate: 7_999 }, "sample rate"],
+    [{ sampleRate: 192_001 }, "sample rate"],
+    [{ durationMs: 300_001 }, "five-minute limit"],
+  ])("rejects implausible metadata %o", async (metadata, message) => {
+    await expect(
+      transcribeWebviewVoiceAudio({
+        recordingId: "invalid-metadata-test",
+        audioBase64: Buffer.from("a").toString("base64"),
+        mimeType: "audio/webm",
+        ...metadata,
+      }),
+    ).rejects.toThrow(message);
+  });
+
+  it("rejects audio above the IPC cap before creating a temp file", async () => {
+    expect(MAX_WEBVIEW_VOICE_BYTES).toBe(8 * 1024 * 1024);
+    await expect(
+      transcribeWebviewVoiceAudio({
+        recordingId: "oversized-audio-test",
+        audioBase64: Buffer.alloc(MAX_WEBVIEW_VOICE_BYTES + 1).toString(
+          "base64",
+        ),
+        mimeType: "audio/webm",
+        durationMs: 1,
+      }),
+    ).rejects.toThrow("recording is too large");
+  });
+
+  it("never touches a legacy/sentinel file derived from recordingId", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-sentinel-"));
+    const sentinel = path.join(tempDir, "cukii-voice-replayed-voice.webm");
+    fs.writeFileSync(sentinel, "sentinel");
+    try {
+      await transcribeWebviewVoiceAudio(
+        {
+          recordingId: "replayed-voice",
+          audioBase64: Buffer.from("owned").toString("base64"),
+          mimeType: "audio/webm",
+          durationMs: 1,
+        },
+        async () => "ok",
+        tempDir,
+      );
+      expect(fs.readFileSync(sentinel, "utf8")).toBe("sentinel");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates concurrent replays of the same recording id", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-concurrent-"));
+    const paths: string[] = [];
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => (release = resolve));
+    const payload = {
+      recordingId: "concurrent-replay",
+      audioBase64: Buffer.from("owned").toString("base64"),
+      mimeType: "audio/webm",
+      durationMs: 1,
+    };
+    try {
+      const calls = [1, 2].map(() =>
+        transcribeWebviewVoiceAudio(
+          payload,
+          async (inputPath) => {
+            paths.push(inputPath);
+            await barrier;
+            expect(fs.readFileSync(inputPath, "utf8")).toBe("owned");
+            return "ok";
+          },
+          tempDir,
+        ),
+      );
+      await vi.waitFor(() => expect(paths).toHaveLength(2));
+      expect(new Set(paths).size).toBe(2);
+      release();
+      await expect(Promise.all(calls)).resolves.toEqual(["ok", "ok"]);
+      expect(paths.every((inputPath) => !fs.existsSync(inputPath))).toBe(true);
+    } finally {
+      release?.();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("treats recorder EPIPE during stop as an already-closed microphone", async () => {

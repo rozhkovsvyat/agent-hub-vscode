@@ -12,11 +12,14 @@ type ActiveRecording = {
   recorder: MediaRecorder;
   stream: MediaStream;
   chunks: Blob[];
+  collecting: boolean;
   startedAt: number;
   timeout: number;
 };
 
 const MAX_RECORDING_MS = 5 * 60 * 1000;
+// Must match the extension-host guard. Check before base64 inflation and IPC.
+const MAX_RECORDING_BYTES = 8 * 1024 * 1024;
 
 function voiceErrorMessage(error: unknown): string {
   const name = (error as { name?: unknown })?.name;
@@ -65,12 +68,25 @@ function preferredRecorderOptions(): MediaRecorderOptions | undefined {
 export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const activeRecording = useRef<ActiveRecording>();
+  const pendingAcquisition = useRef<number>();
+  const acquisitionGeneration = useRef(0);
   const mounted = useRef(true);
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string>();
 
-  const discard = (recording: ActiveRecording) => {
+  const discard = (recording: ActiveRecording, stopRecorder = true) => {
     window.clearTimeout(recording.timeout);
+    recording.collecting = false;
+    recording.recorder.ondataavailable = null;
+    recording.recorder.onstop = null;
+    recording.recorder.onerror = null;
+    if (stopRecorder && recording.recorder.state !== "inactive") {
+      try {
+        recording.recorder.stop();
+      } catch {
+        // Tracks are still the authoritative resource and are stopped below.
+      }
+    }
     stopTracks(recording.stream);
   };
 
@@ -88,12 +104,20 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
     const { recordingId } = recording;
     if (activeRecording.current?.recordingId !== recordingId) return;
     window.clearTimeout(recording.timeout);
+    recording.collecting = false;
     stopTracks(recording.stream);
     const blob = new Blob(recording.chunks, {
       type: recording.recorder.mimeType || "audio/webm",
     });
     if (blob.size === 0)
       return fail(recordingId, new Error("No microphone audio was captured."));
+    if (blob.size > MAX_RECORDING_BYTES)
+      return fail(
+        recordingId,
+        new Error(
+          "The microphone recording is too large. Record a shorter message and retry.",
+        ),
+      );
     if (mounted.current) setState("transcribing");
     try {
       const audioBase64 = await blobToBase64(blob);
@@ -108,7 +132,10 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
           audioBase64,
           mimeType: blob.type || "audio/webm",
           sampleRate,
-          durationMs: Math.max(1, Date.now() - recording.startedAt),
+          durationMs: Math.min(
+            MAX_RECORDING_MS,
+            Math.max(1, Date.now() - recording.startedAt),
+          ),
         },
       );
       if (
@@ -138,21 +165,21 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   useEffect(
     () => () => {
       mounted.current = false;
+      pendingAcquisition.current = undefined;
+      acquisitionGeneration.current += 1;
       const active = activeRecording.current;
       activeRecording.current = undefined;
       if (!active) return;
-      window.clearTimeout(active.timeout);
-      active.recorder.ondataavailable = null;
-      active.recorder.onstop = null;
-      active.recorder.onerror = null;
-      if (active.recorder.state !== "inactive") active.recorder.stop();
-      stopTracks(active.stream);
+      discard(active);
     },
     [],
   );
 
   const start = async () => {
-    if (activeRecording.current) return;
+    if (activeRecording.current || pendingAcquisition.current !== undefined)
+      return;
+    const generation = ++acquisitionGeneration.current;
+    pendingAcquisition.current = generation;
     const recordingId =
       globalThis.crypto?.randomUUID?.() ??
       `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -174,7 +201,11 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
           autoGainControl: true,
         },
       });
-      if (!mounted.current || activeRecording.current) {
+      if (
+        !mounted.current ||
+        pendingAcquisition.current !== generation ||
+        activeRecording.current
+      ) {
         stopTracks(stream);
         return;
       }
@@ -184,12 +215,14 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         recorder,
         stream,
         chunks: [],
+        collecting: true,
         startedAt: Date.now(),
         timeout: 0,
       };
       activeRecording.current = active;
       recorder.ondataavailable = (event) => {
         if (
+          active.collecting &&
           activeRecording.current?.recordingId === recordingId &&
           event.data.size > 0
         )
@@ -203,6 +236,7 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         );
       recorder.onstop = () => void finish(active);
       recorder.start(250);
+      pendingAcquisition.current = undefined;
       active.timeout = window.setTimeout(() => {
         if (
           activeRecording.current?.recordingId === recordingId &&
@@ -212,8 +246,16 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
       }, MAX_RECORDING_MS);
       if (mounted.current) setState("listening");
     } catch (caught) {
+      const active = activeRecording.current;
+      if (active?.recordingId === recordingId) {
+        fail(recordingId, caught);
+        pendingAcquisition.current = undefined;
+        return;
+      }
       if (stream) stopTracks(stream);
-      if (mounted.current && !activeRecording.current) {
+      if (pendingAcquisition.current !== generation) return;
+      pendingAcquisition.current = undefined;
+      if (mounted.current) {
         setError(voiceErrorMessage(caught));
         setState("idle");
       }

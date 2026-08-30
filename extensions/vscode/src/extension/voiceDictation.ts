@@ -502,7 +502,9 @@ export type WebviewVoiceAudio = {
   durationMs?: number;
 };
 
-const MAX_WEBVIEW_VOICE_BYTES = 25 * 1024 * 1024;
+// Base64 expands this by ~33% inside VS Code's JSON IPC. Eight MiB keeps the
+// message comfortably bounded while still allowing the five-minute Opus cap.
+export const MAX_WEBVIEW_VOICE_BYTES = 8 * 1024 * 1024;
 
 function extensionForVoiceMimeType(mimeType: string): string {
   const normalized = mimeType.toLowerCase().split(";", 1)[0].trim();
@@ -522,10 +524,27 @@ function decodeWebviewVoiceAudio(audioBase64: string): Buffer {
   if (!audioBase64) {
     throw new Error("No microphone audio was captured.");
   }
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(audioBase64)) {
+  const padding = audioBase64.endsWith("==")
+    ? 2
+    : audioBase64.endsWith("=")
+      ? 1
+      : 0;
+  const decodedLength = Math.floor((audioBase64.length * 3) / 4) - padding;
+  if (decodedLength > MAX_WEBVIEW_VOICE_BYTES) {
+    throw new Error(
+      "The microphone recording is too large. Record a shorter message and retry.",
+    );
+  }
+  if (
+    audioBase64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(audioBase64)
+  ) {
     throw new Error("The microphone recording data was invalid. Please retry.");
   }
   const bytes = Buffer.from(audioBase64, "base64");
+  if (bytes.toString("base64") !== audioBase64) {
+    throw new Error("The microphone recording data was invalid. Please retry.");
+  }
   if (bytes.byteLength === 0) {
     throw new Error("No microphone audio was captured.");
   }
@@ -553,7 +572,9 @@ export async function transcribeWebviewVoiceAudio(
   }
   if (
     payload.sampleRate !== undefined &&
-    (!Number.isFinite(payload.sampleRate) || payload.sampleRate <= 0)
+    (!Number.isFinite(payload.sampleRate) ||
+      payload.sampleRate < 8_000 ||
+      payload.sampleRate > 192_000)
   ) {
     throw new Error(
       "The microphone reported an invalid sample rate. Please retry.",
@@ -565,18 +586,25 @@ export async function transcribeWebviewVoiceAudio(
   ) {
     throw new Error("The microphone recording was empty. Please try again.");
   }
+  if (
+    payload.durationMs !== undefined &&
+    payload.durationMs > MAX_VOICE_RECORDING_MS
+  ) {
+    throw new Error("The microphone recording exceeded the five-minute limit.");
+  }
 
   const extension = extensionForVoiceMimeType(payload.mimeType);
   const bytes = decodeWebviewVoiceAudio(payload.audioBase64);
-  const inputPath = path.join(
-    tempDir,
-    `cukii-voice-${payload.recordingId}${extension}`,
-  );
+  // A caller-controlled recording id must never identify a shared temp file.
+  // Each invocation owns a new directory, so replay/concurrent calls cannot
+  // delete one another's input (or an unrelated sentinel left by a crash).
+  const ownedDir = fs.mkdtempSync(path.join(tempDir, "cukii-voice-upload-"));
+  const inputPath = path.join(ownedDir, `recording${extension}`);
   try {
-    fs.writeFileSync(inputPath, bytes, { flag: "wx" });
+    fs.writeFileSync(inputPath, bytes, { flag: "wx", mode: 0o600 });
     return await transcribe(inputPath);
   } finally {
-    fs.rmSync(inputPath, { force: true });
+    fs.rmSync(ownedDir, { recursive: true, force: true });
   }
 }
 
