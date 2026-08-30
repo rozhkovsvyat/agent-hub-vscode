@@ -10,6 +10,8 @@ interface VendorAccountsModalProps {
   onClose: () => void;
 }
 
+type RefreshReason = "initial" | "user" | "action" | "poll";
+
 const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   install: "Install",
   login: "Log in",
@@ -21,21 +23,37 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [accounts, setAccounts] = useState<BrokerVendorAuthStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const [refreshError, setRefreshError] = useState<string>();
+  const [actionNotice, setActionNotice] = useState<string>();
   const refreshInFlight = useRef(false);
-  const refreshQueued = useRef(false);
-  const queuedRefreshSilent = useRef(true);
-  const refreshGeneration = useRef(0);
+  const pendingPoll = useRef(false);
+  const pendingExplicitRefresh = useRef<
+    | {
+        reason: "user" | "action";
+        generation: number;
+      }
+    | undefined
+  >(undefined);
+  const explicitRefreshGeneration = useRef(0);
 
   const refresh = useCallback(
-    async (silent = false) => {
-      const generation = ++refreshGeneration.current;
-      if (!silent) setLoading(true);
+    async (reason: RefreshReason, queuedGeneration?: number) => {
+      const explicit = reason === "user" || reason === "action";
+      const generation =
+        queuedGeneration ??
+        (explicit
+          ? ++explicitRefreshGeneration.current
+          : explicitRefreshGeneration.current);
+      if (reason === "user") setLoading(true);
       if (refreshInFlight.current) {
-        // A later intent invalidates the pending result before it resolves.
-        // Once it completes, launch a fresh native probe for the latest intent.
-        refreshQueued.current = true;
-        queuedRefreshSilent.current = silent;
+        if (reason === "poll") {
+          // Coalesce any number of timer ticks behind the current native probe.
+          if (!pendingExplicitRefresh.current) pendingPoll.current = true;
+        } else if (explicit) {
+          // Only user/action intent invalidates the active result.
+          pendingExplicitRefresh.current = { reason, generation };
+          pendingPoll.current = false;
+        }
         return;
       }
       refreshInFlight.current = true;
@@ -44,19 +62,26 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           "cukii/listVendorAccounts",
           undefined,
         );
-        if (generation !== refreshGeneration.current) return;
+        if (generation !== explicitRefreshGeneration.current) return;
         if (response.status === "success") {
           setAccounts(response.content);
-        } else if (!silent) {
-          setNotice(response.error);
+          setRefreshError(undefined);
+        } else if (reason !== "poll") {
+          setRefreshError(response.error);
         }
       } finally {
         refreshInFlight.current = false;
-        if (refreshQueued.current) {
-          refreshQueued.current = false;
-          void refresh(queuedRefreshSilent.current);
-        } else if (generation === refreshGeneration.current) {
+        if (generation === explicitRefreshGeneration.current) {
           setLoading(false);
+        }
+        const queuedExplicit = pendingExplicitRefresh.current;
+        if (queuedExplicit) {
+          pendingExplicitRefresh.current = undefined;
+          pendingPoll.current = false;
+          void refresh(queuedExplicit.reason, queuedExplicit.generation);
+        } else if (pendingPoll.current) {
+          pendingPoll.current = false;
+          void refresh("poll");
         }
       }
     },
@@ -64,8 +89,8 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   );
 
   useEffect(() => {
-    void refresh();
-    const poll = window.setInterval(() => void refresh(true), 5_000);
+    void refresh("initial");
+    const poll = window.setInterval(() => void refresh("poll"), 5_000);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -87,13 +112,13 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         vendor: account.id,
         action,
       });
-      setNotice(
+      setActionNotice(
         response.status === "success" ? response.content.message : response.error,
       );
     } finally {
       setBusy(undefined);
       // Do not keep the state from before opening the native login/logout flow.
-      await refresh(true);
+      await refresh("action");
     }
   };
 
@@ -119,7 +144,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
               aria-label="Refresh vendor accounts"
               title="Refresh status"
               className="cukii-account-icon-button"
-              onClick={() => void refresh(false)}
+              onClick={() => void refresh("user")}
             >
               <ArrowPathIcon className={loading ? "animate-spin" : ""} />
             </button>
@@ -180,9 +205,10 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           )}
         </div>
 
-        {notice && (
+        {(refreshError || actionNotice) && (
           <div className="mt-2 border-t border-[var(--vscode-widget-border)] pt-2 text-[12px] text-[var(--vscode-descriptionForeground)]">
-            {notice}
+            {refreshError && <div>{refreshError}</div>}
+            {actionNotice && <div>{actionNotice}</div>}
           </div>
         )}
       </div>
