@@ -7,18 +7,16 @@ import { promisify } from "util";
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
-import type * as vscode from "vscode";
 
 const execFileAsync = promisify(execFile);
 
-const WHISPER_MODEL = "Xenova/whisper-base";
 const WHISPER_REVISION = "64da57285918e20ea79ea5c88eed7197933abaa8";
 export const MAX_VOICE_RECORDING_MS = 5 * 60 * 1000;
-const WHISPER_CACHE_DIR = path.join(
-  os.homedir(),
-  ".agent-hub",
+const WHISPER_MODEL_ROOT = path.join(
+  __dirname,
   "models",
-  "whisper",
+  "whisper-base",
+  WHISPER_REVISION,
 );
 const WHISPER_FILES: Record<string, string> = {
   "config.json":
@@ -72,6 +70,7 @@ type Recording = {
 };
 
 const recordings = new Map<string, Recording>();
+let recordingOwner: string | undefined;
 const pendingRecordings = new Set<string>();
 const cancelledStarts = new Set<string>();
 const finalizations = new Map<string, Promise<string | void>>();
@@ -89,15 +88,10 @@ type VoiceRecordingOptions = {
   tempDir?: string;
 };
 
-function whisperModelDir(cacheDir = WHISPER_CACHE_DIR): string {
-  return path.join(cacheDir, "Xenova", "whisper-base", WHISPER_REVISION);
-}
-
-export function verifyWhisperCache(cacheDir = WHISPER_CACHE_DIR): {
+export function verifyPackagedWhisperModel(modelDir = WHISPER_MODEL_ROOT): {
   valid: boolean;
   reason?: string;
 } {
-  const modelDir = whisperModelDir(cacheDir);
   for (const [relativePath, expectedHash] of Object.entries(WHISPER_FILES)) {
     const filePath = path.join(modelDir, ...relativePath.split("/"));
     if (!fs.existsSync(filePath)) {
@@ -113,10 +107,6 @@ export function verifyWhisperCache(cacheDir = WHISPER_CACHE_DIR): {
   return { valid: true };
 }
 
-function discardPartialWhisperCache(): void {
-  fs.rmSync(whisperModelDir(), { recursive: true, force: true });
-}
-
 export function parseDirectShowAudioDevices(stderr: string): string[] {
   return [...stderr.matchAll(/"([^"]+)"\s+\(audio\)/g)].map(
     (match) => match[1],
@@ -126,9 +116,9 @@ export function parseDirectShowAudioDevices(stderr: string): string[] {
 export function selectDirectShowAudioDevice(
   devices: string[],
 ): string | undefined {
-  return (
-    devices.find((device) => !/streaming|virtual/i.test(device)) ?? devices[0]
-  );
+  const softwareDevice =
+    /streaming|virtual|voicemeeter|vb[- ]?audio|cable|stereo mix|стерео микшер/i;
+  return devices.find((device) => !softwareDevice.test(device)) ?? devices[0];
 }
 
 async function audioDevice(): Promise<string> {
@@ -186,6 +176,10 @@ export async function startVoiceRecording(
   if (pendingRecordings.has(recordingId) || recordings.has(recordingId)) {
     throw new Error("Voice recording is already active.");
   }
+  if (recordingOwner) {
+    throw new Error("Another Cukii voice recording is already active.");
+  }
+  recordingOwner = recordingId;
   pendingRecordings.add(recordingId);
   let ownedDir: string | undefined;
   try {
@@ -262,18 +256,27 @@ export async function startVoiceRecording(
   } finally {
     pendingRecordings.delete(recordingId);
     cancelledStarts.delete(recordingId);
+    if (!recordings.has(recordingId) && recordingOwner === recordingId) {
+      recordingOwner = undefined;
+    }
   }
 }
 
 async function stopRecorder(recording: Recording): Promise<void> {
   if (recording.durationTimer) clearTimeout(recording.durationTimer);
   if (recording.exited) return;
-  await requestRecorderQuit(recording.process.stdin);
-  if (await waitForProcessExit(recording, 5_000)) return;
-  recording.process.kill();
-  if (!(await waitForProcessExit(recording, 2_000))) {
+  let quitError: unknown;
+  try {
+    await requestRecorderQuit(recording.process.stdin);
+  } catch (error) {
+    quitError = error;
+  }
+  if (!quitError && (await waitForProcessExit(recording, 5_000))) return;
+  if (!recording.exited) recording.process.kill();
+  if (!recording.exited && !(await waitForProcessExit(recording, 2_000))) {
     throw new Error("The audio recorder did not stop after termination.");
   }
+  if (quitError) throw quitError;
 }
 
 export async function requestRecorderQuit(
@@ -308,72 +311,23 @@ function voiceError(error: unknown): Error {
 }
 
 async function createTranscriber(): Promise<any> {
-  const initialCacheState = verifyWhisperCache();
-  if (!initialCacheState.valid && fs.existsSync(whisperModelDir())) {
-    discardPartialWhisperCache();
-  }
-  const load = async (progress?: vscode.Progress<{ message?: string }>) => {
-    const { env, pipeline } = await import("@xenova/transformers");
-    env.cacheDir = WHISPER_CACHE_DIR;
-    env.useFSCache = true;
-    env.useBrowserCache = false;
-    return pipeline("automatic-speech-recognition", WHISPER_MODEL, {
-      revision: WHISPER_REVISION,
-      progress_callback: (update: {
-        status?: string;
-        file?: string;
-        progress?: number;
-      }) => {
-        const suffix =
-          update.progress === undefined
-            ? ""
-            : ` ${Math.round(update.progress)}%`;
-        progress?.report({
-          message: update.file
-            ? `${update.status ?? "Downloading"}: ${update.file}${suffix}`
-            : "Preparing local speech recognition…",
-        });
-      },
-    });
-  };
-
-  let loaded: any;
-  try {
-    if (initialCacheState.valid) {
-      loaded = await load();
-    } else {
-      let api: typeof vscode | undefined;
-      try {
-        api = createRequire(__filename)("vscode") as typeof vscode;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "MODULE_NOT_FOUND") {
-          throw error;
-        }
-      }
-      loaded = api
-        ? await api.window.withProgress(
-            {
-              location: api.ProgressLocation.Notification,
-              title: "Cukii: downloading local Whisper model (one time)",
-              cancellable: false,
-            },
-            (progress) => load(progress),
-          )
-        : await load();
-    }
-  } catch (error) {
-    if (!initialCacheState.valid) discardPartialWhisperCache();
-    throw error;
-  }
-
-  const finalCacheState = verifyWhisperCache();
-  if (!finalCacheState.valid) {
-    discardPartialWhisperCache();
+  const modelState = verifyPackagedWhisperModel();
+  if (!modelState.valid) {
     throw new Error(
-      `The downloaded Whisper model failed integrity verification: ${finalCacheState.reason}. Retry voice input to download a clean copy.`,
+      `Cukii's packaged Whisper model failed integrity verification: ${modelState.reason}. Reinstall Cukii.`,
     );
   }
-  return loaded;
+  const { env, pipeline } = await import("@xenova/transformers");
+  env.allowRemoteModels = false;
+  env.allowLocalModels = true;
+  env.localModelPath = path.join(__dirname, "models");
+  env.useFSCache = false;
+  env.useBrowserCache = false;
+  return pipeline(
+    "automatic-speech-recognition",
+    `whisper-base/${WHISPER_REVISION}`,
+    { local_files_only: true },
+  );
 }
 
 async function transcriber(): Promise<any> {
@@ -449,6 +403,7 @@ export function assertVoiceTranscriptIsUsable(
     .trim()
     .toLocaleLowerCase()
     .replace(/^[\s"'`.,!?;:(){}-]+|[\s"'`.,!?;:(){}-]+$/gu, "")
+    .replace(/[.-]/g, "_")
     .replace(/\s+/g, "");
   if (
     new Set([
@@ -579,6 +534,7 @@ async function finalizeRecording(
     return await operation;
   } finally {
     finalizations.delete(recordingId);
+    if (recordingOwner === recordingId) recordingOwner = undefined;
   }
 }
 

@@ -12,6 +12,16 @@ function copyVoiceRuntime() {
   const runtimeDir = path.join(__dirname, "..", "out", "runtime");
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.copyFileSync(source, path.join(runtimeDir, path.basename(source)));
+  const whisperSource = path.join(__dirname, "..", "models", "whisper-base");
+  const whisperOutput = path.join(
+    __dirname,
+    "..",
+    "out",
+    "models",
+    "whisper-base",
+  );
+  fs.rmSync(whisperOutput, { recursive: true, force: true });
+  fs.cpSync(whisperSource, whisperOutput, { recursive: true });
 
   const outputModules = path.join(__dirname, "..", "out", "node_modules");
   for (const packageName of ["onnxruntime-node", "onnxruntime-common"]) {

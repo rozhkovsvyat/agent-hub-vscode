@@ -16,7 +16,7 @@ import {
   stopVoiceRecording,
   transcribeVoiceFile,
   transcribeDecodedVoiceAudio,
-  verifyWhisperCache,
+  verifyPackagedWhisperModel,
   voiceFfmpegExecutable,
   voiceRecordingStatus,
 } from "./voiceDictation";
@@ -97,6 +97,10 @@ describe("voice dictation runtime", () => {
     "... [NO_SPEECH] ...",
     "<|nospeech|>",
     "( <|NO_SPEECH|> )",
+    "[NO-SPEECH]",
+    "[NO.SPEECH]",
+    "[BLANK-AUDIO]",
+    "<|no-speech|>",
   ])("rejects a standalone no-speech marker: %s", (text) => {
     expect(() => assertVoiceTranscriptIsUsable(text, 2)).toThrow(
       "No speech was detected",
@@ -131,22 +135,46 @@ describe("voice dictation runtime", () => {
     ).toBe("Line (4- Steinberg UR22C)");
   });
 
+  it.each([
+    "VoiceMeeter Output",
+    "VB-Audio Virtual Cable",
+    "CABLE Output",
+    "Stereo Mix (Realtek)",
+    "Микрофон (Steam Streaming Microphone)",
+  ])("demotes software capture device %s", (software) => {
+    expect(
+      selectDirectShowAudioDevice([software, "Line (4- Steinberg UR22C)"]),
+    ).toBe("Line (4- Steinberg UR22C)");
+  });
+
   it("uses Cukii's packaged/development recorder rather than system PATH", () => {
     expect(voiceFfmpegExecutable()).toMatch(/ffmpeg\.exe$/i);
   });
 
-  it("detects a partial Whisper cache and pins a finite recording cap", () => {
+  it("detects an incomplete packaged model and pins a finite recording cap", () => {
     const cacheDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "cukii-whisper-test-"),
     );
     try {
-      const state = verifyWhisperCache(cacheDir);
+      const state = verifyPackagedWhisperModel(cacheDir);
       expect(state.valid).toBe(false);
       expect(state.reason).toContain("missing config.json");
       expect(MAX_VOICE_RECORDING_MS).toBe(300_000);
     } finally {
       fs.rmSync(cacheDir, { recursive: true, force: true });
     }
+  });
+
+  it("ships the complete pinned Whisper model source for packaging", () => {
+    const modelDir = path.join(
+      __dirname,
+      "../../models/whisper-base/64da57285918e20ea79ea5c88eed7197933abaa8",
+    );
+    expect(verifyPackagedWhisperModel(modelDir)).toEqual({ valid: true });
+    expect(
+      fs.statSync(path.join(modelDir, "onnx/encoder_model_quantized.onnx"))
+        .size,
+    ).toBeGreaterThan(20_000_000);
   });
 
   it("treats recorder EPIPE during stop as an already-closed microphone", async () => {
@@ -159,6 +187,83 @@ describe("voice dictation runtime", () => {
       },
     } as unknown as NodeJS.WritableStream;
     await expect(requestRecorderQuit(input)).resolves.toBeUndefined();
+  });
+
+  it("enforces one host recording owner across recording identifiers", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-owner-"));
+    try {
+      await startVoiceRecording("global-owner-one", {
+        resolveDevice: async () => "Steinberg",
+        spawnRecorder: ((_command: string, args: readonly string[]) =>
+          fakeRecorder(String(args.at(-1)))) as any,
+        startupDelayMs: 0,
+        tempDir,
+      });
+      await expect(
+        startVoiceRecording("global-owner-two", {
+          resolveDevice: async () => "Other",
+          spawnRecorder: vi.fn() as any,
+          startupDelayMs: 0,
+          tempDir,
+        }),
+      ).rejects.toThrow("Another Cukii voice recording is already active");
+      await cancelVoiceRecording("global-owner-one");
+      await expect(
+        startVoiceRecording("global-owner-two", {
+          resolveDevice: async () => "Steinberg",
+          spawnRecorder: ((_command: string, args: readonly string[]) =>
+            fakeRecorder(String(args.at(-1)))) as any,
+          startupDelayMs: 0,
+          tempDir,
+        }),
+      ).resolves.toMatchObject({ recordingId: "global-owner-two" });
+      await cancelVoiceRecording("global-owner-two");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("kills ffmpeg and removes owned temp files when stdin fails with EIO", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-eio-"));
+    const kill = vi.fn();
+    try {
+      await startVoiceRecording("stdin-eio-test", {
+        resolveDevice: async () => "Steinberg",
+        spawnRecorder: ((_command: string, args: readonly string[]) => {
+          fs.writeFileSync(String(args.at(-1)), Buffer.alloc(64));
+          const child = new EventEmitter() as ChildProcess;
+          Object.assign(child, {
+            stderr: new PassThrough(),
+            stdin: {
+              writable: true,
+              write: (_chunk: string, callback: (error: Error) => void) => {
+                callback(
+                  Object.assign(new Error("device I/O failure"), {
+                    code: "EIO",
+                  }),
+                );
+                return false;
+              },
+            },
+            kill: () => {
+              kill();
+              setImmediate(() => child.emit("exit", 1));
+              return true;
+            },
+          });
+          return child;
+        }) as any,
+        startupDelayMs: 0,
+        tempDir,
+      });
+      await expect(cancelVoiceRecording("stdin-eio-test")).rejects.toThrow(
+        "device I/O failure",
+      );
+      expect(kill).toHaveBeenCalledOnce();
+      expect(fs.readdirSync(tempDir)).toEqual([]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("cancels ownership during the pending 450ms start and removes its temp WAV", async () => {

@@ -19,20 +19,25 @@ async function probeExtracted(extensionRoot, wavPath) {
   });
   if (version.status !== 0) throw new Error(version.stderr || "ffmpeg failed");
 
-  const onnx = require(path.join(
-    extensionRoot,
-    "out",
-    "node_modules",
-    "onnxruntime-node",
-  ));
+  const onnx = require(
+    path.join(extensionRoot, "out", "node_modules", "onnxruntime-node"),
+  );
   if (typeof onnx.InferenceSession !== "function") {
-    throw new Error("Packaged onnxruntime-node did not load its native binding");
+    throw new Error(
+      "Packaged onnxruntime-node did not load its native binding",
+    );
   }
 
   global.fetch = async () => {
     throw new Error("Network access is disabled by the packaged offline probe");
   };
   const voice = require(path.join(extensionRoot, "out", "voiceDictation.js"));
+  const whisperModel = voice.verifyPackagedWhisperModel();
+  if (!whisperModel.valid) {
+    throw new Error(
+      `Packaged Whisper model is invalid: ${whisperModel.reason}`,
+    );
+  }
   const transcript = await voice.transcribeVoiceFile(wavPath);
   console.log(
     JSON.stringify(
@@ -44,7 +49,7 @@ async function probeExtracted(extensionRoot, wavPath) {
           version: version.stdout.split(/\r?\n/, 1)[0],
         },
         onnxNativeBinding: true,
-        whisperCache: voice.verifyWhisperCache(),
+        whisperModel,
         offline: true,
         transcript,
       },
@@ -65,7 +70,9 @@ async function main() {
   }
   const vsixPath = path.resolve(vsixArg);
   const wavPath = path.resolve(wavArg);
-  const destination = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-voice-vsix-"));
+  const destination = fs.mkdtempSync(
+    path.join(os.tmpdir(), "cukii-voice-vsix-"),
+  );
   try {
     const extract = spawnSync("tar", ["-xf", vsixPath, "-C", destination], {
       encoding: "utf8",

@@ -35,4 +35,32 @@ describe("voice messenger error channel", () => {
     expect(gui).toContain('"cukii/startVoiceRecording"');
     expect(gui).toContain('"cukii/stopVoiceRecording"');
   });
+
+  it("copies one pinned offline Whisper model into the packaged output", () => {
+    const extensionRoot = path.resolve(__dirname, "../..");
+    const build = fs.readFileSync(
+      path.join(extensionRoot, "scripts/esbuild.js"),
+      "utf8",
+    );
+    const ignore = fs.readFileSync(
+      path.join(extensionRoot, ".vscodeignore"),
+      "utf8",
+    );
+    const probe = fs.readFileSync(
+      path.join(extensionRoot, "scripts/probe-voice-package.js"),
+      "utf8",
+    );
+    const runtime = fs.readFileSync(
+      path.join(extensionRoot, "src/extension/voiceDictation.ts"),
+      "utf8",
+    );
+    expect(build).toContain("fs.cpSync(whisperSource, whisperOutput");
+    expect(ignore).toContain("models/whisper-base/**");
+    expect(ignore).not.toContain("out/models");
+    expect(probe).toContain("verifyPackagedWhisperModel");
+    expect(probe).toContain("Network access is disabled");
+    expect(runtime).toContain("env.allowRemoteModels = false");
+    expect(runtime).toContain('env.localModelPath = path.join(__dirname, "models")');
+    expect(runtime).not.toContain("Downloading local Whisper model");
+  });
 });

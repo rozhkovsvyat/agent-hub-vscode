@@ -20,6 +20,7 @@ manual-testing-sandbox
 esbuild.js
 importMetaUrl.js
 scripts
+models/whisper-base/**
 e2e
 
 server/exe/**
