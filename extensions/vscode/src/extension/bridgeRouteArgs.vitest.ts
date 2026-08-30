@@ -21,6 +21,7 @@ import {
   nativeDelegateHint,
   routeForModel,
 } from "./bridgeChatAdapter";
+import { createBridgeSteerSpool } from "./bridgeSteer";
 import { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { resolveBridgeControls } from "./bridgeControls";
 import {
@@ -49,29 +50,52 @@ describe("native bridge argv", () => {
     expect(route.args).toContain("D:\\Scratch\\cukii-bridge");
     if (route.promptFile) promptFiles.push(route.promptFile);
 
-    const steerPath = "D:\\Scratch\\cukii-steer\\cukii-steer-test.txt";
-    expect(
-      isInternalSteerRead(
-        {
-          kind: "toolStart",
-          id: "internal-read",
-          name: "Read",
-          args: JSON.stringify({ file_path: steerPath }),
-        },
-        steerPath,
-      ),
-    ).toBe(true);
-    expect(
-      isInternalSteerRead(
-        {
-          kind: "toolStart",
-          id: "ordinary-read",
-          name: "Read",
-          args: JSON.stringify({ file_path: "D:\\Brain\\vault\\README.md" }),
-        },
-        steerPath,
-      ),
-    ).toBe(false);
+    const spool = createBridgeSteerSpool();
+    try {
+      const caseVariant = spool.path.replace(
+        "D:\\Scratch\\cukii-steer",
+        "d:\\sCrAtCh\\CuKiI-sTeEr",
+      );
+      expect(
+        isInternalSteerRead(
+          {
+            kind: "toolStart",
+            id: "internal-read",
+            name: "Read",
+            args: JSON.stringify({ file_path: caseVariant }),
+          },
+          spool.path,
+        ),
+      ).toBe(true);
+      expect(
+        isInternalSteerRead(
+          {
+            kind: "toolStart",
+            id: "ordinary-read",
+            name: "Read",
+            args: JSON.stringify({
+              file_path: "D:\\Scratch\\cukii-steer\\notes.md",
+            }),
+          },
+          spool.path,
+        ),
+      ).toBe(false);
+      expect(
+        isInternalSteerRead(
+          {
+            kind: "toolStart",
+            id: "unregistered-read",
+            name: "Read",
+            args: JSON.stringify({
+              file_path: "D:\\Scratch\\cukii-steer\\cukii-steer-fake.txt",
+            }),
+          },
+          "D:\\Scratch\\cukii-steer\\cukii-steer-fake.txt",
+        ),
+      ).toBe(false);
+    } finally {
+      spool.cleanup();
+    }
   });
 
   it("adds the real Claude MCP permission transport without leaking its token", async () => {

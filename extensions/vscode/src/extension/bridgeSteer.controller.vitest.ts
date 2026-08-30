@@ -1,19 +1,42 @@
 import fs from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CUKII_STEER_TEST_SCRATCH_ROOT } from "./bridgeScratch";
 import {
   BridgeSteeringController,
   CUKII_STEER_SCRATCH_ROOT,
   createBridgeSteerSpool,
+  createBridgeSteerSpoolForTest,
 } from "./bridgeSteer";
+
+const testCanaryRoot = path.join(
+  path.dirname(CUKII_STEER_TEST_SCRATCH_ROOT),
+  "cukii-steer-security-canary",
+);
+
+function removeTestPath(target: string): void {
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) {
+      fs.unlinkSync(target);
+    } else {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+afterEach(() => {
+  removeTestPath(CUKII_STEER_TEST_SCRATCH_ROOT);
+  removeTestPath(testCanaryRoot);
+});
 
 describe("BridgeSteeringController", () => {
   it.each(["success", "error", "interrupt"])(
     "keeps the %s steering spool under Scratch and cleans its exact file",
-    async (terminalPath) => {
-      const spool = createBridgeSteerSpool(
-        `vitest-${terminalPath}-${Date.now()}`,
-      );
+    async () => {
+      const spool = createBridgeSteerSpool();
       expect(spool.path.toLowerCase()).toContain(
         CUKII_STEER_SCRATCH_ROOT.toLowerCase(),
       );
@@ -27,6 +50,51 @@ describe("BridgeSteeringController", () => {
       expect(fs.existsSync(spool.path)).toBe(false);
     },
   );
+
+  it.each([
+    "a/../../../Brain/vault/pwn",
+    "a\\..\\..\\..\\Brain\\vault\\pwn",
+    "D:\\Brain\\vault\\pwn",
+    "\\\\server\\share\\pwn",
+    "safe..nonce",
+  ])("rejects unsafe nonce %j without touching the outside canary", (nonce) => {
+    fs.mkdirSync(testCanaryRoot, { recursive: true });
+    const canary = path.join(testCanaryRoot, "unchanged.txt");
+    fs.writeFileSync(canary, "do-not-touch", "utf8");
+
+    expect(() => createBridgeSteerSpoolForTest(nonce)).toThrow(
+      "opaque safe token",
+    );
+    expect(fs.readFileSync(canary, "utf8")).toBe("do-not-touch");
+    expect(fs.existsSync(path.join(testCanaryRoot, "pwn"))).toBe(false);
+  });
+
+  it("fails closed when the fixed test root is a junction", () => {
+    fs.mkdirSync(testCanaryRoot, { recursive: true });
+    const canary = path.join(testCanaryRoot, "unchanged.txt");
+    fs.writeFileSync(canary, "do-not-touch", "utf8");
+    fs.symlinkSync(testCanaryRoot, CUKII_STEER_TEST_SCRATCH_ROOT, "junction");
+
+    expect(() => createBridgeSteerSpoolForTest("safe_nonce_012345")).toThrow(
+      "Unsafe bridge Scratch path component",
+    );
+    expect(fs.readFileSync(canary, "utf8")).toBe("do-not-touch");
+    expect(
+      fs
+        .readdirSync(testCanaryRoot)
+        .filter((entry) => entry !== "unchanged.txt"),
+    ).toEqual([]);
+  });
+
+  it("does not clean up a replacement file that it does not own", () => {
+    const spool = createBridgeSteerSpoolForTest("safe_nonce_012345");
+    fs.unlinkSync(spool.path);
+    fs.writeFileSync(spool.path, "replacement-canary", "utf8");
+
+    spool.cleanup();
+
+    expect(fs.readFileSync(spool.path, "utf8")).toBe("replacement-canary");
+  });
 
   it("delivers a follow-up to the same Claude session before the next step", async () => {
     const order: string[] = ["tool-finished"];

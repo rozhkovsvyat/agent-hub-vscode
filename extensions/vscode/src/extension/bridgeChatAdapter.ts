@@ -26,6 +26,7 @@ import {
 import {
   BridgeSteeringController,
   createBridgeSteerSpool,
+  isActiveBridgeSteerSpool,
   steerPromptInstruction,
   type BridgeSteerSpool,
 } from "./bridgeSteer";
@@ -946,7 +947,13 @@ export function isInternalSteerRead(
   event: Extract<BridgeEvent, { kind: "toolStart" }>,
   steerPath: string | undefined,
 ): boolean {
-  if (!steerPath || !/^read(?:_file|file)?$/i.test(event.name)) return false;
+  if (
+    !steerPath ||
+    !isActiveBridgeSteerSpool(steerPath) ||
+    !/^read(?:_file|file)?$/i.test(event.name)
+  ) {
+    return false;
+  }
   let args: unknown;
   try {
     args = JSON.parse(event.args);

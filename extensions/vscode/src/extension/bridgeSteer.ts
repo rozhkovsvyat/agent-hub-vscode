@@ -1,10 +1,10 @@
-import fs from "node:fs";
 import path from "node:path";
 
 import type { CukiiSteerReceipt } from "core/protocol/ideWebview";
 import {
   CUKII_STEER_SCRATCH_ROOT,
-  createSteerScratchPath,
+  createProductionSteerScratchFile,
+  createTestSteerScratchFile,
 } from "./bridgeScratch";
 
 export type SteerMessage = {
@@ -28,38 +28,45 @@ export type BridgeSteerSpool = {
   cleanup: () => void;
 };
 
-export function createBridgeSteerSpool(
-  nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  root = CUKII_STEER_SCRATCH_ROOT,
-): BridgeSteerSpool {
-  const filePath =
-    path.resolve(root) === path.resolve(CUKII_STEER_SCRATCH_ROOT)
-      ? createSteerScratchPath(nonce)
-      : path.join(path.resolve(root), `cukii-steer-${nonce}.txt`);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, "", "utf8");
+const activeSpoolPaths = new Set<string>();
+
+function spoolPathKey(candidate: string): string {
+  return path.resolve(candidate).replaceAll("/", "\\").toLowerCase();
+}
+
+function toBridgeSteerSpool(file: {
+  path: string;
+  append: (text: string) => boolean;
+  cleanup: () => void;
+}): BridgeSteerSpool {
+  const pathKey = spoolPathKey(file.path);
+  activeSpoolPaths.add(pathKey);
 
   return {
-    path: filePath,
+    path: file.path,
     async append(text: string): Promise<boolean> {
       const trimmed = text.trim();
-      if (!trimmed || !fs.existsSync(filePath)) return false;
-      try {
-        fs.appendFileSync(filePath, `USER:\n${trimmed}\n\n`, "utf8");
-        return true;
-      } catch {
-        return false;
-      }
+      return !!trimmed && file.append(`USER:\n${trimmed}\n\n`);
     },
     cleanup(): void {
-      try {
-        fs.rmSync(filePath, { force: true });
-      } catch {
-        // The process can already have been killed; cleanup must stay
-        // idempotent for success, error, cancellation and generator return.
-      }
+      activeSpoolPaths.delete(pathKey);
+      file.cleanup();
     },
   };
+}
+
+/** Production callers cannot choose the root or filename. */
+export function createBridgeSteerSpool(): BridgeSteerSpool {
+  return toBridgeSteerSpool(createProductionSteerScratchFile());
+}
+
+/** Fixed-root test hook for negative path-security contract tests. */
+export function createBridgeSteerSpoolForTest(nonce: string): BridgeSteerSpool {
+  return toBridgeSteerSpool(createTestSteerScratchFile(nonce));
+}
+
+export function isActiveBridgeSteerSpool(candidate: string): boolean {
+  return activeSpoolPaths.has(spoolPathKey(candidate));
 }
 
 export function steerPromptInstruction(steerPath: string): string {

@@ -5,12 +5,46 @@ import {
   abortStream,
   newSession,
   setBrokerPermissionMode,
+  setActive,
+  setInactive,
   streamUpdate,
 } from "../slices/sessionSlice";
 import { setupStore } from "../store";
 import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("merge contract: activity is not terminal; inactive, abort, and new session reset streaming", async () => {
+    const store = setupStore({ ideMessenger: new MockIdeMessenger() });
+    store.dispatch(
+      newSession({
+        sessionId: "wait-contract",
+        title: "Wait contract",
+        workspaceDirectory: "D:/Scratch/cukii-interrupt-terminal-2.0.67",
+        history: [
+          {
+            message: { role: "user", content: "Start" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+
+    // Integrators union their wait signal with bridge completion; ordinary
+    // activity stays active until an explicit reset arrives.
+    store.dispatch(setActive());
+    store.dispatch(streamUpdate([{ role: "assistant", content: "Working" }]));
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    store.dispatch(setInactive());
+    expect(store.getState().session.isStreaming).toBe(false);
+    store.dispatch(setActive());
+    store.dispatch(abortStream());
+    expect(store.getState().session.isStreaming).toBe(false);
+    store.dispatch(setActive());
+    store.dispatch(newSession(undefined));
+    expect(store.getState().session.isStreaming).toBe(false);
+  });
+
   it("sends this tab's effort and speed in the bridge request", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: Array<{ messageType: string; data: unknown }> = [];
