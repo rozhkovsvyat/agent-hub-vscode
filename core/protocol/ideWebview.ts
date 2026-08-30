@@ -168,6 +168,23 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       message?: string;
     },
   ];
+  /**
+   * Audio is captured by the webview with getUserMedia/MediaRecorder.  The
+   * extension host deliberately only owns decoding and ASR: capturing there
+   * through DirectShow caused two independent recording lifecycles and two
+   * competing error notifications on Windows.
+   */
+  "cukii/transcribeVoiceRecording": [
+    {
+      recordingId: string;
+      /** Base64, not a data URL. Kept in protocol JSON for VS Code webviews. */
+      audioBase64: string;
+      mimeType: string;
+      sampleRate?: number;
+      durationMs?: number;
+    },
+    { text: string },
+  ];
   "cukii/runVendorAuthAction": [
     { vendor: BrokerVendorId; action: BrokerVendorAuthAction },
     { opened: boolean; message: string },

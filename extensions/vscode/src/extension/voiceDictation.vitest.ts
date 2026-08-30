@@ -15,6 +15,7 @@ import {
   stopVoiceRecording,
   transcribeVoiceFile,
   transcribeDecodedVoiceAudio,
+  transcribeWebviewVoiceAudio,
   verifyWhisperCache,
   voiceFfmpegExecutable,
   voiceRecordingStatus,
@@ -117,6 +118,55 @@ describe("voice dictation runtime", () => {
     } finally {
       fs.rmSync(cacheDir, { recursive: true, force: true });
     }
+  });
+
+  it("writes non-empty webview MediaRecorder bytes only for the ASR call and always removes them", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-webview-"));
+    const recordingId = "webview-voice-test";
+    let receivedPath = "";
+    try {
+      await expect(
+        transcribeWebviewVoiceAudio(
+          {
+            recordingId,
+            audioBase64: Buffer.from("webm-audio").toString("base64"),
+            mimeType: "audio/webm;codecs=opus",
+            sampleRate: 48_000,
+            durationMs: 250,
+          },
+          async (inputPath) => {
+            receivedPath = inputPath;
+            expect(fs.readFileSync(inputPath).toString()).toBe("webm-audio");
+            return "проверка";
+          },
+          tempDir,
+        ),
+      ).resolves.toBe("проверка");
+      expect(receivedPath).toMatch(/\.webm$/);
+      expect(fs.existsSync(receivedPath)).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["empty bytes", "", "audio/webm", "No microphone audio was captured"],
+    ["malformed bytes", "***", "audio/webm", "recording data was invalid"],
+    [
+      "unsupported mime",
+      Buffer.from("a").toString("base64"),
+      "text/plain",
+      "format is not supported",
+    ],
+  ])("rejects %s before ASR", async (_name, audioBase64, mimeType, message) => {
+    await expect(
+      transcribeWebviewVoiceAudio({
+        recordingId: "invalid-webview-voice",
+        audioBase64,
+        mimeType,
+        durationMs: 1,
+      }),
+    ).rejects.toThrow(message);
   });
 
   it("treats recorder EPIPE during stop as an already-closed microphone", async () => {

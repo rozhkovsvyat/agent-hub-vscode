@@ -53,6 +53,7 @@ import {
   cancelVoiceRecording,
   startVoiceRecording,
   stopVoiceRecording,
+  transcribeWebviewVoiceAudio,
   voiceRecordingStatus,
 } from "./voiceDictation";
 import { appendSteerMessage } from "./bridgeSteer";
@@ -602,22 +603,10 @@ export class VsCodeMessenger {
       }));
     });
     this.onWebview("cukii/startVoiceRecording", async (msg) => {
-      try {
-        return await startVoiceRecording(msg.data.recordingId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        void vscode.window.showErrorMessage(`Cukii voice input: ${message}`);
-        throw error;
-      }
+      return await startVoiceRecording(msg.data.recordingId);
     });
     this.onWebview("cukii/stopVoiceRecording", async (msg) => {
-      try {
-        return { text: await stopVoiceRecording(msg.data.recordingId) };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        void vscode.window.showErrorMessage(`Cukii voice input: ${message}`);
-        throw error;
-      }
+      return { text: await stopVoiceRecording(msg.data.recordingId) };
     });
     this.onWebview("cukii/cancelVoiceRecording", async (msg) => {
       await cancelVoiceRecording(msg.data.recordingId);
@@ -625,6 +614,9 @@ export class VsCodeMessenger {
     this.onWebview("cukii/voiceRecordingStatus", async (msg) =>
       voiceRecordingStatus(msg.data.recordingId),
     );
+    this.onWebview("cukii/transcribeVoiceRecording", async (msg) => ({
+      text: await transcribeWebviewVoiceAudio(msg.data),
+    }));
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
       clearBrokerVendorAccountCache();
       const spec = vendorAuthTerminalCommand(

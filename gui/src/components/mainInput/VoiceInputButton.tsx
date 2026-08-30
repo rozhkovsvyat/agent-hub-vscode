@@ -7,110 +7,230 @@ interface VoiceInputButtonProps {
 
 type VoiceState = "idle" | "starting" | "listening" | "transcribing";
 
-/** Native FFmpeg capture + local multilingual Whisper in the extension host. */
+type ActiveRecording = {
+  recordingId: string;
+  recorder: MediaRecorder;
+  stream: MediaStream;
+  chunks: Blob[];
+  startedAt: number;
+  timeout: number;
+};
+
+const MAX_RECORDING_MS = 5 * 60 * 1000;
+
+function voiceErrorMessage(error: unknown): string {
+  const name = (error as { name?: unknown })?.name;
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "Microphone permission was denied. Allow Cukii to use the microphone and retry.";
+  if (name === "NotFoundError")
+    return "No microphone is available. Connect or select a Windows recording device and retry.";
+  if (name === "NotReadableError" || name === "AbortError")
+    return "The microphone is busy or unavailable. Close the app using it and retry.";
+  return error instanceof Error ? error.message : String(error);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Could not read microphone audio."));
+    reader.onload = () => {
+      const value = reader.result;
+      if (typeof value !== "string" || !value.includes(","))
+        return reject(new Error("Could not read microphone audio."));
+      resolve(value.slice(value.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function stopTracks(stream: MediaStream): void {
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+function preferredRecorderOptions(): MediaRecorderOptions | undefined {
+  const mimeType = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+  ].find(
+    (candidate) =>
+      typeof MediaRecorder.isTypeSupported === "function" &&
+      MediaRecorder.isTypeSupported(candidate),
+  );
+  return mimeType ? { mimeType } : undefined;
+}
+
+/** Browser/webview is the only microphone owner; host only decodes/transcribes. */
 export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   const ideMessenger = useContext(IdeMessengerContext);
-  const recordingId = useRef<string | undefined>(undefined);
+  const activeRecording = useRef<ActiveRecording>();
   const mounted = useRef(true);
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string>();
 
-  useEffect(
-    () => () => {
-      mounted.current = false;
-      if (recordingId.current) {
-        void ideMessenger.request("cukii/cancelVoiceRecording", {
-          recordingId: recordingId.current,
-        });
-        recordingId.current = undefined;
-      }
-    },
-    [ideMessenger],
-  );
+  const discard = (recording: ActiveRecording) => {
+    window.clearTimeout(recording.timeout);
+    stopTracks(recording.stream);
+  };
 
-  useEffect(() => {
-    if (state !== "listening" || !recordingId.current) return;
-    const timer = window.setInterval(async () => {
-      const active = recordingId.current;
-      if (!active) return;
-      try {
-        const response = await ideMessenger.request(
-          "cukii/voiceRecordingStatus",
-          { recordingId: active },
-        );
-        if (!mounted.current || response.status !== "success") return;
-        if (
-          response.content.state === "expired" ||
-          response.content.state === "error"
-        ) {
-          recordingId.current = undefined;
-          setError(
-            response.content.message ?? "Voice recording ended unexpectedly.",
-          );
-          setState("idle");
-        }
-      } catch {
-        // The stop action reports the authoritative error; transient polling
-        // failures must not discard ownership of an active microphone.
-      }
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [ideMessenger, state]);
+  const fail = (recordingId: string, reason: unknown) => {
+    const active = activeRecording.current;
+    if (!active || active.recordingId !== recordingId) return;
+    activeRecording.current = undefined;
+    discard(active);
+    if (!mounted.current) return;
+    setError(voiceErrorMessage(reason));
+    setState("idle");
+  };
 
-  const start = async () => {
-    const requestedId =
-      globalThis.crypto?.randomUUID?.() ??
-      `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    recordingId.current = requestedId;
-    setError(undefined);
-    setState("starting");
+  const finish = async (recording: ActiveRecording) => {
+    const { recordingId } = recording;
+    if (activeRecording.current?.recordingId !== recordingId) return;
+    window.clearTimeout(recording.timeout);
+    stopTracks(recording.stream);
+    const blob = new Blob(recording.chunks, {
+      type: recording.recorder.mimeType || "audio/webm",
+    });
+    if (blob.size === 0)
+      return fail(recordingId, new Error("No microphone audio was captured."));
+    if (mounted.current) setState("transcribing");
     try {
+      const audioBase64 = await blobToBase64(blob);
+      if (activeRecording.current?.recordingId !== recordingId) return;
+      const sampleRate = recording.stream
+        .getAudioTracks()[0]
+        ?.getSettings().sampleRate;
       const response = await ideMessenger.request(
-        "cukii/startVoiceRecording",
-        { recordingId: requestedId },
+        "cukii/transcribeVoiceRecording",
+        {
+          recordingId,
+          audioBase64,
+          mimeType: blob.type || "audio/webm",
+          sampleRate,
+          durationMs: Math.max(1, Date.now() - recording.startedAt),
+        },
       );
-      if (!mounted.current || recordingId.current !== requestedId) return;
-      if (response.status === "error") {
-        recordingId.current = undefined;
-        setError(response.error);
-        setState("idle");
+      if (
+        !mounted.current ||
+        activeRecording.current?.recordingId !== recordingId
+      )
         return;
+      activeRecording.current = undefined;
+      const text =
+        response.status === "success" ? response.content.text.trim() : "";
+      if (!text)
+        setError(
+          response.status === "error"
+            ? response.error
+            : "No speech was recognized.",
+        );
+      else {
+        onTranscript(text);
+        setError(undefined);
       }
-      recordingId.current = response.content.recordingId;
-      setState("listening");
-    } catch (caught) {
-      if (!mounted.current || recordingId.current !== requestedId) return;
-      recordingId.current = undefined;
-      setError(caught instanceof Error ? caught.message : String(caught));
       setState("idle");
+    } catch (caught) {
+      fail(recordingId, caught);
     }
   };
 
-  const stop = async () => {
-    const active = recordingId.current;
-    if (!active) return;
-    recordingId.current = undefined;
-    setState("transcribing");
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      const active = activeRecording.current;
+      activeRecording.current = undefined;
+      if (!active) return;
+      window.clearTimeout(active.timeout);
+      active.recorder.ondataavailable = null;
+      active.recorder.onstop = null;
+      active.recorder.onerror = null;
+      if (active.recorder.state !== "inactive") active.recorder.stop();
+      stopTracks(active.stream);
+    },
+    [],
+  );
+
+  const start = async () => {
+    if (activeRecording.current) return;
+    const recordingId =
+      globalThis.crypto?.randomUUID?.() ??
+      `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setError(undefined);
+    setState("starting");
+    let stream: MediaStream | undefined;
     try {
-      const response = await ideMessenger.request("cukii/stopVoiceRecording", {
-        recordingId: active,
+      if (
+        !navigator.mediaDevices?.getUserMedia ||
+        typeof MediaRecorder === "undefined"
+      )
+        throw new Error(
+          "Voice input is not supported by this VS Code webview. Update VS Code and retry.",
+        );
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
-      if (response.status === "success") {
-        onTranscript(response.content.text);
-        setError(undefined);
-      } else {
-        setError(response.error);
+      if (!mounted.current || activeRecording.current) {
+        stopTracks(stream);
+        return;
       }
+      const recorder = new MediaRecorder(stream, preferredRecorderOptions());
+      const active: ActiveRecording = {
+        recordingId,
+        recorder,
+        stream,
+        chunks: [],
+        startedAt: Date.now(),
+        timeout: 0,
+      };
+      activeRecording.current = active;
+      recorder.ondataavailable = (event) => {
+        if (
+          activeRecording.current?.recordingId === recordingId &&
+          event.data.size > 0
+        )
+          active.chunks.push(event.data);
+      };
+      recorder.onerror = (event) =>
+        fail(
+          recordingId,
+          (event as Event & { error?: Error }).error ??
+            new Error("The microphone recorder failed."),
+        );
+      recorder.onstop = () => void finish(active);
+      recorder.start(250);
+      active.timeout = window.setTimeout(() => {
+        if (
+          activeRecording.current?.recordingId === recordingId &&
+          recorder.state !== "inactive"
+        )
+          recorder.stop();
+      }, MAX_RECORDING_MS);
+      if (mounted.current) setState("listening");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (stream) stopTracks(stream);
+      if (mounted.current && !activeRecording.current) {
+        setError(voiceErrorMessage(caught));
+        setState("idle");
+      }
     }
-    setState("idle");
+  };
+
+  const stop = () => {
+    const active = activeRecording.current;
+    if (!active || active.recorder.state === "inactive") return;
+    setState("transcribing");
+    active.recorder.stop();
   };
 
   const title = error
     ? error
     : state === "starting"
-      ? "Starting microphone…"
+      ? "Requesting microphone…"
       : state === "listening"
         ? "Stop and transcribe"
         : state === "transcribing"
@@ -121,7 +241,11 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
     <button
       type="button"
       className={`cukii-voice-button ${state === "listening" ? "cukii-voice-button-listening" : ""} ${error ? "cukii-voice-button-error" : ""}`}
-      aria-label={error ? `Voice dictation failed: ${error}. Click to retry.` : "Voice dictation"}
+      aria-label={
+        error
+          ? `Voice dictation failed: ${error}. Click to retry.`
+          : "Voice dictation"
+      }
       aria-pressed={state === "listening"}
       aria-busy={state === "starting" || state === "transcribing"}
       title={title}

@@ -493,6 +493,93 @@ export async function transcribeVoiceFile(inputPath: string): Promise<string> {
   return transcribeDecodedVoiceAudio(await decodeVoiceAudio(inputPath));
 }
 
+export type WebviewVoiceAudio = {
+  recordingId: string;
+  /** Base64 audio bytes (not a data URL) emitted by MediaRecorder. */
+  audioBase64: string;
+  mimeType: string;
+  sampleRate?: number;
+  durationMs?: number;
+};
+
+const MAX_WEBVIEW_VOICE_BYTES = 25 * 1024 * 1024;
+
+function extensionForVoiceMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase().split(";", 1)[0].trim();
+  if (normalized === "audio/webm") return ".webm";
+  if (normalized === "audio/ogg") return ".ogg";
+  if (normalized === "audio/wav" || normalized === "audio/wave") return ".wav";
+  if (normalized === "audio/mp4" || normalized === "audio/m4a") return ".m4a";
+  throw new Error(
+    "This microphone recording format is not supported. Retry with the default microphone.",
+  );
+}
+
+function decodeWebviewVoiceAudio(audioBase64: string): Buffer {
+  // Buffer.from accepts malformed base64 silently. Rejecting it before writing
+  // a file keeps a stale/webview-corrupted recording distinct from a genuine
+  // no-speech transcription result.
+  if (!audioBase64) {
+    throw new Error("No microphone audio was captured.");
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(audioBase64)) {
+    throw new Error("The microphone recording data was invalid. Please retry.");
+  }
+  const bytes = Buffer.from(audioBase64, "base64");
+  if (bytes.byteLength === 0) {
+    throw new Error("No microphone audio was captured.");
+  }
+  if (bytes.byteLength > MAX_WEBVIEW_VOICE_BYTES) {
+    throw new Error(
+      "The microphone recording is too large. Record a shorter message and retry.",
+    );
+  }
+  return bytes;
+}
+
+/**
+ * The browser/webview is the sole microphone owner. It supplies the exact
+ * MediaRecorder bytes and metadata; the extension host writes a short-lived
+ * private file only because the existing sanctioned ffmpeg/Whisper pipeline
+ * decodes files. Nothing is logged and the file is removed in every outcome.
+ */
+export async function transcribeWebviewVoiceAudio(
+  payload: WebviewVoiceAudio,
+  transcribe: (inputPath: string) => Promise<string> = transcribeVoiceFile,
+  tempDir = os.tmpdir(),
+): Promise<string> {
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(payload.recordingId)) {
+    throw new Error("Invalid voice recording identifier.");
+  }
+  if (
+    payload.sampleRate !== undefined &&
+    (!Number.isFinite(payload.sampleRate) || payload.sampleRate <= 0)
+  ) {
+    throw new Error(
+      "The microphone reported an invalid sample rate. Please retry.",
+    );
+  }
+  if (
+    payload.durationMs !== undefined &&
+    (!Number.isFinite(payload.durationMs) || payload.durationMs <= 0)
+  ) {
+    throw new Error("The microphone recording was empty. Please try again.");
+  }
+
+  const extension = extensionForVoiceMimeType(payload.mimeType);
+  const bytes = decodeWebviewVoiceAudio(payload.audioBase64);
+  const inputPath = path.join(
+    tempDir,
+    `cukii-voice-${payload.recordingId}${extension}`,
+  );
+  try {
+    fs.writeFileSync(inputPath, bytes, { flag: "wx" });
+    return await transcribe(inputPath);
+  } finally {
+    fs.rmSync(inputPath, { force: true });
+  }
+}
+
 function rememberTerminal(
   recordingId: string,
   state: "expired" | "error",
