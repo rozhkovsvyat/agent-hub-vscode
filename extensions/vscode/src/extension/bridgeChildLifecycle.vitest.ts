@@ -13,7 +13,9 @@ class UncooperativeChild extends EventEmitter {
 describe("terminateBridgeChild", () => {
   it("escalates when the vendor ignores the soft abort", async () => {
     const child = new UncooperativeChild();
-    const forceKill = vi.fn(() => child.emit("close"));
+    const forceKill = vi.fn(() => {
+      child.emit("close");
+    });
     await terminateBridgeChild(child, { graceMs: 1, forceMs: 1, forceKill });
     expect(child.kill).toHaveBeenCalledTimes(1);
     expect(forceKill).toHaveBeenCalledTimes(1);

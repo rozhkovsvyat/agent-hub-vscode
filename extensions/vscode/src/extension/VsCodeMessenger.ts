@@ -18,6 +18,7 @@ import type {
   BrokerVendorId,
   CukiiCancelReceipt,
   CukiiPermissionMode,
+  CukiiSteerReceipt,
 } from "core/protocol/ideWebview";
 import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
@@ -762,31 +763,37 @@ export class VsCodeMessenger {
       });
       return wrapped;
     });
-    this.onWebview("cukii/steerDuringStream", async (msg) => {
-      const protocol = sourceProtocol(msg, this.webviewProtocol);
-      const run = this.activeBridgeRuns.get(protocol);
-      if (!run || run.sessionId !== msg.data.sessionId) {
-        return {
-          messageId: msg.data.messageId,
-          sessionId: msg.data.sessionId,
-          status: "deferred",
-        };
-      }
-      return run.steering.deliver(msg.data);
-    });
-    this.onWebview("cukii/cancelBridgeRun", async (msg) => {
-      const protocol = sourceProtocol(msg, this.webviewProtocol);
-      const run = this.activeBridgeRuns.get(protocol);
-      if (!run || run.sessionId !== msg.data.sessionId) {
-        return {
-          requestId: msg.data.requestId,
-          sessionId: msg.data.sessionId,
-          status: "already-cancelled",
-          interrupted: "turn",
-        };
-      }
-      return this.cancelBridgeRun(run, msg.data.requestId);
-    });
+    this.onWebview(
+      "cukii/steerDuringStream",
+      async (msg): Promise<CukiiSteerReceipt> => {
+        const protocol = sourceProtocol(msg, this.webviewProtocol);
+        const run = this.activeBridgeRuns.get(protocol);
+        if (!run || run.sessionId !== msg.data.sessionId) {
+          return {
+            messageId: msg.data.messageId,
+            sessionId: msg.data.sessionId,
+            status: "deferred",
+          };
+        }
+        return run.steering.deliver(msg.data);
+      },
+    );
+    this.onWebview(
+      "cukii/cancelBridgeRun",
+      async (msg): Promise<CukiiCancelReceipt> => {
+        const protocol = sourceProtocol(msg, this.webviewProtocol);
+        const run = this.activeBridgeRuns.get(protocol);
+        if (!run || run.sessionId !== msg.data.sessionId) {
+          return {
+            requestId: msg.data.requestId,
+            sessionId: msg.data.sessionId,
+            status: "already-cancelled",
+            interrupted: "turn",
+          };
+        }
+        return this.cancelBridgeRun(run, msg.data.requestId);
+      },
+    );
     this.onWebviewOrCore("getSearchResults", async (msg) => {
       return ide.getSearchResults(msg.data.query, msg.data.maxResults);
     });

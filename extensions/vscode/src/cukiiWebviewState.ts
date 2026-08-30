@@ -15,6 +15,12 @@ export function sanitizeLegacyHistoryState(
   input: unknown,
   pointsToLegacyHistory: (value: unknown) => boolean = isLegacyHistoryRoute,
 ): unknown {
+  // Saved webview state is untrusted input. These budgets bound both the
+  // worklist and copied shape: a deliberately wide JSON object must not turn
+  // bootstrap into a million-property clone.
+  const MAX_NODES = 4_096;
+  const MAX_KEYS = 4_096;
+  const MAX_ARRAY_ENTRIES = 2_048;
   const seen = new WeakMap<object, unknown>();
   const routeFieldNames = new Set([
     "page",
@@ -38,18 +44,50 @@ export function sanitizeLegacyHistoryState(
       : Object.create(prototype === null ? null : Object.prototype);
   };
 
+  // On a budget/prototype failure, preserve only the bootstrap-critical
+  // primitive session id. This is intentionally not a best-effort partial
+  // clone: partial hostile state is less safe than a canonical fresh state.
+  const safeCanonicalState = (value: object): Record<string, unknown> => {
+    const canonical: Record<string, unknown> = {};
+    const descriptor = Object.getOwnPropertyDescriptor(value, "sessionId");
+    if (
+      descriptor &&
+      "value" in descriptor &&
+      typeof descriptor.value === "string"
+    ) {
+      canonical.sessionId = descriptor.value;
+    }
+    return canonical;
+  };
+
   if (input === null || typeof input !== "object") return input;
   const root = createClone(input);
-  if (root === null) return input;
+  if (root === null) return safeCanonicalState(input);
   seen.set(input, root);
   const pending: Array<{
     source: object;
     target: Record<string, unknown> | unknown[];
   }> = [{ source: input, target: root }];
+  let nodes = 1;
+  let keys = 0;
+  let arrayEntries = 0;
+  let exceededBudget = false;
 
-  while (pending.length > 0) {
+  while (pending.length > 0 && !exceededBudget) {
     const { source, target } = pending.pop()!;
-    for (const key of Object.keys(source)) {
+    // `Object.keys` itself allocates every key for a hostile wide object.
+    // Enumerate incrementally and stop before reading more descriptors.
+    for (const key in source) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      if (
+        keys >= MAX_KEYS ||
+        (Array.isArray(source) && arrayEntries >= MAX_ARRAY_ENTRIES)
+      ) {
+        exceededBudget = true;
+        break;
+      }
+      keys++;
+      if (Array.isArray(source)) arrayEntries++;
       const descriptor = Object.getOwnPropertyDescriptor(source, key);
       // Do not execute getters from untrusted/prototyped state.
       if (!descriptor || !("value" in descriptor)) continue;
@@ -67,9 +105,17 @@ export function sanitizeLegacyHistoryState(
         } else {
           const childClone = createClone(fieldValue);
           if (childClone !== null) {
+            if (nodes >= MAX_NODES) {
+              exceededBudget = true;
+              break;
+            }
+            nodes++;
             sanitized = childClone;
             seen.set(fieldValue, childClone);
             pending.push({ source: fieldValue, target: childClone });
+          } else {
+            // Do not retain an untrusted exotic object by reference.
+            continue;
           }
         }
       }
@@ -82,7 +128,7 @@ export function sanitizeLegacyHistoryState(
     }
   }
 
-  return root;
+  return exceededBudget ? safeCanonicalState(input) : root;
 }
 
 /** Runs before the GUI module on every new or revived webview. */

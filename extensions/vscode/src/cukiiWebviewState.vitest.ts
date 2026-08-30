@@ -193,6 +193,26 @@ describe("revived Cukii webview legacy route migration", () => {
     expect(migratedLeaf.items).toEqual([{}, 7, null, "text"]);
   });
 
+  it("fails closed on a million-key restored state without cloning its width", () => {
+    const hostile = Object.create(null) as Record<string, unknown>;
+    hostile.sessionId = "safe-session";
+    hostile.page = "/history";
+    hostile.route = { pathname: "/History?old=true" };
+    for (let index = 0; index < 1_000_000; index++) {
+      hostile[`saved-${index}`] = index;
+    }
+
+    const started = Date.now();
+    const migrated = sanitizeLegacyHistoryState(hostile);
+    const elapsedMs = Date.now() - started;
+
+    // The bounded worklist discards the partial clone and returns a canonical
+    // bootstrap state rather than retaining old History markers or width.
+    expect(migrated).toEqual({ sessionId: "safe-session" });
+    expect(JSON.stringify(migrated)).not.toMatch(/history/i);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
   it.each([null, "not-state", 42, ["not", "state"]])(
     "normalizes non-object bootstrap state %j without throwing",
     (restoredState) => {
