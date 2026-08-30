@@ -58,6 +58,7 @@ import {
 import { appendSteerMessage } from "./bridgeSteer";
 import { allVendorPermissionCapabilities } from "./permissionCapabilities";
 import {
+  clearBrokerVendorAccountCache,
   listBrokerVendorAccounts,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -625,6 +626,7 @@ export class VsCodeMessenger {
       voiceRecordingStatus(msg.data.recordingId),
     );
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
+      clearBrokerVendorAccountCache();
       const spec = vendorAuthTerminalCommand(
         msg.data.vendor as BrokerVendorId,
         msg.data.action as BrokerVendorAuthAction,

@@ -13,13 +13,20 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Anthropic");
     await getElementByText("DeepSeek");
     await getElementByText("owner@example.com");
-    await getElementByText("Setup postponed");
+    await getElementByText("Not configured / not yet supported");
+    expect(document.querySelectorAll("h3, h4")).toHaveLength(1);
+    expect(getElementByText("Accounts")).toBeDefined();
     await user.click(await getElementByText("Log out"));
 
     expect(requestSpy).toHaveBeenCalledWith("cukii/runVendorAuthAction", {
       vendor: "claude",
       action: "logout",
     });
+    expect(
+      requestSpy.mock.calls.filter(
+        ([messageType]) => messageType === "cukii/listVendorAccounts",
+      ),
+    ).toHaveLength(2);
     expect(
       await getElementByText(
         "Authentication flow opened in the integrated terminal.",

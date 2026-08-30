@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  accountLabelFromAuthMetadata,
+  nativeCliCandidates,
+  notInstalledVendorStatus,
+  notSupportedVendorStatus,
   classifyVendorAuthOutput,
   isMissingCliError,
   vendorAuthTerminalCommand,
@@ -24,10 +28,16 @@ describe("Cukii vendor CLI accounts", () => {
     });
     expect(
       classifyVendorAuthOutput("codex", "Logged in using ChatGPT"),
-    ).toMatchObject({ state: "connected", accountLabel: "Account connected" });
+    ).toMatchObject({
+      state: "connected",
+      accountLabel: "Logged in • Identity unavailable",
+    });
     expect(
       classifyVendorAuthOutput("grok", "You are logged in with grok.com."),
-    ).toMatchObject({ state: "connected", accountLabel: "Account connected" });
+    ).toMatchObject({
+      state: "connected",
+      accountLabel: "Logged in • Identity unavailable",
+    });
     expect(
       classifyVendorAuthOutput(
         "cursor",
@@ -43,7 +53,7 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
     ).toMatchObject({
-      accountLabel: "Account connected",
+      accountLabel: "Logged in • Identity unavailable",
       actions: ["logout"],
     });
     expect(
@@ -52,6 +62,91 @@ describe("Cukii vendor CLI accounts", () => {
         '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
       ).state,
     ).toBe("connected");
+  });
+
+  it("uses local native auth metadata for a safe, stable account label", () => {
+    expect(
+      accountLabelFromAuthMetadata("grok", {
+        "https://auth.x.ai::profile": {
+          email: "owner@example.com",
+        },
+      }),
+    ).toBe("owner@example.com");
+    expect(
+      accountLabelFromAuthMetadata("kimi", {
+        access_token:
+          "eyJhbGciOiJub25lIn0.eyJ1c2VyX2lkIjoia2ltaS11c2VyLTQyIn0.",
+      }),
+    ).toBeUndefined();
+    expect(
+      accountLabelFromAuthMetadata("codex", {
+        tokens: { account_id: "acct_42" },
+      }),
+    ).toBe("Account acct_42");
+  });
+
+  it("discovers Cursor from native Windows product locations before PATH", () => {
+    expect(
+      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+    ).toContain(
+      "C:\\Users\\owner\\AppData\\Local\\Programs\\Cursor\\resources\\app\\bin\\agent.exe",
+    );
+    expect(
+      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+    ).toContain(
+      "C:\\Program Files\\Cursor\\resources\\app\\bin\\agent.exe",
+    );
+    expect(
+      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+    ).not.toContain(
+      "agent",
+    );
+  });
+
+  it("uses the required disconnected, unavailable, and identity fallback copy", () => {
+    expect(notInstalledVendorStatus("cursor")).toMatchObject({
+      installed: false,
+      authenticated: false,
+      state: "unavailable",
+      accountLabel: "Not installed",
+      actions: ["install"],
+    });
+    expect(notSupportedVendorStatus()).toMatchObject({
+      id: "deepseek",
+      installed: false,
+      authenticated: false,
+      state: "postponed",
+      accountLabel: "Not configured / not yet supported",
+      actions: [],
+    });
+    for (
+      const vendor of ["claude", "codex", "grok", "cursor", "kimi", "qwen"] as const
+    ) {
+      expect(classifyVendorAuthOutput(vendor, "not logged in")).toMatchObject({
+        state: "disconnected",
+        authenticated: false,
+        accountLabel: "Not logged in",
+        actions: ["login"],
+      });
+    }
+    expect(
+      classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
+    ).toMatchObject({ accountLabel: "Logged in • Identity unavailable" });
+    const labels = [
+      classifyVendorAuthOutput("claude", '{"loggedIn":false}').accountLabel,
+      classifyVendorAuthOutput("codex", "not logged in").accountLabel,
+      classifyVendorAuthOutput("grok", "not logged in").accountLabel,
+      classifyVendorAuthOutput("cursor", "not logged in").accountLabel,
+      classifyVendorAuthOutput("kimi", "not logged in").accountLabel,
+      classifyVendorAuthOutput("qwen", "not logged in").accountLabel,
+    ];
+    expect(labels).not.toContain("Account connected");
+    expect(labels).not.toContain("Not signed in");
+    expect(classifyVendorAuthOutput("codex", "request timed out")).toMatchObject({
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Account status unavailable",
+    });
   });
 
   it("uses only supported native login/logout flows", () => {
@@ -69,6 +164,9 @@ describe("Cukii vendor CLI accounts", () => {
       followup: "/logout",
     });
     expect(vendorAuthTerminalCommand("qwen", "logout")).toBeUndefined();
+    expect(vendorAuthTerminalCommand("qwen", "login")?.command).toBe(
+      "qwen /auth",
+    );
     expect(vendorAuthTerminalCommand("deepseek", "login")).toBeUndefined();
   });
 

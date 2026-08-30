@@ -23,10 +23,17 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
 
   const refresh = useCallback(
     async (silent = false) => {
-      if (refreshInFlight.current) return;
+      if (refreshInFlight.current) {
+        // A terminal auth action can complete while a periodic probe is still
+        // running. Queue one fresh probe instead of leaving the old result on
+        // screen.
+        refreshQueued.current = true;
+        return;
+      }
       refreshInFlight.current = true;
       if (!silent) setLoading(true);
       try {
@@ -42,6 +49,10 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
       } finally {
         refreshInFlight.current = false;
         if (!silent) setLoading(false);
+        if (refreshQueued.current) {
+          refreshQueued.current = false;
+          void refresh(true);
+        }
       }
     },
     [ideMessenger],
@@ -66,14 +77,19 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   ) => {
     const key = `${account.id}:${action}`;
     setBusy(key);
-    const response = await ideMessenger.request("cukii/runVendorAuthAction", {
-      vendor: account.id,
-      action,
-    });
-    setNotice(
-      response.status === "success" ? response.content.message : response.error,
-    );
-    setBusy(undefined);
+    try {
+      const response = await ideMessenger.request("cukii/runVendorAuthAction", {
+        vendor: account.id,
+        action,
+      });
+      setNotice(
+        response.status === "success" ? response.content.message : response.error,
+      );
+    } finally {
+      setBusy(undefined);
+      // Do not keep the state from before opening the native login/logout flow.
+      await refresh(true);
+    }
   };
 
   return (
@@ -114,7 +130,6 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           </div>
         </header>
 
-        <h4 className="cukii-account-section-title">Accounts</h4>
         <div className="mt-1">
           {loading && accounts.length === 0 ? (
             <div className="py-4 text-[13px] text-[var(--vscode-descriptionForeground)]">

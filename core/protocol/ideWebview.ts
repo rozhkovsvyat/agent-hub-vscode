@@ -58,6 +58,10 @@ export type BrokerVendorModelCatalog = {
 export type BrokerVendorAuthStatus = {
   id: BrokerVendorId;
   label: string;
+  /** Whether the vendor's native Windows CLI/product was found. */
+  installed: boolean;
+  /** Result of the current native CLI/local-auth probe. */
+  authenticated: boolean;
   state: "connected" | "disconnected" | "unavailable" | "postponed" | "unknown";
   /** Account identity shown below the vendor name. Never put transport/auth diagnostics here. */
   accountLabel: string;

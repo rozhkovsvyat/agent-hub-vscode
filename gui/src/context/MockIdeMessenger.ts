@@ -77,6 +77,8 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     {
       id: "claude",
       label: "Anthropic",
+      installed: true,
+      authenticated: true,
       state: "connected",
       accountLabel: "owner@example.com",
       actions: ["logout"],
@@ -84,8 +86,10 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     {
       id: "deepseek",
       label: "DeepSeek",
+      installed: false,
+      authenticated: false,
       state: "postponed",
-      accountLabel: "Setup postponed",
+      accountLabel: "Not configured / not yet supported",
       actions: [],
     },
   ],
