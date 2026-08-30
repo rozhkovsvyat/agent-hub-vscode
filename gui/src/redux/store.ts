@@ -38,6 +38,7 @@ const saveSubsetFilters = [
     "id",
     "lastSessionId",
     "title",
+    "revision",
 
     // Persist edit mode in case closes in middle
     "mode",

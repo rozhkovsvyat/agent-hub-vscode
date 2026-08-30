@@ -182,6 +182,43 @@ describe("SessionManager", () => {
 
       expect(session.history).toBe(newHistory);
     });
+
+    it("serializes rapid updates without a stale receipt erasing the latest body", async () => {
+      const session = getCurrentSession();
+      session.revision = 1;
+      let release!: () => void;
+      const firstReceipt = new Promise<void>((resolve) => (release = resolve));
+      const saved: Session[] = [];
+      mockHistoryManager.save
+        .mockImplementationOnce(async (snapshot: Session) => {
+          saved.push(structuredClone(snapshot));
+          await firstReceipt;
+          return { ...snapshot, revision: 2 };
+        })
+        .mockImplementationOnce(async (snapshot: Session) => {
+          saved.push(structuredClone(snapshot));
+          return { ...snapshot, revision: 3 };
+        });
+      const one: ChatHistoryItem[] = [
+        { message: { role: "user", content: "one" }, contextItems: [] },
+      ];
+      const two: ChatHistoryItem[] = [
+        { message: { role: "user", content: "two" }, contextItems: [] },
+      ];
+
+      const first = updateSessionHistory(one);
+      const second = updateSessionHistory(two);
+      await Promise.resolve();
+      release();
+      await Promise.all([first, second]);
+
+      expect(saved.map((item) => item.history[0].message.content)).toEqual([
+        "one",
+        "two",
+      ]);
+      expect(session.history).toBe(two);
+      expect(session.revision).toBe(3);
+    });
   });
 
   describe("updateSessionTitle", () => {
@@ -195,7 +232,7 @@ describe("SessionManager", () => {
   });
 
   describe("saveSession", () => {
-    it("should save the current session to file when it has content", () => {
+    it("should save the current session to file when it has content", async () => {
       const session = getCurrentSession();
       session.title = "Test Session";
       session.history = [
@@ -208,7 +245,7 @@ describe("SessionManager", () => {
         },
       ];
 
-      saveSession();
+      await saveSession();
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining("test-uuid-123.json"),
@@ -242,7 +279,7 @@ describe("SessionManager", () => {
       expect(mockFs.writeFileSync).not.toHaveBeenCalled();
     });
 
-    it("should filter out system messages except the first one", () => {
+    it("should filter out system messages except the first one", async () => {
       const session = getCurrentSession();
       session.history = [
         {
@@ -268,7 +305,7 @@ describe("SessionManager", () => {
         },
       ];
 
-      saveSession();
+      await saveSession();
 
       const savedData = JSON.parse(
         (mockFs.writeFileSync as any).mock.calls[0][1],
@@ -280,7 +317,7 @@ describe("SessionManager", () => {
   });
 
   describe("loadOrCreateSessionById", () => {
-    it("should load an existing session and set it as current", () => {
+    it("should load an existing session and set it as current", async () => {
       const existingSession: Session = {
         sessionId: "existing-id",
         title: "Existing",
@@ -295,19 +332,19 @@ describe("SessionManager", () => {
 
       mockHistoryManager.load.mockReturnValue(existingSession);
 
-      const session = loadOrCreateSessionById("existing-id");
+      const session = await loadOrCreateSessionById("existing-id");
 
       expect(session).toBe(existingSession);
       expect(mockHistoryManager.load).toHaveBeenCalledWith("existing-id");
       expect(getCurrentSession()).toBe(existingSession);
     });
 
-    it("should create a new session when none exists for the id", () => {
+    it("should create a new session when none exists for the id", async () => {
       mockHistoryManager.load.mockImplementation(() => {
         throw new Error("not found");
       });
 
-      const session = loadOrCreateSessionById("new-id");
+      const session = await loadOrCreateSessionById("new-id");
 
       expect(session.sessionId).toBe("new-id");
       expect(session.history).toEqual([]);

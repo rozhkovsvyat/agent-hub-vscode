@@ -1,10 +1,8 @@
 import type { BaseSessionMetadata } from "core";
 import { describe, expect, it } from "vitest";
 import { groupSessions, parseSessionGroups } from "./sessionGroups";
-import {
-  formatSessionAge,
-  mergeSessionsWithOpenPanels,
-} from "./CukiiSessionNavigator";
+import { formatSessionAge } from "./CukiiSessionNavigator";
+import { mergeSessionsWithOpenPanels } from "./cukiiSessionMerge";
 
 const sessions: BaseSessionMetadata[] = [
   {
@@ -43,17 +41,33 @@ describe("Cukii session groups", () => {
     });
   });
 
-  it("merges open blank panels with persisted and closed sessions", () => {
+  it("never renders NaN for malformed session dates", () => {
+    expect(formatSessionAge("not-a-date")).toBe("");
+    expect(formatSessionAge(new Date().toISOString())).toMatch(/^\d+m$/u);
+  });
+});
+
+describe("Cukii session sidebar lifecycle", () => {
+  it("shows zero sidebar rows for ten blank open panels", () => {
+    const blankPanels = Array.from({ length: 10 }, (_, index) => ({
+      panelId: `panel-${index}`,
+      title: "Cukii",
+    }));
+
+    expect(mergeSessionsWithOpenPanels([], blankPanels)).toEqual([]);
+    expect(mergeSessionsWithOpenPanels(sessions, blankPanels)).toEqual(
+      sessions.map((session) => ({ ...session, openPanelId: undefined })),
+    );
+  });
+
+  it("merges persisted sessions with their open panel ids only once", () => {
     const merged = mergeSessionsWithOpenPanels(sessions, [
       { panelId: "panel-one", sessionId: "one", title: "Claude task" },
-      { panelId: "panel-blank", title: "New session" },
+      { panelId: "panel-blank", title: "Cukii" },
+      { panelId: "panel-one-dup", sessionId: "one", title: "Claude task" },
     ]);
 
-    expect(merged.map((session) => session.sessionId)).toEqual([
-      "open:panel-blank",
-      "one",
-      "two",
-    ]);
+    expect(merged.map((session) => session.sessionId)).toEqual(["one", "two"]);
     expect(
       merged.find((session) => session.sessionId === "one")?.openPanelId,
     ).toBe("panel-one");
@@ -62,8 +76,27 @@ describe("Cukii session groups", () => {
     ).toBeUndefined();
   });
 
-  it("never renders NaN for malformed session dates", () => {
-    expect(formatSessionAge("not-a-date")).toBe("");
-    expect(formatSessionAge(new Date().toISOString())).toMatch(/^\d+m$/u);
+  it("ignores open panel titles that include model names", () => {
+    const merged = mergeSessionsWithOpenPanels(
+      [
+        {
+          sessionId: "saved",
+          title: "Fix flaky test",
+          dateCreated: "2026-08-27T12:00:00Z",
+          workspaceDirectory: "D:/Brain/vault",
+        },
+      ],
+      [
+        {
+          panelId: "panel-saved",
+          sessionId: "saved",
+          title: "Opus 5 · Fix flaky test",
+        },
+      ],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.title).toBe("Fix flaky test");
+    expect(merged[0]?.openPanelId).toBe("panel-saved");
   });
 });

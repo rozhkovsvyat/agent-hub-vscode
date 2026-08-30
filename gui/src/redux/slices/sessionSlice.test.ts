@@ -73,6 +73,8 @@ describe("sessionSlice streamUpdate", () => {
     ] as ChatHistoryItemWithMessageId[],
     isStreaming: false,
     title: "Test Session",
+    titleManuallySet: false,
+    revision: 0,
     id: "test-session-id",
     streamAborter: new AbortController(),
     symbols: {},
@@ -112,6 +114,7 @@ describe("sessionSlice streamUpdate", () => {
     expect(restored.brokerSpeed).toBe("fast");
     expect(restored.brokerPermissionMode).toBe("auto");
     expect(restored.hasReasoningEnabled).toBe(false);
+    expect(restored.titleManuallySet).toBe(false);
 
     const blank = sessionSlice.reducer(restored, newSession(undefined));
     expect(blank.brokerEffort).toBe("high");
@@ -134,6 +137,25 @@ describe("sessionSlice streamUpdate", () => {
     // Reducers have no native CLI facts. The bridge rejects this combination
     // until PermissionModeControl receives a real capability response.
     expect(codex.brokerPermissionMode).toBe("editAutomatically");
+  });
+
+  it("restores a manual title and clears its lock for a fresh tab", () => {
+    const restored = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "manually-renamed-session",
+        title: "Windows lifecycle investigation",
+        titleManuallySet: true,
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+      }),
+    );
+
+    expect(restored.title).toBe("Windows lifecycle investigation");
+    expect(restored.titleManuallySet).toBe(true);
+
+    const blank = sessionSlice.reducer(restored, newSession(undefined));
+    expect(blank.titleManuallySet).toBe(false);
   });
 
   describe("Basic Chat Message", () => {

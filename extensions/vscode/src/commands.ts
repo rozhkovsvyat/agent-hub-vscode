@@ -37,7 +37,12 @@ import { ContinueConsoleWebviewViewProvider } from "./ContinueConsoleWebviewView
 import { ContinueGUIWebviewViewProvider } from "./ContinueGUIWebviewViewProvider";
 import {
   cukiiPanelRegistry as fullScreenPanels,
+  CUKII_BLANK_PANEL_TITLE,
+  getCukiiRenameTarget,
+  isPersistableCukiiTitle,
+  listCukiiRenameTargets,
   listOpenCukiiPanels,
+  syncCukiiPanelTitleForSession,
   type CukiiPanelHost,
 } from "./cukiiPanelRegistry";
 import { processDiff } from "./diff/processDiff";
@@ -51,7 +56,7 @@ import {
 } from "./util/addCode";
 import { Battery } from "./util/battery";
 import { getMetaKeyLabel } from "./util/util";
-import { openEditorAndRevealRange } from "./util/vscode";
+import { getExtensionUri, openEditorAndRevealRange } from "./util/vscode";
 import { VsCodeIde } from "./VsCodeIde";
 
 export const FULL_SCREEN_VIEW_TYPE = "cukii.fullScreenChat";
@@ -65,6 +70,16 @@ let nextFullScreenPanelId = 1;
  * который VS Code вернул после перезапуска окна. Второй путь раньше
  * отсутствовал вовсе, и восстановленный таб оставался навсегда пустым.
  */
+function applyCukiiPanelChrome(panel: vscode.WebviewPanel, title?: string) {
+  panel.iconPath = {
+    light: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
+    dark: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
+  };
+  panel.title = isPersistableCukiiTitle(title)
+    ? title.trim()
+    : CUKII_BLANK_PANEL_TITLE;
+}
+
 function attachFullScreenPanel(
   panel: vscode.WebviewPanel,
   extensionContext: vscode.ExtensionContext,
@@ -76,6 +91,7 @@ function attachFullScreenPanel(
   const panelId = `cukii-panel-${nextFullScreenPanelId++}`;
   const protocol = sidebar.webviewProtocol.cloneHandlers();
   fullScreenPanels.add(panelId, { panel, protocol }, initialSessionId);
+  applyCukiiPanelChrome(panel, initialTitle);
 
   const notifyPanelList = () => {
     sidebar.webviewProtocol.send(
@@ -86,16 +102,26 @@ function attachFullScreenPanel(
 
   notifyPanelList();
 
-  if (initialTitle) {
-    panel.title = initialTitle;
+  if (isPersistableCukiiTitle(initialTitle)) {
+    fullScreenPanels.updateTitle(panelId, initialTitle.trim());
   }
 
   protocol.on("cukii/panelSessionChanged", ({ data }) => {
     fullScreenPanels.updateSession(panelId, data.sessionId);
-    if (data.title?.trim()) {
+    if (isPersistableCukiiTitle(data.title)) {
+      fullScreenPanels.updateTitle(panelId, data.title.trim());
       panel.title = data.title.trim();
     }
     notifyPanelList();
+  });
+
+  // A session can disappear after the command verified it but before the
+  // freshly-created webview finishes loading it. Dispose this provisional
+  // panel instead of turning it into a misleading blank Cukii tab.
+  protocol.on("cukii/initialSessionLoadFailed", ({ data }) => {
+    if (fullScreenPanels.get(panelId)?.sessionId === data.sessionId) {
+      panel.dispose();
+    }
   });
 
   panel.webview.html = sidebar.getSidebarContent(
@@ -145,7 +171,7 @@ export function registerFullScreenPanelSerializer(
     vscode.window.registerWebviewPanelSerializer(FULL_SCREEN_VIEW_TYPE, {
       async deserializeWebviewPanel(
         panel: vscode.WebviewPanel,
-        state: { sessionId?: string } | undefined,
+        state: { sessionId?: string; title?: string } | undefined,
       ) {
         panel.webview.options = { enableScripts: true };
         attachFullScreenPanel(
@@ -153,6 +179,7 @@ export function registerFullScreenPanelSerializer(
           extensionContext,
           sidebar,
           state?.sessionId,
+          state?.title,
         );
       },
     }),
@@ -819,7 +846,13 @@ const getCommandsMap: (
     ) => {
       if (options.panelId) {
         const existing = fullScreenPanels.get(options.panelId);
-        if (existing) {
+        // panelId is only a focus hint from the sidebar. Never let a stale
+        // panel id focus a tab whose bound session differs from the clicked
+        // row; fall through to the authoritative session lookup instead.
+        if (
+          existing &&
+          (!options.sessionId || existing.sessionId === options.sessionId)
+        ) {
           existing.panel.panel.reveal();
           fullScreenPanels.markActive(existing.id);
           return;
@@ -838,9 +871,23 @@ const getCommandsMap: (
         }
       }
 
+      let initialSessionId = options.sessionId;
+      let initialTitle = options.title;
+      if (initialSessionId && !options.forceNew) {
+        // Do not create a tab merely to discover that its saved session was
+        // deleted/missing. Core.load returns a blank default for that case;
+        // saved Cukii sessions are only navigable after their first history
+        // entry, so the check is both deterministic and side-effect free.
+        const restored = core.invoke("history/load", { id: initialSessionId });
+        if (!restored || restored.history.length === 0) {
+          return;
+        }
+        initialTitle = restored.title;
+      }
+
       const panel = vscode.window.createWebviewPanel(
         FULL_SCREEN_VIEW_TYPE,
-        "Cukii",
+        CUKII_BLANK_PANEL_TITLE,
         vscode.ViewColumn.Beside,
         {
           retainContextWhenHidden: true,
@@ -852,9 +899,69 @@ const getCommandsMap: (
         panel,
         extensionContext,
         sidebar,
-        options.sessionId,
-        options.title,
+        initialSessionId,
+        initialTitle,
         options.suppressInitialChordCharacter,
+      );
+    },
+    "cukii.renameChatPanel": async () => {
+      const targets = listCukiiRenameTargets(fullScreenPanels);
+      if (targets.length === 0) {
+        return;
+      }
+      // Always require a click in QuickPick. A context-menu invocation on a
+      // blank Cukii tab has no session identity either, even when there is
+      // only one persisted tab elsewhere in the editor.
+      const target = await vscode.window.showQuickPick(
+        targets.map((candidate) => ({
+          label: candidate.title,
+          description: candidate.sessionId,
+          detail: "Cukii editor tab",
+          panelId: candidate.panelId,
+          sessionId: candidate.sessionId,
+        })),
+        {
+          title: "Choose Cukii editor tab to rename",
+          placeHolder: "Select the tab you opened the context menu from",
+          matchOnDescription: true,
+        },
+      );
+      if (!target) {
+        return;
+      }
+      const entry = getCukiiRenameTarget(target.panelId, fullScreenPanels);
+      if (!entry || entry.sessionId !== target.sessionId) {
+        return;
+      }
+      const currentTitle =
+        entry.displayTitle?.trim() || entry.panel.panel.title.trim();
+      const nextTitle = await vscode.window.showInputBox({
+        title: "Rename Cukii session",
+        value: currentTitle,
+        validateInput: (value) =>
+          value.trim() ? undefined : "Title cannot be empty",
+      });
+      const trimmed = nextTitle?.trim();
+      if (!trimmed || trimmed === currentTitle) {
+        return;
+      }
+      const saved = await core.invoke("history/rename", {
+        id: entry.sessionId,
+        title: trimmed,
+      });
+      if (!saved) return;
+      // A stale Rename command must display the title selected by the CAS
+      // boundary if another explicit rename committed first.
+      const effectiveTitle = saved.title;
+      syncCukiiPanelTitleForSession(entry.sessionId, effectiveTitle);
+      entry.panel.protocol.send("cukii/sessionTitleChanged", {
+        sessionId: entry.sessionId,
+        title: effectiveTitle,
+        titleManuallySet: Boolean(saved.titleManuallySet),
+      });
+      sidebar.webviewProtocol.send(
+        "cukii/openChatPanelsChanged",
+        listOpenCukiiPanels(),
       );
     },
     "continue.forceNextEdit": async () => {

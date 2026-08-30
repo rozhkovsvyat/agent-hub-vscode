@@ -331,7 +331,7 @@ export async function processStreamingResponse(
     }
 
     const responseEndTime = Date.now();
-    const cost = recordStreamTelemetry({
+    const cost = await recordStreamTelemetry({
       requestStartTime,
       responseEndTime,
       inputTokens,

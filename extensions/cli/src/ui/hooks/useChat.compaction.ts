@@ -62,7 +62,7 @@ export async function handleCompactCommand({
       ...currentSession,
       history: result.compactedHistory,
     };
-    updateSessionHistory(result.compactedHistory);
+    await updateSessionHistory(result.compactedHistory);
     setCurrentSession(updatedSession);
 
     // Add success message to chat

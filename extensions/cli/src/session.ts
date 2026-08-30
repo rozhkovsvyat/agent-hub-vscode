@@ -71,6 +71,10 @@ export function getSessionFilePath(): string {
 class SessionManager {
   private static instance: SessionManager;
   private currentSession: Session | null = null;
+  /** Every write observes the prior receipt's revision before taking its
+   * snapshot. This makes two UI updates on one terminal last-state-wins
+   * without weakening SQLite's cross-process CAS. */
+  private persistenceTail: Promise<void> = Promise.resolve();
   private sessionUsage: SessionUsage = {
     totalCost: 0,
     promptTokens: 0,
@@ -113,16 +117,16 @@ class SessionManager {
     this.syncUsageFromSession();
   }
 
-  updateHistory(history: ChatHistoryItem[]): void {
+  async updateHistory(history: ChatHistoryItem[]): Promise<void> {
     const session = this.getCurrentSession();
     session.history = history;
-    saveSession();
+    await this.enqueueSave(session);
   }
 
-  updateTitle(title: string): void {
+  async updateTitle(title: string): Promise<void> {
     const session = this.getCurrentSession();
     session.title = title;
-    saveSession();
+    await this.enqueueSave(session);
   }
 
   clear(): void {
@@ -146,7 +150,7 @@ class SessionManager {
     return this.getCurrentSession().sessionId;
   }
 
-  trackUsage(cost: number, usage: Usage): void {
+  async trackUsage(cost: number, usage: Usage): Promise<void> {
     // Accumulate cost
     this.sessionUsage.totalCost += cost;
 
@@ -174,7 +178,7 @@ class SessionManager {
     // Update session and persist
     const session = this.getCurrentSession();
     session.usage = { ...this.sessionUsage };
-    saveSession(); // Persist immediately
+    await this.enqueueSave(session); // Persist immediately
   }
 
   getTotalCost(): number {
@@ -183,6 +187,31 @@ class SessionManager {
 
   getUsage(): SessionUsage {
     return { ...this.sessionUsage };
+  }
+
+  async enqueueSave(session = this.getCurrentSession()): Promise<void> {
+    // Capture the mutation at enqueue time. A prior receipt must never copy an
+    // older body back onto `session` and erase a mutation made while it was
+    // in flight.
+    const desired = getSessionPersistenceSnapshot(session);
+    const job = this.persistenceTail.then(async () => {
+      if (!hasSessionContent(desired)) return;
+      // The body is the captured desired mutation, while its CAS revision is
+      // the receipt from the preceding local write.
+      desired.revision = session.revision;
+      const saved = await historyManager.save(desired);
+      // Revision is the only field this receipt owns. In particular do not
+      // overwrite history/title: either may already contain a newer mutation.
+      if (saved?.revision !== undefined) session.revision = saved.revision;
+    });
+    // A rejected write remains observable to its caller but cannot poison
+    // the queue and prevent a later user retry from being persisted.
+    this.persistenceTail = job.catch(() => undefined);
+    return job;
+  }
+
+  async flushPersistence(): Promise<void> {
+    await this.persistenceTail;
   }
 
   private syncUsageFromSession(): void {
@@ -276,22 +305,17 @@ function hasSessionContent(session: Session): boolean {
 /**
  * Save the current session to file
  */
-export function saveSession(): void {
+export async function saveSession(): Promise<void> {
   try {
     const manager = SessionManager.getInstance();
     if (!manager.hasSession()) {
       return;
     }
 
-    const session = manager.getCurrentSession();
-    if (!hasSessionContent(session)) {
-      return;
-    }
-
-    const sessionToSave = getSessionPersistenceSnapshot(session);
-    historyManager.save(sessionToSave);
+    await manager.enqueueSave(manager.getCurrentSession());
   } catch (error) {
     logger.error("Error saving session:", error);
+    throw error;
   }
 }
 
@@ -453,7 +477,7 @@ export async function listSessions(
 ): Promise<ExtendedSessionMetadata[]> {
   try {
     // Get local sessions
-    const localSessions = historyManager.list({ limit });
+    const localSessions = await historyManager.list({ limit });
 
     // Add first user message preview to each local session
     const localSessionsWithPreview: ExtendedSessionMetadata[] = [];
@@ -502,9 +526,11 @@ export async function listSessions(
 /**
  * Load session by ID
  */
-export function loadSessionById(sessionId: string): Session | null {
+export async function loadSessionById(
+  sessionId: string,
+): Promise<Session | null> {
   try {
-    const session = historyManager.load(sessionId);
+    const session = await historyManager.load(sessionId);
     return session;
   } catch (error) {
     logger.error("Error loading session by ID:", error);
@@ -517,11 +543,11 @@ export function loadSessionById(sessionId: string): Session | null {
  * Useful for long-lived processes (e.g., cn serve) that need to
  * preserve chat history across restarts for the same storage/agent id.
  */
-export function loadOrCreateSessionById(
+export async function loadOrCreateSessionById(
   sessionId: string,
   history: ChatHistoryItem[] = [],
-): Session {
-  const existing = loadSessionById(sessionId);
+): Promise<Session> {
+  const existing = await loadSessionById(sessionId);
   if (existing) {
     SessionManager.getInstance().setSession(existing);
     return existing;
@@ -533,15 +559,17 @@ export function loadOrCreateSessionById(
 /**
  * Update the current session's history
  */
-export function updateSessionHistory(history: ChatHistoryItem[]): void {
-  SessionManager.getInstance().updateHistory(history);
+export async function updateSessionHistory(
+  history: ChatHistoryItem[],
+): Promise<void> {
+  await SessionManager.getInstance().updateHistory(history);
 }
 
 /**
  * Update the current session's title
  */
-export function updateSessionTitle(title: string): void {
-  SessionManager.getInstance().updateTitle(title);
+export async function updateSessionTitle(title: string): Promise<void> {
+  await SessionManager.getInstance().updateTitle(title);
 }
 
 /**
@@ -584,8 +612,16 @@ export function startNewSession(history: ChatHistoryItem[] = []): Session {
 /**
  * Track cost for the current session
  */
-export function trackSessionUsage(cost: number, usage: Usage): void {
-  SessionManager.getInstance().trackUsage(cost, usage);
+export async function trackSessionUsage(
+  cost: number,
+  usage: Usage,
+): Promise<void> {
+  await SessionManager.getInstance().trackUsage(cost, usage);
+}
+
+/** Drains queued local history writes before an intentional CLI exit. */
+export async function flushSessionPersistence(): Promise<void> {
+  await SessionManager.getInstance().flushPersistence();
 }
 
 /**

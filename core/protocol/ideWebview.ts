@@ -194,6 +194,12 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   ];
   "cukii/listOpenChatPanels": [undefined, CukiiOpenChatPanel[]];
   "cukii/panelSessionChanged": [{ sessionId: string; title?: string }, void];
+  /** The chat webview could not restore its requested saved session. */
+  "cukii/initialSessionLoadFailed": [{ sessionId: string }, void];
+  "cukii/renameSession": [
+    { sessionId: string; title: string },
+    { ok: boolean },
+  ];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [
     undefined,
@@ -242,6 +248,10 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   "cukii/claudePermissionRequested": [
     CukiiClaudePermissionRequest,
     { accepted: boolean },
+  ];
+  "cukii/sessionTitleChanged": [
+    { sessionId: string; title: string; titleManuallySet?: boolean },
+    void,
   ];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];

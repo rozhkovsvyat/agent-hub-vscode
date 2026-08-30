@@ -270,7 +270,7 @@ function calculateFallbackCost(
 }
 
 // Helper function to record telemetry
-export function recordStreamTelemetry(options: {
+export async function recordStreamTelemetry(options: {
   requestStartTime: number;
   responseEndTime: number;
   inputTokens: number;
@@ -278,7 +278,7 @@ export function recordStreamTelemetry(options: {
   model: any;
   tools?: any[];
   fullUsage?: any;
-}): number {
+}): Promise<number> {
   const {
     requestStartTime,
     responseEndTime,
@@ -352,7 +352,7 @@ export function recordStreamTelemetry(options: {
   }
 
   telemetryService.recordCost(cost, model.model);
-  trackSessionUsage(cost, usage);
+  await trackSessionUsage(cost, usage);
 
   telemetryService.recordResponseTime(
     totalDuration,

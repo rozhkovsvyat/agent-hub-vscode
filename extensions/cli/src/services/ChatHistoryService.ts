@@ -66,7 +66,9 @@ export class ChatHistoryService extends BaseService<ChatHistoryState> {
     if (this.currentState.isRemoteMode) {
       // Skip persistence in remote mode
     } else if (persist !== false) {
-      updateSessionHistory(history);
+      void updateSessionHistory(history).catch((error) =>
+        logger.error("Failed to persist chat history", { error }),
+      );
     }
   }
 
@@ -385,7 +387,7 @@ export class ChatHistoryService extends BaseService<ChatHistoryState> {
    * Load a session into the service
    */
   async loadSession(sessionId: string): Promise<void> {
-    const session = loadSessionById(sessionId);
+    const session = await loadSessionById(sessionId);
     if (session) {
       // Load new history without recording undo; set sessionId separately
       this.setHistoryInternal(session.history, { recordUndo: false });

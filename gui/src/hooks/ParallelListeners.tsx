@@ -18,11 +18,14 @@ import {
   setIsSessionLoading,
   setIsSessionMetadataLoading,
   setMode,
+  setTitleManuallySet,
+  updateSessionTitle,
 } from "../redux/slices/sessionSlice";
 import { setTTSActive } from "../redux/slices/uiSlice";
 
 import { modelSupportsReasoning } from "core/llm/autodetect";
 import { cancelStream } from "../redux/thunks/cancelStream";
+import { isRestorableCukiiSession } from "./cukiiSessionRestore";
 import { handleApplyStateUpdate } from "../redux/thunks/handleApplyStateUpdate";
 import {
   getSession,
@@ -57,6 +60,7 @@ function ParallelListeners() {
   // Load symbols for chat on any session change
   const sessionId = useAppSelector((state) => state.session.id);
   const sessionTitle = useAppSelector((state) => state.session.title);
+  const historyLength = useAppSelector((state) => state.session.history.length);
   const lastSessionId = useAppSelector((store) => store.session.lastSessionId);
   const [initialSessionId] = useState(
     window.cukiiSurface === "chat"
@@ -67,16 +71,33 @@ function ParallelListeners() {
   useWebviewListener("cukii/getActiveSessionId", async () => sessionId || "");
 
   useEffect(() => {
-    if (window.cukiiSurface !== "chat" || !sessionId) return;
+    if (window.cukiiSurface !== "chat" || !sessionId || historyLength === 0) {
+      return;
+    }
     window.cukiiVscode?.setState({
       ...(window.cukiiVscode?.getState() ?? {}),
       sessionId,
+      title: sessionTitle,
     });
     ideMessenger.post("cukii/panelSessionChanged", {
       sessionId,
       title: sessionTitle,
     });
-  }, [ideMessenger, sessionId, sessionTitle]);
+  }, [ideMessenger, sessionId, sessionTitle, historyLength]);
+
+  useWebviewListener(
+    "cukii/sessionTitleChanged",
+    async ({ sessionId: changedSessionId, title, titleManuallySet }) => {
+      if (changedSessionId !== sessionId) {
+        return;
+      }
+      dispatch(updateSessionTitle(title));
+      if (titleManuallySet) {
+        dispatch(setTitleManuallySet(true));
+      }
+    },
+    [dispatch, sessionId],
+  );
 
   const handleConfigUpdate = useCallback(
     async (isInitial: boolean, result: FromCoreProtocol["configUpdate"][0]) => {
@@ -158,20 +179,27 @@ function ParallelListeners() {
         if (configResult.status === "success") {
           await handleConfigUpdate(true, configResult.content);
         }
-        if (sessionResult && "session" in sessionResult) {
+        if (
+          sessionResult &&
+          "session" in sessionResult &&
+          isRestorableCukiiSession(sessionResult.session)
+        ) {
           dispatch(newSession(sessionResult.session));
           if (sessionResult.session.chatModelTitle) {
             void dispatch(
               selectChatModelForProfile(sessionResult.session.chatModelTitle),
             );
           }
-        } else if (
-          initialSessionId &&
-          sessionResult &&
-          "error" in sessionResult
-        ) {
-          console.error("Failed to load Cukii session", sessionResult.error);
-          dispatch(newSession());
+        } else if (initialSessionId && sessionResult) {
+          // This panel was explicitly created for a persisted session. It
+          // must not silently become a blank tab (or replace any active
+          // session) if that session vanished after the extension preflight.
+          if ("error" in sessionResult) {
+            console.error("Failed to load Cukii session", sessionResult.error);
+          }
+          ideMessenger.post("cukii/initialSessionLoadFailed", {
+            sessionId: initialSessionId,
+          });
         } else if (window.cukiiSurface === "chat") {
           dispatch(newSession());
         }

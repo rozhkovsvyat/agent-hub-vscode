@@ -10,6 +10,9 @@ import {
   newSession,
   setAllSessionMetadata,
   setIsSessionMetadataLoading,
+  setSessionRevision,
+  setTitleManuallySet,
+  updateSessionTitle,
   updateSessionMetadata,
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
@@ -69,14 +72,32 @@ export const deleteSession = createAsyncThunk<void, string, ThunkApiType>(
 
 export const updateSession = createAsyncThunk<void, Session, ThunkApiType>(
   "session/update",
-  async (session, { extra, dispatch }) => {
+  async (session, { extra, dispatch, getState }) => {
     dispatch(
       updateSessionMetadata({
         sessionId: session.sessionId,
         title: session.title,
       }),
     ); // optimistic session metadata update
-    await extra.ideMessenger.request("history/save", session);
+    const saved = await extra.ideMessenger.request("history/save", session);
+    if (saved.status === "success") {
+      dispatch(
+        setSessionRevision({
+          sessionId: saved.content.sessionId,
+          revision: saved.content.revision ?? 0,
+        }),
+      );
+      // The persistence boundary is authoritative when it resolved a stale
+      // request against a manual rename. This catches a rename event that
+      // reached the IDE just before/after this webview's local state update.
+      if (
+        saved.content.titleManuallySet &&
+        getState().session.id === saved.content.sessionId
+      ) {
+        dispatch(updateSessionTitle(saved.content.title));
+        dispatch(setTitleManuallySet(true));
+      }
+    }
     await dispatch(refreshSessionMetadata({}));
   },
 );
@@ -204,47 +225,96 @@ export const saveCurrentSession = createAsyncThunk<
     // New session has already been dispatched
     // Now save previous session and update chat title if relevant
     let title = session.title;
-    if (title === NEW_SESSION_TITLE) {
-      if (
-        !getState().config.config?.disableSessionTitles &&
-        selectedChatModel
-      ) {
-        let assistantResponse = session.history
-          ?.filter((h) => h.message.role === "assistant")[0]
-          ?.message?.content?.toString();
+    let titleManuallySet = session.titleManuallySet;
+    let waitedForAutoTitle = false;
+    if (!titleManuallySet) {
+      if (title === NEW_SESSION_TITLE) {
+        if (
+          !getState().config.config?.disableSessionTitles &&
+          selectedChatModel
+        ) {
+          let assistantResponse = session.history
+            ?.filter((h) => h.message.role === "assistant")[0]
+            ?.message?.content?.toString();
 
-        if (assistantResponse && generateTitle) {
-          try {
-            const result = await extra.ideMessenger.request(
-              "chatDescriber/describe",
-              {
-                text: assistantResponse,
-              },
-            );
-            if (result.status === "success" && result.content) {
-              title = result.content;
+          if (assistantResponse && generateTitle) {
+            try {
+              waitedForAutoTitle = true;
+              const result = await extra.ideMessenger.request(
+                "chatDescriber/describe",
+                {
+                  text: assistantResponse,
+                },
+              );
+              if (result.status === "success" && result.content) {
+                title = result.content;
+              }
+            } catch (e) {
+              console.error("Error generating chat title", e);
             }
-          } catch (e) {
-            console.error("Error generating chat title", e);
           }
         }
+        // Fallbacks if above doesn't work out or session titles disabled
+        if (title === NEW_SESSION_TITLE) {
+          title = getChatTitleFromMessage(session.history[0].message);
+        }
       }
-      // Fallbacks if above doesn't work out or session titles disabled
-      if (title === NEW_SESSION_TITLE) {
-        title = getChatTitleFromMessage(session.history[0].message);
+      // More fallbacks in case of no title
+      if (!title.length) {
+        const metadata = session.allSessionMetadata.find(
+          (m) => m.sessionId === session.id,
+        );
+        if (metadata?.title) {
+          title = metadata.title;
+        }
+      }
+      if (!title.length) {
+        title = NEW_SESSION_TITLE;
       }
     }
-    // More fallbacks in case of no title
-    if (!title.length) {
-      const metadata = session.allSessionMetadata.find(
-        (m) => m.sessionId === session.id,
-      );
-      if (metadata?.title) {
-        title = metadata.title;
+
+    // A manual rename can land while chatDescriber/describe is awaiting. The
+    // current Redux state is the fast path; history/load is the durable source
+    // when the IDE has persisted the rename before its webview event arrives.
+    if (waitedForAutoTitle) {
+      const currentSession = getState().session;
+      if (currentSession.id === session.id && currentSession.titleManuallySet) {
+        title = currentSession.title;
+        titleManuallySet = true;
+      } else {
+        const persisted = await extra.ideMessenger.request("history/load", {
+          id: session.id,
+        });
+        if (
+          persisted.status === "success" &&
+          persisted.content.titleManuallySet
+        ) {
+          title = persisted.content.title;
+          titleManuallySet = true;
+        }
       }
     }
-    if (!title.length) {
-      title = NEW_SESSION_TITLE;
+
+    // Only update the live tab after resolving a possible concurrent manual
+    // rename. Updating it earlier could replace the manual title before the
+    // check above reads it.
+    // There are no awaits between this read and the following dispatches. This
+    // closes the remaining window where the native rename event could land
+    // after the earlier (post-describer) check, but before we update Redux.
+    const liveSession = getState().session;
+    if (liveSession.id === session.id && liveSession.titleManuallySet) {
+      title = liveSession.title;
+      titleManuallySet = true;
+    }
+    if (liveSession.id === session.id && liveSession.title !== title) {
+      dispatch(updateSessionTitle(title));
+    }
+    if (
+      liveSession.id === session.id &&
+      titleManuallySet &&
+      !liveSession.titleManuallySet
+    ) {
+      dispatch(setTitleManuallySet(true));
     }
 
     const updatedSession: Session = {
@@ -260,6 +330,8 @@ export const saveCurrentSession = createAsyncThunk<
       brokerSpeed: session.brokerSpeed,
       hasReasoningEnabled: session.hasReasoningEnabled,
       brokerPermissionMode: session.brokerPermissionMode,
+      titleManuallySet: titleManuallySet || undefined,
+      revision: session.revision,
     };
 
     const result = await dispatch(updateSession(updatedSession));

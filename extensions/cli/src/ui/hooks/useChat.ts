@@ -10,6 +10,8 @@ import { services } from "../../services/index.js";
 import {
   createSession,
   loadSession,
+  loadSessionById,
+  startNewSession,
   updateSessionHistory,
 } from "../../session.js";
 import { handleSlashCommands } from "../../slashCommands.js";
@@ -82,11 +84,6 @@ export function useChat({
 
     // Fork from an existing session if fork flag is used
     if (fork) {
-      const { loadSessionById, startNewSession } = require("../../session.js");
-      const sessionToFork = loadSessionById(fork);
-      if (sessionToFork) {
-        return startNewSession(sessionToFork.history);
-      }
       // If session not found, create a new empty session
       return createSession([]);
     }
@@ -102,6 +99,16 @@ export function useChat({
     // Create new session
     return createSession([]);
   });
+
+  useEffect(() => {
+    if (!fork || isRemoteMode) return;
+    void loadSessionById(fork)
+      .then((sessionToFork) => {
+        if (sessionToFork)
+          setCurrentSession(startNewSession(sessionToFork.history));
+      })
+      .catch((error) => logger.error("Failed to fork session", { error }));
+  }, [fork, isRemoteMode]);
 
   // Local view of history driven solely by ChatHistoryService
   const [chatHistory, setChatHistoryView] = useState<ChatHistoryItem[]>(() =>
@@ -335,7 +342,9 @@ export function useChat({
           ...currentSession,
           history: currentHistory,
         };
-        updateSessionHistory(currentHistory);
+        void updateSessionHistory(currentHistory).catch((error) =>
+          logger.error("Failed to save session history", { error }),
+        );
         setCurrentSession(updatedSession);
         logger.debug("Session saved");
         return currentHistory;
@@ -774,7 +783,7 @@ export function useChat({
     setAttachedFiles([]);
 
     // Update the session with the rewound history
-    updateSessionHistory(rewindedHistory);
+    await updateSessionHistory(rewindedHistory);
 
     // Force refresh of StaticChatContent to show truncated history
     if (onRefreshStatic) {

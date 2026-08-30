@@ -5,7 +5,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import type { BaseSessionMetadata, Session } from "core";
+import type { BaseSessionMetadata } from "core";
 import type { CukiiOpenChatPanel } from "core/protocol/ideWebview";
 import {
   useCallback,
@@ -23,6 +23,10 @@ import {
   parseSessionGroups,
   type SessionGroupState,
 } from "./sessionGroups";
+import {
+  mergeSessionsWithOpenPanels,
+  type CukiiNavigatorSession,
+} from "./cukiiSessionMerge";
 
 const STORAGE_KEY = "cukii.session-groups.v1";
 const Shell = styled.div`
@@ -264,35 +268,8 @@ export function formatSessionAge(date: string) {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export type CukiiNavigatorSession = BaseSessionMetadata & {
-  openPanelId?: string;
-};
-
-export function mergeSessionsWithOpenPanels(
-  sessions: BaseSessionMetadata[],
-  openPanels: CukiiOpenChatPanel[],
-): CukiiNavigatorSession[] {
-  const openBySession = new Map(
-    openPanels
-      .filter((panel) => panel.sessionId)
-      .map((panel) => [panel.sessionId!, panel]),
-  );
-  const persistedIds = new Set(sessions.map((session) => session.sessionId));
-  const persisted = sessions.map((session) => ({
-    ...session,
-    openPanelId: openBySession.get(session.sessionId)?.panelId,
-  }));
-  const liveOnly = openPanels
-    .filter((panel) => !panel.sessionId || !persistedIds.has(panel.sessionId))
-    .map((panel) => ({
-      sessionId: panel.sessionId ?? `open:${panel.panelId}`,
-      title: panel.title || "New session",
-      dateCreated: new Date().toISOString(),
-      workspaceDirectory: window.workspacePaths?.[0] ?? "",
-      openPanelId: panel.panelId,
-    }));
-  return [...liveOnly, ...persisted];
-}
+export type { CukiiNavigatorSession } from "./cukiiSessionMerge";
+export { mergeSessionsWithOpenPanels } from "./cukiiSessionMerge";
 
 type ContextState = {
   session: CukiiNavigatorSession;
@@ -332,8 +309,14 @@ export default function CukiiSessionNavigator() {
 
   useWebviewListener(
     "cukii/openChatPanelsChanged",
-    async (panels) => setOpenPanels(panels),
-    [],
+    async (panels) => {
+      setOpenPanels(panels);
+      // A panel becomes visible at the same time as its first history/save.
+      // Refresh metadata now rather than leaving the new semantic row hidden
+      // until the five-second poll fires.
+      await load();
+    },
+    [load],
   );
   useEffect(
     () => localStorage.setItem(STORAGE_KEY, JSON.stringify(groups)),
@@ -400,19 +383,16 @@ export default function CukiiSessionNavigator() {
       title: session.title,
     });
   const renameSession = async (session: CukiiNavigatorSession) => {
-    if (session.sessionId.startsWith("open:")) return;
     const title = window.prompt("Rename session", session.title)?.trim();
     if (!title || title === session.title) return;
-    const result = await messenger.request("history/load", {
-      id: session.sessionId,
+    const result = await messenger.request("cukii/renameSession", {
+      sessionId: session.sessionId,
+      title,
     });
-    if (result.status !== "success") return;
-    const updated: Session = { ...result.content, title };
-    await messenger.request("history/save", updated);
+    if (result.status !== "success" || !result.content.ok) return;
     await load();
   };
   const deleteSession = async (session: CukiiNavigatorSession) => {
-    if (session.sessionId.startsWith("open:")) return;
     await messenger.request("history/delete", { id: session.sessionId });
     setGroups((state) => {
       const assignments = { ...state.assignments };
@@ -527,32 +507,30 @@ export default function CukiiSessionNavigator() {
                     </SessionTitle>
                     <Age>{formatSessionAge(session.dateCreated)}</Age>
                   </SessionButton>
-                  {!session.sessionId.startsWith("open:") && (
-                    <RowActions>
-                      <RowAction
-                        className="cukii-session-menu-button"
-                        aria-label={`Rename ${session.title}`}
-                        title="Rename session"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void renameSession(session);
-                        }}
-                      >
-                        <PencilIcon width={15} height={15} />
-                      </RowAction>
-                      <RowAction
-                        className="cukii-session-menu-button"
-                        aria-label={`Delete ${session.title}`}
-                        title="Delete session"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void deleteSession(session);
-                        }}
-                      >
-                        <TrashIcon width={16} height={16} />
-                      </RowAction>
-                    </RowActions>
-                  )}
+                  <RowActions>
+                    <RowAction
+                      className="cukii-session-menu-button"
+                      aria-label={`Rename ${session.title}`}
+                      title="Rename session"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void renameSession(session);
+                      }}
+                    >
+                      <PencilIcon width={15} height={15} />
+                    </RowAction>
+                    <RowAction
+                      className="cukii-session-menu-button"
+                      aria-label={`Delete ${session.title}`}
+                      title="Delete session"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteSession(session);
+                      }}
+                    >
+                      <TrashIcon width={16} height={16} />
+                    </RowAction>
+                  </RowActions>
                 </Row>
               ))}
           </div>
@@ -581,47 +559,62 @@ export default function CukiiSessionNavigator() {
           >
             Resume session
           </MenuItem>
-          {!context.session.sessionId.startsWith("open:") && (
-            <>
-              <MenuSeparator />
+          <MenuSeparator />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() =>
+              void renameSession(context.session).then(() => setContext(null))
+            }
+          >
+            Rename session
+          </MenuItem>
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() =>
+              void deleteSession(context.session).then(() => setContext(null))
+            }
+          >
+            Delete session
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              setAssignNewGroupTo(context.session.sessionId);
+              setAddingGroup(true);
+              setContext(null);
+            }}
+          >
+            New group from session
+          </MenuItem>
+          {groups.groups
+            .filter(
+              (group) =>
+                group.id !== groups.assignments[context.session.sessionId],
+            )
+            .map((group) => (
               <MenuItem
                 className="cukii-session-menu-button"
                 role="menuitem"
-                onClick={() => {
-                  setAssignNewGroupTo(context.session.sessionId);
-                  setAddingGroup(true);
-                  setContext(null);
-                }}
+                key={group.id}
+                onClick={() =>
+                  assignSession(context.session.sessionId, group.id)
+                }
               >
-                New group from session
+                Move to &quot;{group.name}&quot;
               </MenuItem>
-              {groups.groups
-                .filter(
-                  (group) =>
-                    group.id !== groups.assignments[context.session.sessionId],
-                )
-                .map((group) => (
-                  <MenuItem
-                    className="cukii-session-menu-button"
-                    role="menuitem"
-                    key={group.id}
-                    onClick={() =>
-                      assignSession(context.session.sessionId, group.id)
-                    }
-                  >
-                    Move to &quot;{group.name}&quot;
-                  </MenuItem>
-                ))}
-              <MenuSeparator />
-              <MenuItem
-                className="cukii-session-menu-button"
-                role="menuitem"
-                onClick={() => assignSession(context.session.sessionId, "")}
-              >
-                Remove from group
-              </MenuItem>
-            </>
-          )}
+            ))}
+          <MenuSeparator />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => assignSession(context.session.sessionId, "")}
+          >
+            Remove from group
+          </MenuItem>
         </ContextMenu>
       )}
     </Shell>

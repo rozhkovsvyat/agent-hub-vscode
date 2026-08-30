@@ -28,7 +28,11 @@ import { stripImages } from "core/util/messageContent";
 import * as vscode from "vscode";
 
 import { ApplyManager } from "../apply";
-import { cukiiPanelRegistry, listOpenCukiiPanels } from "../cukiiPanelRegistry";
+import {
+  cukiiPanelRegistry,
+  listOpenCukiiPanels,
+  syncCukiiPanelTitleForSession,
+} from "../cukiiPanelRegistry";
 import { VerticalDiffManager } from "../diff/vertical/manager";
 import { addCurrentSelectionToEdit } from "../quickEdit/AddCurrentSelection";
 import EditDecorationManager from "../quickEdit/EditDecorationManager";
@@ -213,6 +217,36 @@ export class VsCodeMessenger {
 
     this.onWebview("cukii/listOpenChatPanels", () => listOpenCukiiPanels());
 
+    this.onWebview("cukii/renameSession", async ({ data }) => {
+      const trimmed = data.title.trim();
+      if (!trimmed) {
+        return { ok: false };
+      }
+      const saved = await this.inProcessMessenger.externalRequest(
+        "history/rename",
+        { id: data.sessionId, title: trimmed },
+      );
+      if (!saved) return { ok: false };
+      // The persistence boundary may have retained a concurrent manual title.
+      // Reflect the effective value, never the stale requested value.
+      const effectiveTitle = saved.title;
+      syncCukiiPanelTitleForSession(data.sessionId, effectiveTitle);
+      const titlePayload = {
+        sessionId: data.sessionId,
+        title: effectiveTitle,
+        titleManuallySet: Boolean(saved.titleManuallySet),
+      };
+      for (const entry of cukiiPanelRegistry.values()) {
+        entry.panel.protocol.send("cukii/sessionTitleChanged", titlePayload);
+      }
+      this.webviewProtocol.send("cukii/sessionTitleChanged", titlePayload);
+      this.webviewProtocol.send(
+        "cukii/openChatPanelsChanged",
+        listOpenCukiiPanels(),
+      );
+      return { ok: true };
+    });
+
     this.onWebview("acceptDiff", async ({ data: { filepath, streamId } }) => {
       await vscode.commands.executeCommand(
         "continue.acceptDiff",
@@ -361,7 +395,9 @@ export class VsCodeMessenger {
     });
 
     /** PASS THROUGH FROM WEBVIEW TO CORE AND BACK **/
-    WEBVIEW_TO_CORE_PASS_THROUGH.forEach((messageType) => {
+    WEBVIEW_TO_CORE_PASS_THROUGH.filter(
+      (messageType) => messageType !== "history/save",
+    ).forEach((messageType) => {
       this.onWebview(messageType, async (msg) => {
         return await this.inProcessMessenger.externalRequest(
           messageType,
@@ -369,6 +405,26 @@ export class VsCodeMessenger {
           msg.messageId,
         );
       });
+    });
+
+    this.onWebview("history/save", async (msg) => {
+      const result = await this.inProcessMessenger.externalRequest(
+        "history/save",
+        msg.data,
+        msg.messageId,
+      );
+      // HistoryManager.save is the sole CAS/merge boundary and returns the
+      // effective session, including a manual title or newer history that a
+      // stale auto-title request was not allowed to overwrite.
+      const session = result;
+      if (session.sessionId && session.title) {
+        syncCukiiPanelTitleForSession(session.sessionId, session.title);
+        this.webviewProtocol.send(
+          "cukii/openChatPanelsChanged",
+          listOpenCukiiPanels(),
+        );
+      }
+      return result;
     });
 
     /** PASS THROUGH FROM CORE TO WEBVIEW AND BACK **/

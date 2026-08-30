@@ -299,6 +299,10 @@ export interface Session {
   brokerPermissionMode?: import("./protocol/ideWebview").CukiiPermissionMode;
   /** Optional: cumulative usage and cost for all LLM API calls in this session */
   usage?: SessionUsage;
+  /** When true, auto-title generation must not overwrite this title. */
+  titleManuallySet?: boolean;
+  /** Monotonic per-session revision used for compare-and-merge persistence. */
+  revision?: number;
 }
 
 export interface BaseSessionMetadata {

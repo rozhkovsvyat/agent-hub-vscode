@@ -80,7 +80,7 @@ async function handleFork() {
   }
 }
 
-function handleTitle(args: string[]) {
+async function handleTitle(args: string[]): Promise<SlashCommandResult> {
   const title = args.join(" ").trim();
   if (!title) {
     return {
@@ -92,7 +92,7 @@ function handleTitle(args: string[]) {
   }
 
   try {
-    updateSessionTitle(title);
+    await updateSessionTitle(title);
     return {
       exit: false,
       output: chalk.green(`Session title updated to: "${title}"`),
@@ -187,7 +187,7 @@ function handleExport(_args: string[]): SlashCommandResult {
   };
 }
 
-function handleImport(args: string[]): SlashCommandResult {
+async function handleImport(args: string[]): Promise<SlashCommandResult> {
   const filePath = args.join(" ").trim();
   if (!filePath) {
     return {
@@ -220,7 +220,7 @@ function handleImport(args: string[]): SlashCommandResult {
 
     let session = exportedData.session;
 
-    const existing = historyManager.load(session.sessionId);
+    const existing = await historyManager.load(session.sessionId);
     const sessionExists = existing.history.length > 0;
 
     if (sessionExists) {
@@ -229,7 +229,7 @@ function handleImport(args: string[]): SlashCommandResult {
         ...session,
         sessionId: uuidv4(),
       };
-      historyManager.save(session);
+      await historyManager.save(session);
       return {
         exit: false,
         output: chalk.green(
@@ -239,7 +239,7 @@ function handleImport(args: string[]): SlashCommandResult {
       };
     }
 
-    historyManager.save(session);
+    await historyManager.save(session);
     return {
       exit: false,
       output: chalk.green(

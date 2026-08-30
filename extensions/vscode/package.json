@@ -389,6 +389,12 @@
           "dark": "media/cukii-title.svg"
         },
         "group": "Cukii"
+      },
+      {
+        "command": "cukii.renameChatPanel",
+        "category": "Cukii",
+        "title": "Rename Session",
+        "group": "Cukii"
       }
     ],
     "keybindings": [
@@ -601,6 +607,13 @@
         {
           "command": "continue.openInNewWindow",
           "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "cukii.renameChatPanel",
+          "when": "webviewId == 'cukii.fullScreenChat'",
+          "group": "1_modify"
         }
       ],
       "terminal/context": [

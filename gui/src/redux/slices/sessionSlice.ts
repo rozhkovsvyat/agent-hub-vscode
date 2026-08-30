@@ -223,6 +223,8 @@ type SessionState = {
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
   title: string;
+  titleManuallySet: boolean;
+  revision: number;
   id: string;
   streamAborter: AbortController;
   mainEditorContentTrigger?: JSONContent | undefined;
@@ -266,6 +268,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   history: [],
   isStreaming: false,
   title: NEW_SESSION_TITLE,
+  titleManuallySet: false,
+  revision: 0,
   id: uuidv4(),
   streamAborter: new AbortController(),
   symbols: {},
@@ -784,6 +788,8 @@ export const sessionSlice = createSlice({
       if (payload) {
         state.history = payload.history as any;
         state.title = payload.title;
+        state.titleManuallySet = Boolean(payload.titleManuallySet);
+        state.revision = payload.revision ?? 0;
         state.id = payload.sessionId;
         if (payload.mode) {
           state.mode = payload.mode;
@@ -802,6 +808,8 @@ export const sessionSlice = createSlice({
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
+        state.titleManuallySet = false;
+        state.revision = 0;
         state.id = uuidv4();
         state.mode = "broker";
         state.brokerModel = "opus-5";
@@ -814,6 +822,17 @@ export const sessionSlice = createSlice({
     },
     updateSessionTitle: (state, { payload }: PayloadAction<string>) => {
       state.title = payload;
+    },
+    setTitleManuallySet: (state, { payload }: PayloadAction<boolean>) => {
+      state.titleManuallySet = payload;
+    },
+    setSessionRevision: (
+      state,
+      { payload }: PayloadAction<{ sessionId: string; revision: number }>,
+    ) => {
+      if (state.id === payload.sessionId) {
+        state.revision = payload.revision;
+      }
     },
     setIsSessionMetadataLoading: (
       state,
@@ -1200,6 +1219,8 @@ export const {
   streamUpdate,
   newSession,
   updateSessionTitle,
+  setTitleManuallySet,
+  setSessionRevision,
   addHighlightedCode,
   addPromptCompletionPair,
   setActive,

@@ -118,7 +118,6 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     message: "Authentication flow opened in the integrated terminal.",
   },
   "docs/getIndexedPages": [],
-  "history/save": undefined,
   "config/getSerializedProfileInfo": {
     profileId: "local",
     profiles: [],
@@ -197,6 +196,14 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
 };
 
 const DEFAULT_MOCK_CORE_RESPONSE_HANDLERS: MockResponseHandlers = {
+  "history/save": async (session) => session,
+  "history/rename": async ({ id, title }) => ({
+    sessionId: id,
+    title,
+    titleManuallySet: true,
+    workspaceDirectory: "",
+    history: [],
+  }),
   "history/load": async ({ id }) => ({
     sessionId: id,
     title: "Mock session",

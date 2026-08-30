@@ -325,7 +325,7 @@ export class Core {
 
     // History
     on("history/list", async (msg) => {
-      const sessions = historyManager.list(msg.data);
+      const sessions = await historyManager.list(msg.data);
       const limit = msg.data?.limit ?? 100;
       return sessions.slice(0, limit);
     });
@@ -333,22 +333,25 @@ export class Core {
     on("history/delete", async (msg) => {
       await this.hookLifecycleReady;
       await this.endHookSession(msg.data.id, "clear");
-      historyManager.delete(msg.data.id);
+      await historyManager.delete(msg.data.id);
     });
 
     on("history/load", async (msg) => {
       await this.hookLifecycleReady;
-      const session = historyManager.load(msg.data.id);
+      const session = await historyManager.load(msg.data.id);
       await this.startHookSession(session.sessionId, "resume");
       return session;
     });
 
-    on("history/save", (msg) => {
-      historyManager.save(msg.data);
-    });
+    on("history/save", async (msg) => historyManager.save(msg.data));
+    on(
+      "history/rename",
+      async (msg) =>
+        await historyManager.renameExisting(msg.data.id, msg.data.title),
+    );
 
     on("history/share", async (msg) => {
-      const session = historyManager.load(msg.data.id);
+      const session = await historyManager.load(msg.data.id);
       const outputDir = msg.data.outputDir;
       const history = session.history.map((msg) => msg.message);
       await shareSession(this.ide, history, outputDir);
@@ -359,7 +362,7 @@ export class Core {
       for (const sessionId of this.activeHookSessions.keys()) {
         await this.endHookSession(sessionId, "clear");
       }
-      historyManager.clearAll();
+      await historyManager.clearAll();
     });
 
     on("devdata/log", async (msg) => {

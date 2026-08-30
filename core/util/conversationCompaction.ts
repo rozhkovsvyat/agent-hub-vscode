@@ -23,7 +23,7 @@ export async function compactConversation({
   currentModel,
 }: CompactionParams): Promise<void> {
   // Get the current session
-  const session = historyManager.load(sessionId);
+  const session = await historyManager.load(sessionId);
   const historyUpToIndex = session.history.slice(0, index + 1);
 
   // Apply the same filtering logic as in constructMessages, but exclude the target message
@@ -108,5 +108,5 @@ export async function compactConversation({
     history: updatedHistory,
   };
 
-  historyManager.save(updatedSession);
+  await historyManager.save(updatedSession);
 }

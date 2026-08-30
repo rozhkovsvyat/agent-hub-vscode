@@ -70,7 +70,8 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "history/list": [ListHistoryOptions, BaseSessionMetadata[]];
   "history/delete": [{ id: string }, void];
   "history/load": [{ id: string }, Session];
-  "history/save": [Session, void];
+  "history/save": [Session, Session];
+  "history/rename": [{ id: string; title: string }, Session | undefined];
   "history/share": [{ id: string; outputDir?: string }, void];
   "history/clear": [undefined, void];
   "devdata/log": [DevDataLogEvent, void];
