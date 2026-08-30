@@ -46,6 +46,7 @@ import {
   openBridgeSession,
   recoverBridgeSession,
 } from "./bridgeUiClient";
+import { bridgeTerminalLaunchSpec } from "./bridgeTerminalCommand";
 
 import { modelSupportsNextEdit } from "core/llm/autodetect";
 import { NEXT_EDIT_MODELS } from "core/llm/constants";
@@ -549,42 +550,19 @@ export class VsCodeExtension {
               if (typeof worktree !== "string" || !worktree)
                 throw new Error("broker did not provision module worktree");
               const root = worktree;
-              const wslRoot = root
-                .replace(
-                  /^([A-Za-z]):\\/,
-                  (_, drive: string) => `/mnt/${drive.toLowerCase()}/`,
-                )
-                .replace(/\\/g, "/");
-              const cursorScript = Buffer.from(
-                `cd -- ${JSON.stringify(wslRoot)}\nexec cursor-agent`,
-                "utf8",
-              ).toString("base64");
+              const command = bridgeTerminalLaunchSpec(
+                agent,
+                root,
+                bridgeSessionId,
+                role,
+                scope,
+              );
               const terminal = vscode.window.createTerminal({
                 name: `Cukii · ${agent} · ${role}`,
-                cwd: root,
-                shellPath: agent === "cursor" ? "wsl.exe" : agent,
-                shellArgs:
-                  agent === "codex"
-                    ? ["--cd", root]
-                    : agent === "grok"
-                      ? ["--cwd", root]
-                      : agent === "qwen"
-                        ? ["--model", "qwen3.8-max-preview"]
-                        : agent === "cursor"
-                          ? [
-                              "-d",
-                              "Ubuntu-24.04",
-                              "--",
-                              "bash",
-                              "-lc",
-                              `printf %s ${cursorScript} | base64 -d | bash`,
-                            ]
-                          : [],
-                env: {
-                  AGENT_HUB_BRIDGE_SESSION: bridgeSessionId,
-                  AGENT_HUB_BRIDGE_ROLE: role,
-                  AGENT_HUB_BRIDGE_SCOPE: scope,
-                },
+                cwd: command.cwd,
+                shellPath: command.program,
+                shellArgs: command.args,
+                env: command.env,
               });
               terminal.show();
               void vscode.window.showInformationMessage(
