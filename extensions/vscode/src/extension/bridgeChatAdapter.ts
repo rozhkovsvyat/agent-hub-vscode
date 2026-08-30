@@ -513,32 +513,43 @@ function resolveCommand(program: string, args: string[]): ResolvedCommand {
   return { program: executable, args };
 }
 
+function kimiWindowsNativeProgram(): string {
+  const home = os.homedir();
+  // The home directory itself may legitimately be redirected by Windows. The
+  // trust boundary starts at its Kimi-owned child components.
+  const kimiRoot = path.join(home, ".kimi-code");
+  const binDirectory = path.join(kimiRoot, "bin");
+  const nativeProgram = path.join(binDirectory, "kimi.exe");
+  const components: Array<{ path: string; type: "directory" | "file" }> = [
+    { path: kimiRoot, type: "directory" },
+    { path: binDirectory, type: "directory" },
+    { path: nativeProgram, type: "file" },
+  ];
+  try {
+    for (const component of components) {
+      const stats = fs.lstatSync(component.path);
+      const typeMatches =
+        component.type === "directory" ? stats.isDirectory() : stats.isFile();
+      if (stats.isSymbolicLink() || !typeMatches) {
+        throw new Error("unsafe Kimi native path component");
+      }
+    }
+  } catch {
+    throw new Error(
+      `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused.`,
+    );
+  }
+  return nativeProgram;
+}
+
 function kimiRoute(label: string, args: string[]): BridgeRoute {
   // Resolve the official native executable, then account for the executable,
   // every final argument, and libuv-style Windows escaping before any broker,
   // child process, or filesystem artefact can be created.
-  let command: ResolvedCommand;
-  if (process.platform === "win32") {
-    const nativeProgram = path.join(
-      os.homedir(),
-      ".kimi-code",
-      "bin",
-      "kimi.exe",
-    );
-    try {
-      const stats = fs.lstatSync(nativeProgram);
-      if (!stats.isFile() || stats.isSymbolicLink()) {
-        throw new Error("not a native executable");
-      }
-    } catch {
-      throw new Error(
-        `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused.`,
-      );
-    }
-    command = { program: nativeProgram, args };
-  } else {
-    command = resolveCommand(kimiCliProgram(), args);
-  }
+  const command =
+    process.platform === "win32"
+      ? { program: kimiWindowsNativeProgram(), args }
+      : resolveCommand(kimiCliProgram(), args);
   assertKimiWindowsCommandLine(command.program, command.args);
   return {
     label,

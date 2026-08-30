@@ -51,7 +51,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function nativeKimiPaths(): {
+  root: string;
+  bin: string;
+  executable: string;
+} {
+  const root = path.join(os.homedir(), ".kimi-code");
+  const bin = path.join(root, "bin");
+  return { root, bin, executable: path.join(bin, "kimi.exe") };
+}
+
+function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
+  return {
+    isDirectory: () => type === "directory",
+    isFile: () => type === "file",
+    isSymbolicLink: () => symbolicLink,
+  } as fs.Stats;
+}
+
 describe("native bridge argv", () => {
+  it("uses the ordinary native Kimi component chain, without lstat on homedir", () => {
+    const paths = nativeKimiPaths();
+    const lstatSync = vi.spyOn(fs, "lstatSync");
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.program).toBe(paths.executable);
+    expect(lstatSync).toHaveBeenCalledWith(paths.root);
+    expect(lstatSync).toHaveBeenCalledWith(paths.bin);
+    expect(lstatSync).toHaveBeenCalledWith(paths.executable);
+    expect(lstatSync).not.toHaveBeenCalledWith(os.homedir());
+  });
+
   it("keeps an exact Unicode/multiline Kimi prompt in argv without any Scratch file", () => {
     const prefix = "Первая строка\n🙂 第二行\n";
     const prompt = prefix + "x".repeat(1_024);
@@ -90,12 +125,7 @@ describe("native bridge argv", () => {
   });
 
   it("fails closed when only a Kimi cmd shim is present", () => {
-    const nativeProgram = path.join(
-      os.homedir(),
-      ".kimi-code",
-      "bin",
-      "kimi.exe",
-    );
+    const { executable: nativeProgram } = nativeKimiPaths();
     const shim = path.join(
       os.homedir(),
       "AppData",
@@ -133,6 +163,76 @@ describe("native bridge argv", () => {
     ).toThrow(/native executable is required/);
     expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
     expect(existsSync).not.toHaveBeenCalledWith(shim);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reparse/junction Kimi parent before any side effect", () => {
+    const paths = nativeKimiPaths();
+    const originalLstat = fs.lstatSync;
+    const lstatSync = vi
+      .spyOn(fs, "lstatSync")
+      .mockImplementation((candidate) => {
+        if (String(candidate).toLowerCase() === paths.root.toLowerCase()) {
+          // On Windows Node presents a junction/reparse point as lstat
+          // symbolic-link metadata; the component must not be traversed.
+          return fakeStats("directory", true);
+        }
+        return originalLstat(candidate);
+      });
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
+    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+    expect(() =>
+      routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        "&|<>^%!",
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      ),
+    ).toThrow(/native executable is required/);
+    expect(lstatSync).toHaveBeenCalledWith(paths.root);
+    expect(lstatSync).not.toHaveBeenCalledWith(paths.bin);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects a final Kimi executable symlink before any side effect", () => {
+    const paths = nativeKimiPaths();
+    const originalLstat = fs.lstatSync;
+    const lstatSync = vi
+      .spyOn(fs, "lstatSync")
+      .mockImplementation((candidate) => {
+        const pathKey = String(candidate).toLowerCase();
+        if (pathKey === paths.root.toLowerCase()) {
+          return fakeStats("directory");
+        }
+        if (pathKey === paths.bin.toLowerCase()) {
+          return fakeStats("directory");
+        }
+        if (pathKey === paths.executable.toLowerCase()) {
+          return fakeStats("file", true);
+        }
+        return originalLstat(candidate);
+      });
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
+    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+    expect(() =>
+      routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        "&|<>^%!",
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      ),
+    ).toThrow(/native executable is required/);
+    expect(lstatSync).toHaveBeenCalledWith(paths.root);
+    expect(lstatSync).toHaveBeenCalledWith(paths.bin);
+    expect(lstatSync).toHaveBeenCalledWith(paths.executable);
     expect(writeFileSync).not.toHaveBeenCalled();
     expect(mkdirSync).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
