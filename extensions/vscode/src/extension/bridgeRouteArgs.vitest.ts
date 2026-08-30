@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +83,56 @@ describe("native bridge argv", () => {
         resolveBridgeControls("kimi-k3", "high", "standard"),
       ),
     ).toThrow(/safe CreateProcess limit/);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when only a Kimi cmd shim is present", () => {
+    const nativeProgram = path.join(
+      os.homedir(),
+      ".kimi-code",
+      "bin",
+      "kimi.exe",
+    );
+    const shim = path.join(
+      os.homedir(),
+      "AppData",
+      "Roaming",
+      "npm",
+      "kimi.cmd",
+    );
+    const originalLstat = fs.lstatSync;
+    const lstatSync = vi
+      .spyOn(fs, "lstatSync")
+      .mockImplementation((candidate) => {
+        if (String(candidate).toLowerCase() === nativeProgram.toLowerCase()) {
+          const error = new Error("ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          throw error;
+        }
+        return originalLstat(candidate);
+      });
+    const existsSync = vi
+      .spyOn(fs, "existsSync")
+      .mockImplementation((candidate) =>
+        String(candidate).toLowerCase() === shim.toLowerCase() ? true : false,
+      );
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
+    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+
+    expect(() =>
+      routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        "&|<>^%!",
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      ),
+    ).toThrow(/native executable is required/);
+    expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
+    expect(existsSync).not.toHaveBeenCalledWith(shim);
     expect(writeFileSync).not.toHaveBeenCalled();
     expect(mkdirSync).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();

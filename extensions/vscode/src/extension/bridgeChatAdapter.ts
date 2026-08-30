@@ -462,11 +462,6 @@ function commandCandidates(program: string): string[] {
     ...(program === "grok"
       ? [path.join(home, ".grok", "bin", "grok.exe")]
       : []),
-    // Kimi Code CLI ставит нативный exe вне PATH — резолвим его напрямую, иначе
-    // .cmd-шим съедает и без того тесный бюджет командной строки под транскрипт.
-    ...(program === "kimi"
-      ? [path.join(home, ".kimi-code", "bin", "kimi.exe")]
-      : []),
     ...(program === "agent"
       ? [
           path.join(home, ".cursor", "bin", "agent.exe"),
@@ -519,10 +514,31 @@ function resolveCommand(program: string, args: string[]): ResolvedCommand {
 }
 
 function kimiRoute(label: string, args: string[]): BridgeRoute {
-  // Resolve exactly as the launcher will, then account for the executable,
+  // Resolve the official native executable, then account for the executable,
   // every final argument, and libuv-style Windows escaping before any broker,
   // child process, or filesystem artefact can be created.
-  const command = resolveCommand(kimiCliProgram(), args);
+  let command: ResolvedCommand;
+  if (process.platform === "win32") {
+    const nativeProgram = path.join(
+      os.homedir(),
+      ".kimi-code",
+      "bin",
+      "kimi.exe",
+    );
+    try {
+      const stats = fs.lstatSync(nativeProgram);
+      if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error("not a native executable");
+      }
+    } catch {
+      throw new Error(
+        `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused.`,
+      );
+    }
+    command = { program: nativeProgram, args };
+  } else {
+    command = resolveCommand(kimiCliProgram(), args);
+  }
   assertKimiWindowsCommandLine(command.program, command.args);
   return {
     label,
