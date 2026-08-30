@@ -22,7 +22,7 @@ describe("ModelPickerModal", () => {
     await getElementByText("GPT-5.6 Terra");
 
     await getElementByText("Opus 5");
-    await getElementByText("1M context — Best for everyday, complex tasks");
+    await getElementByText("1M context • Best for everyday, complex tasks");
 
     // Select a model.
     await user.click(await getElementByText("Sonnet 5"));

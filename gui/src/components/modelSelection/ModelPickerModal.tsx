@@ -10,6 +10,7 @@ import {
 } from "../../redux/slices/sessionSlice";
 import { applyRuntimeVendorCatalog, VENDORS } from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
+import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
 
 interface ModelPickerModalProps {
   onClose: () => void;
@@ -112,7 +113,10 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
                       <ModelCapabilityRating model={model} />
                     </span>
                     <span className="block truncate text-xs text-[var(--vscode-descriptionForeground)]">
-                      {model.contextWindowLabel} context — {model.description}
+                      {formatCukiiModelSubtitle(
+                        model.contextWindowLabel,
+                        model.description,
+                      )}
                     </span>
                   </span>
                   {selected && (

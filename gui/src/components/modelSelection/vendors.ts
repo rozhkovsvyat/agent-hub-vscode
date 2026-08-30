@@ -5,7 +5,10 @@ import type {
   BrokerSubagent,
 } from "core/protocol/ideWebview";
 import { CUKII_VENDOR_REGISTRY } from "core/cukiiVendorRegistry";
-import { canonicalCukiiModelDescription } from "core/cukiiModelPresentation";
+import {
+  canonicalCukiiModelDescription,
+  cukiiCapabilityRating,
+} from "core/cukiiModelPresentation";
 
 export type VendorId = BrokerVendorId;
 
@@ -141,13 +144,7 @@ export const VENDORS: VendorInfo[] = CUKII_VENDOR_REGISTRY.map((registered) => {
   return {
     ...vendor,
     label: registered.label,
-    models: vendor.models.map((model) => ({
-      ...model,
-      contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
-      description:
-        model.description?.trim() ||
-        canonicalCukiiModelDescription(model.value, model.label),
-    })),
+    models: presentVendorModels(vendor.models),
   };
 });
 
@@ -178,13 +175,7 @@ export function applyRuntimeVendorCatalog(
     return {
       id: registered.id,
       label: registered.label,
-      models: (live?.models ?? fallback?.models ?? []).map((model) => ({
-        ...model,
-        contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
-        description:
-          model.description?.trim() ||
-          canonicalCukiiModelDescription(model.value, model.label),
-      })),
+      models: presentVendorModels(live?.models ?? fallback?.models ?? []),
     };
   }).filter((vendor) => vendor.models.length > 0);
   if (next.length === 0) return;
@@ -211,31 +202,31 @@ export function displayModelLabel(model: ModelInfo): string {
 }
 
 /** Product-level capability tier, independent of vendor pricing and context. */
-export function cukiiCapabilityRating(
-  model: Pick<ModelInfo, "value" | "label">,
-): 1 | 2 | 3 | 4 {
-  const stableId = model.value.toLowerCase().replace(/^cursor:/, "");
-  const fallbackLabel = model.label.toLowerCase();
-  const matches = (pattern: RegExp) =>
-    pattern.test(stableId) || pattern.test(fallbackLabel);
+export { cukiiCapabilityRating };
 
-  if (matches(/(?:^|[-\s])fable(?:[-\s]|$)/)) return 4;
-  if (
-    matches(/(?:^|[-\s])opus(?:[-\s]|$)/) ||
-    matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
-    matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
-    matches(/qwen[-\s]?3[.-]8[-\s]max/)
-  ) {
-    return 3;
-  }
-  if (
-    matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
-    matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
-    matches(/(?:^|[-\s])grok(?:[-\s]|$)/)
-  ) {
-    return 2;
-  }
-  return 1;
+/**
+ * Normalizes catalog metadata and orders a vendor's models by Cukii bottle
+ * rating. The original catalog index breaks ties, preserving canonical/live
+ * vendor order without imposing a name or locale sort.
+ */
+export function presentVendorModels(
+  models: BootstrapVendorInfo["models"],
+): ModelInfo[] {
+  return models
+    .map((model) => ({
+      ...model,
+      contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
+      description:
+        model.description?.trim() ||
+        canonicalCukiiModelDescription(model.value, model.label),
+    }))
+    .map((model, canonicalIndex) => ({ model, canonicalIndex }))
+    .sort(
+      (left, right) =>
+        cukiiCapabilityRating(right.model) - cukiiCapabilityRating(left.model) ||
+        left.canonicalIndex - right.canonicalIndex,
+    )
+    .map(({ model }) => model);
 }
 
 export function vendorForModel(model: BrokerModel): VendorInfo | undefined {

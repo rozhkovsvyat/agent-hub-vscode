@@ -5,9 +5,11 @@ import {
   applyRuntimeVendorCatalog,
   cukiiCapabilityRating,
   displayModelLabel,
+  presentVendorModels,
   supportsNativeThinking,
   VENDORS,
 } from "./vendors";
+import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
 
 describe("Cukii model context labels", () => {
   it("keeps context out of the first-line display label", () => {
@@ -57,6 +59,102 @@ describe("Cukii model context labels", () => {
     ]);
   });
 
+  it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
+    const expectedModelOrderByVendor = {
+      claude: ["fable-5", "opus-5", "sonnet-5", "haiku-4-5"],
+      codex: [
+        "codex-5-6-sol",
+        "codex-5-6-terra",
+        "codex-5-6-luna",
+        "codex-5-5",
+        "codex-5-4",
+        "codex-5-4-mini",
+      ],
+      grok: ["grok-4-6", "grok-4-5"],
+      cursor: ["composer-2-5"],
+      kimi: ["kimi-k3", "kimi-k3-256k", "kimi-k2", "kimi-k2-highspeed"],
+      qwen: ["qwen-3-8-max"],
+      deepseek: ["deepseek-v4-pro"],
+    } as const;
+
+    for (const vendor of VENDORS) {
+      const models = vendor.models;
+      expect(models.map((model) => model.value), vendor.id).toEqual(
+        expectedModelOrderByVendor[vendor.id],
+      );
+      expect(
+        models.map(cukiiCapabilityRating),
+        `${vendor.id} ratings`,
+      ).toEqual(
+        [...models.map(cukiiCapabilityRating)].sort((left, right) =>
+          right - left,
+        ),
+      );
+    }
+  });
+
+  it("rejects ascending and unsorted rating mutations while preserving equal-rating catalog order", () => {
+    const canonical = [
+      { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "1M" },
+      {
+        value: "codex-5-6-terra",
+        label: "GPT-5.6 Terra",
+        contextWindowLabel: "1M",
+      },
+      {
+        value: "codex-5-6-sol",
+        label: "GPT-5.6 Sol",
+        contextWindowLabel: "1M",
+      },
+      {
+        value: "codex-5-5",
+        label: "GPT-5.5",
+        contextWindowLabel: "1M",
+      },
+    ] as const;
+    const presented = presentVendorModels([...canonical]);
+    const isNonIncreasing = (models: typeof presented) =>
+      models.every(
+        (model, index) =>
+          index === 0 ||
+          cukiiCapabilityRating(models[index - 1]) >=
+            cukiiCapabilityRating(model),
+      );
+
+    expect(presented.map((model) => model.value)).toEqual([
+      "codex-5-6-sol",
+      "codex-5-6-terra",
+      "codex-5-4",
+      "codex-5-5",
+    ]);
+    expect(isNonIncreasing(presented)).toBe(true);
+    expect(
+      isNonIncreasing([...presented].reverse()),
+      "ascending mutation",
+    ).toBe(false);
+    expect(isNonIncreasing(canonical as unknown as typeof presented), "unsorted mutation").toBe(
+      false,
+    );
+  });
+
+  it("formats every model subline with the exact bullet separator", () => {
+    for (const model of ALL_MODELS) {
+      const subtitle = formatCukiiModelSubtitle(
+        model.contextWindowLabel,
+        model.description,
+      );
+      expect(subtitle, model.value).toBe(
+        `${model.contextWindowLabel} context • ${model.description}`,
+      );
+      expect(subtitle, model.value).not.toContain(
+        `${model.contextWindowLabel} context — `,
+      );
+      expect(subtitle, model.value).not.toContain(
+        `${model.contextWindowLabel} context - `,
+      );
+    }
+  });
+
   it("exposes Thinking only for models with a verified native on/off switch", () => {
     expect(supportsNativeThinking("opus-5")).toBe(true);
     expect(supportsNativeThinking("sonnet-5")).toBe(true);
@@ -89,7 +187,7 @@ describe("Cukii model context labels", () => {
     },
   );
 
-  it("normalizes runtime catalog presentation to non-empty metadata", () => {
+  it("normalizes and sorts the live catalog without changing equal-tier order", () => {
     applyRuntimeVendorCatalog([
       {
         id: "codex",
@@ -100,6 +198,18 @@ describe("Cukii model context labels", () => {
             label: "GPT-5.6 Luna",
             contextWindowLabel: "272K",
             description: "   ",
+          },
+          {
+            value: "codex-5-6-sol",
+            label: "GPT-5.6 Sol",
+            contextWindowLabel: "272K",
+            description: "Live Sol description",
+          },
+          {
+            value: "codex-5-6-terra",
+            label: "GPT-5.6 Terra",
+            contextWindowLabel: "272K",
+            description: "Live Terra description",
           },
           {
             value: "codex:custom",
@@ -122,5 +232,15 @@ describe("Cukii model context labels", () => {
       ALL_MODELS.find((model) => model.value === "codex:custom")
         ?.contextWindowLabel,
     ).toBe("Unavailable");
+    expect(
+      VENDORS.find((vendor) => vendor.id === "codex")?.models.map(
+        (model) => model.value,
+      ),
+    ).toEqual([
+      "codex-5-6-sol",
+      "codex-5-6-terra",
+      "codex-5-6-luna",
+      "codex:custom",
+    ]);
   });
 });

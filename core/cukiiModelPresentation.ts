@@ -49,3 +49,44 @@ export function canonicalCukiiModelDescription(
   if (matches(/deepseek/)) return "DeepSeek coding model";
   return "Model available through the vendor CLI";
 }
+
+/** Product-level capability tier shown as Cukii bottles in the model picker. */
+export function cukiiCapabilityRating(
+  model: Pick<CukiiModelPresentation, "value" | "label">,
+): 1 | 2 | 3 | 4 {
+  const stableId = model.value.toLowerCase().replace(/^cursor:/, "");
+  const fallbackLabel = model.label.toLowerCase();
+  const matches = (pattern: RegExp) =>
+    pattern.test(stableId) || pattern.test(fallbackLabel);
+
+  if (matches(/(?:^|[-\s])fable(?:[-\s]|$)/)) return 4;
+  if (
+    matches(/(?:^|[-\s])opus(?:[-\s]|$)/) ||
+    matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
+    matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
+    matches(/qwen[-\s]?3[.-]8[-\s]max/)
+  ) {
+    return 3;
+  }
+  if (
+    matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
+    matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
+    matches(/(?:^|[-\s])grok(?:[-\s]|$)/)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/** The compact second line shared by every Cukii model picker option. */
+export function formatCukiiModelSubtitle(
+  contextWindowLabel: string,
+  description: string,
+): string {
+  return `${contextWindowLabel} context • ${description}`;
+}
+
+interface CukiiModelPresentation {
+  value: string;
+  label: string;
+}
