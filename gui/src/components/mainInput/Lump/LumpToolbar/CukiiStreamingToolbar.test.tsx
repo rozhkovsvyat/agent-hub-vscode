@@ -2,7 +2,10 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { CukiiStreamingToolbar } from "./CukiiStreamingToolbar";
+import {
+  CukiiStreamingToolbar,
+  CukiiWaitingReceipt,
+} from "./CukiiStreamingToolbar";
 
 afterEach(() => vi.useRealTimers());
 
@@ -22,7 +25,9 @@ describe("CukiiStreamingToolbar", () => {
     expect(toolbar.textContent).not.toMatch(/Backspace/i);
     expect(toolbar.textContent).not.toMatch(/to stop/i);
     expect(toolbar.textContent).not.toMatch(/\bStop\b/);
-    expect(toolbar.querySelectorAll(".cukii-thinking-character")).not.toHaveLength(0);
+    expect(
+      toolbar.querySelectorAll(".cukii-thinking-character"),
+    ).not.toHaveLength(0);
     expect(toolbar.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
     expect(toolbar.querySelector('[aria-live="polite"]')?.textContent).toBe(
       "Crumbing through it..",
@@ -33,7 +38,9 @@ describe("CukiiStreamingToolbar", () => {
     vi.useFakeTimers();
     render(<CukiiStreamingToolbar />);
     act(() => vi.advanceTimersByTime(4_000));
-    expect(screen.getByText("Combulating..", { selector: '[aria-live="polite"]' })).toBeTruthy();
+    expect(
+      screen.getByText("Combulating..", { selector: '[aria-live="polite"]' }),
+    ).toBeTruthy();
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
   });
 
@@ -43,5 +50,41 @@ describe("CukiiStreamingToolbar", () => {
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.cukii-thinking-character\s*\{[^}]*animation:\s*none/s,
     );
+  });
+
+  it("hides only for an explicit native wait, not unknown stream silence", () => {
+    const { rerender } = render(<CukiiStreamingToolbar active />);
+    expect(screen.getByTestId("cukii-streaming-toolbar")).toBeInTheDocument();
+    expect(screen.getByTestId("cukii-crumbs")).toBeInTheDocument();
+
+    rerender(
+      <CukiiStreamingToolbar
+        active
+        wait={{
+          condition: "Sleeping for 12 seconds",
+          deadline: "2026-08-31T12:00:12.000Z",
+        }}
+      />,
+    );
+    expect(
+      screen.queryByTestId("cukii-streaming-toolbar"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cukii-crumbs")).not.toBeInTheDocument();
+  });
+
+  it("renders the wait receipt as a static accessible status", () => {
+    render(
+      <CukiiWaitingReceipt
+        wait={{
+          condition: "Sleeping for 12 seconds",
+          deadline: "2026-08-31T12:00:12.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Cukii is waiting — Sleeping for 12 seconds · until 2026-08-31T12:00:12.000Z",
+    );
+    expect(screen.queryByTestId("cukii-crumbs")).not.toBeInTheDocument();
   });
 });

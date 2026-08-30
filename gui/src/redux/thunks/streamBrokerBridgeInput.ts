@@ -6,6 +6,7 @@ import {
   abortStream,
   errorToolCall,
   setActive,
+  setBridgeWait,
   setContextPercentage,
   setInactive,
   setInlineErrorMessage,
@@ -15,6 +16,13 @@ import {
   updateToolCallOutput,
 } from "../slices/sessionSlice";
 import { RootState, ThunkApiType } from "../store";
+
+type CukiiBridgeMessage = ChatMessage & {
+  cukiiBridgeWait?: {
+    condition: string;
+    deadline?: string;
+  };
+};
 
 type RaceResult<T> =
   | { kind: "value"; value: IteratorResult<T, PromptLog | undefined> }
@@ -159,15 +167,20 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           break;
         }
 
-        const hasTerminalReceipt = result.value.value.some(
-          isBridgeTerminalMessage,
-        );
-        const visibleMessages = result.value.value.filter(
-          (message) => !isBridgeTerminalMessage(message),
-        );
-        if (visibleMessages.length) {
-          dispatch(streamUpdate(visibleMessages));
-          settleObservedToolCalls(visibleMessages, dispatch);
+        let hasTerminalReceipt = false;
+        for (const message of result.value.value as CukiiBridgeMessage[]) {
+          if (isBridgeTerminalMessage(message)) {
+            hasTerminalReceipt = true;
+            continue;
+          }
+          if (message.cukiiBridgeWait) {
+            // Positively identified native wait metadata, never a model string
+            // and never an inference from quiet stdout.
+            dispatch(setBridgeWait(message.cukiiBridgeWait));
+            continue;
+          }
+          dispatch(streamUpdate([message]));
+          settleObservedToolCalls([message], dispatch);
         }
         if (hasTerminalReceipt) {
           // Hide activity synchronously on the native terminal receipt. The

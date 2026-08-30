@@ -995,7 +995,18 @@ export function isBridgeTerminalChatMessage(
   return (message as BridgeTerminalChatMessage).cukiiTerminal === true;
 }
 
-function toChatMessages(event: BridgeEvent): ChatMessage[] {
+/** Explicit bridge-only transport metadata, never text that a model can emit. */
+export type CukiiBridgeWait = {
+  condition: string;
+  deadline?: string;
+};
+
+export type CukiiBridgeChatMessage = ChatMessage & {
+  cukiiBridgeWait?: CukiiBridgeWait;
+  cukiiTerminal?: true;
+};
+
+export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
   switch (event.kind) {
     case "text":
       return [{ role: "assistant", content: event.text }];
@@ -1027,6 +1038,22 @@ function toChatMessages(event: BridgeEvent): ChatMessage[] {
           cukiiToolError: event.isError,
         },
       ] as unknown as ChatMessage[];
+    case "wait":
+      return [
+        {
+          role: "thinking",
+          content: "",
+          cukiiBridgeWait: {
+            condition: event.condition,
+            deadline:
+              event.durationSeconds === undefined
+                ? undefined
+                : new Date(
+                    Date.now() + event.durationSeconds * 1_000,
+                  ).toISOString(),
+          },
+        },
+      ] as CukiiBridgeChatMessage[];
     case "error":
       return [{ role: "assistant", content: `\n\n⚠️ ${event.text}\n` }];
     case "complete":
@@ -1035,7 +1062,7 @@ function toChatMessages(event: BridgeEvent): ChatMessage[] {
       // before waiting for a tardy native process close.
       return [
         { role: "assistant", content: "", cukiiTerminal: true },
-      ] as BridgeTerminalChatMessage[];
+      ] as CukiiBridgeChatMessage[];
   }
 }
 

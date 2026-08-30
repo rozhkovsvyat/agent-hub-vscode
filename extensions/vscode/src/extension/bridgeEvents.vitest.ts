@@ -139,6 +139,71 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("помечает только доказуемый standalone sleep как ожидание", () => {
+    const { events } = collect("codex-thread", [
+      '{"type":"item.started","item":{"id":"sleep_1","type":"command_execution","command":"sleep 12","status":"in_progress"}}',
+    ]);
+
+    expect(events).toEqual([
+      {
+        kind: "toolStart",
+        id: "sleep_1",
+        name: "Shell",
+        args: JSON.stringify({ command: "sleep 12" }),
+      },
+      {
+        kind: "wait",
+        condition: "Sleeping for 12 seconds",
+        durationSeconds: 12,
+      },
+    ]);
+  });
+
+  it("recognizes explicit PowerShell Start-Sleep but not prose or compound commands", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"I will wait for the result."},{"type":"tool_use","id":"one","name":"Bash","input":{"command":"echo wait && sleep 5"}},{"type":"tool_use","id":"two","name":"Bash","input":{"command":"Start-Sleep -Seconds 7"}},{"type":"tool_use","id":"three","name":"Read","input":{"file_path":"wait.md"}}]}}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "text", text: "I will wait for the result." },
+      {
+        kind: "toolStart",
+        id: "one",
+        name: "Bash",
+        args: JSON.stringify({ command: "echo wait && sleep 5" }),
+      },
+      {
+        kind: "toolStart",
+        id: "two",
+        name: "Bash",
+        args: JSON.stringify({ command: "Start-Sleep -Seconds 7" }),
+      },
+      {
+        kind: "wait",
+        condition: "Sleeping for 7 seconds",
+        durationSeconds: 7,
+      },
+      {
+        kind: "toolStart",
+        id: "three",
+        name: "Read",
+        args: JSON.stringify({ file_path: "wait.md" }),
+      },
+    ]);
+  });
+
+  it("recognizes a standalone Start-Sleep behind the native pwsh wrapper", () => {
+    const { events } = collect("codex-thread", [
+      '{"type":"item.started","item":{"id":"sleep_2","type":"command_execution","command":"pwsh -NoProfile -Command \\"Start-Sleep -Seconds 3\\"","status":"in_progress"}}',
+    ]);
+
+    expect(events.at(-1)).toEqual({
+      kind: "wait",
+      condition: "Sleeping for 3 seconds",
+      durationSeconds: 3,
+    });
+  });
+
   it("разбирает живой kimi stream-json (NDJSON в стиле OpenAI)", () => {
     const { events, parser } = collect("kimi-ndjson", KIMI_LINES);
     expect(parser.sawStructuredOutput).toBe(true);

@@ -60,7 +60,10 @@ import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
-import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
+import {
+  CukiiStreamingToolbar,
+  CukiiWaitingReceipt,
+} from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
@@ -134,6 +137,7 @@ export function Chat() {
   const hasPendingPermission = useAppSelector(
     (state) => Object.keys(state.session.pendingClaudePermissions).length > 0,
   );
+  const bridgeWait = useAppSelector((state) => state.session.bridgeWait);
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -580,15 +584,19 @@ export function Chat() {
           </>
         )}
         <InlineErrorMessage />
-        {isStreaming && !isInEdit && (
-          <div
-            className="cukii-spinner-row"
-            data-testid="cukii-spinner-row"
-            data-cukii-active={activeTimelineToolId ? undefined : "true"}
-          >
-            <CukiiStreamingToolbar active={!activeTimelineToolId} />
-          </div>
-        )}
+        {isStreaming &&
+          !isInEdit &&
+          (bridgeWait ? (
+            <CukiiWaitingReceipt wait={bridgeWait} />
+          ) : (
+            <div
+              className="cukii-spinner-row"
+              data-testid="cukii-spinner-row"
+              data-cukii-active={activeTimelineToolId ? undefined : "true"}
+            >
+              <CukiiStreamingToolbar active={!activeTimelineToolId} />
+            </div>
+          ))}
       </StepsDiv>
       {!isSessionLoading && (
         <div className={"cukii-main-input-shell relative shrink-0"}>

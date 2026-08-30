@@ -9,8 +9,11 @@ import {
   newSession,
   sessionSlice,
   setActive,
+  setBridgeWait,
   setBrokerModel,
   setBrokerPermissionMode,
+  setInactive,
+  abortStream,
 } from "./sessionSlice";
 
 // Mock dependencies
@@ -577,5 +580,43 @@ describe("sessionSlice mid-task steer messages", () => {
     const next = sessionSlice.reducer(steered, newSession(undefined));
     expect(next.history).toHaveLength(0);
     expect(next.isStreaming).toBe(false);
+  });
+});
+
+describe("sessionSlice native bridge wait state", () => {
+  const receipt = {
+    condition: "Sleeping for 12 seconds",
+    deadline: "2026-08-31T12:00:12.000Z",
+  };
+
+  it("enters wait and clears it on the next factual activity", () => {
+    const waiting = sessionSlice.reducer(
+      sessionSlice.reducer(sessionSlice.getInitialState(), setActive()),
+      setBridgeWait(receipt),
+    );
+    expect(waiting.bridgeWait).toEqual(receipt);
+
+    const activeAgain = sessionSlice.reducer(
+      waiting,
+      streamUpdate([{ role: "thinking", content: "Working again" }]),
+    );
+    expect(activeAgain.bridgeWait).toBeUndefined();
+  });
+
+  it("never restores stale wait state after completion, interruption, or a new session", () => {
+    const waiting = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBridgeWait(receipt),
+    );
+
+    expect(
+      sessionSlice.reducer(waiting, setInactive()).bridgeWait,
+    ).toBeUndefined();
+    expect(
+      sessionSlice.reducer(waiting, abortStream()).bridgeWait,
+    ).toBeUndefined();
+    expect(
+      sessionSlice.reducer(waiting, newSession(undefined)).bridgeWait,
+    ).toBeUndefined();
   });
 });

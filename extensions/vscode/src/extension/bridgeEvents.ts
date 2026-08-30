@@ -22,7 +22,10 @@ export type BridgeEvent =
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
   | { kind: "error"; text: string }
   /** A vendor's explicit turn-complete receipt, never a guessed quiet gap. */
-  | { kind: "complete" };
+  | { kind: "complete" }
+  /** Explicit native command wait; never inferred from missing output. */
+  | { kind: "wait"; condition: string; durationSeconds?: number }
+  | { kind: "error"; text: string };
 
 export type BridgeFormat =
   | "anthropic-envelope"
@@ -49,6 +52,63 @@ function asText(value: unknown): string {
     return "";
   }
   return JSON.stringify(value);
+}
+
+/**
+ * The loader must not guess from quiet stdout: a long command can still be
+ * doing useful work. We only recognise a shell tool whose *entire* command is
+ * a known sleep primitive. Compound commands are deliberately excluded: on a
+ * tool-start event there is no proof that their sleep phase is current yet.
+ */
+function explicitWaitForToolStart(
+  event: Extract<BridgeEvent, { kind: "toolStart" }>,
+): Extract<BridgeEvent, { kind: "wait" }> | undefined {
+  if (
+    !/(?:^|[_ -])(?:shell|bash|powershell|pwsh|terminal)(?:$|[_ -])/i.test(
+      event.name,
+    )
+  ) {
+    return undefined;
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(event.args);
+  } catch {
+    return undefined;
+  }
+  const command =
+    decoded && typeof decoded === "object" && "command" in decoded
+      ? (decoded as { command?: unknown }).command
+      : undefined;
+  if (typeof command !== "string") {
+    return undefined;
+  }
+
+  const standaloneCommand =
+    /^(?:powershell|pwsh)(?:\.exe)?\s+(?:-(?:noprofile|noninteractive|nologo)\s+)*(?:-command|-c)\s+["']?(.+?)["']?$/i.exec(
+      command.trim(),
+    )?.[1] ?? command.trim();
+  const match =
+    /^sleep\s+(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?$/i.exec(
+      standaloneCommand,
+    ) ??
+    /^start-sleep\s+(?:-seconds|-s)\s+(\d+(?:\.\d+)?)$/i.exec(
+      standaloneCommand,
+    );
+  if (!match) {
+    return undefined;
+  }
+
+  const durationSeconds = Number(match[1]);
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 0) {
+    return undefined;
+  }
+  return {
+    kind: "wait",
+    condition: `Sleeping for ${match[1]} seconds`,
+    durationSeconds,
+  };
 }
 
 /** claude `stream-json` и grok `streaming-messages-json` — один конверт. */
@@ -341,12 +401,19 @@ export class BridgeEventParser {
     } catch {
       return [];
     }
-    const events =
+    const parsed =
       this.format === "codex-thread"
         ? parseCodexThread(event)
         : this.format === "kimi-ndjson"
           ? parseKimiNdjson(event)
           : parseAnthropicEnvelope(event);
+    const events = parsed.flatMap((parsedEvent) => {
+      const wait =
+        parsedEvent.kind === "toolStart"
+          ? explicitWaitForToolStart(parsedEvent)
+          : undefined;
+      return wait ? [parsedEvent, wait] : [parsedEvent];
+    });
     // An init/schema-drift JSON object is not useful structured output. Keep
     // raw-stdout fallback alive until an event the UI can actually render.
     if (events.length) {

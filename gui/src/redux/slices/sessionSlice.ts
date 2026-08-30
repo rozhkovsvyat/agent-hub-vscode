@@ -216,6 +216,12 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   interrupted?: boolean;
 };
 
+/** An explicit native-worker pause, carried separately from chat text. */
+export type CukiiBridgeWait = {
+  condition: string;
+  deadline?: string;
+};
+
 type SessionState = {
   lastSessionId?: string;
   isSessionLoading: boolean;
@@ -224,6 +230,8 @@ type SessionState = {
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
   isCancelling?: boolean;
+  /** Ephemeral per-tab state; deliberately excluded from persisted Session. */
+  bridgeWait?: CukiiBridgeWait;
   title: string;
   titleManuallySet: boolean;
   revision: number;
@@ -270,6 +278,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   history: [],
   isStreaming: false,
   isCancelling: false,
+  bridgeWait: undefined,
   title: NEW_SESSION_TITLE,
   titleManuallySet: false,
   revision: 0,
@@ -320,6 +329,7 @@ export const sessionSlice = createSlice({
     },
     setActive: (state) => {
       state.isStreaming = true;
+      state.bridgeWait = undefined;
     },
     setIsGatheringContext: (state, { payload }: PayloadAction<boolean>) => {
       const curMessage = state.history.at(-1);
@@ -585,6 +595,7 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
       state.isCancelling = false;
+      state.bridgeWait = undefined;
     },
     setCancelling: (state, action: PayloadAction<boolean>) => {
       state.isCancelling = action.payload;
@@ -633,8 +644,20 @@ export const sessionSlice = createSlice({
       // or bridge error leaves isStreaming stuck to true.
       state.isStreaming = false;
       state.isCancelling = false;
+      state.bridgeWait = undefined;
+    },
+    setBridgeWait: (
+      state,
+      action: PayloadAction<CukiiBridgeWait | undefined>,
+    ) => {
+      state.bridgeWait = action.payload;
     },
     streamUpdate: (state, action: PayloadAction<ChatMessage[]>) => {
+      // Every actual bridge message proves the worker resumed. Silence is not
+      // an event and must leave the animated loader alone.
+      if (action.payload.length) {
+        state.bridgeWait = undefined;
+      }
       if (state.history.length) {
         for (const message of action.payload) {
           let lastItem = state.history[state.history.length - 1];
@@ -804,6 +827,7 @@ export const sessionSlice = createSlice({
 
       state.isStreaming = false;
       state.isCancelling = false;
+      state.bridgeWait = undefined;
       state.isSessionLoading = false;
       state.symbols = {};
 
@@ -1252,6 +1276,7 @@ export const {
   addHighlightedCode,
   addPromptCompletionPair,
   setActive,
+  setBridgeWait,
   submitEditorAndInitAtIndex,
   truncateHistoryToMessage,
   updateHistoryItemAtIndex,
