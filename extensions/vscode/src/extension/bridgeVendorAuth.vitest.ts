@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   accountLabelFromAuthMetadata,
   nativeCliCandidates,
+  probeSpec,
   notInstalledVendorStatus,
   notSupportedVendorStatus,
   classifyVendorAuthOutput,
@@ -101,6 +102,16 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("discovers Cursor from native Windows product locations before PATH", () => {
+    const candidates = nativeCliCandidates(
+      "cursor",
+      "C:\\Users\\owner",
+      "win32",
+      { LOCALAPPDATA: "C:\\Users\\owner\\AppData\\Local" },
+    );
+    expect(candidates.slice(0, 2)).toEqual([
+      "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.cmd",
+      "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
+    ]);
     expect(
       nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
     ).toContain(
@@ -108,14 +119,23 @@ describe("Cukii vendor CLI accounts", () => {
     );
     expect(
       nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
-    ).toContain(
-      "C:\\Program Files\\Cursor\\resources\\app\\bin\\agent.exe",
-    );
+    ).toContain("C:\\Program Files\\Cursor\\resources\\app\\bin\\agent.exe");
     expect(
       nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
-    ).not.toContain(
-      "agent",
-    );
+    ).not.toContain("agent");
+    expect(
+      probeSpec(
+        "cursor",
+        "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
+      ),
+    ).toMatchObject({
+      program: expect.stringMatching(/powershell\.exe$/i),
+      args: expect.arrayContaining([
+        "-File",
+        "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
+        "status",
+      ]),
+    });
   });
 
   it("uses the required disconnected, unavailable, and identity fallback copy", () => {
@@ -134,9 +154,14 @@ describe("Cukii vendor CLI accounts", () => {
       accountLabel: "Not configured / not yet supported",
       actions: [],
     });
-    for (
-      const vendor of ["claude", "codex", "grok", "cursor", "kimi", "qwen"] as const
-    ) {
+    for (const vendor of [
+      "claude",
+      "codex",
+      "grok",
+      "cursor",
+      "kimi",
+      "qwen",
+    ] as const) {
       expect(classifyVendorAuthOutput(vendor, "not logged in")).toMatchObject({
         state: "disconnected",
         authenticated: false,
@@ -157,7 +182,9 @@ describe("Cukii vendor CLI accounts", () => {
     ];
     expect(labels).not.toContain("Account connected");
     expect(labels).not.toContain("Not signed in");
-    expect(classifyVendorAuthOutput("codex", "request timed out")).toMatchObject({
+    expect(
+      classifyVendorAuthOutput("codex", "request timed out"),
+    ).toMatchObject({
       state: "unknown",
       authenticated: false,
       accountLabel: "Account status unavailable",

@@ -266,6 +266,8 @@ export function nativeCliCandidates(
     ],
     grok: [paths.join(userHome, ".grok", "bin", "grok.exe")],
     cursor: [
+      paths.join(localAppData, "cursor-agent", "agent.cmd"),
+      paths.join(localAppData, "cursor-agent", "agent.ps1"),
       paths.join(userHome, ".cursor", "bin", "agent.exe"),
       paths.join(
         localAppData,
@@ -276,8 +278,22 @@ export function nativeCliCandidates(
         "bin",
         "agent.exe",
       ),
-      paths.join(localAppData, "Cursor", "resources", "app", "bin", "agent.exe"),
-      paths.join(programFiles, "Cursor", "resources", "app", "bin", "agent.exe"),
+      paths.join(
+        localAppData,
+        "Cursor",
+        "resources",
+        "app",
+        "bin",
+        "agent.exe",
+      ),
+      paths.join(
+        programFiles,
+        "Cursor",
+        "resources",
+        "app",
+        "bin",
+        "agent.exe",
+      ),
       paths.join(
         programFilesX86,
         "Cursor",
@@ -316,10 +332,38 @@ function quoteCmdToken(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-function probeSpec(vendor: VendorWithCli, executable: string): ProbeSpec {
+export function probeSpec(
+  vendor: VendorWithCli,
+  executable: string,
+): ProbeSpec {
   const args = WINDOWS_PROBE_ARGS[vendor];
   if (process.platform === "win32") {
-    const command = [quoteCmdToken(executable), ...args.map(quoteCmdToken)].join(" ");
+    if (executable.toLowerCase().endsWith(".ps1")) {
+      const powershell = path.win32.join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      return {
+        program: powershell,
+        args: [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          executable,
+          ...args,
+        ],
+      };
+    }
+    const command = [
+      quoteCmdToken(executable),
+      ...args.map(quoteCmdToken),
+    ].join(" ");
     return {
       program: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
       args: ["/d", "/s", "/c", `call ${command}`],
@@ -415,7 +459,9 @@ async function probeVendor(
       maxBuffer: 256 * 1024,
     });
     const output =
-      vendor === "qwen" ? JSON.stringify(metadata ?? {}) : `${stdout}\n${stderr}`;
+      vendor === "qwen"
+        ? JSON.stringify(metadata ?? {})
+        : `${stdout}\n${stderr}`;
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
@@ -424,7 +470,8 @@ async function probeVendor(
     };
   } catch (error) {
     if (isMissingCliError(error)) return notInstalledVendorStatus(vendor);
-    const output = vendor === "qwen" ? JSON.stringify(metadata ?? {}) : errorText(error);
+    const output =
+      vendor === "qwen" ? JSON.stringify(metadata ?? {}) : errorText(error);
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
@@ -438,16 +485,15 @@ async function probeVendor(
 // modal refresh launches fresh native probes. Kept explicit for the action path.
 export function clearBrokerVendorAccountCache(): void {}
 
-export async function listBrokerVendorAccounts(): Promise<BrokerVendorAuthStatus[]> {
+export async function listBrokerVendorAccounts(): Promise<
+  BrokerVendorAuthStatus[]
+> {
   const live = await Promise.all(
     (["claude", "codex", "grok", "cursor", "kimi", "qwen"] as const).map(
       probeVendor,
     ),
   );
-  return [
-    ...live,
-    notSupportedVendorStatus(),
-  ];
+  return [...live, notSupportedVendorStatus()];
 }
 
 export function vendorAuthTerminalCommand(
@@ -456,7 +502,10 @@ export function vendorAuthTerminalCommand(
 ): { name: string; command: string; followup?: string } | undefined {
   const install = action === "install";
   const commands: Partial<
-    Record<BrokerVendorId, { install?: string; login?: string; logout?: string }>
+    Record<
+      BrokerVendorId,
+      { install?: string; login?: string; logout?: string }
+    >
   > = {
     claude: {
       install: "npm install -g @anthropic-ai/claude-code@latest",
@@ -498,6 +547,8 @@ export function vendorAuthTerminalCommand(
   return {
     name: `Cukii · ${vendor} ${action}`,
     command,
-    ...(vendor === "kimi" && action === "logout" ? { followup: "/logout" } : {}),
+    ...(vendor === "kimi" && action === "logout"
+      ? { followup: "/logout" }
+      : {}),
   };
 }
