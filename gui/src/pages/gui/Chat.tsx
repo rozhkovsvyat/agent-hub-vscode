@@ -62,10 +62,7 @@ import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
 import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
-import {
-  getLastInProgressToolCallId,
-  getToolTimelineClass,
-} from "./timelineUtils";
+import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -86,15 +83,6 @@ function assistantHasVisibleText(item: ChatHistoryItemWithMessageId): boolean {
   );
 }
 
-function isLastAgentTurn(
-  visibleHistory: ChatHistoryItemWithMessageId[],
-  index: number,
-): boolean {
-  return visibleHistory
-    .slice(index + 1)
-    .every((entry) => entry.message.role === "tool");
-}
-
 const StepsDiv = styled.div`
   position: relative;
   background-color: transparent;
@@ -111,6 +99,14 @@ const StepsDiv = styled.div`
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
+
+function hasEscapeOwningOverlay(): boolean {
+  return Boolean(
+    document.querySelector(
+      '[role="menu"], [role="dialog"], [role="listbox"], .tippy-box',
+    ),
+  );
+}
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
@@ -176,11 +172,14 @@ export function Chat() {
       if (
         e.key === "Escape" &&
         isStreaming &&
+        !e.repeat &&
+        !e.isComposing &&
         !e.defaultPrevented &&
         !e.metaKey &&
         !e.ctrlKey &&
         !e.altKey &&
-        !e.shiftKey
+        !e.shiftKey &&
+        !hasEscapeOwningOverlay()
       ) {
         e.preventDefault();
         void dispatch(cancelStream());
@@ -327,16 +326,13 @@ export function Chat() {
     () => findLatestSummaryIndex(history),
     [history],
   );
+  const activeTimelineToolId = useMemo(
+    () => getActiveTimelineToolId(history),
+    [history],
+  );
 
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
     const transcriptHistory = history.slice(transcriptStart);
-    const visibleHistory = transcriptHistory.filter(
-      (item) => item.message.role !== "system",
-    );
-    const visibleIndexById = new Map(
-      visibleHistory.map((entry, index) => [entry.message.id, index]),
-    );
-
     return transcriptHistory.flatMap((item, relativeIndex): JSX.Element[] => {
       const historyIndex = transcriptStart + relativeIndex;
       const {
@@ -351,14 +347,8 @@ export function Chat() {
         return [];
       }
 
-      const visibleIndex = visibleIndexById.get(message.id) ?? -1;
       const isBeforeLatestSummary =
         latestSummaryIndex !== -1 && historyIndex < latestSummaryIndex;
-      const isLiveTurn =
-        isStreaming && isLastAgentTurn(visibleHistory, visibleIndex);
-      const lastInProgressToolCallId = isLiveTurn
-        ? getLastInProgressToolCallId(toolCallStates)
-        : undefined;
       const errorBoundary = (content: ReactNode) => (
         <ErrorBoundary
           FallbackComponent={fallbackRender}
@@ -417,9 +407,7 @@ export function Chat() {
         const thinkingRows: JSX.Element[] = [
           <div
             key={message.id}
-            className={`cukii-timeline-item cukii-timeline-event shrink-0 ${
-              isLiveTurn && inProgress ? "cukii-timeline-current" : ""
-            } ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+            className={`cukii-timeline-item cukii-timeline-event shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
           >
             {errorBoundary(thinkingBody)}
           </div>,
@@ -456,11 +444,7 @@ export function Chat() {
           rows.push(
             <div
               key={`${message.id}-text`}
-              className={`cukii-timeline-item cukii-timeline-event shrink-0 ${
-                isLiveTurn && !lastInProgressToolCallId
-                  ? "cukii-timeline-current"
-                  : ""
-              } ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              className={`cukii-timeline-item cukii-timeline-event shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
             >
               {errorBoundary(
                 <div className="thread-message">
@@ -480,8 +464,14 @@ export function Chat() {
           rows.push(
             <div
               key={toolCallState.toolCallId}
+              data-cukii-active={
+                toolCallState.toolCallId === activeTimelineToolId
+                  ? "true"
+                  : undefined
+              }
               className={`cukii-timeline-item shrink-0 ${getToolTimelineClass(
                 toolCallState.status,
+                toolCallState.toolCallId === activeTimelineToolId,
               )} ${isBeforeLatestSummary ? "opacity-50" : ""}`}
             >
               {errorBoundary(
@@ -526,6 +516,7 @@ export function Chat() {
     history,
     isLastUserInput,
     isStreaming,
+    activeTimelineToolId,
     latestSummaryIndex,
     sendInput,
     transcriptStart,
@@ -578,8 +569,12 @@ export function Chat() {
         )}
         <InlineErrorMessage />
         {isStreaming && !isInEdit && (
-          <div className="cukii-spinner-row" data-testid="cukii-spinner-row">
-            <CukiiStreamingToolbar active={isStreaming} />
+          <div
+            className="cukii-spinner-row"
+            data-testid="cukii-spinner-row"
+            data-cukii-active={activeTimelineToolId ? undefined : "true"}
+          >
+            <CukiiStreamingToolbar active={!activeTimelineToolId} />
           </div>
         )}
       </StepsDiv>

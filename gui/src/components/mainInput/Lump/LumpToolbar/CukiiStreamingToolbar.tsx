@@ -8,6 +8,7 @@ import { CukiiCrumbs } from "../../../cukii/CukiiCrumbs";
  */
 export function CukiiStreamingToolbar({ active = true }: { active?: boolean }) {
   const phrase = useThinkingPhrase(active);
+  const announcement = `${phrase}..`;
 
   return (
     <div
@@ -16,7 +17,20 @@ export function CukiiStreamingToolbar({ active = true }: { active?: boolean }) {
     >
       <div className="cukii-thinking-row min-w-0">
         <CukiiCrumbs active={active} />
-        <span className="cukii-thinking-text truncate">{phrase}..</span>
+        <span className="cukii-thinking-text" aria-hidden="true">
+          {announcement.split("").map((character, index) => (
+            <span
+              className="cukii-thinking-character"
+              key={`${phrase}-${index}`}
+              style={{ animationDelay: `${index * 18}ms` }}
+            >
+              {character}
+            </span>
+          ))}
+        </span>
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </span>
       </div>
     </div>
   );

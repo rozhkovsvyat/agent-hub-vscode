@@ -636,7 +636,9 @@ function InputToolbar(props: InputToolbarProps) {
             <Button
               variant={props.isMainInput ? "primary" : "secondary"}
               size="sm"
-              className="cukii-submit-button cukii-ui-button"
+              className={`cukii-submit-button cukii-ui-button ${
+                showStop ? "cukii-submit-button--stop" : ""
+              }`}
               data-testid="submit-input-button"
               aria-label={showStop ? "Stop response" : "Send message"}
               onClick={(event) => {

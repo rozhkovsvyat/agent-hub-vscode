@@ -50,8 +50,8 @@ describe("CukiiSessionNavigator Claude parity", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("menuitem", { name: "Rename session" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("menuitem", { name: "Rename session" }),
+    ).toBeNull();
     expect(
       screen.getByRole("menuitem", { name: "Delete session" }),
     ).toBeInTheDocument();
@@ -126,7 +126,7 @@ describe("CukiiSessionNavigator Claude parity", () => {
     });
   });
 
-  it("persists sidebar rename through cukii/renameSession", async () => {
+  it("persists pencil rename and updates the existing sidebar row without a reload", async () => {
     const messenger = new MockIdeMessenger();
     const renameSpy = vi.fn().mockResolvedValue({ ok: true });
     messenger.responseHandlers["cukii/renameSession"] = renameSpy;
@@ -140,19 +140,14 @@ describe("CukiiSessionNavigator Claude parity", () => {
     ];
     messenger.responses["cukii/listOpenChatPanels"] = [];
 
-    vi.stubGlobal(
-      "prompt",
-      vi.fn(() => "Manual title"),
-    );
-
     await renderWithProviders(<CukiiSessionNavigator />, {
       mockIdeMessenger: messenger,
     });
 
-    fireEvent.contextMenu(await screen.findByTitle("Old title"));
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Rename session" }),
-    );
+    fireEvent.click(await screen.findByLabelText("Rename Old title"));
+    const input = await screen.findByLabelText("Rename Old title");
+    fireEvent.change(input, { target: { value: "Manual title" } });
+    fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() =>
       expect(renameSpy).toHaveBeenCalledWith({
@@ -160,6 +155,8 @@ describe("CukiiSessionNavigator Claude parity", () => {
         title: "Manual title",
       }),
     );
+    expect(await screen.findByTitle("Manual title")).toBeInTheDocument();
+    expect(screen.queryAllByTitle("Manual title")).toHaveLength(1);
   });
 
   it("does nothing when sidebar rename is cancelled or empty", async () => {
@@ -176,15 +173,31 @@ describe("CukiiSessionNavigator Claude parity", () => {
     ];
     messenger.responses["cukii/listOpenChatPanels"] = [];
 
-    vi.stubGlobal(
-      "prompt",
-      vi.fn(() => "   "),
-    );
-
     await renderWithProviders(<CukiiSessionNavigator />, {
       mockIdeMessenger: messenger,
     });
     fireEvent.click(await screen.findByLabelText("Rename Keep me"));
+    const input = await screen.findByLabelText("Rename Keep me");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(renameSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the edit open and shows an honest error if persistence fails", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/renameSession"] = vi
+      .fn()
+      .mockResolvedValue({ ok: false });
+    messenger.responses["history/list"] = [
+      { sessionId: "session", title: "Old title", dateCreated: "2026-08-27T12:00:00Z", workspaceDirectory: "D:/Brain/vault" },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    await renderWithProviders(<CukiiSessionNavigator />, { mockIdeMessenger: messenger });
+    fireEvent.click(await screen.findByLabelText("Rename Old title"));
+    const input = await screen.findByLabelText("Rename Old title");
+    fireEvent.change(input, { target: { value: "New title" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not rename session");
+    expect(screen.getByDisplayValue("New title")).toBeInTheDocument();
   });
 });

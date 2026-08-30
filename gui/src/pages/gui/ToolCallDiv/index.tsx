@@ -15,6 +15,7 @@ import {
   isCursorBridgeToolCall,
 } from "./CursorBridgeProgress";
 import { getIconByName } from "./utils";
+import { CukiiCommandCard } from "./CukiiCommandCard";
 
 interface SingleToolCallDivProps {
   toolCallState: ToolCallState;
@@ -88,16 +89,13 @@ export function SingleToolCallDiv({
     );
   }
 
-  // Broker/Grok shell tools used to render as nested UnifiedTerminal
-  // chrome (chevron + "Terminal" + Run) and collapse the feed. Claude
-  // shows one caption row per command on the timeline; match that.
+  // Shell execution is a transcript of its own: retain a compact timeline
+  // footprint, but expose an accessible IN/OUT card rather than a naked path.
   if (functionName === BuiltInToolNames.RunTerminalCommand) {
     return (
-      <SimpleToolCallUI
-        tool={tool}
+      <CukiiCommandCard
+        command={toolCallState.parsedArgs?.command ?? ""}
         toolCallState={toolCallState}
-        historyIndex={historyIndex}
-        showLeadingIcon={false}
       />
     );
   }

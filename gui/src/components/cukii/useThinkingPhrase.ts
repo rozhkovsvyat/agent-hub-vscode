@@ -3,16 +3,15 @@ import { useEffect, useState } from "react";
 /**
  * Печатающаяся фраза живого лоадера стрима.
  *
- * Thinking-надпись этим хуком больше не пользуется: она должна говорить
- * «Thinking», а не притворяться вторым лоадером.
+ * Это именно Cukii-голос, а не заимствованный набор фраз другого продукта.
  */
 export const CUKII_THINKING_PHRASES = [
-  "Thinking",
+  "Crumbing through it",
   "Combulating",
-  "Sussing",
+  "Cookie calculus",
   "Sifting crumbs",
-  "Warming context",
-  "Checking the bite",
+  "Baking context",
+  "Tasting the trail",
 ];
 
 // Фраза должна успеть прочитаться: держим её ~4 s, как у Claude Code, —

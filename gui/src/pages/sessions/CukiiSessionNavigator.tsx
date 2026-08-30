@@ -287,6 +287,9 @@ export default function CukiiSessionNavigator() {
   const [assignNewGroupTo, setAssignNewGroupTo] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [context, setContext] = useState<ContextState>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
@@ -382,15 +385,42 @@ export default function CukiiSessionNavigator() {
       sessionId: session.sessionId,
       title: session.title,
     });
+  const beginRename = (session: CukiiNavigatorSession) => {
+    setRenameError(null);
+    setRenameDraft(session.title);
+    setEditingSessionId(session.sessionId);
+  };
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameDraft("");
+  };
   const renameSession = async (session: CukiiNavigatorSession) => {
-    const title = window.prompt("Rename session", session.title)?.trim();
-    if (!title || title === session.title) return;
+    const title = renameDraft.trim();
+    if (!title || title === session.title) {
+      cancelRename();
+      return;
+    }
     const result = await messenger.request("cukii/renameSession", {
       sessionId: session.sessionId,
       title,
     });
-    if (result.status !== "success" || !result.content.ok) return;
-    await load();
+    if (result.status !== "success" || !result.content.ok) {
+      setRenameError("Could not rename session. Try again.");
+      return;
+    }
+    // Update both sources immediately. The extension also broadcasts the same
+    // title to an already-open chat panel, so neither side needs a reload.
+    setSessions((items) =>
+      items.map((item) =>
+        item.sessionId === session.sessionId ? { ...item, title } : item,
+      ),
+    );
+    setOpenPanels((panels) =>
+      panels.map((panel) =>
+        panel.sessionId === session.sessionId ? { ...panel, title } : panel,
+      ),
+    );
+    cancelRename();
   };
   const deleteSession = async (session: CukiiNavigatorSession) => {
     await messenger.request("history/delete", { id: session.sessionId });
@@ -502,9 +532,28 @@ export default function CukiiSessionNavigator() {
                     title={session.title}
                     onClick={() => void openSession(session)}
                   >
-                    <SessionTitle>
-                      {session.title || "New session"}
-                    </SessionTitle>
+                    {editingSessionId === session.sessionId ? (
+                      <input
+                        aria-label={`Rename ${session.title}`}
+                        autoFocus
+                        value={renameDraft}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        onBlur={() => void renameSession(session)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void renameSession(session);
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                      />
+                    ) : (
+                      <SessionTitle>{session.title || "New session"}</SessionTitle>
+                    )}
                     <Age>{formatSessionAge(session.dateCreated)}</Age>
                   </SessionButton>
                   <RowActions>
@@ -514,7 +563,7 @@ export default function CukiiSessionNavigator() {
                       title="Rename session"
                       onClick={(event) => {
                         event.stopPropagation();
-                        void renameSession(session);
+                        beginRename(session);
                       }}
                     >
                       <PencilIcon width={15} height={15} />
@@ -558,16 +607,6 @@ export default function CukiiSessionNavigator() {
             }
           >
             Resume session
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem
-            className="cukii-session-menu-button"
-            role="menuitem"
-            onClick={() =>
-              void renameSession(context.session).then(() => setContext(null))
-            }
-          >
-            Rename session
           </MenuItem>
           <MenuItem
             className="cukii-session-menu-button"
@@ -616,6 +655,11 @@ export default function CukiiSessionNavigator() {
             Remove from group
           </MenuItem>
         </ContextMenu>
+      )}
+      {renameError && (
+        <div role="alert" className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]">
+          {renameError}
+        </div>
       )}
     </Shell>
   );
