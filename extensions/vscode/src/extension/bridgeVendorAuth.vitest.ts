@@ -85,6 +85,21 @@ describe("Cukii vendor CLI accounts", () => {
     ).toBe("Account acct_42");
   });
 
+  it("never derives Grok or Kimi identity from CLI output", () => {
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com as stdout-leak@example.test",
+      ).accountLabel,
+    ).toBe("Logged in • Identity unavailable");
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code source=oauth stdout-leak@example.test",
+      ).accountLabel,
+    ).toBe("Logged in • Identity unavailable");
+  });
+
   it("discovers Cursor from native Windows product locations before PATH", () => {
     expect(
       nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),

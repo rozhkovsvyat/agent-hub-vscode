@@ -24,23 +24,27 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [notice, setNotice] = useState<string>();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
+  const queuedRefreshSilent = useRef(true);
+  const refreshGeneration = useRef(0);
 
   const refresh = useCallback(
     async (silent = false) => {
+      const generation = ++refreshGeneration.current;
+      if (!silent) setLoading(true);
       if (refreshInFlight.current) {
-        // A terminal auth action can complete while a periodic probe is still
-        // running. Queue one fresh probe instead of leaving the old result on
-        // screen.
+        // A later intent invalidates the pending result before it resolves.
+        // Once it completes, launch a fresh native probe for the latest intent.
         refreshQueued.current = true;
+        queuedRefreshSilent.current = silent;
         return;
       }
       refreshInFlight.current = true;
-      if (!silent) setLoading(true);
       try {
         const response = await ideMessenger.request(
           "cukii/listVendorAccounts",
           undefined,
         );
+        if (generation !== refreshGeneration.current) return;
         if (response.status === "success") {
           setAccounts(response.content);
         } else if (!silent) {
@@ -48,10 +52,11 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         }
       } finally {
         refreshInFlight.current = false;
-        if (!silent) setLoading(false);
         if (refreshQueued.current) {
           refreshQueued.current = false;
-          void refresh(true);
+          void refresh(queuedRefreshSilent.current);
+        } else if (generation === refreshGeneration.current) {
+          setLoading(false);
         }
       }
     },

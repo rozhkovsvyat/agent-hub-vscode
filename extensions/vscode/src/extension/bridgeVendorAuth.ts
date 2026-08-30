@@ -152,7 +152,6 @@ export function classifyVendorAuthOutput(
 ): AuthClassification {
   const text = stdout.trim();
   const accountLabel = identityLabel ?? unknownIdentityLabel();
-  const exposedEmail = text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => ({
     state: "connected" as const,
     authenticated: true,
@@ -192,12 +191,12 @@ export function classifyVendorAuthOutput(
   }
   if (vendor === "codex") {
     return /logged in/i.test(text)
-      ? connected(exposedEmail ?? accountLabel, ["logout"])
+      ? connected(accountLabel, ["logout"])
       : unknown();
   }
   if (vendor === "grok") {
     return /logged in with/i.test(text)
-      ? connected(exposedEmail ?? accountLabel, ["logout"])
+      ? connected(accountLabel, ["logout"])
       : unknown();
   }
   if (vendor === "cursor") {
@@ -216,11 +215,11 @@ export function classifyVendorAuthOutput(
   }
   if (vendor === "kimi") {
     return /source=oauth/i.test(text)
-      ? connected(exposedEmail ?? accountLabel, ["logout"])
+      ? connected(accountLabel, ["logout"])
       : unknown();
   }
   return qwenOauthSelected(parseJson(text))
-    ? connected(exposedEmail ?? accountLabel, [])
+    ? connected(accountLabel, [])
     : disconnected();
 }
 
