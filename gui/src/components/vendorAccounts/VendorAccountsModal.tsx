@@ -14,7 +14,7 @@ type RefreshReason = "initial" | "user" | "action" | "poll";
 
 const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   install: "Install",
-  login: "Log in",
+  login: "Sign in",
   logout: "Log out",
 };
 
@@ -39,6 +39,9 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
 
   const refresh = useCallback(
     async (reason: RefreshReason, queuedGeneration?: number) => {
+      // Native auth can change as soon as the terminal opens. No refresh is
+      // allowed to paint the preceding snapshot before the action completes.
+      if (authActionOpening.current) return;
       const explicit = reason === "user" || reason === "action";
       const generation =
         queuedGeneration ??
@@ -46,7 +49,6 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           ? ++explicitRefreshGeneration.current
           : explicitRefreshGeneration.current);
       if (reason === "user") setLoading(true);
-      if (reason === "poll" && authActionOpening.current) return;
       if (refreshInFlight.current) {
         if (reason === "poll") {
           // Coalesce any number of timer ticks behind the current native probe.
@@ -122,7 +124,9 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         action,
       });
       setActionNotice(
-        response.status === "success" ? response.content.message : response.error,
+        response.status === "success"
+          ? response.content.message
+          : response.error,
       );
     } finally {
       authActionOpening.current = false;
@@ -154,6 +158,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
               aria-label="Refresh vendor accounts"
               title="Refresh status"
               className="cukii-account-icon-button"
+              disabled={busy !== undefined}
               onClick={() => void refresh("user")}
             >
               <ArrowPathIcon className={loading ? "animate-spin" : ""} />

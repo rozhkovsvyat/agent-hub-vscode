@@ -8,10 +8,15 @@ import {
   notSupportedVendorStatus,
   classifyVendorAuthOutput,
   isMissingCliError,
+  localKimiCredentials,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
 
 describe("Cukii vendor CLI accounts", () => {
+  function jwt(payload: Record<string, unknown>): string {
+    return `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
+  }
+
   it("classifies real CLI status shapes without a decorative local flag", () => {
     expect(
       classifyVendorAuthOutput(
@@ -78,7 +83,7 @@ describe("Cukii vendor CLI accounts", () => {
         credentials: [
           {
             access_token:
-              "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6Im93bmVyQGV4YW1wbGUuY29tIn0.",
+              "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6Im93bmVyQGV4YW1wbGUuY29tIn0.signature",
           },
         ],
       }),
@@ -88,7 +93,7 @@ describe("Cukii vendor CLI accounts", () => {
         credentials: [
           {
             access_token:
-              "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhYmNkZWZnaGlqa2xtbm9wcXJzdHV2In0.",
+              "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhYmNkZWZnaGlqa2xtbm9wcXJzdHV2In0.signature",
           },
         ],
       }),
@@ -99,10 +104,61 @@ describe("Cukii vendor CLI accounts", () => {
       }),
     ).toBeUndefined();
     expect(
+      accountLabelFromAuthMetadata("kimi", {
+        credentials: [
+          {
+            access_token:
+              "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6Im1hbGZvcm1lZEBleGFtcGxlLnRlc3QifQ.",
+          },
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      accountLabelFromAuthMetadata("kimi", {
+        credentials: [
+          { access_token: jwt({ email: "expired@example.test", exp: 0 }) },
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      accountLabelFromAuthMetadata("kimi", {
+        credentials: [
+          {
+            access_token: jwt({
+              email: "future@example.test",
+              nbf: 4_102_444_800,
+            }),
+          },
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
       accountLabelFromAuthMetadata("codex", {
         tokens: { account_id: "acct_42" },
       }),
     ).toBe("Account acct_42");
+  });
+
+  it("skips malformed Kimi credential files and prefers the newest valid one", () => {
+    const directory = "C:\\Users\\owner\\.kimi-code\\credentials";
+    const credentials = localKimiCredentials(directory, {
+      readdirSync: () => ["broken.json", "current.json"],
+      statSync: (file) => ({
+        isFile: () => true,
+        size: 100,
+        mtimeMs: file.endsWith("current.json") ? 200 : 100,
+      }),
+      readFileSync: (file) => {
+        if (String(file).endsWith("broken.json")) return "{";
+        return JSON.stringify({
+          access_token: jwt({ email: "current@example.test" }),
+        });
+      },
+    });
+
+    expect(accountLabelFromAuthMetadata("kimi", { credentials })).toBe(
+      "current@example.test",
+    );
   });
 
   it("never derives Grok or Kimi identity from CLI output", () => {
@@ -184,7 +240,7 @@ describe("Cukii vendor CLI accounts", () => {
       expect(classifyVendorAuthOutput(vendor, "not logged in")).toMatchObject({
         state: "disconnected",
         authenticated: false,
-        accountLabel: "Not logged in",
+        accountLabel: "Not signed in",
         actions: ["login"],
       });
     }
@@ -200,7 +256,7 @@ describe("Cukii vendor CLI accounts", () => {
       classifyVendorAuthOutput("qwen", "not logged in").accountLabel,
     ];
     expect(labels).not.toContain("Account connected");
-    expect(labels).not.toContain("Not signed in");
+    expect(labels).not.toContain("Not logged in");
     expect(
       classifyVendorAuthOutput("codex", "request timed out"),
     ).toMatchObject({

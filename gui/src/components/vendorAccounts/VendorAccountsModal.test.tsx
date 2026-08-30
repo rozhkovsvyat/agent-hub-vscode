@@ -69,16 +69,17 @@ describe("VendorAccountsModal", () => {
     const ideMessenger = new MockIdeMessenger();
     const originalRequest = ideMessenger.request.bind(ideMessenger);
     let accountRequests = 0;
-    vi.spyOn(ideMessenger, "request").mockImplementation(
-      (async (messageType, data) => {
-        if (messageType === "cukii/listVendorAccounts") {
-          accountRequests += 1;
-          const response = accountRequests === 1 ? first.promise : second.promise;
-          return (await response) as never;
-        }
-        return originalRequest(messageType, data);
-      }) as typeof ideMessenger.request,
-    );
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType,
+      data,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        accountRequests += 1;
+        const response = accountRequests === 1 ? first.promise : second.promise;
+        return (await response) as never;
+      }
+      return originalRequest(messageType, data);
+    }) as typeof ideMessenger.request);
     const { user } = await renderWithProviders(
       <VendorAccountsModal onClose={vi.fn()} />,
       { mockIdeMessenger: ideMessenger },
@@ -115,16 +116,17 @@ describe("VendorAccountsModal", () => {
     const ideMessenger = new MockIdeMessenger();
     const originalRequest = ideMessenger.request.bind(ideMessenger);
     let accountRequests = 0;
-    vi.spyOn(ideMessenger, "request").mockImplementation(
-      (async (messageType, data) => {
-        if (messageType === "cukii/listVendorAccounts") {
-          accountRequests += 1;
-          const response = accountRequests === 1 ? first.promise : second.promise;
-          return (await response) as never;
-        }
-        return originalRequest(messageType, data);
-      }) as typeof ideMessenger.request,
-    );
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType,
+      data,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        accountRequests += 1;
+        const response = accountRequests === 1 ? first.promise : second.promise;
+        return (await response) as never;
+      }
+      return originalRequest(messageType, data);
+    }) as typeof ideMessenger.request);
     const { user } = await renderWithProviders(
       <VendorAccountsModal onClose={vi.fn()} />,
       { mockIdeMessenger: ideMessenger },
@@ -146,7 +148,11 @@ describe("VendorAccountsModal", () => {
     expect(document.body.textContent).not.toContain("stale@example.test");
 
     await act(async () => {
-      second.resolve({ status: "error", error: "newest refresh error", done: true });
+      second.resolve({
+        status: "error",
+        error: "newest refresh error",
+        done: true,
+      });
     });
     await getElementByText("newest refresh error");
     expect(document.body.textContent).not.toContain("stale@example.test");
@@ -220,6 +226,91 @@ describe("VendorAccountsModal", () => {
     expect(document.body.textContent).not.toContain("stale@example.test");
   });
 
+  it("blocks a manual refresh while opening terminal auth, then refreshes after it completes", async () => {
+    const action = deferred<unknown>();
+    const refreshedList = deferred<unknown>();
+    const ideMessenger = new MockIdeMessenger();
+    const originalRequest = ideMessenger.request.bind(ideMessenger);
+    let accountRequests = 0;
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType,
+      data,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        accountRequests += 1;
+        if (accountRequests === 1) return originalRequest(messageType, data);
+        return (await refreshedList.promise) as never;
+      }
+      if (messageType === "cukii/runVendorAuthAction") {
+        return (await action.promise) as never;
+      }
+      return originalRequest(messageType, data);
+    }) as typeof ideMessenger.request);
+    const { user } = await renderWithProviders(
+      <VendorAccountsModal onClose={vi.fn()} />,
+      { mockIdeMessenger: ideMessenger },
+    );
+    await getElementByText("Log out");
+    await user.click(await getElementByText("Log out"));
+
+    const refresh = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Refresh vendor accounts"]',
+    );
+    expect(refresh).toBeDisabled();
+    await user.click(refresh!);
+    expect(accountRequests).toBe(1);
+
+    await act(async () => {
+      action.resolve({
+        status: "success",
+        content: {
+          opened: true,
+          message: "Authentication flow opened in the integrated terminal.",
+        },
+        done: true,
+      });
+    });
+    await waitFor(() => expect(accountRequests).toBe(2));
+    await act(async () => {
+      refreshedList.resolve({
+        status: "success",
+        content: [connectedAccount("fresh-after-action@example.test")],
+        done: true,
+      });
+    });
+    await getElementByText("fresh-after-action@example.test");
+  });
+
+  it("uses the exact sign-in and unavailable copy", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "codex",
+        label: "OpenAI",
+        installed: true,
+        authenticated: false,
+        state: "disconnected",
+        accountLabel: "Not signed in",
+        actions: ["login"],
+      },
+      {
+        id: "cursor",
+        label: "Cursor",
+        installed: false,
+        authenticated: false,
+        state: "unavailable",
+        accountLabel: "Not installed",
+        actions: ["install"],
+      },
+    ];
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+    await getElementByText("Sign in");
+    await getElementByText("Not signed in");
+    await getElementByText("Not installed");
+  });
+
   it("coalesces timer ticks without starving a slow current probe", async () => {
     vi.useFakeTimers();
     let unmount: (() => void) | undefined;
@@ -229,17 +320,18 @@ describe("VendorAccountsModal", () => {
       const ideMessenger = new MockIdeMessenger();
       const originalRequest = ideMessenger.request.bind(ideMessenger);
       let accountRequests = 0;
-      vi.spyOn(ideMessenger, "request").mockImplementation(
-        (async (messageType, data) => {
-          if (messageType === "cukii/listVendorAccounts") {
-            accountRequests += 1;
-            const response =
-              accountRequests === 1 ? first.promise : second.promise;
-            return (await response) as never;
-          }
-          return originalRequest(messageType, data);
-        }) as typeof ideMessenger.request,
-      );
+      vi.spyOn(ideMessenger, "request").mockImplementation((async (
+        messageType,
+        data,
+      ) => {
+        if (messageType === "cukii/listVendorAccounts") {
+          accountRequests += 1;
+          const response =
+            accountRequests === 1 ? first.promise : second.promise;
+          return (await response) as never;
+        }
+        return originalRequest(messageType, data);
+      }) as typeof ideMessenger.request);
       ({ unmount } = await renderWithProviders(
         <VendorAccountsModal onClose={vi.fn()} />,
         { mockIdeMessenger: ideMessenger },
@@ -293,14 +385,15 @@ describe("VendorAccountsModal", () => {
       { status: "error", error: "refresh failed", done: true },
       success,
     ];
-    vi.spyOn(ideMessenger, "request").mockImplementation(
-      (async (messageType, data) => {
-        if (messageType === "cukii/listVendorAccounts") {
-          return listResponses.shift() as never;
-        }
-        return originalRequest(messageType, data);
-      }) as typeof ideMessenger.request,
-    );
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType,
+      data,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        return listResponses.shift() as never;
+      }
+      return originalRequest(messageType, data);
+    }) as typeof ideMessenger.request);
     const { user } = await renderWithProviders(
       <VendorAccountsModal onClose={vi.fn()} />,
       { mockIdeMessenger: ideMessenger },

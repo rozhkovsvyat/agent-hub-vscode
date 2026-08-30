@@ -11,6 +11,9 @@ import * as path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+// A short allowance avoids hiding a valid local session when the workstation
+// clock is only slightly behind the identity provider.
+const JWT_CLOCK_SKEW_SECONDS = 60;
 
 type VendorWithCli = Exclude<BrokerVendorId, "deepseek">;
 type ProbeSpec = { program: string; args: string[] };
@@ -77,16 +80,38 @@ function stringAt(record: unknown, ...keys: string[]): string | undefined {
 
 function decodeJwtPayload(token: unknown): Record<string, unknown> | undefined {
   if (typeof token !== "string") return undefined;
-  const payload = token.split(".")[1];
-  if (!payload) return undefined;
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => !part)) return undefined;
+  const [header, payload] = parts;
   try {
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(
-      normalized.length + ((4 - (normalized.length % 4)) % 4),
-      "=",
-    );
-    const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-    return isRecord(parsed) ? parsed : undefined;
+    const decodePart = (part: string): unknown => {
+      const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = normalized.padEnd(
+        normalized.length + ((4 - (normalized.length % 4)) % 4),
+        "=",
+      );
+      return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+    };
+    if (!isRecord(decodePart(header))) return undefined;
+    const parsed = decodePart(payload);
+    if (!isRecord(parsed)) return undefined;
+    const exp = parsed.exp;
+    const nbf = parsed.nbf;
+    if (
+      (exp !== undefined &&
+        (typeof exp !== "number" || !Number.isFinite(exp))) ||
+      (nbf !== undefined && (typeof nbf !== "number" || !Number.isFinite(nbf)))
+    ) {
+      return undefined;
+    }
+    const now = Date.now() / 1_000;
+    if (
+      (typeof exp === "number" && exp < now - JWT_CLOCK_SKEW_SECONDS) ||
+      (typeof nbf === "number" && nbf > now + JWT_CLOCK_SKEW_SECONDS)
+    ) {
+      return undefined;
+    }
+    return parsed;
   } catch {
     return undefined;
   }
@@ -208,7 +233,7 @@ export function classifyVendorAuthOutput(
   const disconnected = (): AuthClassification => ({
     state: "disconnected",
     authenticated: false,
-    accountLabel: "Not logged in",
+    accountLabel: "Not signed in",
     actions: ["login"],
   });
   const unknown = (): AuthClassification => ({
@@ -416,6 +441,67 @@ export function probeSpec(
   return { program: executable, args };
 }
 
+type KimiCredential = {
+  access_token?: string;
+  id_token?: string;
+};
+type KimiCredentialFileSystem = {
+  readdirSync(directory: string): string[];
+  statSync(file: string): {
+    isFile(): boolean;
+    size: number;
+    mtimeMs: number;
+  };
+  readFileSync(file: string, encoding: BufferEncoding): string;
+};
+
+/**
+ * Credentials are ordered newest-first, then by filename, so a current
+ * credential wins predictably. A bad sibling must not hide a usable one.
+ */
+export function localKimiCredentials(
+  credentialsDirectory: string,
+  fileSystem: KimiCredentialFileSystem = fs,
+): KimiCredential[] {
+  try {
+    return fileSystem
+      .readdirSync(credentialsDirectory)
+      .filter((entry) => entry.endsWith(".json"))
+      .sort()
+      .flatMap((entry) => {
+        try {
+          const credentialFile = path.join(credentialsDirectory, entry);
+          const stat = fileSystem.statSync(credentialFile);
+          // Native credential files are small. Never load an unexpected bulk file.
+          if (!stat.isFile() || stat.size > 64 * 1024) return [];
+          const credential = JSON.parse(
+            fileSystem.readFileSync(credentialFile, "utf8"),
+          );
+          const accessToken = stringAt(credential, "access_token");
+          const idToken = stringAt(credential, "id_token");
+          if (!accessToken && !idToken) return [];
+          return [
+            {
+              credential: { access_token: accessToken, id_token: idToken },
+              modifiedAt: stat.mtimeMs,
+              filename: entry,
+            },
+          ];
+        } catch {
+          return [];
+        }
+      })
+      .sort(
+        (left, right) =>
+          right.modifiedAt - left.modifiedAt ||
+          left.filename.localeCompare(right.filename),
+      )
+      .map(({ credential }) => credential);
+  } catch {
+    return [];
+  }
+}
+
 function localMetadata(vendor: VendorWithCli): unknown {
   const userHome = os.homedir();
   const file =
@@ -433,26 +519,7 @@ function localMetadata(vendor: VendorWithCli): unknown {
         ".kimi-code",
         "credentials",
       );
-      const credentials = fs
-        .readdirSync(credentialsDirectory)
-        .filter((entry) => entry.endsWith(".json"))
-        .sort()
-        .flatMap((entry) => {
-          const credentialFile = path.join(credentialsDirectory, entry);
-          const stat = fs.statSync(credentialFile);
-          // Native credential files are small. Never load an unexpected bulk file.
-          if (!stat.isFile() || stat.size > 64 * 1024) return [];
-          const credential = JSON.parse(
-            fs.readFileSync(credentialFile, "utf8"),
-          );
-          return [
-            {
-              access_token: stringAt(credential, "access_token"),
-              id_token: stringAt(credential, "id_token"),
-            },
-          ];
-        });
-      return { credentials };
+      return { credentials: localKimiCredentials(credentialsDirectory) };
     }
     if (!file || !fs.existsSync(file)) return undefined;
     const raw = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
