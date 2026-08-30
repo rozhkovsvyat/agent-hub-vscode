@@ -12,7 +12,7 @@ describe("isRestorableCukiiSession", () => {
       workspaceDirectory: "D:/Brain/vault",
       history: [
         {
-          message: { id: "user-1", role: "user", content: "Continue" },
+          message: { id: "user-1", role: "user", content: "Continue" } as any,
           contextItems: [],
         },
       ],

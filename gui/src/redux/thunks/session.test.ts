@@ -14,11 +14,16 @@ describe("saveCurrentSession title lifecycle", () => {
     state.session.title = NEW_SESSION_TITLE;
     state.session.history = [
       {
-        message: { role: "user", content: "Fix the Windows session lifecycle" },
+        message: {
+          id: "user-1",
+          role: "user",
+          content: "Fix the Windows session lifecycle",
+        },
         contextItems: [],
       },
       {
         message: {
+          id: "assistant-1",
           role: "assistant",
           content: "I will inspect the lifecycle.",
         },
@@ -33,12 +38,14 @@ describe("saveCurrentSession title lifecycle", () => {
       "Windows session lifecycle";
     const saveSpy = vi.spyOn(store.mockIdeMessenger, "request");
 
-    await store.dispatch(
+    await (store.dispatch as any)(
       saveCurrentSession({ openNewSession: false, generateTitle: true }),
     );
 
-    expect(store.getState().session.title).toBe("Windows session lifecycle");
-    expect(store.getState().session.title).not.toContain("Opus 5");
+    expect((store.getState() as any).session.title).toBe(
+      "Windows session lifecycle",
+    );
+    expect((store.getState() as any).session.title).not.toContain("Opus 5");
     expect(saveSpy).toHaveBeenCalledWith(
       "history/save",
       expect.objectContaining({
@@ -56,7 +63,11 @@ describe("saveCurrentSession title lifecycle", () => {
     state.session.titleManuallySet = true;
     state.session.history = [
       {
-        message: { role: "user", content: "A later prompt must not rename me" },
+        message: {
+          id: "user-1",
+          role: "user",
+          content: "A later prompt must not rename me",
+        },
         contextItems: [],
       },
     ];
@@ -65,14 +76,16 @@ describe("saveCurrentSession title lifecycle", () => {
       "Incorrect generated title";
     const requestSpy = vi.spyOn(store.mockIdeMessenger, "request");
 
-    await store.dispatch(
+    await (store.dispatch as any)(
       saveCurrentSession({ openNewSession: false, generateTitle: true }),
     );
-    await store.dispatch(
+    await (store.dispatch as any)(
       saveCurrentSession({ openNewSession: false, generateTitle: true }),
     );
 
-    expect(store.getState().session.title).toBe("Release notes review");
+    expect((store.getState() as any).session.title).toBe(
+      "Release notes review",
+    );
     expect(requestSpy).not.toHaveBeenCalledWith(
       "chatDescriber/describe",
       expect.anything(),
@@ -96,11 +109,15 @@ describe("saveCurrentSession title lifecycle", () => {
     state.session.title = NEW_SESSION_TITLE;
     state.session.history = [
       {
-        message: { role: "user", content: "Initial request" },
+        message: { id: "user-1", role: "user", content: "Initial request" },
         contextItems: [],
       },
       {
-        message: { role: "assistant", content: "Assistant reply" },
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Assistant reply",
+        },
         contextItems: [],
       },
     ];
@@ -129,20 +146,20 @@ describe("saveCurrentSession title lifecycle", () => {
     });
     const saveSpy = vi.spyOn(store.mockIdeMessenger, "request");
 
-    const saving = store.dispatch(
+    const saving = (store.dispatch as any)(
       saveCurrentSession({ openNewSession: false, generateTitle: true }),
     );
     await describeStarted;
-    store.dispatch(updateSessionTitle("Manual rename wins"));
-    store.dispatch(setTitleManuallySet(true));
+    (store.dispatch as any)(updateSessionTitle("Manual rename wins"));
+    (store.dispatch as any)(setTitleManuallySet(true));
     if (!resolveDescribe) {
       throw new Error("The deferred describer did not start");
     }
     resolveDescribe("Late automatic title");
     await saving;
 
-    expect(store.getState().session.title).toBe("Manual rename wins");
-    expect(store.getState().session.titleManuallySet).toBe(true);
+    expect((store.getState() as any).session.title).toBe("Manual rename wins");
+    expect((store.getState() as any).session.titleManuallySet).toBe(true);
     expect(saveSpy).toHaveBeenCalledWith(
       "history/save",
       expect.objectContaining({
