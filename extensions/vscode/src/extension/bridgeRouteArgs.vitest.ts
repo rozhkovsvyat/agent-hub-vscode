@@ -17,11 +17,9 @@ vi.mock("./permissionCapabilities", () => ({
 
 import {
   attachClaudePermissionTransport,
-  isInternalSteerRead,
   nativeDelegateHint,
   routeForModel,
 } from "./bridgeChatAdapter";
-import { createBridgeSteerSpool } from "./bridgeSteer";
 import { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { resolveBridgeControls } from "./bridgeControls";
 import {
@@ -35,7 +33,7 @@ afterEach(() => {
 });
 
 describe("native bridge argv", () => {
-  it("keeps bridge transcript files in Scratch and suppresses only the exact steering read", () => {
+  it("keeps bridge transcript files in Scratch", () => {
     const prompt = "x".repeat(25_000);
     const route = routeForModel(
       "kimi-k3",
@@ -49,53 +47,6 @@ describe("native bridge argv", () => {
     );
     expect(route.args).toContain("D:\\Scratch\\cukii-bridge");
     if (route.promptFile) promptFiles.push(route.promptFile);
-
-    const spool = createBridgeSteerSpool();
-    try {
-      const caseVariant = spool.path.replace(
-        "D:\\Scratch\\cukii-steer",
-        "d:\\sCrAtCh\\CuKiI-sTeEr",
-      );
-      expect(
-        isInternalSteerRead(
-          {
-            kind: "toolStart",
-            id: "internal-read",
-            name: "Read",
-            args: JSON.stringify({ file_path: caseVariant }),
-          },
-          spool.path,
-        ),
-      ).toBe(true);
-      expect(
-        isInternalSteerRead(
-          {
-            kind: "toolStart",
-            id: "ordinary-read",
-            name: "Read",
-            args: JSON.stringify({
-              file_path: "D:\\Scratch\\cukii-steer\\notes.md",
-            }),
-          },
-          spool.path,
-        ),
-      ).toBe(false);
-      expect(
-        isInternalSteerRead(
-          {
-            kind: "toolStart",
-            id: "unregistered-read",
-            name: "Read",
-            args: JSON.stringify({
-              file_path: "D:\\Scratch\\cukii-steer\\cukii-steer-fake.txt",
-            }),
-          },
-          "D:\\Scratch\\cukii-steer\\cukii-steer-fake.txt",
-        ),
-      ).toBe(false);
-    } finally {
-      spool.cleanup();
-    }
   });
 
   it("adds the real Claude MCP permission transport without leaking its token", async () => {

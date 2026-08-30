@@ -23,13 +23,7 @@ import {
   registerNestedWorkerFollower,
   type NestedWorkerFollower,
 } from "./nestedWorkerFollow";
-import {
-  BridgeSteeringController,
-  createBridgeSteerSpool,
-  isActiveBridgeSteerSpool,
-  steerPromptInstruction,
-  type BridgeSteerSpool,
-} from "./bridgeSteer";
+import { BridgeSteeringController } from "./bridgeSteer";
 import {
   bridgeControlPrompt,
   bridgeControlSummary,
@@ -49,7 +43,11 @@ import {
   ClaudePermissionBroker,
   type ClaudePermissionRequest,
 } from "./claudePermissionBroker";
-import { bridgeScratchRoot, createBridgeScratchPath } from "./bridgeScratch";
+import {
+  bridgeScratchRoot,
+  createBridgeScratchPath,
+  createKimiPromptScratchFile,
+} from "./bridgeScratch";
 
 export type BridgeRoute = {
   label: string;
@@ -58,6 +56,7 @@ export type BridgeRoute = {
   /** Формат stdout нативного CLI: от него зависит разбор в события. */
   format: BridgeFormat;
   promptFile?: string;
+  cleanupPromptFile?: () => void;
   logFile: string;
   /**
    * CLI получает промпт аргументом и stdin не читает (kimi -p). Писать туда весь
@@ -244,7 +243,6 @@ function buildPrompt(
   brokerModel: BrokerModel,
   brokerSubagent: BrokerSubagent,
   cwd: string,
-  steerPath: string | undefined,
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode,
 ): string {
@@ -296,7 +294,6 @@ function buildPrompt(
     ...(isClaudeNativeModel(brokerModel)
       ? [
           "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
-          ...(steerPath ? [steerPromptInstruction(steerPath)] : []),
         ]
       : []),
     "",
@@ -660,10 +657,12 @@ export function routeForModel(
       Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
     let promptArg = prompt;
     let kimiPromptFile: string | undefined;
+    let cleanupPromptFile: (() => void) | undefined;
     const extraArgs: string[] = [];
     if (!inline) {
-      kimiPromptFile = createBridgeScratchPath("cukii-kimi-prompt");
-      fs.writeFileSync(kimiPromptFile, prompt, "utf8");
+      const ownedPrompt = createKimiPromptScratchFile(prompt);
+      kimiPromptFile = ownedPrompt.path;
+      cleanupPromptFile = ownedPrompt.cleanup;
       promptArg =
         "Your full broker instructions and the conversation transcript are in " +
         `the file \"${kimiPromptFile}\". Read that file first, then act on the ` +
@@ -687,6 +686,7 @@ export function routeForModel(
       ],
       format: "kimi-ndjson",
       promptFile: kimiPromptFile,
+      cleanupPromptFile,
       logFile,
       noStdin: true,
     };
@@ -758,10 +758,12 @@ export function routeForModel(
         Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
       let promptArg = prompt;
       let kimiPromptFile: string | undefined;
+      let cleanupPromptFile: (() => void) | undefined;
       const extraArgs: string[] = [];
       if (!inline) {
-        kimiPromptFile = createBridgeScratchPath("cukii-kimi-prompt");
-        fs.writeFileSync(kimiPromptFile, prompt, "utf8");
+        const ownedPrompt = createKimiPromptScratchFile(prompt);
+        kimiPromptFile = ownedPrompt.path;
+        cleanupPromptFile = ownedPrompt.cleanup;
         promptArg =
           "Your full broker instructions and the conversation transcript are in " +
           `the file "${kimiPromptFile}". Read that file first, then act on the ` +
@@ -784,6 +786,7 @@ export function routeForModel(
         ],
         format: "kimi-ndjson",
         promptFile: kimiPromptFile,
+        cleanupPromptFile,
         logFile,
         noStdin: true,
       };
@@ -934,42 +937,6 @@ export function isBridgeTerminalChatMessage(
   return (message as BridgeTerminalChatMessage).cukiiTerminal === true;
 }
 
-function normalizeWindowsPath(candidate: string): string {
-  return path.resolve(candidate).replaceAll("/", "\\").toLowerCase();
-}
-
-/**
- * The Claude steering file is a transport implementation detail. Suppress only
- * a Read whose declared path is exactly the active spool; all ordinary Read
- * actions remain visible.
- */
-export function isInternalSteerRead(
-  event: Extract<BridgeEvent, { kind: "toolStart" }>,
-  steerPath: string | undefined,
-): boolean {
-  if (
-    !steerPath ||
-    !isActiveBridgeSteerSpool(steerPath) ||
-    !/^read(?:_file|file)?$/i.test(event.name)
-  ) {
-    return false;
-  }
-  let args: unknown;
-  try {
-    args = JSON.parse(event.args);
-  } catch {
-    return false;
-  }
-  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
-  const input = args as Record<string, unknown>;
-  const candidate =
-    input.file_path ?? input.filePath ?? input.filepath ?? input.path;
-  return (
-    typeof candidate === "string" &&
-    normalizeWindowsPath(candidate) === normalizeWindowsPath(steerPath)
-  );
-}
-
 function toChatMessages(event: BridgeEvent): ChatMessage[] {
   switch (event.kind) {
     case "text":
@@ -1029,22 +996,7 @@ export async function* streamBridgeChat(
 ): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
-  // Claude's documented stream-json session needs an out-of-band follow-up
-  // channel between tool calls. Keep that transient file under Scratch, never
-  // under a vault or %TEMP%, and own its lifecycle at the generator boundary.
-  const steerSpool = isClaudeNativeModel(args.brokerModel)
-    ? createBridgeSteerSpool()
-    : undefined;
-  try {
-    return yield* streamBridgeChatWithSteer(
-      args,
-      cwd,
-      steerSpool,
-      permissionTransport,
-    );
-  } finally {
-    steerSpool?.cleanup();
-  }
+  return yield* streamBridgeChatWithSteer(args, cwd, permissionTransport);
 }
 
 async function* streamBridgeChatWithSteer(
@@ -1059,7 +1011,6 @@ async function* streamBridgeChatWithSteer(
     brokerPermissionMode: CukiiPermissionMode;
   },
   cwd: string,
-  steerSpool: BridgeSteerSpool | undefined,
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
   // The model picker fills this cache in the normal path. A restored saved
@@ -1076,7 +1027,6 @@ async function* streamBridgeChatWithSteer(
     args.brokerModel,
     args.brokerSubagent,
     cwd,
-    steerSpool?.path,
     controls,
     args.brokerPermissionMode,
   );
@@ -1127,9 +1077,9 @@ async function* streamBridgeChatWithSteer(
   try {
     command = ensureProgramAvailable(route);
   } catch (err) {
-    if (route.promptFile) {
+    route.cleanupPromptFile?.();
+    if (route.promptFile && !route.cleanupPromptFile)
       fs.rmSync(route.promptFile, { force: true });
-    }
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
@@ -1150,18 +1100,12 @@ async function* streamBridgeChatWithSteer(
   let cancelled = false;
   let done = false;
   const queue: BridgeEvent[] = [];
-  const internalSteerToolIds = new Set<string>();
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "toolStart") {
-        if (isInternalSteerRead(event, steerSpool?.path)) {
-          internalSteerToolIds.add(event.id);
-          continue;
-        }
         permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
       }
       if (event.kind === "toolResult") {
-        if (internalSteerToolIds.delete(event.id)) continue;
         permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
       }
       queue.push(event);
@@ -1195,17 +1139,17 @@ async function* streamBridgeChatWithSteer(
     if (route.stdinFormat === "claude-stream-json") {
       permissionTransport?.steering?.attachWriter(async (text) => {
         if (
-          !steerSpool ||
           child.exitCode !== null ||
           child.signalCode !== null ||
           permissionTransport?.abortSignal?.aborted
         ) {
           return false;
         }
-        // Follow-up stdin frames are not a stable Claude CLI contract. The
-        // prompt instructs the same native session to read this dedicated
-        // Scratch spool after each tool instead.
-        return steerSpool.append(text);
+        return new Promise<boolean>((resolve) => {
+          child.stdin.write(claudeStreamingInput(text), (error) =>
+            resolve(!error),
+          );
+        });
       });
     }
   }
@@ -1319,9 +1263,9 @@ async function* streamBridgeChatWithSteer(
     closeFollowers(followers);
     child.stdin.end();
     await terminateBridgeChild(child);
-    if (route.promptFile) {
+    route.cleanupPromptFile?.();
+    if (route.promptFile && !route.cleanupPromptFile)
       fs.rmSync(route.promptFile, { force: true });
-    }
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);

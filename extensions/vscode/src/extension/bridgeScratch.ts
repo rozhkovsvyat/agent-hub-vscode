@@ -8,18 +8,21 @@ import { randomBytes } from "node:crypto";
  * directory where they become visible as unrelated timeline receipts.
  */
 export const CUKII_BRIDGE_SCRATCH_ROOT = "D:\\Scratch\\cukii-bridge";
-export const CUKII_STEER_SCRATCH_ROOT = "D:\\Scratch\\cukii-steer";
-/** An isolated fixed root used only by the extension contract tests. */
-export const CUKII_STEER_TEST_SCRATCH_ROOT =
-  "D:\\Scratch\\cukii-steer-test-only";
+const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{16,96}$/;
 
-const OPAQUE_NONCE = /^[A-Za-z0-9_-]{16,96}$/;
-
-export type OwnedSteerScratchFile = {
+export type OwnedBridgeScratchFile = {
   path: string;
-  append: (text: string) => boolean;
   cleanup: () => void;
 };
+
+let raceHook:
+  | ((phase: "after-create" | "before-cleanup", path: string) => void)
+  | undefined;
+
+/** Test-only deterministic race injection; production has no configurable path. */
+export function setBridgeScratchRaceHookForTest(hook: typeof raceHook): void {
+  raceHook = hook;
+}
 
 function windowsPathKey(candidate: string): string {
   return path.resolve(candidate).replaceAll("/", "\\").toLowerCase();
@@ -31,9 +34,9 @@ function isWithin(child: string, root: string): boolean {
   return childKey === rootKey || childKey.startsWith(`${rootKey}\\`);
 }
 
-function assertOpaqueNonce(nonce: string): void {
-  if (!OPAQUE_NONCE.test(nonce)) {
-    throw new Error("Bridge steering nonce must be an opaque safe token.");
+function assertOpaqueToken(token: string): void {
+  if (!OPAQUE_TOKEN.test(token)) {
+    throw new Error("Bridge Scratch token must be an opaque safe token.");
   }
 }
 
@@ -86,80 +89,66 @@ function lstatOwnedFile(
   }
 }
 
-function createOwnedSteerScratchFile(
-  root: string,
-  nonce = randomBytes(24).toString("base64url"),
-): OwnedSteerScratchFile {
-  assertOpaqueNonce(nonce);
-  const canonicalRoot = createDirectoryWithoutReparse(root);
-  const filePath = path.join(canonicalRoot, `cukii-steer-${nonce}.txt`);
-  if (!isWithin(filePath, canonicalRoot)) {
-    throw new Error("Bridge steering file escaped its Scratch root.");
+export function createKimiPromptScratchFile(
+  prompt: string,
+): OwnedBridgeScratchFile {
+  const canonicalRoot = createDirectoryWithoutReparse(
+    CUKII_BRIDGE_SCRATCH_ROOT,
+  );
+  const token = randomBytes(24).toString("base64url");
+  assertOpaqueToken(token);
+  const ownerDirectory = path.join(canonicalRoot, `owner-${token}`);
+  fs.mkdirSync(ownerDirectory, { mode: 0o700 });
+  const ownerStats = fs.lstatSync(ownerDirectory);
+  if (ownerStats.isSymbolicLink() || !ownerStats.isDirectory()) {
+    throw new Error("Unsafe owned Kimi Scratch directory.");
   }
-
-  // wx refuses an attacker-provided pre-existing file. Validate the descriptor
-  // afterwards so a race cannot turn append/cleanup into an operation on a
-  // replacement object.
+  const canonicalOwnerDirectory = fs.realpathSync.native(ownerDirectory);
+  if (!isWithin(canonicalOwnerDirectory, canonicalRoot)) {
+    throw new Error("Kimi Scratch directory escaped its root.");
+  }
+  const filePath = path.join(
+    canonicalOwnerDirectory,
+    `kimi-prompt-${token}.txt`,
+  );
   const descriptor = fs.openSync(filePath, "wx", 0o600);
   let expected: { dev: number; ino: number };
   try {
     const stats = fs.fstatSync(descriptor);
     expected = { dev: stats.dev, ino: stats.ino };
+    fs.writeFileSync(descriptor, prompt, "utf8");
   } finally {
     fs.closeSync(descriptor);
   }
-  if (!lstatOwnedFile(filePath, canonicalRoot, expected)) {
-    throw new Error("Bridge steering file failed ownership validation.");
+  if (!lstatOwnedFile(filePath, canonicalOwnerDirectory, expected)) {
+    throw new Error("Kimi Scratch file failed ownership validation.");
   }
+  raceHook?.("after-create", filePath);
 
   return {
     path: filePath,
-    append(text: string): boolean {
-      if (!lstatOwnedFile(filePath, canonicalRoot, expected)) return false;
-      let handle: number | undefined;
-      try {
-        // Opening before writing and comparing fstat identity prevents a
-        // substituted symlink/reparse target from receiving user content.
-        handle = fs.openSync(filePath, "a");
-        const stats = fs.fstatSync(handle);
-        if (stats.dev !== expected.dev || stats.ino !== expected.ino) {
-          return false;
-        }
-        fs.writeFileSync(handle, text, "utf8");
-        return true;
-      } catch {
-        return false;
-      } finally {
-        if (handle !== undefined) fs.closeSync(handle);
-      }
-    },
     cleanup(): void {
-      if (!lstatOwnedFile(filePath, canonicalRoot, expected)) return;
+      raceHook?.("before-cleanup", filePath);
+      if (!lstatOwnedFile(filePath, canonicalOwnerDirectory, expected)) {
+        console.warn(
+          `[Cukii] refusing to unlink unowned Kimi Scratch file: ${filePath}`,
+        );
+        return;
+      }
       try {
         fs.unlinkSync(filePath);
+        fs.rmdirSync(canonicalOwnerDirectory);
       } catch {
-        // Idempotent on normal completion, error and cancellation. A failed
-        // validation intentionally leaves a suspicious path untouched.
+        console.warn(
+          `[Cukii] Kimi Scratch cleanup left owned artifact: ${filePath}`,
+        );
       }
     },
   };
 }
 
-export function createProductionSteerScratchFile(): OwnedSteerScratchFile {
-  return createOwnedSteerScratchFile(CUKII_STEER_SCRATCH_ROOT);
-}
-
-/** Test-only fixed-root hook; it deliberately cannot select a production root. */
-export function createTestSteerScratchFile(
-  nonce: string,
-): OwnedSteerScratchFile {
-  return createOwnedSteerScratchFile(CUKII_STEER_TEST_SCRATCH_ROOT, nonce);
-}
-
 export function bridgeScratchRoot(): string {
-  const root = path.resolve(CUKII_BRIDGE_SCRATCH_ROOT);
-  fs.mkdirSync(root, { recursive: true });
-  return root;
+  return createDirectoryWithoutReparse(CUKII_BRIDGE_SCRATCH_ROOT);
 }
 
 export function createBridgeScratchPath(
@@ -171,8 +160,4 @@ export function createBridgeScratchPath(
     bridgeScratchRoot(),
     `${safePrefix}-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`,
   );
-}
-
-export function steerScratchRoot(): string {
-  return createDirectoryWithoutReparse(CUKII_STEER_SCRATCH_ROOT);
 }
