@@ -131,4 +131,61 @@ describe("streamBrokerBridgeInput controls", () => {
     await running;
     expect(store.getState().session.history).toHaveLength(0);
   });
+
+  it("keeps activity for assistant text but dismisses it on an explicit terminal receipt", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let nextCall = 0;
+    let emitTerminal!: (value: IteratorResult<any[], undefined>) => void;
+    const terminal = new Promise<IteratorResult<any[], undefined>>(
+      (resolve) => (emitTerminal = resolve),
+    );
+    const returned = vi.fn(async () => ({ done: true, value: undefined }));
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: async () => {
+        nextCall += 1;
+        if (nextCall === 1) {
+          return {
+            done: false,
+            value: [{ role: "assistant", content: "Final-looking text" }],
+          };
+        }
+        return terminal;
+      },
+      return: returned,
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "terminal-receipt",
+        title: "Terminal receipt",
+        workspaceDirectory: "D:/Scratch/cukii-interrupt-terminal-2.0.67",
+        history: [
+          {
+            message: { role: "user", content: "Start native bridge" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.history.at(-1)?.message.content).toBe(
+        "Final-looking text",
+      ),
+    );
+    expect(store.getState().session.isStreaming).toBe(true);
+    emitTerminal({
+      done: false,
+      value: [{ role: "assistant", content: "", cukiiTerminal: true }],
+    });
+    await running;
+
+    expect(store.getState().session.isStreaming).toBe(false);
+    expect(returned).toHaveBeenCalledTimes(1);
+  });
 });

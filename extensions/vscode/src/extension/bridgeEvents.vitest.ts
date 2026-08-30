@@ -76,6 +76,7 @@ describe("BridgeEventParser", () => {
         output: "File does not exist.",
         isError: true,
       },
+      { kind: "complete" },
     ]);
   });
 
@@ -134,6 +135,7 @@ describe("BridgeEventParser", () => {
         isError: false,
       },
       { kind: "text", text: "line-one" },
+      { kind: "complete" },
     ]);
   });
 
@@ -175,6 +177,24 @@ describe("BridgeEventParser", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(parser.push("совершенно обычный текст\n")).toEqual([]);
     expect(parser.sawStructuredOutput).toBe(false);
+  });
+
+  it("не считает обычный assistant text завершением turn", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    expect(
+      parser.push(
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working."}]}}\n',
+      ),
+    ).toEqual([{ kind: "text", text: "Working." }]);
+  });
+
+  it("возвращает terminal receipt из Claude result до закрытия процесса", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    expect(
+      parser.push(
+        '{"type":"result","subtype":"success","is_error":false,"result":"Done"}\n',
+      ),
+    ).toEqual([{ kind: "complete" }]);
   });
 
   it("не подавляет raw fallback от одного непонятного JSON-события", () => {

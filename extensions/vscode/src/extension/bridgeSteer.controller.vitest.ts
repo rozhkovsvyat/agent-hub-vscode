@@ -1,8 +1,33 @@
+import fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
-import { BridgeSteeringController } from "./bridgeSteer";
+import {
+  BridgeSteeringController,
+  CUKII_STEER_SCRATCH_ROOT,
+  createBridgeSteerSpool,
+} from "./bridgeSteer";
 
 describe("BridgeSteeringController", () => {
+  it.each(["success", "error", "interrupt"])(
+    "keeps the %s steering spool under Scratch and cleans its exact file",
+    async (terminalPath) => {
+      const spool = createBridgeSteerSpool(
+        `vitest-${terminalPath}-${Date.now()}`,
+      );
+      expect(spool.path.toLowerCase()).toContain(
+        CUKII_STEER_SCRATCH_ROOT.toLowerCase(),
+      );
+      await expect(spool.append("change direction")).resolves.toBe(true);
+      expect(fs.readFileSync(spool.path, "utf8")).toContain("USER:");
+
+      // The same idempotent operation runs from generator finally on normal
+      // completion, errors and cancellation.
+      spool.cleanup();
+      spool.cleanup();
+      expect(fs.existsSync(spool.path)).toBe(false);
+    },
+  );
+
   it("delivers a follow-up to the same Claude session before the next step", async () => {
     const order: string[] = ["tool-finished"];
     const controller = new BridgeSteeringController("session-1", true);

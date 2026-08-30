@@ -329,8 +329,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-main-input-shell .cukii-input-box:focus-within {
-  border-color: #E3A867 !important;
-  box-shadow: 0 0 0 1px #E3A867 !important;
+  border-color: #e3a867 !important;
+  box-shadow: 0 0 0 1px #e3a867 !important;
   transform: none;
 }
 
@@ -904,19 +904,19 @@ button.cukii-submit-button:hover {
    the stop-button contract. Ordinary send/disabled states remain untouched. */
 button.cukii-submit-button--stop,
 button.cukii-submit-button--stop:hover {
-  background: #E3A867 !important;
+  background: #e3a867 !important;
   color: #ffffff !important;
 }
 
 button.cukii-submit-button--stop:hover,
 button.cukii-submit-button--stop:focus-visible {
-  background: #C9873F !important;
-  box-shadow: 0 0 0 1px #C9873F !important;
+  background: #c9873f !important;
+  box-shadow: 0 0 0 1px #c9873f !important;
 }
 
 button.cukii-submit-button--stop:active {
-  background: #C9873F !important;
-  box-shadow: 0 0 0 1px #C9873F !important;
+  background: #c9873f !important;
+  box-shadow: 0 0 0 1px #c9873f !important;
 }
 
 .cukii-command-menu-item-active,
@@ -1059,7 +1059,13 @@ button.cukii-submit-button--stop:active {
   border-radius: 4px;
   background: var(--vscode-textCodeBlock-background, rgba(110, 118, 129, 0.15));
   color: var(--vscode-terminal-foreground, var(--vscode-foreground, #cccccc));
-  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(
+    --vscode-editor-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
   font-size: 12px;
   line-height: 18px;
   white-space: pre-wrap;
@@ -1208,7 +1214,8 @@ button.cukii-submit-button--stop:active {
   min-height: 0;
   align-items: flex-start;
   color: var(--vscode-foreground, #cccccc);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: normal;
@@ -1217,7 +1224,8 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-thinking-summary {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   letter-spacing: normal;
   line-height: 19.5px;
@@ -1239,11 +1247,11 @@ button.cukii-submit-button--stop:active {
   height: 15px;
   flex: 0 0 15px;
   overflow: visible;
-  color: #E3A867;
+  color: #e3a867;
 }
 
 .cukii-crumbs circle {
-  fill: #E3A867;
+  fill: #e3a867;
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -1278,12 +1286,10 @@ button.cukii-submit-button--stop:active {
   }
 }
 
-/* Turn-level "Interrupted" fact — Claude renders it as plain muted text,
-   not as a timeline event with a red dot. Align with the prose column. */
-.cukii-interrupted-fact {
-  position: relative;
-  display: block;
-  padding-left: 30px;
+/* A terminal cancellation stays in the normal timeline rail; no detached
+   footer/inset is allowed after the last receipt. */
+.cukii-timeline-interrupted {
+  color: var(--vscode-descriptionForeground, #979797);
 }
 
 /* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста.

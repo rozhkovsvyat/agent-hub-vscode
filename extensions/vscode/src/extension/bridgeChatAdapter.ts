@@ -23,7 +23,12 @@ import {
   registerNestedWorkerFollower,
   type NestedWorkerFollower,
 } from "./nestedWorkerFollow";
-import { BridgeSteeringController } from "./bridgeSteer";
+import {
+  BridgeSteeringController,
+  createBridgeSteerSpool,
+  steerPromptInstruction,
+  type BridgeSteerSpool,
+} from "./bridgeSteer";
 import {
   bridgeControlPrompt,
   bridgeControlSummary,
@@ -43,6 +48,7 @@ import {
   ClaudePermissionBroker,
   type ClaudePermissionRequest,
 } from "./claudePermissionBroker";
+import { bridgeScratchRoot, createBridgeScratchPath } from "./bridgeScratch";
 
 export type BridgeRoute = {
   label: string;
@@ -237,6 +243,7 @@ function buildPrompt(
   brokerModel: BrokerModel,
   brokerSubagent: BrokerSubagent,
   cwd: string,
+  steerPath: string | undefined,
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode,
 ): string {
@@ -288,6 +295,7 @@ function buildPrompt(
     ...(isClaudeNativeModel(brokerModel)
       ? [
           "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
+          ...(steerPath ? [steerPromptInstruction(steerPath)] : []),
         ]
       : []),
     "",
@@ -359,10 +367,7 @@ export function nativeDelegateHint(
 }
 
 function bridgeLogFile(model: BrokerModel): string {
-  return path.join(
-    os.tmpdir(),
-    `cukii-${model.replace(/[^a-z0-9._-]/gi, "-")}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
-  );
+  return createBridgeScratchPath(`cukii-${model}`, ".log");
 }
 
 // Anthropic documents this JSONL envelope for `-p --input-format stream-json`
@@ -591,10 +596,7 @@ export function routeForModel(
   }
   const nativeGrokModel = grokNativeModel(model);
   if (nativeGrokModel) {
-    const promptFile = path.join(
-      os.tmpdir(),
-      `cukii-grok-transcript-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-    );
+    const promptFile = createBridgeScratchPath("cukii-grok-transcript");
     fs.writeFileSync(promptFile, prompt, "utf8");
     let promptJson: string;
     try {
@@ -659,16 +661,13 @@ export function routeForModel(
     let kimiPromptFile: string | undefined;
     const extraArgs: string[] = [];
     if (!inline) {
-      kimiPromptFile = path.join(
-        os.tmpdir(),
-        `cukii-kimi-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-      );
+      kimiPromptFile = createBridgeScratchPath("cukii-kimi-prompt");
       fs.writeFileSync(kimiPromptFile, prompt, "utf8");
       promptArg =
         "Your full broker instructions and the conversation transcript are in " +
         `the file \"${kimiPromptFile}\". Read that file first, then act on the ` +
         "latest user message. Answer in the user's language.";
-      extraArgs.push("--add-dir", os.tmpdir());
+      extraArgs.push("--add-dir", bridgeScratchRoot());
     }
     const skillDirs = getKimiSkillDirs();
     return {
@@ -760,16 +759,13 @@ export function routeForModel(
       let kimiPromptFile: string | undefined;
       const extraArgs: string[] = [];
       if (!inline) {
-        kimiPromptFile = path.join(
-          os.tmpdir(),
-          `cukii-kimi-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-        );
+        kimiPromptFile = createBridgeScratchPath("cukii-kimi-prompt");
         fs.writeFileSync(kimiPromptFile, prompt, "utf8");
         promptArg =
           "Your full broker instructions and the conversation transcript are in " +
           `the file "${kimiPromptFile}". Read that file first, then act on the ` +
           "latest user message. Answer in the user's language.";
-        extraArgs.push("--add-dir", os.tmpdir());
+        extraArgs.push("--add-dir", bridgeScratchRoot());
       }
       const skillDirs = getKimiSkillDirs();
       return {
@@ -828,10 +824,7 @@ export function routeForModel(
         logFile,
       };
     case "grok-4-6":
-      const promptFile = path.join(
-        os.tmpdir(),
-        `cukii-grok-transcript-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-      );
+      const promptFile = createBridgeScratchPath("cukii-grok-transcript");
       fs.writeFileSync(promptFile, prompt, "utf8");
       let promptJson: string;
       try {
@@ -932,6 +925,44 @@ export function routeForModel(
  * внутри worker-а, поэтому GUI переводит его в состояние done и НИКОГДА не
  * исполняет повторно — это витрина чужой работы, а не запрос на подтверждение.
  */
+type BridgeTerminalChatMessage = ChatMessage & { cukiiTerminal?: true };
+
+export function isBridgeTerminalChatMessage(
+  message: ChatMessage,
+): message is BridgeTerminalChatMessage {
+  return (message as BridgeTerminalChatMessage).cukiiTerminal === true;
+}
+
+function normalizeWindowsPath(candidate: string): string {
+  return path.resolve(candidate).replaceAll("/", "\\").toLowerCase();
+}
+
+/**
+ * The Claude steering file is a transport implementation detail. Suppress only
+ * a Read whose declared path is exactly the active spool; all ordinary Read
+ * actions remain visible.
+ */
+export function isInternalSteerRead(
+  event: Extract<BridgeEvent, { kind: "toolStart" }>,
+  steerPath: string | undefined,
+): boolean {
+  if (!steerPath || !/^read(?:_file|file)?$/i.test(event.name)) return false;
+  let args: unknown;
+  try {
+    args = JSON.parse(event.args);
+  } catch {
+    return false;
+  }
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  const input = args as Record<string, unknown>;
+  const candidate =
+    input.file_path ?? input.filePath ?? input.filepath ?? input.path;
+  return (
+    typeof candidate === "string" &&
+    normalizeWindowsPath(candidate) === normalizeWindowsPath(steerPath)
+  );
+}
+
 function toChatMessages(event: BridgeEvent): ChatMessage[] {
   switch (event.kind) {
     case "text":
@@ -966,6 +997,13 @@ function toChatMessages(event: BridgeEvent): ChatMessage[] {
       ] as unknown as ChatMessage[];
     case "error":
       return [{ role: "assistant", content: `\n\n⚠️ ${event.text}\n` }];
+    case "complete":
+      // Keep terminal state on the stream transport rather than in transcript
+      // history. The GUI consumes this private marker and hides activity
+      // before waiting for a tardy native process close.
+      return [
+        { role: "assistant", content: "", cukiiTerminal: true },
+      ] as BridgeTerminalChatMessage[];
   }
 }
 
@@ -984,7 +1022,22 @@ export async function* streamBridgeChat(
 ): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
-  return yield* streamBridgeChatWithSteer(args, cwd, permissionTransport);
+  // Claude's documented stream-json session needs an out-of-band follow-up
+  // channel between tool calls. Keep that transient file under Scratch, never
+  // under a vault or %TEMP%, and own its lifecycle at the generator boundary.
+  const steerSpool = isClaudeNativeModel(args.brokerModel)
+    ? createBridgeSteerSpool()
+    : undefined;
+  try {
+    return yield* streamBridgeChatWithSteer(
+      args,
+      cwd,
+      steerSpool,
+      permissionTransport,
+    );
+  } finally {
+    steerSpool?.cleanup();
+  }
 }
 
 async function* streamBridgeChatWithSteer(
@@ -999,6 +1052,7 @@ async function* streamBridgeChatWithSteer(
     brokerPermissionMode: CukiiPermissionMode;
   },
   cwd: string,
+  steerSpool: BridgeSteerSpool | undefined,
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
   // The model picker fills this cache in the normal path. A restored saved
@@ -1015,6 +1069,7 @@ async function* streamBridgeChatWithSteer(
     args.brokerModel,
     args.brokerSubagent,
     cwd,
+    steerSpool?.path,
     controls,
     args.brokerPermissionMode,
   );
@@ -1088,6 +1143,23 @@ async function* streamBridgeChatWithSteer(
   let cancelled = false;
   let done = false;
   const queue: BridgeEvent[] = [];
+  const internalSteerToolIds = new Set<string>();
+  const enqueueVisibleEvents = (events: BridgeEvent[]) => {
+    for (const event of events) {
+      if (event.kind === "toolStart") {
+        if (isInternalSteerRead(event, steerSpool?.path)) {
+          internalSteerToolIds.add(event.id);
+          continue;
+        }
+        permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
+      }
+      if (event.kind === "toolResult") {
+        if (internalSteerToolIds.delete(event.id)) continue;
+        permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
+      }
+      queue.push(event);
+    }
+  };
   const abortChild = () => {
     cancelled = true;
     queue.length = 0;
@@ -1114,18 +1186,20 @@ async function* streamBridgeChatWithSteer(
     );
     if (!route.stdinFormat) child.stdin.end();
     if (route.stdinFormat === "claude-stream-json") {
-      permissionTransport?.steering?.attachWriter(
-        (text) =>
-          new Promise<boolean>((resolve) => {
-            if (child.exitCode !== null || child.signalCode !== null) {
-              resolve(false);
-              return;
-            }
-            child.stdin.write(claudeStreamingInput(text), (error) =>
-              resolve(!error),
-            );
-          }),
-      );
+      permissionTransport?.steering?.attachWriter(async (text) => {
+        if (
+          !steerSpool ||
+          child.exitCode !== null ||
+          child.signalCode !== null ||
+          permissionTransport?.abortSignal?.aborted
+        ) {
+          return false;
+        }
+        // Follow-up stdin frames are not a stable Claude CLI contract. The
+        // prompt instructs the same native session to read this dedicated
+        // Scratch spool after each tool instead.
+        return steerSpool.append(text);
+      });
     }
   }
 
@@ -1150,16 +1224,7 @@ async function* streamBridgeChatWithSteer(
     if (rawStdout.length < 2_000_000) {
       rawStdout += text;
     }
-    const events = parser.push(text);
-    for (const event of events) {
-      if (event.kind === "toolStart") {
-        permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
-      }
-      if (event.kind === "toolResult") {
-        permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
-      }
-    }
-    queue.push(...events);
+    enqueueVisibleEvents(parser.push(text));
   });
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8");
@@ -1177,13 +1242,7 @@ async function* streamBridgeChatWithSteer(
       done = true;
       return;
     }
-    const events = parser.flush();
-    for (const event of events) {
-      if (event.kind === "toolResult") {
-        permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
-      }
-    }
-    queue.push(...events);
+    enqueueVisibleEvents(parser.flush());
     if (!cancelled && code && code !== 0) {
       const detail = stderr.trim() || stdoutTail.trim();
       error = new Error(
@@ -1203,15 +1262,24 @@ async function* streamBridgeChatWithSteer(
   // ответ. Полная отмена требует ещё и проброса AbortSignal через протокол —
   // здесь закрыт только гарантированный процессный хвост.
   try {
+    let terminalReceived = false;
     while (!done || queue.length) {
       const next = queue.shift();
       if (next) {
         if (next.kind === "text") {
           completion += next.text;
         }
-        registerNestedWorkerFollower(next, toolNamesById, followers);
+        if (next.kind !== "complete") {
+          registerNestedWorkerFollower(next, toolNamesById, followers);
+        }
         for (const message of toChatMessages(next)) {
           yield message;
+        }
+        if (next.kind === "complete") {
+          // The protocol's own final receipt is authoritative. Do not wait
+          // for a child that lingers after printing its completed turn.
+          terminalReceived = true;
+          break;
         }
       } else {
         const nestedThinking = drainFollowers(followers);
@@ -1224,10 +1292,13 @@ async function* streamBridgeChatWithSteer(
         }
       }
     }
-    for (const message of drainFollowers(followers)) {
-      yield message;
+    if (!terminalReceived) {
+      for (const message of drainFollowers(followers)) {
+        yield message;
+      }
     }
     if (
+      !terminalReceived &&
       route.format !== "text" &&
       !parser.sawStructuredOutput &&
       rawStdout.trim()

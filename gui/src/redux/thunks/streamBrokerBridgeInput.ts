@@ -20,6 +20,14 @@ type RaceResult<T> =
   | { kind: "value"; value: IteratorResult<T, PromptLog | undefined> }
   | { kind: "cancelled" };
 
+type BridgeTerminalMessage = ChatMessage & { cukiiTerminal?: true };
+
+function isBridgeTerminalMessage(
+  message: ChatMessage,
+): message is BridgeTerminalMessage {
+  return (message as BridgeTerminalMessage).cukiiTerminal === true;
+}
+
 /**
  * Позволяет выйти из await gen.next(), если стрим отменили (кнопка Stop / Esc).
  * Без этого GUI мог застрять в ожидании зависшего нативного worker-а и не сбросить
@@ -151,8 +159,25 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           break;
         }
 
-        dispatch(streamUpdate(result.value.value));
-        settleObservedToolCalls(result.value.value, dispatch);
+        const hasTerminalReceipt = result.value.value.some(
+          isBridgeTerminalMessage,
+        );
+        const visibleMessages = result.value.value.filter(
+          (message) => !isBridgeTerminalMessage(message),
+        );
+        if (visibleMessages.length) {
+          dispatch(streamUpdate(visibleMessages));
+          settleObservedToolCalls(visibleMessages, dispatch);
+        }
+        if (hasTerminalReceipt) {
+          // Hide activity synchronously on the native terminal receipt. The
+          // generator return still performs process cleanup, but a slow child
+          // close must never leave the user looking at a false loader.
+          dispatch(setInactive());
+          completed = true;
+          await gen.return(undefined);
+          break;
+        }
       }
     } finally {
       if (!completed) await gen.return(undefined);

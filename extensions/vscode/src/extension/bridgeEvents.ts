@@ -20,7 +20,9 @@ export type BridgeEvent =
   | { kind: "thinking"; text: string }
   | { kind: "toolStart"; id: string; name: string; args: string }
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  /** A vendor's explicit turn-complete receipt, never a guessed quiet gap. */
+  | { kind: "complete" };
 
 export type BridgeFormat =
   | "anthropic-envelope"
@@ -140,21 +142,29 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
     return out;
   }
 
-  // Финальный `result` дублирует уже отданный текст, поэтому в ленту он не
-  // попадает — кроме случая, когда прогон завершился ошибкой.
-  if (event.type === "result" && event.is_error) {
-    out.push({
-      kind: "error",
-      text: asText(
-        event.result ?? event.error ?? "worker завершился с ошибкой",
-      ),
-    });
+  // `result` is the native turn receipt. It can arrive before the CLI process
+  // exits, so it must settle UI activity rather than leaving the loader tied
+  // to a delayed child close. The final text was already emitted in assistant
+  // envelopes and is intentionally not duplicated.
+  if (event.type === "result") {
+    if (event.is_error) {
+      out.push({
+        kind: "error",
+        text: asText(
+          event.result ?? event.error ?? "worker завершился с ошибкой",
+        ),
+      });
+    }
+    out.push({ kind: "complete" });
   }
   return out;
 }
 
 /** `codex exec --json`: события thread/turn/item. */
 function parseCodexThread(event: any): BridgeEvent[] {
+  if (event.type === "turn.completed") {
+    return [{ kind: "complete" }];
+  }
   const item = event?.item;
   if (
     !item ||

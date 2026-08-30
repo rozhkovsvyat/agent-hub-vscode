@@ -427,14 +427,14 @@ export function Chat() {
           </div>,
         ];
 
-        // Turn-level "Interrupted" fact for canceled thinking-only streams.
-        // Render it as plain muted text (Claude parity), not a timeline event
-        // with a red dot.
+        // A cancellation is a terminal event in the same transcript rail as
+        // thinking/text. Keeping it as a sibling timeline item preserves the
+        // dot, vertical connector and prose inset instead of a detached footer.
         if (item.interrupted) {
           thinkingRows.push(
             <div
               key={`${message.id}-interrupted`}
-              className={`cukii-interrupted-fact mt-2 min-w-0 ${
+              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-interrupted shrink-0 ${
                 isBeforeLatestSummary ? "opacity-50" : ""
               }`}
             >
@@ -498,15 +498,13 @@ export function Chat() {
           );
         });
 
-        // Turn-level "Interrupted" fact (Claude parity). Always shown when
-        // the user canceled this turn, so the label is visible regardless of
-        // whether an in-flight tool call already carries the per-tool label.
-        // Render it as plain muted text, not a timeline event with a red dot.
+        // Always show turn cancellation as a normal timeline row, regardless
+        // of whether a tool has a separate per-tool interruption label.
         if (item.interrupted) {
           rows.push(
             <div
               key={`${message.id}-interrupted`}
-              className={`cukii-interrupted-fact mt-2 min-w-0 ${
+              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-interrupted shrink-0 ${
                 isBeforeLatestSummary ? "opacity-50" : ""
               }`}
             >

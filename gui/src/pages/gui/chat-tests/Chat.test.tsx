@@ -113,23 +113,41 @@ test("Escape uses the real cancel lifecycle once and renders Interrupted", async
         sessionId: "escape-interrupt",
         title: "Escape interrupt",
         history: [
-          { message: { id: "user", role: "user", content: "run" }, contextItems: [] },
-          { message: { id: "assistant", role: "assistant", content: "Running" }, contextItems: [] },
+          {
+            message: { id: "user", role: "user", content: "run" },
+            contextItems: [],
+          },
+          {
+            message: { id: "assistant", role: "assistant", content: "Running" },
+            contextItems: [],
+          },
         ],
       },
     });
     store.dispatch({ type: "session/setActive" });
   });
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", repeat: true, bubbles: true }));
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      repeat: true,
+      bubbles: true,
+    }),
+  );
   expect(store.getState().session.isStreaming).toBe(false);
   expect(await getElementByTestId("turn-interrupted")).toBeTruthy();
-  expect(container.querySelector('[data-testid="cukii-spinner-row"]')).toBeNull();
+  expect(
+    container.querySelector('[data-testid="cukii-spinner-row"]'),
+  ).toBeNull();
 });
 
 test("Escape is inert while idle and yields to an open menu", async () => {
   const { store } = await renderWithProviders(<Chat />);
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
   expect(store.getState().session.isStreaming).toBe(false);
 
   await act(async () => {
@@ -138,7 +156,9 @@ test("Escape is inert while idle and yields to an open menu", async () => {
   const menu = document.createElement("div");
   menu.setAttribute("role", "menu");
   document.body.append(menu);
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
   expect(store.getState().session.isStreaming).toBe(true);
   menu.remove();
 });
@@ -444,7 +464,9 @@ test("shell tool calls render compact IN/OUT command cards without legacy termin
   expect(
     container.querySelectorAll('[data-testid="terminal-container"]'),
   ).toHaveLength(0);
-  expect(container.querySelectorAll('[data-testid="cukii-command-card"]')).toHaveLength(3);
+  expect(
+    container.querySelectorAll('[data-testid="cukii-command-card"]'),
+  ).toHaveLength(3);
 
   const timelineItems = container.querySelectorAll(".cukii-timeline-item");
   expect(timelineItems.length).toBeGreaterThanOrEqual(4);
@@ -484,8 +506,12 @@ test("tool start/start/complete race has exactly one active row and returns it t
     store.dispatch(setToolCallCalling({ toolCallId: "first" }));
     store.dispatch(setToolCallCalling({ toolCallId: "second" }));
   });
-  expect(container.querySelectorAll('[data-cukii-active="true"]')).toHaveLength(1);
-  expect(container.querySelector('[data-cukii-active="true"]')?.textContent).toContain("Bash");
+  expect(container.querySelectorAll('[data-cukii-active="true"]')).toHaveLength(
+    1,
+  );
+  expect(
+    container.querySelector('[data-cukii-active="true"]')?.textContent,
+  ).toContain("Bash");
 
   await act(async () => {
     store.dispatch(acceptToolCall({ toolCallId: "second" }));
@@ -495,8 +521,50 @@ test("tool start/start/complete race has exactly one active row and returns it t
   expect(active).toHaveLength(1);
   expect(active[0]).toHaveAttribute("data-testid", "cukii-spinner-row");
   const spinner = container.querySelector('[data-testid="cukii-spinner-row"]');
-  const cards = container.querySelectorAll('[data-testid="cukii-command-card"]');
+  const cards = container.querySelectorAll(
+    '[data-testid="cukii-command-card"]',
+  );
   expect(spinner?.compareDocumentPosition(cards[cards.length - 1]) ?? 0).toBe(
     Node.DOCUMENT_POSITION_PRECEDING,
   );
+});
+
+test("Interrupted is a sibling timeline row, never a detached transcript footer", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "interrupted-rail",
+        title: "Interrupted rail",
+        history: [
+          {
+            message: { id: "user-1", role: "user", content: "Start" },
+            contextItems: [],
+          },
+          {
+            message: {
+              id: "assistant-1",
+              role: "assistant",
+              content: "Partial result",
+            },
+            contextItems: [],
+            interrupted: true,
+          },
+        ],
+      },
+    });
+  });
+
+  const interrupted = container.querySelector(
+    "[data-testid='turn-interrupted']",
+  );
+  const row = interrupted?.closest(".cukii-timeline-item");
+  expect(row).not.toBeNull();
+  expect(row?.classList).toContain("cukii-timeline-event");
+  expect(row?.classList).toContain("cukii-timeline-interrupted");
+  expect(row?.previousElementSibling?.classList).toContain(
+    "cukii-timeline-item",
+  );
+  expect(container.querySelector(".cukii-interrupted-fact")).toBeNull();
 });

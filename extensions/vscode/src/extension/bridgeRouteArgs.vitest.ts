@@ -17,6 +17,7 @@ vi.mock("./permissionCapabilities", () => ({
 
 import {
   attachClaudePermissionTransport,
+  isInternalSteerRead,
   nativeDelegateHint,
   routeForModel,
 } from "./bridgeChatAdapter";
@@ -33,6 +34,46 @@ afterEach(() => {
 });
 
 describe("native bridge argv", () => {
+  it("keeps bridge transcript files in Scratch and suppresses only the exact steering read", () => {
+    const prompt = "x".repeat(25_000);
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      prompt,
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.promptFile?.toLowerCase()).toContain(
+      "d:\\scratch\\cukii-bridge",
+    );
+    expect(route.args).toContain("D:\\Scratch\\cukii-bridge");
+    if (route.promptFile) promptFiles.push(route.promptFile);
+
+    const steerPath = "D:\\Scratch\\cukii-steer\\cukii-steer-test.txt";
+    expect(
+      isInternalSteerRead(
+        {
+          kind: "toolStart",
+          id: "internal-read",
+          name: "Read",
+          args: JSON.stringify({ file_path: steerPath }),
+        },
+        steerPath,
+      ),
+    ).toBe(true);
+    expect(
+      isInternalSteerRead(
+        {
+          kind: "toolStart",
+          id: "ordinary-read",
+          name: "Read",
+          args: JSON.stringify({ file_path: "D:\\Brain\\vault\\README.md" }),
+        },
+        steerPath,
+      ),
+    ).toBe(false);
+  });
+
   it("adds the real Claude MCP permission transport without leaking its token", async () => {
     const route = routeForModel(
       "opus-5",
