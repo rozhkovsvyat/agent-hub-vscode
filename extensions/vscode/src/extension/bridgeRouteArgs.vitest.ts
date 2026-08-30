@@ -35,6 +35,7 @@ import {
   claudeStreamingInput,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
+  nativePromptCacheArgs,
   routeForModel,
   windowsCommandLineUtf16Length,
 } from "./bridgeChatAdapter";
@@ -338,6 +339,7 @@ describe("native bridge argv", () => {
     expect(route.args).toEqual([
       "--model",
       "claude-opus-5",
+      "--exclude-dynamic-system-prompt-sections",
       "--effort",
       "xhigh",
       "--settings",
@@ -352,6 +354,38 @@ describe("native bridge argv", () => {
       "--verbose",
     ]);
   });
+
+  it.each([
+    ["opus-5", true],
+    ["haiku-4-5", true],
+    ["codex-5-6-terra", false],
+    ["composer-2-5", false],
+    ["qwen-3-8-max", false],
+  ] as const)(
+    "uses only the native prompt-cache contract for %s",
+    (model, hasClaudeDefaultSystemFlag) => {
+      const route = routeForModel(
+        model,
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls(model, "high", "standard"),
+        model.startsWith("codex") ? "bypass" : "manual",
+      );
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(nativePromptCacheArgs(model)).toEqual(
+        hasClaudeDefaultSystemFlag
+          ? ["--exclude-dynamic-system-prompt-sections"]
+          : [],
+      );
+      expect(
+        route.args.includes("--exclude-dynamic-system-prompt-sections"),
+      ).toBe(hasClaudeDefaultSystemFlag);
+      if (!hasClaudeDefaultSystemFlag) {
+        expect(route.args.join(" ")).not.toMatch(/(?:^|[- ])cache(?:[- =]|$)/i);
+      }
+    },
+  );
 
   it.each(["codex-5-6-terra", "codex-5-6-sol"] as const)(
     "wires Codex %s effort and priority tier before exec",

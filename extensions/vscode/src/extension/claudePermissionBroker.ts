@@ -7,10 +7,14 @@ import {
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import type { CukiiPermissionMode } from "core/protocol/ideWebview";
 import { JsonlFrameReader } from "./claudePermissionJsonl";
+import {
+  CUKII_PERMISSION_SCRATCH_ROOT,
+  createCukiiScratchDirectory,
+  removeCukiiScratchDirectory,
+} from "./bridgeScratch";
 
 export type ClaudePermissionDecision = "allow" | "deny";
 export type ClaudePermissionRequest = {
@@ -92,9 +96,9 @@ export class ClaudePermissionBroker {
   readonly runId = randomUUID();
   readonly token = randomBytes(32).toString("hex");
   readonly pipeName = `\\\\.\\pipe\\cukii-permission-${randomUUID()}`;
-  readonly configDirectory = path.join(
-    os.tmpdir(),
-    `cukii-claude-permission-${this.runId}`,
+  readonly configDirectory = createCukiiScratchDirectory(
+    CUKII_PERMISSION_SCRATCH_ROOT,
+    "claude-permission",
   );
   readonly configPath = path.join(this.configDirectory, "mcp.json");
   private readonly pending = new Map<string, Pending>();
@@ -109,7 +113,6 @@ export class ClaudePermissionBroker {
     if (this.server || this.disposed)
       throw new Error("Permission broker cannot be started twice.");
     try {
-      fs.mkdirSync(this.configDirectory, { recursive: false, mode: 0o700 });
       (this.options.restrictDirectory ?? restrictPrivateDirectory)(
         this.configDirectory,
       );
@@ -215,7 +218,10 @@ export class ClaudePermissionBroker {
         if (!server.listening) return resolve();
         server.close(() => resolve());
       });
-    fs.rmSync(this.configDirectory, { recursive: true, force: true });
+    removeCukiiScratchDirectory(
+      this.configDirectory,
+      CUKII_PERMISSION_SCRATCH_ROOT,
+    );
   }
   private handleSocket(socket: net.Socket): void {
     this.sockets.add(socket);

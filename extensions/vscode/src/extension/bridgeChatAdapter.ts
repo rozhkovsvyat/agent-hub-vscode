@@ -43,7 +43,10 @@ import {
   ClaudePermissionBroker,
   type ClaudePermissionRequest,
 } from "./claudePermissionBroker";
-import { createBridgeScratchPath } from "./bridgeScratch";
+import {
+  removeBridgeScratchFile,
+  writeBridgeScratchFile,
+} from "./bridgeScratch";
 
 export type BridgeRoute = {
   label: string;
@@ -425,11 +428,21 @@ export function nativeDelegateHint(
   }
 }
 
-function bridgeLogFile(model: BrokerModel): string | undefined {
-  // Kimi's prompt route must never create a bridge Scratch artefact. Keep its
-  // stderr in memory; failures still include the captured detail below.
-  if (isKimiModel(model)) return undefined;
-  return createBridgeScratchPath(`cukii-${model}`, ".log");
+function bridgeLogFile(_model: BrokerModel): string | undefined {
+  // stderr is bounded in memory below. Persisting an unactionable log creates
+  // a secret-bearing artefact and complicates cancellation cleanup.
+  return undefined;
+}
+
+/**
+ * Claude exposes an explicit knob for its default-system cache. Other native
+ * providers cache their stable prompt prefix automatically; their installed
+ * CLIs expose no equivalent safe argv option, so Cukii never fakes one.
+ */
+export function nativePromptCacheArgs(model: BrokerModel): string[] {
+  return isClaudeNativeModel(model)
+    ? ["--exclude-dynamic-system-prompt-sections"]
+    : [];
 }
 
 // Anthropic documents this JSONL envelope for `-p --input-format stream-json`
@@ -668,6 +681,7 @@ export function routeForModel(
       args: [
         "--model",
         claudeModel,
+        ...nativePromptCacheArgs(model),
         ...claudeControlArgs(controls),
         ...permissionArgs,
         "-p",
@@ -704,13 +718,12 @@ export function routeForModel(
   }
   const nativeGrokModel = grokNativeModel(model);
   if (nativeGrokModel) {
-    const promptFile = createBridgeScratchPath("cukii-grok-transcript");
-    fs.writeFileSync(promptFile, prompt, "utf8");
+    const promptFile = writeBridgeScratchFile("grok-transcript", prompt);
     let promptJson: string;
     try {
       promptJson = grokPromptJson(messages, promptFile);
     } catch (error) {
-      fs.rmSync(promptFile, { force: true });
+      removeBridgeScratchFile(promptFile);
       throw error;
     }
     return {
@@ -886,13 +899,12 @@ export function routeForModel(
         logFile,
       };
     case "grok-4-6":
-      const promptFile = createBridgeScratchPath("cukii-grok-transcript");
-      fs.writeFileSync(promptFile, prompt, "utf8");
+      const promptFile = writeBridgeScratchFile("grok-transcript", prompt);
       let promptJson: string;
       try {
         promptJson = grokPromptJson(messages, promptFile);
       } catch (error) {
-        fs.rmSync(promptFile, { force: true });
+        removeBridgeScratchFile(promptFile);
         throw error;
       }
       return {
@@ -1162,7 +1174,7 @@ async function* streamBridgeChatWithSteer(
   try {
     command = ensureProgramAvailable(route);
   } catch (err) {
-    if (route.promptFile) fs.rmSync(route.promptFile, { force: true });
+    if (route.promptFile) removeBridgeScratchFile(route.promptFile);
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
@@ -1346,7 +1358,7 @@ async function* streamBridgeChatWithSteer(
     closeFollowers(followers);
     child.stdin.end();
     await terminateBridgeChild(child);
-    if (route.promptFile) fs.rmSync(route.promptFile, { force: true });
+    if (route.promptFile) removeBridgeScratchFile(route.promptFile);
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);

@@ -7,6 +7,11 @@ import { promisify } from "util";
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
+import {
+  CUKII_VOICE_SCRATCH_ROOT,
+  createCukiiScratchDirectory,
+  removeCukiiScratchDirectory,
+} from "./bridgeScratch";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +72,7 @@ type Recording = {
   exited?: { code: number | null; stderr: string };
   failure?: Error;
   durationTimer?: NodeJS.Timeout;
+  cleanupOwnedDir: () => void;
 };
 
 const recordings = new Map<string, Recording>();
@@ -182,14 +188,20 @@ export async function startVoiceRecording(
   recordingOwner = recordingId;
   pendingRecordings.add(recordingId);
   let ownedDir: string | undefined;
+  let cleanupOwnedDir: (() => void) | undefined;
   try {
     const device = await (options.resolveDevice ?? audioDevice)();
     if (cancelledStarts.delete(recordingId)) {
       throw new Error("Voice recording was cancelled.");
     }
-    ownedDir = fs.mkdtempSync(
-      path.join(options.tempDir ?? os.tmpdir(), "cukii-voice-capture-"),
-    );
+    const isTestDirectory = options.tempDir !== undefined;
+    ownedDir = isTestDirectory
+      ? fs.mkdtempSync(path.join(options.tempDir!, "cukii-voice-capture-"))
+      : createCukiiScratchDirectory(CUKII_VOICE_SCRATCH_ROOT, "voice-capture");
+    const cleanup = isTestDirectory
+      ? () => fs.rmSync(ownedDir!, { recursive: true, force: true })
+      : () => removeCukiiScratchDirectory(ownedDir!, CUKII_VOICE_SCRATCH_ROOT);
+    cleanupOwnedDir = cleanup;
     const outputPath = path.join(ownedDir, "recording.wav");
     const child = (options.spawnRecorder ?? spawn)(
       voiceFfmpegExecutable(),
@@ -219,6 +231,7 @@ export async function startVoiceRecording(
       ownedDir,
       outputPath,
       device,
+      cleanupOwnedDir: cleanup,
     };
     let stderr = "";
     child.stderr?.on("data", (chunk) => {
@@ -250,7 +263,7 @@ export async function startVoiceRecording(
     if (recordings.has(recordingId)) {
       await finalizeRecording(recordingId, "cancel");
     } else if (ownedDir) {
-      fs.rmSync(ownedDir, { recursive: true, force: true });
+      cleanupOwnedDir?.();
     }
     throw error;
   } finally {
@@ -526,7 +539,7 @@ async function finalizeRecording(
       return await transcribeVoiceFile(recording.outputPath);
     } finally {
       if (recording.durationTimer) clearTimeout(recording.durationTimer);
-      fs.rmSync(recording.ownedDir, { recursive: true, force: true });
+      recording.cleanupOwnedDir();
     }
   })();
   finalizations.set(recordingId, operation);

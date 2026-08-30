@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { ChatMessage } from "core";
@@ -114,11 +113,8 @@ export function isAllowedLogPath(filePath: string): boolean {
     return false;
   }
   const normalized = resolved.replace(/\\/g, "/").toLowerCase();
-  const tmp = path.resolve(os.tmpdir()).replace(/\\/g, "/").toLowerCase();
-  if (normalized === tmp || normalized.startsWith(`${tmp}/`)) {
-    return true;
-  }
   return (
+    normalized.includes("/scratch/cukii-") ||
     normalized.includes("/cursor-bridge/") ||
     normalized.includes("/logs/cukii") ||
     /\/cukii-[^/]+\.log$/.test(normalized)

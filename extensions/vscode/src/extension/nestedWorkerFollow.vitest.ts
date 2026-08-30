@@ -41,7 +41,7 @@ describe("isDelegationTool", () => {
 
 describe("parseNestedWorker", () => {
   it("extracts cursor_submit log path from JSON blob", () => {
-    const logPath = path.join(os.tmpdir(), "job.output.log");
+    const logPath = "D:\\Scratch\\cukii-bridge\\job.output.log";
     const output = JSON.stringify({
       job: "260825130844-883400-0000",
       output: logPath,
@@ -135,8 +135,10 @@ describe("drainFollowers", () => {
   });
 
   it("yields thinking from a growing log while the parent stream is silent", () => {
+    const root = "D:\\Scratch\\cukii-bridge";
+    fs.mkdirSync(root, { recursive: true });
     const file = path.join(
-      os.tmpdir(),
+      root,
       `nested-worker-follow-${Date.now()}-${Math.random().toString(16).slice(2)}.output.log`,
     );
     tempFiles.push(file);
