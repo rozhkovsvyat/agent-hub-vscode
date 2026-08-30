@@ -18,6 +18,7 @@ export class BridgeSteeringController {
   private readonly receipts = new Map<string, Promise<CukiiSteerReceipt>>();
   private readonly pending: PendingSteer[] = [];
   private writer: SteerWriter | undefined;
+  private inFlight: PendingSteer | undefined;
   private closed = false;
   private flushing = false;
 
@@ -56,6 +57,9 @@ export class BridgeSteeringController {
     if (this.closed) return;
     this.closed = true;
     this.writer = undefined;
+    if (this.inFlight) {
+      this.inFlight.resolve(this.deferred(this.inFlight.message));
+    }
     for (const pending of this.pending.splice(0)) {
       pending.resolve(this.deferred(pending.message));
     }
@@ -69,6 +73,7 @@ export class BridgeSteeringController {
     try {
       while (this.pending.length && this.writer === writer && !this.closed) {
         const pending = this.pending.shift()!;
+        this.inFlight = pending;
         let delivered = false;
         try {
           delivered = await writer(pending.message.text);
@@ -76,7 +81,7 @@ export class BridgeSteeringController {
           delivered = false;
         }
         pending.resolve(
-          delivered
+          delivered && !this.closed
             ? {
                 messageId: pending.message.messageId,
                 sessionId: this.sessionId,
@@ -84,6 +89,7 @@ export class BridgeSteeringController {
               }
             : this.deferred(pending.message),
         );
+        if (this.inFlight === pending) this.inFlight = undefined;
       }
     } finally {
       this.flushing = false;

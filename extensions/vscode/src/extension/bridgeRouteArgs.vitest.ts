@@ -17,6 +17,8 @@ vi.mock("./permissionCapabilities", () => ({
 
 import {
   attachClaudePermissionTransport,
+  claudeStreamingInput,
+  KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES,
   nativeDelegateHint,
   routeForModel,
 } from "./bridgeChatAdapter";
@@ -33,8 +35,14 @@ afterEach(() => {
 });
 
 describe("native bridge argv", () => {
-  it("keeps bridge transcript files in Scratch", () => {
-    const prompt = "x".repeat(25_000);
+  it("keeps an exact Unicode/multiline Kimi prompt in argv without any Scratch file", () => {
+    const prefix = "Первая строка\n🙂 第二行\n";
+    const prompt =
+      prefix +
+      "x".repeat(
+        KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES - Buffer.byteLength(prefix, "utf8"),
+      );
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
     const route = routeForModel(
       "kimi-k3",
       "D:/Brain/vault",
@@ -42,11 +50,42 @@ describe("native bridge argv", () => {
       [],
       resolveBridgeControls("kimi-k3", "high", "standard"),
     );
-    expect(route.promptFile?.toLowerCase()).toContain(
-      "d:\\scratch\\cukii-bridge",
+    expect(Buffer.byteLength(prompt, "utf8")).toBe(
+      KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES,
     );
-    expect(route.args).toContain("D:\\Scratch\\cukii-bridge");
-    if (route.promptFile) promptFiles.push(route.promptFile);
+    expect(route.args[route.args.indexOf("-p") + 1]).toBe(prompt);
+    expect(route.promptFile).toBeUndefined();
+    expect(route.logFile).toBeUndefined();
+    expect(route.args.join(" ")).not.toContain("D:\\Scratch\\cukii-bridge");
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of creating a Kimi prompt file above the Windows argv budget", () => {
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
+    const oversized = "x".repeat(KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES + 1);
+    expect(() =>
+      routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        oversized,
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      ),
+    ).toThrow(/safe Windows argv limit/);
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("serializes the exact Claude stream-json user envelope for Unicode and newlines", () => {
+    const text = "Первая строка\n🙂 第二行\nпоследняя";
+    const frame = claudeStreamingInput(text);
+    expect(frame.endsWith("\n")).toBe(true);
+    expect(JSON.parse(frame)).toEqual({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "text", text }],
+      },
+    });
   });
 
   it("adds the real Claude MCP permission transport without leaking its token", async () => {

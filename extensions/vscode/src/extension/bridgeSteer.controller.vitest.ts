@@ -88,4 +88,27 @@ describe("BridgeSteeringController", () => {
     ]);
     expect(writes).toEqual(["one", "two"]);
   });
+
+  it("never reports delivered when close wins an in-flight stdin write", async () => {
+    let started!: () => void;
+    let finish!: (delivered: boolean) => void;
+    const writerStarted = new Promise<void>((resolve) => (started = resolve));
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(
+      () =>
+        new Promise<boolean>((resolve) => {
+          started();
+          finish = resolve;
+        }),
+    );
+    const receipt = controller.deliver({
+      messageId: "message-1",
+      sessionId: "session-1",
+      text: "cancel this write",
+    });
+    await writerStarted;
+    controller.close();
+    await expect(receipt).resolves.toMatchObject({ status: "deferred" });
+    finish(true);
+  });
 });

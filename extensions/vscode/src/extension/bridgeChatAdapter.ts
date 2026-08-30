@@ -43,11 +43,7 @@ import {
   ClaudePermissionBroker,
   type ClaudePermissionRequest,
 } from "./claudePermissionBroker";
-import {
-  bridgeScratchRoot,
-  createBridgeScratchPath,
-  createKimiPromptScratchFile,
-} from "./bridgeScratch";
+import { createBridgeScratchPath } from "./bridgeScratch";
 
 export type BridgeRoute = {
   label: string;
@@ -56,8 +52,7 @@ export type BridgeRoute = {
   /** Формат stdout нативного CLI: от него зависит разбор в события. */
   format: BridgeFormat;
   promptFile?: string;
-  cleanupPromptFile?: () => void;
-  logFile: string;
+  logFile?: string;
   /**
    * CLI получает промпт аргументом и stdin не читает (kimi -p). Писать туда весь
    * транскрипт нельзя: непрочитанный pipe переполняется и даёт EPIPE/зависание.
@@ -170,10 +165,30 @@ function grokNativeModel(model: BrokerModel): string | undefined {
 // памяти/хуков claude здесь НЕ наследуется — это отдельная работа «свои хуки для
 // Kimi» (config.toml MCP + --skills-dir), см. follow-up.
 //
-// Windows CreateProcess ограничивает командную строку ~32k символов, а `kimi -p`
-// берёт промпт АРГУМЕНТОМ (stdin в prompt-режиме не читает — проверено прогоном).
-// Поэтому большой транскрипт уводим в файл и просим kimi прочитать его тулом.
-const KIMI_INLINE_PROMPT_BUDGET = 24_000;
+// Kimi CLI documents `-p/--prompt`, but not an stdin input mode. Windows
+// CreateProcess accepts roughly 32k UTF-16 code units, so keep a deliberately
+// smaller UTF-8 byte ceiling for the prompt itself; it leaves room for the
+// executable and fixed flags, and is conservative for non-ASCII text.
+export const KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES = 24_000;
+
+function isKimiModel(model: BrokerModel): boolean {
+  return (
+    model === "kimi-k2" ||
+    model.startsWith("kimi-") ||
+    model.startsWith("kimi:")
+  );
+}
+
+function kimiPromptArgument(prompt: string): string {
+  const bytes = Buffer.byteLength(prompt, "utf8");
+  if (bytes > KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES) {
+    throw new Error(
+      `Kimi prompt is ${bytes} UTF-8 bytes; the safe Windows argv limit is ` +
+        `${KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES} bytes. Kimi CLI has no supported stdin prompt transport.`,
+    );
+  }
+  return prompt;
+}
 
 function kimiCliProgram(): string {
   return "kimi";
@@ -364,7 +379,10 @@ export function nativeDelegateHint(
   }
 }
 
-function bridgeLogFile(model: BrokerModel): string {
+function bridgeLogFile(model: BrokerModel): string | undefined {
+  // Kimi's prompt route must never create a bridge Scratch artefact. Keep its
+  // stderr in memory; failures still include the captured detail below.
+  if (isKimiModel(model)) return undefined;
   return createBridgeScratchPath(`cukii-${model}`, ".log");
 }
 
@@ -372,7 +390,7 @@ function bridgeLogFile(model: BrokerModel): string {
 // (Claude Code SDK, "Streaming JSON input"). Keeping stdin open is required
 // for its realtime multi-turn transport; it is closed only on CLI completion
 // or cancellation below.
-function claudeStreamingInput(prompt: string): string {
+export function claudeStreamingInput(prompt: string): string {
   return `${JSON.stringify({
     type: "user",
     message: {
@@ -653,22 +671,7 @@ export function routeForModel(
     ? kimiNativeModel(model)
     : undefined;
   if (liveKimiModel) {
-    const inline =
-      Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
-    let promptArg = prompt;
-    let kimiPromptFile: string | undefined;
-    let cleanupPromptFile: (() => void) | undefined;
-    const extraArgs: string[] = [];
-    if (!inline) {
-      const ownedPrompt = createKimiPromptScratchFile(prompt);
-      kimiPromptFile = ownedPrompt.path;
-      cleanupPromptFile = ownedPrompt.cleanup;
-      promptArg =
-        "Your full broker instructions and the conversation transcript are in " +
-        `the file \"${kimiPromptFile}\". Read that file first, then act on the ` +
-        "latest user message. Answer in the user's language.";
-      extraArgs.push("--add-dir", bridgeScratchRoot());
-    }
+    const promptArg = kimiPromptArgument(prompt);
     const skillDirs = getKimiSkillDirs();
     return {
       label: displayBridgeModel(model),
@@ -681,12 +684,9 @@ export function routeForModel(
         "-m",
         liveKimiModel,
         ...permissionArgs,
-        ...extraArgs,
         ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
       ],
       format: "kimi-ndjson",
-      promptFile: kimiPromptFile,
-      cleanupPromptFile,
       logFile,
       noStdin: true,
     };
@@ -754,22 +754,7 @@ export function routeForModel(
     case "kimi-k3":
     case "kimi-k3-256k": {
       const modelArg = kimiNativeModel(model);
-      const inline =
-        Buffer.byteLength(prompt, "utf8") <= KIMI_INLINE_PROMPT_BUDGET;
-      let promptArg = prompt;
-      let kimiPromptFile: string | undefined;
-      let cleanupPromptFile: (() => void) | undefined;
-      const extraArgs: string[] = [];
-      if (!inline) {
-        const ownedPrompt = createKimiPromptScratchFile(prompt);
-        kimiPromptFile = ownedPrompt.path;
-        cleanupPromptFile = ownedPrompt.cleanup;
-        promptArg =
-          "Your full broker instructions and the conversation transcript are in " +
-          `the file "${kimiPromptFile}". Read that file first, then act on the ` +
-          "latest user message. Answer in the user's language.";
-        extraArgs.push("--add-dir", bridgeScratchRoot());
-      }
+      const promptArg = kimiPromptArgument(prompt);
       const skillDirs = getKimiSkillDirs();
       return {
         label: displayBridgeModel(model),
@@ -781,12 +766,9 @@ export function routeForModel(
           "stream-json",
           ...(modelArg ? ["-m", modelArg] : []),
           ...permissionArgs,
-          ...extraArgs,
           ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
         ],
         format: "kimi-ndjson",
-        promptFile: kimiPromptFile,
-        cleanupPromptFile,
         logFile,
         noStdin: true,
       };
@@ -1077,9 +1059,7 @@ async function* streamBridgeChatWithSteer(
   try {
     command = ensureProgramAvailable(route);
   } catch (err) {
-    route.cleanupPromptFile?.();
-    if (route.promptFile && !route.cleanupPromptFile)
-      fs.rmSync(route.promptFile, { force: true });
+    if (route.promptFile) fs.rmSync(route.promptFile, { force: true });
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
@@ -1180,7 +1160,7 @@ async function* streamBridgeChatWithSteer(
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8");
     stderr += text;
-    fs.appendFileSync(route.logFile, text, "utf8");
+    if (route.logFile) fs.appendFileSync(route.logFile, text, "utf8");
   });
   child.once("error", (err) => {
     if (cancelled) return;
@@ -1201,7 +1181,7 @@ async function* streamBridgeChatWithSteer(
           (detail
             ? ` ${detail}`
             : " Native CLI stopped before returning a normal response.") +
-          ` Bridge log: ${route.logFile}`,
+          (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
       );
     }
     done = true;
@@ -1263,9 +1243,7 @@ async function* streamBridgeChatWithSteer(
     closeFollowers(followers);
     child.stdin.end();
     await terminateBridgeChild(child);
-    route.cleanupPromptFile?.();
-    if (route.promptFile && !route.cleanupPromptFile)
-      fs.rmSync(route.promptFile, { force: true });
+    if (route.promptFile) fs.rmSync(route.promptFile, { force: true });
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
