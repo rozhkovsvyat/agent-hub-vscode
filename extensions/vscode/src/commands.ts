@@ -359,16 +359,16 @@ const getCommandsMap: (
       streamInlineEdit("docstring", prompt, range);
     },
     "continue.codebaseForceReIndex": async () => {
-      core.invoke("index/forceReIndex", undefined);
+      void core.invoke("index/forceReIndex", undefined);
     },
     "continue.rebuildCodebaseIndex": async () => {
-      core.invoke("index/forceReIndex", { shouldClearIndexes: true });
+      void core.invoke("index/forceReIndex", { shouldClearIndexes: true });
     },
     "continue.docsIndex": async () => {
-      core.invoke("context/indexDocs", { reIndex: false });
+      void core.invoke("context/indexDocs", { reIndex: false });
     },
     "continue.docsReIndex": async () => {
-      core.invoke("context/indexDocs", { reIndex: true });
+      void core.invoke("context/indexDocs", { reIndex: true });
     },
     "continue.focusContinueInput": async () => {
       const host = await ensureActiveChatPanel();
@@ -701,7 +701,7 @@ const getCommandsMap: (
           autocompleteModels.some((model) => model.title === selectedOption)
         ) {
           if (core.configHandler.currentProfile?.profileDescription.id) {
-            core.invoke("config/updateSelectedModel", {
+            void core.invoke("config/updateSelectedModel", {
               profileId:
                 core.configHandler.currentProfile?.profileDescription.id,
               role: "autocomplete",
@@ -792,7 +792,7 @@ const getCommandsMap: (
       }
 
       try {
-        const isValid = core.invoke("mdm/setLicenseKey", {
+        const isValid = await core.invoke("mdm/setLicenseKey", {
           licenseKey,
         });
 
@@ -878,7 +878,14 @@ const getCommandsMap: (
         // deleted/missing. Core.load returns a blank default for that case;
         // saved Cukii sessions are only navigable after their first history
         // entry, so the check is both deterministic and side-effect free.
-        const restored = core.invoke("history/load", { id: initialSessionId });
+        let restored;
+        try {
+          restored = await core.invoke("history/load", {
+            id: initialSessionId,
+          });
+        } catch {
+          return;
+        }
         if (!restored || restored.history.length === 0) {
           return;
         }

@@ -129,7 +129,7 @@ export class Core {
   invoke<T extends keyof ToCoreProtocol>(
     messageType: T,
     data: ToCoreProtocol[T][0],
-  ): ToCoreProtocol[T][1] {
+  ): ToCoreProtocol[T][1] | Promise<ToCoreProtocol[T][1]> {
     return this.messenger.invoke(messageType, data);
   }
 
