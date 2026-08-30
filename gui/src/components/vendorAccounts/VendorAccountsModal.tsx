@@ -26,6 +26,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [refreshError, setRefreshError] = useState<string>();
   const [actionNotice, setActionNotice] = useState<string>();
   const refreshInFlight = useRef(false);
+  const authActionOpening = useRef(false);
   const pendingPoll = useRef(false);
   const pendingExplicitRefresh = useRef<
     | {
@@ -45,6 +46,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           ? ++explicitRefreshGeneration.current
           : explicitRefreshGeneration.current);
       if (reason === "user") setLoading(true);
+      if (reason === "poll" && authActionOpening.current) return;
       if (refreshInFlight.current) {
         if (reason === "poll") {
           // Coalesce any number of timer ticks behind the current native probe.
@@ -106,6 +108,13 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
     action: BrokerVendorAuthAction,
   ) => {
     const key = `${account.id}:${action}`;
+    // The terminal can change native auth while a previous probe is still in
+    // flight. Invalidate that snapshot before the terminal opens, rather than
+    // briefly painting the old login state after the user requested a change.
+    explicitRefreshGeneration.current += 1;
+    pendingExplicitRefresh.current = undefined;
+    pendingPoll.current = false;
+    authActionOpening.current = true;
     setBusy(key);
     try {
       const response = await ideMessenger.request("cukii/runVendorAuthAction", {
@@ -116,6 +125,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         response.status === "success" ? response.content.message : response.error,
       );
     } finally {
+      authActionOpening.current = false;
       setBusy(undefined);
       // Do not keep the state from before opening the native login/logout flow.
       await refresh("action");

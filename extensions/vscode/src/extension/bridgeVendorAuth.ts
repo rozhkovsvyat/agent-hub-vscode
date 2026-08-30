@@ -14,6 +14,11 @@ const execFileAsync = promisify(execFile);
 
 type VendorWithCli = Exclude<BrokerVendorId, "deepseek">;
 type ProbeSpec = { program: string; args: string[] };
+type WindowsEnvironment = {
+  LOCALAPPDATA?: string;
+  ProgramFiles?: string;
+  "ProgramFiles(x86)"?: string;
+};
 type AuthClassification = Pick<
   BrokerVendorAuthStatus,
   "state" | "authenticated" | "accountLabel" | "actions"
@@ -91,6 +96,38 @@ function accountIdLabel(identifier: string | undefined): string | undefined {
   return identifier ? `Account ${identifier}` : undefined;
 }
 
+function abbreviatedAccountIdLabel(
+  identifier: string | undefined,
+): string | undefined {
+  if (!identifier) return undefined;
+  const visible =
+    identifier.length > 12
+      ? `${identifier.slice(0, 8)}…${identifier.slice(-4)}`
+      : identifier;
+  return `Account ${visible}`;
+}
+
+function jwtAccountLabel(
+  token: unknown,
+  abbreviatedId = false,
+): string | undefined {
+  const claims = decodeJwtPayload(token);
+  const profile = isRecord(claims) ? claims.profile : undefined;
+  const email = stringAt(claims, "email") ?? stringAt(profile, "email");
+  if (email) return email;
+  const identifier = stringAt(
+    claims,
+    "account_id",
+    "accountId",
+    "sub",
+    "user_id",
+    "userId",
+  );
+  return abbreviatedId
+    ? abbreviatedAccountIdLabel(identifier)
+    : accountIdLabel(identifier);
+}
+
 /** Local CLI auth metadata only; no browser sessions, token text, or guessed email. */
 export function accountLabelFromAuthMetadata(
   vendor: VendorWithCli,
@@ -98,10 +135,9 @@ export function accountLabelFromAuthMetadata(
 ): string | undefined {
   if (vendor === "codex") {
     const tokens = isRecord(metadata) ? metadata.tokens : undefined;
-    const claims = decodeJwtPayload(stringAt(tokens, "id_token"));
     return (
       stringAt(tokens, "email") ??
-      stringAt(claims, "email") ??
+      jwtAccountLabel(stringAt(tokens, "id_token")) ??
       accountIdLabel(stringAt(tokens, "account_id", "accountId"))
     );
   }
@@ -121,6 +157,17 @@ export function accountLabelFromAuthMetadata(
       stringAt(metadata, "email") ??
       accountIdLabel(stringAt(metadata, "accountId", "userId", "id"))
     );
+  }
+  if (vendor === "kimi") {
+    const credentials = isRecord(metadata) ? metadata.credentials : undefined;
+    if (!Array.isArray(credentials)) return undefined;
+    for (const credential of credentials) {
+      const label = jwtAccountLabel(
+        stringAt(credential, "access_token", "id_token"),
+        true,
+      );
+      if (label) return label;
+    }
   }
   return undefined;
 }
@@ -246,10 +293,7 @@ export function nativeCliCandidates(
   vendor: VendorWithCli,
   userHome = os.homedir(),
   platform = process.platform,
-  windowsEnv: Pick<
-    NodeJS.ProcessEnv,
-    "LOCALAPPDATA" | "ProgramFiles" | "ProgramFiles(x86)"
-  > = process.env,
+  windowsEnv: WindowsEnvironment = process.env as WindowsEnvironment,
 ): string[] {
   const program = CLI_PROGRAMS[vendor];
   if (platform !== "win32") return [program];
@@ -383,6 +427,33 @@ function localMetadata(vendor: VendorWithCli): unknown {
           ? path.join(userHome, ".qwen", "settings.json")
           : undefined;
   try {
+    if (vendor === "kimi") {
+      const credentialsDirectory = path.join(
+        userHome,
+        ".kimi-code",
+        "credentials",
+      );
+      const credentials = fs
+        .readdirSync(credentialsDirectory)
+        .filter((entry) => entry.endsWith(".json"))
+        .sort()
+        .flatMap((entry) => {
+          const credentialFile = path.join(credentialsDirectory, entry);
+          const stat = fs.statSync(credentialFile);
+          // Native credential files are small. Never load an unexpected bulk file.
+          if (!stat.isFile() || stat.size > 64 * 1024) return [];
+          const credential = JSON.parse(
+            fs.readFileSync(credentialFile, "utf8"),
+          );
+          return [
+            {
+              access_token: stringAt(credential, "access_token"),
+              id_token: stringAt(credential, "id_token"),
+            },
+          ];
+        });
+      return { credentials };
+    }
     if (!file || !fs.existsSync(file)) return undefined;
     const raw = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
     if (vendor === "codex") {

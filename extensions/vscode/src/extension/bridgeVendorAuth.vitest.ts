@@ -75,8 +75,27 @@ describe("Cukii vendor CLI accounts", () => {
     ).toBe("owner@example.com");
     expect(
       accountLabelFromAuthMetadata("kimi", {
-        access_token:
-          "eyJhbGciOiJub25lIn0.eyJ1c2VyX2lkIjoia2ltaS11c2VyLTQyIn0.",
+        credentials: [
+          {
+            access_token:
+              "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6Im93bmVyQGV4YW1wbGUuY29tIn0.",
+          },
+        ],
+      }),
+    ).toBe("owner@example.com");
+    expect(
+      accountLabelFromAuthMetadata("kimi", {
+        credentials: [
+          {
+            access_token:
+              "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhYmNkZWZnaGlqa2xtbm9wcXJzdHV2In0.",
+          },
+        ],
+      }),
+    ).toBe("Account abcdefgh…stuv");
+    expect(
+      accountLabelFromAuthMetadata("kimi", {
+        credentials: [{ access_token: "not-a-jwt" }],
       }),
     ).toBeUndefined();
     expect(

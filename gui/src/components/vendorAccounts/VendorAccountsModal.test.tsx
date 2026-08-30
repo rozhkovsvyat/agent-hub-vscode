@@ -152,6 +152,74 @@ describe("VendorAccountsModal", () => {
     expect(document.body.textContent).not.toContain("stale@example.test");
   });
 
+  it("invalidates a current snapshot before opening a terminal auth action", async () => {
+    const staleList = deferred<unknown>();
+    const action = deferred<unknown>();
+    const refreshedList = deferred<unknown>();
+    const ideMessenger = new MockIdeMessenger();
+    const originalRequest = ideMessenger.request.bind(ideMessenger);
+    let accountRequests = 0;
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType,
+      data,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        accountRequests += 1;
+        if (accountRequests === 1) return originalRequest(messageType, data);
+        return (await (accountRequests === 2
+          ? staleList.promise
+          : refreshedList.promise)) as never;
+      }
+      if (messageType === "cukii/runVendorAuthAction") {
+        return (await action.promise) as never;
+      }
+      return originalRequest(messageType, data);
+    }) as typeof ideMessenger.request);
+    const { user } = await renderWithProviders(
+      <VendorAccountsModal onClose={vi.fn()} />,
+      { mockIdeMessenger: ideMessenger },
+    );
+    await getElementByText("Log out");
+    const refresh = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Refresh vendor accounts"]',
+    );
+    expect(refresh).toBeTruthy();
+    await user.click(refresh!);
+    await waitFor(() => expect(accountRequests).toBe(2));
+
+    const logout = await getElementByText("Log out");
+    await user.click(logout);
+    await act(async () => {
+      staleList.resolve({
+        status: "success",
+        content: [connectedAccount("stale@example.test")],
+        done: true,
+      });
+    });
+    expect(document.body.textContent).not.toContain("stale@example.test");
+
+    await act(async () => {
+      action.resolve({
+        status: "success",
+        content: {
+          opened: true,
+          message: "Authentication flow opened in the integrated terminal.",
+        },
+        done: true,
+      });
+    });
+    await waitFor(() => expect(accountRequests).toBe(3));
+    await act(async () => {
+      refreshedList.resolve({
+        status: "success",
+        content: [connectedAccount("fresh@example.test")],
+        done: true,
+      });
+    });
+    await getElementByText("fresh@example.test");
+    expect(document.body.textContent).not.toContain("stale@example.test");
+  });
+
   it("coalesces timer ticks without starving a slow current probe", async () => {
     vi.useFakeTimers();
     let unmount: (() => void) | undefined;
