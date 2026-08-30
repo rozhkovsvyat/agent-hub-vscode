@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import * as childProcess from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -148,7 +148,16 @@ function kimiNativeModel(model: BrokerModel): string | undefined {
   if (Object.prototype.hasOwnProperty.call(KIMI_NATIVE_MODELS, model)) {
     return KIMI_NATIVE_MODELS[model];
   }
-  return model.startsWith("kimi:") ? model.slice("kimi:".length) : undefined;
+  if (!model.startsWith("kimi:")) {
+    return undefined;
+  }
+  const alias = model.slice("kimi:".length);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(alias)) {
+    throw new Error(
+      "Kimi native model alias must be 1-128 safe ASCII characters.",
+    );
+  }
+  return alias;
 }
 
 function grokNativeModel(model: BrokerModel): string | undefined {
@@ -165,11 +174,10 @@ function grokNativeModel(model: BrokerModel): string | undefined {
 // памяти/хуков claude здесь НЕ наследуется — это отдельная работа «свои хуки для
 // Kimi» (config.toml MCP + --skills-dir), см. follow-up.
 //
-// Kimi CLI documents `-p/--prompt`, but not an stdin input mode. Windows
-// CreateProcess accepts roughly 32k UTF-16 code units, so keep a deliberately
-// smaller UTF-8 byte ceiling for the prompt itself; it leaves room for the
-// executable and fixed flags, and is conservative for non-ASCII text.
-export const KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES = 24_000;
+// Kimi CLI documents -p/--prompt, but not an stdin input mode. Check the
+// complete quoted CreateProcess command line below before anything launches.
+/** CreateProcess permits 32,767 UTF-16 code units including its NUL terminator. */
+export const KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 = 32_766;
 
 function isKimiModel(model: BrokerModel): boolean {
   return (
@@ -179,15 +187,53 @@ function isKimiModel(model: BrokerModel): boolean {
   );
 }
 
-function kimiPromptArgument(prompt: string): string {
-  const bytes = Buffer.byteLength(prompt, "utf8");
-  if (bytes > KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES) {
+function quoteWindowsCommandLineArgument(argument: string): string {
+  if (argument.length > 0 && !/[\s"]/u.test(argument)) {
+    return argument;
+  }
+
+  let quoted = '"';
+  let backslashes = 0;
+  for (const character of argument) {
+    if (character === "\\") {
+      backslashes += 1;
+    } else if (character === '"') {
+      quoted += "\\".repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+    } else {
+      quoted += "\\".repeat(backslashes) + character;
+      backslashes = 0;
+    }
+  }
+  return quoted + "\\".repeat(backslashes * 2) + '"';
+}
+
+/**
+ * JavaScript string length is UTF-16 code units, the unit CreateProcessW
+ * accepts. Compute after every final argument and Windows escaping are known.
+ */
+export function windowsCommandLineUtf16Length(
+  program: string,
+  args: string[],
+): number {
+  return [program, ...args].map(quoteWindowsCommandLineArgument).join(" ")
+    .length;
+}
+
+function assertKimiWindowsCommandLine(program: string, args: string[]): void {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const length = windowsCommandLineUtf16Length(program, args);
+  if (length > KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16) {
     throw new Error(
-      `Kimi prompt is ${bytes} UTF-8 bytes; the safe Windows argv limit is ` +
-        `${KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES} bytes. Kimi CLI has no supported stdin prompt transport.`,
+      "Kimi command line is " +
+        length +
+        " UTF-16 code units after Windows quoting; the safe CreateProcess limit is " +
+        KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 +
+        ".",
     );
   }
-  return prompt;
 }
 
 function kimiCliProgram(): string {
@@ -472,6 +518,21 @@ function resolveCommand(program: string, args: string[]): ResolvedCommand {
   return { program: executable, args };
 }
 
+function kimiRoute(label: string, args: string[]): BridgeRoute {
+  // Resolve exactly as the launcher will, then account for the executable,
+  // every final argument, and libuv-style Windows escaping before any broker,
+  // child process, or filesystem artefact can be created.
+  const command = resolveCommand(kimiCliProgram(), args);
+  assertKimiWindowsCommandLine(command.program, command.args);
+  return {
+    label,
+    program: command.program,
+    args: command.args,
+    format: "kimi-ndjson",
+    noStdin: true,
+  };
+}
+
 function appendPathSegment(
   segments: string[],
   candidate: string | undefined,
@@ -532,12 +593,16 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
 
 function ensureProgramAvailable(route: BridgeRoute): ResolvedCommand {
   const probeCommand = resolveCommand(route.program, ["--version"]);
-  const probe = spawnSync(probeCommand.program, probeCommand.args, {
-    encoding: "utf8",
-    env: bridgeEnv("fable-5", "auto"),
-    shell: false,
-    windowsHide: true,
-  });
+  const probe = childProcess.spawnSync(
+    probeCommand.program,
+    probeCommand.args,
+    {
+      encoding: "utf8",
+      env: bridgeEnv("fable-5", "auto"),
+      shell: false,
+      windowsHide: true,
+    },
+  );
   if (probe.error) {
     throw new Error(
       `${route.label} bridge is unavailable: cannot start "${route.program}". ` +
@@ -671,25 +736,17 @@ export function routeForModel(
     ? kimiNativeModel(model)
     : undefined;
   if (liveKimiModel) {
-    const promptArg = kimiPromptArgument(prompt);
     const skillDirs = getKimiSkillDirs();
-    return {
-      label: displayBridgeModel(model),
-      program: kimiCliProgram(),
-      args: [
-        "-p",
-        promptArg,
-        "--output-format",
-        "stream-json",
-        "-m",
-        liveKimiModel,
-        ...permissionArgs,
-        ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
-      ],
-      format: "kimi-ndjson",
-      logFile,
-      noStdin: true,
-    };
+    return kimiRoute(displayBridgeModel(model), [
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "-m",
+      liveKimiModel,
+      ...permissionArgs,
+      ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
+    ]);
   }
   switch (model) {
     // `--verbose` обязателен: без него `claude -p` не отдаёт stream-json.
@@ -747,31 +804,23 @@ export function routeForModel(
     // Kimi = подписочный CLI `kimi` (device-login), поток stream-json в формате
     // kimi-ndjson. Выбранная модель всегда передаётся exact native alias через
     // `-m`; иначе пользовательский K2 мог молча превратиться в default K3.
-    // `-p` берёт промпт аргументом и stdin не читает, поэтому большой транскрипт
-    // уходит в файл, а kimi получает короткую инструкцию прочитать его тулом.
+    // `-p` берёт промпт аргументом и stdin не читает; большой transcript
+    // отклоняется до запуска по полному Windows command-line лимиту.
     case "kimi-k2":
     case "kimi-k2-highspeed":
     case "kimi-k3":
     case "kimi-k3-256k": {
       const modelArg = kimiNativeModel(model);
-      const promptArg = kimiPromptArgument(prompt);
       const skillDirs = getKimiSkillDirs();
-      return {
-        label: displayBridgeModel(model),
-        program: kimiCliProgram(),
-        args: [
-          "-p",
-          promptArg,
-          "--output-format",
-          "stream-json",
-          ...(modelArg ? ["-m", modelArg] : []),
-          ...permissionArgs,
-          ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
-        ],
-        format: "kimi-ndjson",
-        logFile,
-        noStdin: true,
-      };
+      return kimiRoute(displayBridgeModel(model), [
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
+        ...(modelArg ? ["-m", modelArg] : []),
+        ...permissionArgs,
+        ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
+      ]);
     }
     case "codex-5-6-terra":
       return {
@@ -1071,7 +1120,7 @@ async function* streamBridgeChatWithSteer(
     content: `Launching native command: ${describeBridgeLaunch(command.program, command.args)}\n`,
   };
 
-  const child = spawn(command.program, command.args, {
+  const child = childProcess.spawn(command.program, command.args, {
     cwd,
     env: bridgeEnv(args.brokerModel, args.brokerSubagent),
     shell: false,

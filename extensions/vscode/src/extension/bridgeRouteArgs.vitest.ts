@@ -1,7 +1,20 @@
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
+vi.mock("node:child_process", async () => {
+  const actual =
+    await vi.importActual<typeof import("node:child_process")>(
+      "node:child_process",
+    );
+  return {
+    ...actual,
+    spawn: vi.fn(actual.spawn),
+    spawnSync: vi.fn(actual.spawnSync),
+  };
+});
 vi.mock("./permissionCapabilities", () => ({
   cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
@@ -18,9 +31,10 @@ vi.mock("./permissionCapabilities", () => ({
 import {
   attachClaudePermissionTransport,
   claudeStreamingInput,
-  KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES,
+  KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
   routeForModel,
+  windowsCommandLineUtf16Length,
 } from "./bridgeChatAdapter";
 import { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { resolveBridgeControls } from "./bridgeControls";
@@ -32,16 +46,13 @@ import {
 const promptFiles: string[] = [];
 afterEach(() => {
   for (const file of promptFiles.splice(0)) fs.rmSync(file, { force: true });
+  vi.restoreAllMocks();
 });
 
 describe("native bridge argv", () => {
   it("keeps an exact Unicode/multiline Kimi prompt in argv without any Scratch file", () => {
     const prefix = "Первая строка\n🙂 第二行\n";
-    const prompt =
-      prefix +
-      "x".repeat(
-        KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES - Buffer.byteLength(prefix, "utf8"),
-      );
+    const prompt = prefix + "x".repeat(1_024);
     const writeFileSync = vi.spyOn(fs, "writeFileSync");
     const route = routeForModel(
       "kimi-k3",
@@ -50,9 +61,6 @@ describe("native bridge argv", () => {
       [],
       resolveBridgeControls("kimi-k3", "high", "standard"),
     );
-    expect(Buffer.byteLength(prompt, "utf8")).toBe(
-      KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES,
-    );
     expect(route.args[route.args.indexOf("-p") + 1]).toBe(prompt);
     expect(route.promptFile).toBeUndefined();
     expect(route.logFile).toBeUndefined();
@@ -60,9 +68,10 @@ describe("native bridge argv", () => {
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 
-  it("fails closed instead of creating a Kimi prompt file above the Windows argv budget", () => {
+  it("rejects 24,000 quote/backslash characters before Scratch or process launch", () => {
     const writeFileSync = vi.spyOn(fs, "writeFileSync");
-    const oversized = "x".repeat(KIMI_WINDOWS_PROMPT_ARGV_MAX_BYTES + 1);
+    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+    const oversized = '\\"'.repeat(12_000);
     expect(() =>
       routeForModel(
         "kimi-k3",
@@ -71,7 +80,51 @@ describe("native bridge argv", () => {
         [],
         resolveBridgeControls("kimi-k3", "high", "standard"),
       ),
-    ).toThrow(/safe Windows argv limit/);
+    ).toThrow(/safe CreateProcess limit/);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("accepts the exact full CreateProcess command-line boundary", () => {
+    const emptyRoute = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      "",
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    const promptIndex = emptyRoute.args.indexOf("-p") + 1;
+    const maxAsciiPromptLength =
+      KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 -
+      windowsCommandLineUtf16Length(emptyRoute.program, emptyRoute.args) +
+      2;
+    const prompt = "x".repeat(maxAsciiPromptLength);
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      prompt,
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.args[promptIndex]).toBe(prompt);
+    expect(windowsCommandLineUtf16Length(route.program, route.args)).toBe(
+      KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
+    );
+  });
+
+  it("rejects an overlong dynamic Kimi alias before any route artefact", () => {
+    const writeFileSync = vi.spyOn(fs, "writeFileSync");
+    expect(() =>
+      routeForModel(
+        `kimi:${"a".repeat(129)}`,
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      ),
+    ).toThrow(/native model alias/);
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 

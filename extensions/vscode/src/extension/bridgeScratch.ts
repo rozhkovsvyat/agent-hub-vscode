@@ -8,16 +8,6 @@ import path from "node:path";
  */
 export const CUKII_BRIDGE_SCRATCH_ROOT = "D:\\Scratch\\cukii-bridge";
 
-function windowsPathKey(candidate: string): string {
-  return path.resolve(candidate).replaceAll("/", "\\").toLowerCase();
-}
-
-function isWithin(child: string, root: string): boolean {
-  const childKey = windowsPathKey(child);
-  const rootKey = windowsPathKey(root).replace(/\\+$/, "");
-  return childKey === rootKey || childKey.startsWith(`${rootKey}\\`);
-}
-
 /**
  * Make a fixed Scratch directory one component at a time. Every existing
  * component is lstat'd: a Windows junction/reparse point is rejected instead
