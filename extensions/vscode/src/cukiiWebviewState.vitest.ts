@@ -112,7 +112,11 @@ describe("revived Cukii webview legacy route migration", () => {
 
   it("preserves unrelated empty route and navigation containers", () => {
     expect(
-      sanitizeLegacyHistoryState({ route: {}, navigation: {}, path: "/config" }),
+      sanitizeLegacyHistoryState({
+        route: {},
+        navigation: {},
+        path: "/config",
+      }),
     ).toEqual({ route: {}, navigation: {}, path: "/config" });
   });
 
@@ -136,7 +140,7 @@ describe("revived Cukii webview legacy route migration", () => {
     });
   });
 
-  it("handles cycles, arrays, primitives, null prototypes and a depth cap", () => {
+  it("removes a deeply nested legacy route without recursing, invoking getters, or polluting prototypes", () => {
     const cyclic: Record<string, unknown> = {
       items: [{ Path: "/history#old" }, 7, null, "text"],
     };
@@ -149,13 +153,20 @@ describe("revived Cukii webview legacy route migration", () => {
     nullPrototype.pathname = "/config";
     cyclic.nullPrototype = nullPrototype;
     let deep: Record<string, unknown> = cyclic;
-    for (let index = 0; index < 50; index++) deep = { navigation: deep };
+    for (let index = 0; index < 1000; index++) deep = { navigation: deep };
+    let getterWasRead = false;
+    Object.defineProperty(cyclic, "path", {
+      enumerable: true,
+      get: () => {
+        getterWasRead = true;
+        return "/history";
+      },
+    });
 
-    const migrated = sanitizeLegacyHistoryState(deep, 4) as Record<
+    const migrated = sanitizeLegacyHistoryState(deep) as Record<
       string,
       unknown
     >;
-    expect(() => sanitizeLegacyHistoryState(deep, Infinity)).not.toThrow();
     const migratedCycle = sanitizeLegacyHistoryState(cyclic) as Record<
       string,
       unknown
@@ -164,10 +175,22 @@ describe("revived Cukii webview legacy route migration", () => {
     expect(migrated).toBeDefined();
     expect(migratedCycle.self).toBe(migratedCycle);
     expect(migratedCycle.items).toEqual([{}, 7, null, "text"]);
+    expect(getterWasRead).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        migratedCycle.nullPrototype as Record<string, unknown>,
+        "__proto__",
+      ),
+    ).toBe(true);
     expect(
       (migratedCycle.nullPrototype as Record<string, unknown>).pathname,
     ).toBe("/config");
+    let migratedLeaf: Record<string, unknown> = migrated;
+    for (let index = 0; index < 1000; index++) {
+      migratedLeaf = migratedLeaf.navigation as Record<string, unknown>;
+    }
+    expect(migratedLeaf.items).toEqual([{}, 7, null, "text"]);
   });
 
   it.each([null, "not-state", 42, ["not", "state"]])(

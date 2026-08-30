@@ -1,4 +1,5 @@
 import { OnboardingModes } from "core/protocol/core";
+import { isLegacyHistoryRoute } from "core/util/legacyHistoryRoute";
 import { useContext, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
@@ -36,6 +37,15 @@ const GridDiv = styled.div`
   height: 100vh;
   overflow-x: visible;
 `;
+
+export function redirectLegacyHistoryNavigation(
+  path: unknown,
+  navigate: (to: string, options?: { replace?: boolean }) => void,
+): boolean {
+  if (!isLegacyHistoryRoute(path)) return false;
+  navigate(ROUTES.HOME, { replace: true });
+  return true;
+}
 
 const Layout = () => {
   const navigate = useNavigate();
@@ -114,10 +124,7 @@ const Layout = () => {
   useWebviewListener(
     "navigateTo",
     async (data) => {
-      if (data.path === "/history") {
-        navigate(ROUTES.HOME, { replace: true });
-        return;
-      }
+      if (redirectLegacyHistoryNavigation(data.path, navigate)) return;
       if (data.toggle && location.pathname === data.path) {
         navigate("/");
       } else {

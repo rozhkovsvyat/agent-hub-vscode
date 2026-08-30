@@ -9,6 +9,7 @@ import { Core } from "core/core";
 import { walkDirAsync } from "core/indexing/walkDir";
 import { isModelInstaller } from "core/llm";
 import { NextEditLoggingService } from "core/nextEdit/NextEditLoggingService";
+import { isLegacyHistoryRoute } from "core/util/legacyHistoryRoute";
 import { startLocalLemonade } from "core/util/lemonadeHelper";
 import { startLocalOllama } from "core/util/ollamaHelper";
 import {
@@ -720,7 +721,7 @@ const getCommandsMap: (
       quickPick.show();
     },
     "continue.navigateTo": (path: string, toggle: boolean) => {
-      if (path === "/history") {
+      if (isLegacyHistoryRoute(path)) {
         void vscode.commands.executeCommand("continue.continueGUIView.focus");
         return;
       }

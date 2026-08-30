@@ -5,7 +5,6 @@ import {
   Key,
   VSBrowser,
   WebDriver,
-  WebElement,
   WebView,
   until,
 } from "vscode-extension-tester";
@@ -380,68 +379,6 @@ describe.skip("GUI Test", () => {
   });
 
   describe("Chat Paths", () => {
-    it("Send many messages → chat auto scrolls → go to history → open previous chat → it is scrolled to the bottom", async () => {
-      for (let i = 0; i <= 20; i++) {
-        const { userMessage, llmResponse } =
-          TestUtils.generateTestMessagePair(i);
-        await GUIActions.sendMessage({
-          view,
-          message: userMessage,
-          inputFieldIndex: i,
-        });
-        const response = await TestUtils.waitForSuccess(() =>
-          GUISelectors.getThreadMessageByText(view, llmResponse),
-        );
-
-        const viewportHeight = await driver.executeScript(
-          "return window.innerHeight",
-        );
-
-        const isInViewport = await driver.executeScript(
-          `
-          const rect = arguments[0].getBoundingClientRect();
-          return (
-            rect.top >= 0 &&
-            rect.bottom <= ${viewportHeight}
-          );
-          `,
-          response,
-        );
-
-        expect(isInViewport).to.eq(true);
-      }
-
-      await view.switchBack();
-
-      await (await GUISelectors.getHistoryNavButton(view)).click();
-      await GUIActions.switchToReactIframe();
-      TestUtils.waitForSuccess(async () => {
-        await (await GUISelectors.getNthHistoryTableRow(view, 0)).click();
-      });
-
-      const { llmResponse } = TestUtils.generateTestMessagePair(20);
-      const response = await TestUtils.waitForSuccess(() =>
-        GUISelectors.getThreadMessageByText(view, llmResponse),
-      );
-
-      const viewportHeight = await driver.executeScript(
-        "return window.innerHeight",
-      );
-
-      const isInViewport = await driver.executeScript(
-        `
-        const rect = arguments[0].getBoundingClientRect();
-        return (
-          rect.top >= 0 &&
-          rect.bottom <= ${viewportHeight}
-        );
-        `,
-        response,
-      );
-
-      expect(isInViewport).to.eq(true);
-    }).timeout(DEFAULT_TIMEOUT.XL * 1000);
-
     it("Open chat and send message → press arrow up and arrow down to cycle through messages → submit another message → press arrow up and arrow down to cycle through messages", async () => {
       await GUIActions.sendMessage({
         view,
@@ -496,92 +433,6 @@ describe.skip("GUI Test", () => {
 
       await input2.sendKeys(Key.ARROW_DOWN);
       await driver.wait(until.elementTextIs(input2, ""), DEFAULT_TIMEOUT.SM);
-    }).timeout(DEFAULT_TIMEOUT.XL);
-
-    it("Open chat and type → open history → press new session button → chat opens, empty and in focus", async () => {
-      const originalTextInput = await GUISelectors.getMessageInputFieldAtIndex(
-        view,
-        0,
-      );
-      await originalTextInput.click();
-      await originalTextInput.sendKeys("Hello");
-      expect(await originalTextInput.getText()).to.equal("Hello");
-
-      await view.switchBack();
-
-      await (await GUISelectors.getHistoryNavButton(view)).click();
-      await GUIActions.switchToReactIframe();
-
-      await view.switchBack();
-      await (await GUISelectors.getNewSessionNavButton(view)).click();
-      await GUIActions.switchToReactIframe();
-
-      const newTextInput = await TestUtils.waitForSuccess(() =>
-        GUISelectors.getMessageInputFieldAtIndex(view, 0),
-      );
-      const activeElement: WebElement = await driver.switchTo().activeElement();
-      const newTextInputHtml = await newTextInput.getAttribute("outerHTML");
-      const activeElementHtml = await activeElement.getAttribute("outerHTML");
-      expect(newTextInputHtml).to.equal(activeElementHtml);
-
-      const textInputValue = await newTextInput.getText();
-      expect(textInputValue).to.equal("");
-    }).timeout(DEFAULT_TIMEOUT.XL);
-
-    it("chat → history → chat", async () => {
-      const messagePair1 = TestUtils.generateTestMessagePair(1);
-      await GUIActions.sendMessage({
-        view,
-        message: messagePair1.userMessage,
-        inputFieldIndex: 0,
-      });
-      await TestUtils.waitForSuccess(() =>
-        GUISelectors.getThreadMessageByText(view, messagePair1.llmResponse),
-      );
-
-      const messagePair2 = TestUtils.generateTestMessagePair(2);
-      await GUIActions.sendMessage({
-        view,
-        message: messagePair2.userMessage,
-        inputFieldIndex: 1,
-      });
-      await TestUtils.waitForSuccess(() =>
-        GUISelectors.getThreadMessageByText(view, messagePair2.llmResponse),
-      );
-
-      /**
-       * SWITCHING BACK AND FORTH
-       * We are switching back and forth here because the history is broken.
-       * It only updates once a another chat is opened, so we need to open a
-       * different chat first.
-       */
-      await view.switchBack();
-      await (await GUISelectors.getHistoryNavButton(view)).click();
-      await GUIActions.switchToReactIframe();
-
-      await (await GUISelectors.getNthHistoryTableRow(view, 0)).click();
-
-      await view.switchBack();
-      await (await GUISelectors.getHistoryNavButton(view)).click();
-      /**
-       * END OF SWITCHING BACK AND FORTH
-       */
-
-      await GUIActions.switchToReactIframe();
-      await (await GUISelectors.getNthHistoryTableRow(view, 0)).click();
-
-      await GUISelectors.getThreadMessageByText(view, messagePair1.llmResponse);
-      await GUISelectors.getThreadMessageByText(view, messagePair2.llmResponse);
-
-      const messagePair3 = TestUtils.generateTestMessagePair(3);
-      await GUIActions.sendMessage({
-        view,
-        message: messagePair3.userMessage,
-        inputFieldIndex: 2,
-      });
-      await TestUtils.waitForSuccess(() =>
-        GUISelectors.getThreadMessageByText(view, messagePair3.llmResponse),
-      );
     }).timeout(DEFAULT_TIMEOUT.XL);
   });
 });

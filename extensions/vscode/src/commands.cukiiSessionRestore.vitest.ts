@@ -94,10 +94,16 @@ describe("saved Cukii sidebar session opening", () => {
     expect(sidebar.webviewProtocol.request).not.toHaveBeenCalled();
   });
 
-  it("also redirects direct legacy route invocations without touching chat", () => {
+  it.each([
+    "/History/",
+    "/history?source=command#old",
+    "history/",
+    "https://cukii.test/HISTORY/?source=command#old",
+    "vscode-webview://panel/History/#old",
+  ])("redirects the legacy route variant %s without touching chat", (route) => {
     const sidebar = register({ invoke: vi.fn() });
 
-    state.commands.get("continue.navigateTo")!("/history", true);
+    state.commands.get("continue.navigateTo")!(route, true);
 
     expect(state.executeCommand).toHaveBeenCalledWith(
       "continue.continueGUIView.focus",
