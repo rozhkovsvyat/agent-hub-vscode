@@ -53,7 +53,6 @@ import {
   cancelVoiceRecording,
   startVoiceRecording,
   stopVoiceRecording,
-  transcribeWebviewVoiceAudio,
   voiceRecordingStatus,
 } from "./voiceDictation";
 import { appendSteerMessage } from "./bridgeSteer";
@@ -614,9 +613,6 @@ export class VsCodeMessenger {
     this.onWebview("cukii/voiceRecordingStatus", async (msg) =>
       voiceRecordingStatus(msg.data.recordingId),
     );
-    this.onWebview("cukii/transcribeVoiceRecording", async (msg) => ({
-      text: await transcribeWebviewVoiceAudio(msg.data),
-    }));
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
       clearBrokerVendorAccountCache();
       const spec = vendorAuthTerminalCommand(

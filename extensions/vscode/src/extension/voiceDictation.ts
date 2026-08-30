@@ -63,6 +63,7 @@ export function voiceFfmpegExecutable(): string {
 
 type Recording = {
   process: ChildProcess;
+  ownedDir: string;
   outputPath: string;
   device: string;
   exited?: { code: number | null; stderr: string };
@@ -122,6 +123,14 @@ export function parseDirectShowAudioDevices(stderr: string): string[] {
   );
 }
 
+export function selectDirectShowAudioDevice(
+  devices: string[],
+): string | undefined {
+  return (
+    devices.find((device) => !/streaming|virtual/i.test(device)) ?? devices[0]
+  );
+}
+
 async function audioDevice(): Promise<string> {
   if (process.platform !== "win32") {
     throw new Error(
@@ -141,13 +150,11 @@ async function audioDevice(): Promise<string> {
     stderr = String((error as { stderr?: unknown }).stderr ?? "");
   }
   const devices = parseDirectShowAudioDevices(stderr);
-  const preferred = devices.find(
-    (device) => !/streaming|virtual/i.test(device),
-  );
-  if (!preferred && devices.length === 0) {
+  const selected = selectDirectShowAudioDevice(devices);
+  if (!selected) {
     throw new Error("No Windows recording device was found.");
   }
-  return preferred ?? devices[0];
+  return selected;
 }
 
 async function waitForRecorderStart(
@@ -160,7 +167,7 @@ async function waitForRecorderStart(
   if (recording.exited) {
     throw new Error(
       recording.exited.stderr.trim() ||
-        "The recording device could not be opened.",
+        `The recording device "${recording.device}" could not be opened.`,
     );
   }
   if (recording.failure) throw recording.failure;
@@ -180,16 +187,16 @@ export async function startVoiceRecording(
     throw new Error("Voice recording is already active.");
   }
   pendingRecordings.add(recordingId);
-  let outputPath: string | undefined;
+  let ownedDir: string | undefined;
   try {
     const device = await (options.resolveDevice ?? audioDevice)();
     if (cancelledStarts.delete(recordingId)) {
       throw new Error("Voice recording was cancelled.");
     }
-    outputPath = path.join(
-      options.tempDir ?? os.tmpdir(),
-      `cukii-voice-${recordingId}.wav`,
+    ownedDir = fs.mkdtempSync(
+      path.join(options.tempDir ?? os.tmpdir(), "cukii-voice-capture-"),
     );
+    const outputPath = path.join(ownedDir, "recording.wav");
     const child = (options.spawnRecorder ?? spawn)(
       voiceFfmpegExecutable(),
       [
@@ -213,7 +220,12 @@ export async function startVoiceRecording(
       ],
       { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] },
     );
-    const recording: Recording = { process: child, outputPath, device };
+    const recording: Recording = {
+      process: child,
+      ownedDir,
+      outputPath,
+      device,
+    };
     let stderr = "";
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
@@ -243,8 +255,8 @@ export async function startVoiceRecording(
   } catch (error) {
     if (recordings.has(recordingId)) {
       await finalizeRecording(recordingId, "cancel");
-    } else if (outputPath) {
-      fs.rmSync(outputPath, { force: true });
+    } else if (ownedDir) {
+      fs.rmSync(ownedDir, { recursive: true, force: true });
     }
     throw error;
   } finally {
@@ -433,6 +445,22 @@ export function assertVoiceTranscriptIsUsable(
   text: string,
   durationSeconds: number,
 ): void {
+  const canonical = text
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/^[\s"'`.,!?;:(){}-]+|[\s"'`.,!?;:(){}-]+$/gu, "")
+    .replace(/\s+/g, "");
+  if (
+    new Set([
+      "[s]",
+      "[blank_audio]",
+      "[no_speech]",
+      "<|nospeech|>",
+      "<|no_speech|>",
+    ]).has(canonical)
+  ) {
+    throw new Error(NO_SPEECH_MESSAGE);
+  }
   const tokens = text.trim().split(/\s+/).filter(Boolean);
   const normalized = tokens.map((token) =>
     token.toLocaleLowerCase().replace(/[^\p{L}\p{N}\[\]]/gu, ""),
@@ -493,121 +521,6 @@ export async function transcribeVoiceFile(inputPath: string): Promise<string> {
   return transcribeDecodedVoiceAudio(await decodeVoiceAudio(inputPath));
 }
 
-export type WebviewVoiceAudio = {
-  recordingId: string;
-  /** Base64 audio bytes (not a data URL) emitted by MediaRecorder. */
-  audioBase64: string;
-  mimeType: string;
-  sampleRate?: number;
-  durationMs?: number;
-};
-
-// Base64 expands this by ~33% inside VS Code's JSON IPC. Eight MiB keeps the
-// message comfortably bounded while still allowing the five-minute Opus cap.
-export const MAX_WEBVIEW_VOICE_BYTES = 8 * 1024 * 1024;
-
-function extensionForVoiceMimeType(mimeType: string): string {
-  const normalized = mimeType.toLowerCase().split(";", 1)[0].trim();
-  if (normalized === "audio/webm") return ".webm";
-  if (normalized === "audio/ogg") return ".ogg";
-  if (normalized === "audio/wav" || normalized === "audio/wave") return ".wav";
-  if (normalized === "audio/mp4" || normalized === "audio/m4a") return ".m4a";
-  throw new Error(
-    "This microphone recording format is not supported. Retry with the default microphone.",
-  );
-}
-
-function decodeWebviewVoiceAudio(audioBase64: string): Buffer {
-  // Buffer.from accepts malformed base64 silently. Rejecting it before writing
-  // a file keeps a stale/webview-corrupted recording distinct from a genuine
-  // no-speech transcription result.
-  if (!audioBase64) {
-    throw new Error("No microphone audio was captured.");
-  }
-  const padding = audioBase64.endsWith("==")
-    ? 2
-    : audioBase64.endsWith("=")
-      ? 1
-      : 0;
-  const decodedLength = Math.floor((audioBase64.length * 3) / 4) - padding;
-  if (decodedLength > MAX_WEBVIEW_VOICE_BYTES) {
-    throw new Error(
-      "The microphone recording is too large. Record a shorter message and retry.",
-    );
-  }
-  if (
-    audioBase64.length % 4 !== 0 ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(audioBase64)
-  ) {
-    throw new Error("The microphone recording data was invalid. Please retry.");
-  }
-  const bytes = Buffer.from(audioBase64, "base64");
-  if (bytes.toString("base64") !== audioBase64) {
-    throw new Error("The microphone recording data was invalid. Please retry.");
-  }
-  if (bytes.byteLength === 0) {
-    throw new Error("No microphone audio was captured.");
-  }
-  if (bytes.byteLength > MAX_WEBVIEW_VOICE_BYTES) {
-    throw new Error(
-      "The microphone recording is too large. Record a shorter message and retry.",
-    );
-  }
-  return bytes;
-}
-
-/**
- * The browser/webview is the sole microphone owner. It supplies the exact
- * MediaRecorder bytes and metadata; the extension host writes a short-lived
- * private file only because the existing sanctioned ffmpeg/Whisper pipeline
- * decodes files. Nothing is logged and the file is removed in every outcome.
- */
-export async function transcribeWebviewVoiceAudio(
-  payload: WebviewVoiceAudio,
-  transcribe: (inputPath: string) => Promise<string> = transcribeVoiceFile,
-  tempDir = os.tmpdir(),
-): Promise<string> {
-  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(payload.recordingId)) {
-    throw new Error("Invalid voice recording identifier.");
-  }
-  if (
-    payload.sampleRate !== undefined &&
-    (!Number.isFinite(payload.sampleRate) ||
-      payload.sampleRate < 8_000 ||
-      payload.sampleRate > 192_000)
-  ) {
-    throw new Error(
-      "The microphone reported an invalid sample rate. Please retry.",
-    );
-  }
-  if (
-    payload.durationMs !== undefined &&
-    (!Number.isFinite(payload.durationMs) || payload.durationMs <= 0)
-  ) {
-    throw new Error("The microphone recording was empty. Please try again.");
-  }
-  if (
-    payload.durationMs !== undefined &&
-    payload.durationMs > MAX_VOICE_RECORDING_MS
-  ) {
-    throw new Error("The microphone recording exceeded the five-minute limit.");
-  }
-
-  const extension = extensionForVoiceMimeType(payload.mimeType);
-  const bytes = decodeWebviewVoiceAudio(payload.audioBase64);
-  // A caller-controlled recording id must never identify a shared temp file.
-  // Each invocation owns a new directory, so replay/concurrent calls cannot
-  // delete one another's input (or an unrelated sentinel left by a crash).
-  const ownedDir = fs.mkdtempSync(path.join(tempDir, "cukii-voice-upload-"));
-  const inputPath = path.join(ownedDir, `recording${extension}`);
-  try {
-    fs.writeFileSync(inputPath, bytes, { flag: "wx", mode: 0o600 });
-    return await transcribe(inputPath);
-  } finally {
-    fs.rmSync(ownedDir, { recursive: true, force: true });
-  }
-}
-
 function rememberTerminal(
   recordingId: string,
   state: "expired" | "error",
@@ -658,7 +571,7 @@ async function finalizeRecording(
       return await transcribeVoiceFile(recording.outputPath);
     } finally {
       if (recording.durationTimer) clearTimeout(recording.durationTimer);
-      fs.rmSync(recording.outputPath, { force: true });
+      fs.rmSync(recording.ownedDir, { recursive: true, force: true });
     }
   })();
   finalizations.set(recordingId, operation);
@@ -695,7 +608,17 @@ export function voiceRecordingStatus(recordingId: string): {
   if (pendingRecordings.has(recordingId) && !recordings.has(recordingId)) {
     return { state: "starting" };
   }
-  if (recordings.has(recordingId)) return { state: "listening" };
+  const recording = recordings.get(recordingId);
+  if (recording?.failure || recording?.exited) {
+    const message =
+      recording.failure?.message ||
+      recording.exited?.stderr.trim() ||
+      `The recording device "${recording.device}" stopped unexpectedly.`;
+    rememberTerminal(recordingId, "error", message);
+    void finalizeRecording(recordingId, "cancel");
+    return { state: "error", message };
+  }
+  if (recording) return { state: "listening" };
   const terminal = terminalRecordings.get(recordingId);
   return terminal
     ? { state: terminal.state, message: terminal.message }

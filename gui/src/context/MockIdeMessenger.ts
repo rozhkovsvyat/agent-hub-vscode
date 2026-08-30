@@ -117,7 +117,6 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
   "cukii/stopVoiceRecording": { text: "привет Куки" },
   "cukii/cancelVoiceRecording": undefined,
   "cukii/voiceRecordingStatus": { state: "listening" },
-  "cukii/transcribeVoiceRecording": { text: "привет Куки" },
   "cukii/runVendorAuthAction": {
     opened: true,
     message: "Authentication flow opened in the integrated terminal.",

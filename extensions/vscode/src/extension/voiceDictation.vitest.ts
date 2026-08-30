@@ -9,14 +9,13 @@ import {
   cancelVoiceRecording,
   assertVoiceTranscriptIsUsable,
   MAX_VOICE_RECORDING_MS,
-  MAX_WEBVIEW_VOICE_BYTES,
   parseDirectShowAudioDevices,
   requestRecorderQuit,
+  selectDirectShowAudioDevice,
   startVoiceRecording,
   stopVoiceRecording,
   transcribeVoiceFile,
   transcribeDecodedVoiceAudio,
-  transcribeWebviewVoiceAudio,
   verifyWhisperCache,
   voiceFfmpegExecutable,
   voiceRecordingStatus,
@@ -92,6 +91,26 @@ describe("voice dictation runtime", () => {
     );
   });
 
+  it.each([
+    "[S]",
+    " [blank_audio] ",
+    "... [NO_SPEECH] ...",
+    "<|nospeech|>",
+    "( <|NO_SPEECH|> )",
+  ])("rejects a standalone no-speech marker: %s", (text) => {
+    expect(() => assertVoiceTranscriptIsUsable(text, 2)).toThrow(
+      "No speech was detected",
+    );
+  });
+
+  it.each([
+    "The no speech setting is disabled",
+    "Please remove the [blank_audio] marker from this sentence",
+    "S is a normal letter",
+  ])("keeps normal text containing marker-like words: %s", (text) => {
+    expect(() => assertVoiceTranscriptIsUsable(text, 5)).not.toThrow();
+  });
+
   it("extracts DirectShow microphone names", () => {
     const inventory = [
       '[dshow @ 0001] "Line (4- Steinberg UR22C)" (audio)',
@@ -101,6 +120,15 @@ describe("voice dictation runtime", () => {
       "Line (4- Steinberg UR22C)",
       "Microphone (Virtual)",
     ]);
+  });
+
+  it("selects a real Unicode DirectShow device before a virtual microphone", () => {
+    expect(
+      selectDirectShowAudioDevice([
+        "Микрофон (Steam Streaming Microphone)",
+        "Line (4- Steinberg UR22C)",
+      ]),
+    ).toBe("Line (4- Steinberg UR22C)");
   });
 
   it("uses Cukii's packaged/development recorder rather than system PATH", () => {
@@ -121,154 +149,6 @@ describe("voice dictation runtime", () => {
     }
   });
 
-  it("writes non-empty webview MediaRecorder bytes only for the ASR call and always removes them", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-webview-"));
-    const recordingId = "webview-voice-test";
-    let receivedPath = "";
-    try {
-      await expect(
-        transcribeWebviewVoiceAudio(
-          {
-            recordingId,
-            audioBase64: Buffer.from("webm-audio").toString("base64"),
-            mimeType: "audio/webm;codecs=opus",
-            sampleRate: 48_000,
-            durationMs: 250,
-          },
-          async (inputPath) => {
-            receivedPath = inputPath;
-            expect(fs.readFileSync(inputPath).toString()).toBe("webm-audio");
-            return "проверка";
-          },
-          tempDir,
-        ),
-      ).resolves.toBe("проверка");
-      expect(receivedPath).toMatch(/\.webm$/);
-      expect(fs.existsSync(receivedPath)).toBe(false);
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  it.each([
-    ["empty bytes", "", "audio/webm", "No microphone audio was captured"],
-    ["malformed bytes", "***", "audio/webm", "recording data was invalid"],
-    [
-      "unsupported mime",
-      Buffer.from("a").toString("base64"),
-      "text/plain",
-      "format is not supported",
-    ],
-  ])("rejects %s before ASR", async (_name, audioBase64, mimeType, message) => {
-    await expect(
-      transcribeWebviewVoiceAudio({
-        recordingId: "invalid-webview-voice",
-        audioBase64,
-        mimeType,
-        durationMs: 1,
-      }),
-    ).rejects.toThrow(message);
-  });
-
-  it.each(["AAA", "AB==", "AAAA="])(
-    "rejects non-canonical base64 %s",
-    async (audioBase64) => {
-      await expect(
-        transcribeWebviewVoiceAudio({
-          recordingId: "canonical-base64-test",
-          audioBase64,
-          mimeType: "audio/webm",
-          durationMs: 1,
-        }),
-      ).rejects.toThrow("recording data was invalid");
-    },
-  );
-
-  it.each([
-    [{ sampleRate: 7_999 }, "sample rate"],
-    [{ sampleRate: 192_001 }, "sample rate"],
-    [{ durationMs: 300_001 }, "five-minute limit"],
-  ])("rejects implausible metadata %o", async (metadata, message) => {
-    await expect(
-      transcribeWebviewVoiceAudio({
-        recordingId: "invalid-metadata-test",
-        audioBase64: Buffer.from("a").toString("base64"),
-        mimeType: "audio/webm",
-        ...metadata,
-      }),
-    ).rejects.toThrow(message);
-  });
-
-  it("rejects audio above the IPC cap before creating a temp file", async () => {
-    expect(MAX_WEBVIEW_VOICE_BYTES).toBe(8 * 1024 * 1024);
-    await expect(
-      transcribeWebviewVoiceAudio({
-        recordingId: "oversized-audio-test",
-        audioBase64: Buffer.alloc(MAX_WEBVIEW_VOICE_BYTES + 1).toString(
-          "base64",
-        ),
-        mimeType: "audio/webm",
-        durationMs: 1,
-      }),
-    ).rejects.toThrow("recording is too large");
-  });
-
-  it("never touches a legacy/sentinel file derived from recordingId", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-sentinel-"));
-    const sentinel = path.join(tempDir, "cukii-voice-replayed-voice.webm");
-    fs.writeFileSync(sentinel, "sentinel");
-    try {
-      await transcribeWebviewVoiceAudio(
-        {
-          recordingId: "replayed-voice",
-          audioBase64: Buffer.from("owned").toString("base64"),
-          mimeType: "audio/webm",
-          durationMs: 1,
-        },
-        async () => "ok",
-        tempDir,
-      );
-      expect(fs.readFileSync(sentinel, "utf8")).toBe("sentinel");
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  it("isolates concurrent replays of the same recording id", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-concurrent-"));
-    const paths: string[] = [];
-    let release!: () => void;
-    const barrier = new Promise<void>((resolve) => (release = resolve));
-    const payload = {
-      recordingId: "concurrent-replay",
-      audioBase64: Buffer.from("owned").toString("base64"),
-      mimeType: "audio/webm",
-      durationMs: 1,
-    };
-    try {
-      const calls = [1, 2].map(() =>
-        transcribeWebviewVoiceAudio(
-          payload,
-          async (inputPath) => {
-            paths.push(inputPath);
-            await barrier;
-            expect(fs.readFileSync(inputPath, "utf8")).toBe("owned");
-            return "ok";
-          },
-          tempDir,
-        ),
-      );
-      await vi.waitFor(() => expect(paths).toHaveLength(2));
-      expect(new Set(paths).size).toBe(2);
-      release();
-      await expect(Promise.all(calls)).resolves.toEqual(["ok", "ok"]);
-      expect(paths.every((inputPath) => !fs.existsSync(inputPath))).toBe(true);
-    } finally {
-      release?.();
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
   it("treats recorder EPIPE during stop as an already-closed microphone", async () => {
     const input = {
       writable: true,
@@ -284,7 +164,8 @@ describe("voice dictation runtime", () => {
   it("cancels ownership during the pending 450ms start and removes its temp WAV", async () => {
     const recordingId = "pending-start-test";
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-pending-"));
-    const outputPath = path.join(tempDir, `cukii-voice-${recordingId}.wav`);
+    const sentinel = path.join(tempDir, `cukii-voice-${recordingId}.wav`);
+    fs.writeFileSync(sentinel, "do not overwrite");
     try {
       const starting = startVoiceRecording(recordingId, {
         resolveDevice: async () => "Test microphone",
@@ -297,7 +178,47 @@ describe("voice dictation runtime", () => {
       await cancelVoiceRecording(recordingId);
       await expect(starting).rejects.toThrow("cancelled");
       expect(voiceRecordingStatus(recordingId)).toEqual({ state: "unknown" });
-      expect(fs.existsSync(outputPath)).toBe(false);
+      expect(fs.readFileSync(sentinel, "utf8")).toBe("do not overwrite");
+      expect(
+        fs
+          .readdirSync(tempDir)
+          .filter((name) => name.startsWith("cukii-voice-capture-")),
+      ).toEqual([]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports and cleans an accepted recorder that exits before stop", async () => {
+    const recordingId = "early-exit-test";
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-early-"));
+    let child!: ChildProcess;
+    try {
+      await startVoiceRecording(recordingId, {
+        resolveDevice: async () => "Микрофон Steinberg",
+        spawnRecorder: ((_command: string, args: readonly string[]) => {
+          child = fakeRecorder(String(args.at(-1)));
+          return child;
+        }) as any,
+        startupDelayMs: 0,
+        tempDir,
+      });
+      child.emit("exit", 1);
+      expect(voiceRecordingStatus(recordingId)).toEqual({
+        state: "error",
+        message:
+          'The recording device "Микрофон Steinberg" stopped unexpectedly.',
+      });
+      await vi.waitFor(() =>
+        expect(
+          fs
+            .readdirSync(tempDir)
+            .filter((name) => name.startsWith("cukii-voice-capture-")),
+        ).toEqual([]),
+      );
+      await expect(stopVoiceRecording(recordingId)).rejects.toThrow(
+        "stopped unexpectedly",
+      );
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
