@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { fireEvent } from "@testing-library/react";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { setBrokerPermissionMode } from "../../redux/slices/sessionSlice";
 import { setupStore } from "../../redux/store";
@@ -137,5 +138,93 @@ describe("Cukii Claude-parity input toolbar", () => {
     await user.keyboard("{ArrowLeft}");
     expect(store.getState().session.brokerEffort).toBe("medium");
     expect(await getElementByText("(Medium)")).toBeDefined();
+  });
+
+  it("has shared ordered command sections and removes unsupported Rewind", async () => {
+    const { user } = await renderWithProviders(<InputToolbar {...props} />);
+    await user.click(await getElementByTestId("broker-menu-button"));
+    const menu = await getElementByTestId("cukii-slash-menu");
+    const headers = [...menu.querySelectorAll("[data-command-section]")];
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Context",
+      "Model",
+    ]);
+    expect(headers[0].previousElementSibling).not.toHaveAttribute(
+      "data-testid",
+      "cukii-command-section-divider",
+    );
+    const dividers = menu.querySelectorAll(
+      '[data-testid="cukii-command-section-divider"]',
+    );
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0].nextElementSibling).toBe(headers[1]);
+    expect(headers[0]).toHaveClass("cukii-command-section-header");
+    expect(headers[1]).toHaveClass("cukii-command-section-header");
+    expect(dividers[0]).toHaveClass("cukii-command-section-divider");
+    expect(menu.textContent).not.toContain("Rewind");
+
+    const filter = menu.querySelector<HTMLInputElement>(
+      'input[placeholder="Filter actions..."]',
+    );
+    expect(filter).not.toBeNull();
+    await user.type(filter!, "Rewind");
+    expect(menu.querySelector('[data-cukii-command-action="Rewind"]')).toBeNull();
+  });
+
+  it("uses one blue active row for mouse and roving keyboard selection", async () => {
+    document.documentElement.style.setProperty(
+      "--vscode-menu-selectionBackground",
+      "#123456",
+    );
+    document.documentElement.style.setProperty(
+      "--vscode-menu-selectionForeground",
+      "#ffffff",
+    );
+    document.documentElement.style.setProperty(
+      "--vscode-list-activeSelectionBackground",
+      "#654321",
+    );
+    const { user } = await renderWithProviders(<InputToolbar {...props} />);
+    await user.click(await getElementByTestId("broker-menu-button"));
+    const menu = await getElementByTestId("cukii-slash-menu");
+    const filter = menu.querySelector<HTMLInputElement>(
+      'input[placeholder="Filter actions..."]',
+    )!;
+    expect(menu.querySelector(".cukii-command-menu-item-active")).toBeNull();
+
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    const first = menu.querySelector<HTMLButtonElement>(
+      'button[data-cukii-command-action="Attach file"]',
+    )!;
+    expect(document.activeElement).toBe(first);
+    expect(first).toHaveClass("cukii-command-menu-item-active");
+    expect(getComputedStyle(first).backgroundColor).toBe("rgb(18, 52, 86)");
+    expect(getComputedStyle(first).color).toBe("rgb(255, 255, 255)");
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(document.activeElement).toHaveAttribute(
+      "data-cukii-command-action",
+      "Mention file from this project",
+    );
+
+    const clear = menu.querySelector<HTMLButtonElement>(
+      'button[data-cukii-command-action="Clear conversation"]',
+    )!;
+    fireEvent.mouseEnter(clear);
+    expect(clear).toHaveClass("cukii-command-menu-item-active");
+    expect(menu.querySelectorAll(".cukii-command-menu-item-active")).toHaveLength(1);
+    expect(
+      menu.querySelector('[data-cukii-command-action="Effort"]'),
+    ).toBeNull();
+    fireEvent.keyDown(menu, { key: "Enter" });
+    expect(document.querySelector('[data-testid="cukii-slash-menu"]')).toBeNull();
+    document.documentElement.style.removeProperty(
+      "--vscode-menu-selectionBackground",
+    );
+    document.documentElement.style.removeProperty(
+      "--vscode-menu-selectionForeground",
+    );
+    document.documentElement.style.removeProperty(
+      "--vscode-list-activeSelectionBackground",
+    );
   });
 });

@@ -3,7 +3,7 @@ import { ToolCallState } from "core";
 import { describe, expect, it } from "vitest";
 import { CukiiCommandCard } from "./CukiiCommandCard";
 
-function state(output: string): ToolCallState {
+function state(output: string, parsedArgs: Record<string, unknown> = {}): ToolCallState {
   return {
     toolCallId: "bash-1",
     toolCall: {
@@ -11,6 +11,7 @@ function state(output: string): ToolCallState {
       type: "function",
       function: { name: "run_terminal_command", arguments: "{}" },
     },
+    parsedArgs,
     status: "done",
     output: [{ name: "Terminal", description: "", content: output }],
   };
@@ -40,5 +41,16 @@ describe("CukiiCommandCard", () => {
     expect(screen.getByTestId("cukii-command-output").textContent).not.toContain("line-0");
     fireEvent.click(screen.getByText("Show 5 earlier lines"));
     expect(screen.getByTestId("cukii-command-output").textContent).toContain("line-0");
+  });
+
+  it("prefers trusted shell metadata over command-text heuristics", () => {
+    render(
+      <CukiiCommandCard
+        command="Write-Output portable"
+        toolCallState={state("portable", { shell: "/bin/bash" })}
+      />,
+    );
+    expect(screen.getByText("Bash")).toBeTruthy();
+    expect(screen.queryByText("PowerShell")).toBeNull();
   });
 });

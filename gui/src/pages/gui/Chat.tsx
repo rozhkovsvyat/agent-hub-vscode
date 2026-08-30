@@ -63,6 +63,7 @@ import { useAutoScroll } from "./useAutoScroll";
 import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
+import { dispatchResponseEscape } from "./chatEscape";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -99,14 +100,6 @@ const StepsDiv = styled.div`
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
-
-function hasEscapeOwningOverlay(): boolean {
-  return Boolean(
-    document.querySelector(
-      '[role="menu"], [role="dialog"], [role="listbox"], .tippy-box',
-    ),
-  );
-}
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
@@ -169,21 +162,9 @@ export function Chat() {
 
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
-      if (
-        e.key === "Escape" &&
-        isStreaming &&
-        !e.repeat &&
-        !e.isComposing &&
-        !e.defaultPrevented &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !e.shiftKey &&
-        !hasEscapeOwningOverlay()
-      ) {
-        e.preventDefault();
+      dispatchResponseEscape(e, isStreaming, () => {
         void dispatch(cancelStream());
-      }
+      });
       if (
         e.key.toLowerCase() === "o" &&
         isMetaEquivalentKeyPressed(e) &&

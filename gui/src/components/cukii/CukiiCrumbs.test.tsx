@@ -27,6 +27,11 @@ describe("CukiiCrumbs", () => {
         crumb.getAttribute("fill"),
       ),
     ).toEqual(["#E3A867", "#E3A867", "#E3A867"]);
+    expect(
+      [...mark.querySelectorAll<SVGCircleElement>("[data-cukii-crumb]")].map(
+        (crumb) => crumb.style.animationDelay,
+      ),
+    ).toEqual(["0ms", "-420ms", "-840ms"]);
   });
 
   it("uses independent triangular trajectories and a truly static reduced-motion fallback", () => {

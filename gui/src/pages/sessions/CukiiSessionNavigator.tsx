@@ -186,6 +186,19 @@ const SessionTitle = styled.span`
   text-overflow: ellipsis;
   white-space: nowrap;
 `;
+const RenameInput = styled.input`
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid #e3a867;
+  border-radius: 4px;
+  outline: none;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+`;
 const Age = styled.span`
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
@@ -291,6 +304,7 @@ export default function CukiiSessionNavigator() {
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
+  const renameSavingRef = useRef(false);
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
   );
@@ -386,6 +400,7 @@ export default function CukiiSessionNavigator() {
       title: session.title,
     });
   const beginRename = (session: CukiiNavigatorSession) => {
+    renameSavingRef.current = false;
     setRenameError(null);
     setRenameDraft(session.title);
     setEditingSessionId(session.sessionId);
@@ -395,32 +410,42 @@ export default function CukiiSessionNavigator() {
     setRenameDraft("");
   };
   const renameSession = async (session: CukiiNavigatorSession) => {
+    if (renameSavingRef.current) return;
     const title = renameDraft.trim();
     if (!title || title === session.title) {
       cancelRename();
       return;
     }
-    const result = await messenger.request("cukii/renameSession", {
-      sessionId: session.sessionId,
-      title,
-    });
-    if (result.status !== "success" || !result.content.ok) {
+    renameSavingRef.current = true;
+    try {
+      const result = await messenger.request("cukii/renameSession", {
+        sessionId: session.sessionId,
+        title,
+      });
+      if (result.status !== "success" || !result.content.ok) {
+        setRenameError("Could not rename session. Try again.");
+        cancelRename();
+        return;
+      }
+      // Update both sources immediately. The extension also broadcasts the same
+      // title to an already-open chat panel, so neither side needs a reload.
+      setSessions((items) =>
+        items.map((item) =>
+          item.sessionId === session.sessionId ? { ...item, title } : item,
+        ),
+      );
+      setOpenPanels((panels) =>
+        panels.map((panel) =>
+          panel.sessionId === session.sessionId ? { ...panel, title } : panel,
+        ),
+      );
+      cancelRename();
+    } catch {
       setRenameError("Could not rename session. Try again.");
-      return;
+      cancelRename();
+    } finally {
+      renameSavingRef.current = false;
     }
-    // Update both sources immediately. The extension also broadcasts the same
-    // title to an already-open chat panel, so neither side needs a reload.
-    setSessions((items) =>
-      items.map((item) =>
-        item.sessionId === session.sessionId ? { ...item, title } : item,
-      ),
-    );
-    setOpenPanels((panels) =>
-      panels.map((panel) =>
-        panel.sessionId === session.sessionId ? { ...panel, title } : panel,
-      ),
-    );
-    cancelRename();
   };
   const deleteSession = async (session: CukiiNavigatorSession) => {
     await messenger.request("history/delete", { id: session.sessionId });
@@ -527,36 +552,36 @@ export default function CukiiSessionNavigator() {
                   key={session.sessionId}
                   onContextMenu={(event) => openContext(event, session)}
                 >
-                  <SessionButton
-                    className="cukii-session-button"
-                    title={session.title}
-                    onClick={() => void openSession(session)}
-                  >
-                    {editingSessionId === session.sessionId ? (
-                      <input
-                        aria-label={`Rename ${session.title}`}
-                        autoFocus
-                        value={renameDraft}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => setRenameDraft(event.target.value)}
-                        onBlur={() => void renameSession(session)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            void renameSession(session);
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            cancelRename();
-                          }
-                        }}
-                      />
-                    ) : (
+                  {editingSessionId === session.sessionId ? (
+                    <RenameInput
+                      aria-label={`Rename ${session.title}`}
+                      autoFocus
+                      value={renameDraft}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onBlur={() => void renameSession(session)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void renameSession(session);
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          cancelRename();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <SessionButton
+                      className="cukii-session-button"
+                      title={session.title}
+                      onClick={() => void openSession(session)}
+                    >
                       <SessionTitle>{session.title || "New session"}</SessionTitle>
-                    )}
-                    <Age>{formatSessionAge(session.dateCreated)}</Age>
-                  </SessionButton>
-                  <RowActions>
+                      <Age>{formatSessionAge(session.dateCreated)}</Age>
+                    </SessionButton>
+                  )}
+                  {editingSessionId !== session.sessionId && <RowActions>
                     <RowAction
                       className="cukii-session-menu-button"
                       aria-label={`Rename ${session.title}`}
@@ -579,7 +604,7 @@ export default function CukiiSessionNavigator() {
                     >
                       <TrashIcon width={16} height={16} />
                     </RowAction>
-                  </RowActions>
+                  </RowActions>}
                 </Row>
               ))}
           </div>

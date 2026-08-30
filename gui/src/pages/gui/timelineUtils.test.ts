@@ -22,13 +22,61 @@ describe("getToolTimelineClass", () => {
           { toolCallId: "second", toolCall: { id: "second", type: "function", function: { name: "bash", arguments: "{}" } }, status: "calling" },
         ],
       },
-    ] as ChatHistoryItem[];
+    ] as unknown as ChatHistoryItem[];
     expect(getActiveTimelineToolId(history)).toBe("second");
     history[0].toolCallStates![1].status = "done";
-    expect(getActiveTimelineToolId(history)).toBe("first");
+    expect(getActiveTimelineToolId(history)).toBeUndefined();
     history[0].toolCallStates![0].status = "done";
     expect(getActiveTimelineToolId(history)).toBeUndefined();
     expect(getToolTimelineClass("calling", false)).toBe("cukii-timeline-event");
     expect(getToolTimelineClass("done", true)).not.toBe("cukii-timeline-current");
+  });
+
+  it("keeps exactly one terminal current row across start/start/out-of-order complete races", () => {
+    const history = [
+      {
+        message: { role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "powershell-1",
+            toolCall: { id: "powershell-1", type: "function", function: { name: "bash", arguments: "{}" } },
+            status: "calling",
+          },
+          {
+            toolCallId: "powershell-2",
+            toolCall: { id: "powershell-2", type: "function", function: { name: "bash", arguments: "{}" } },
+            status: "calling",
+          },
+        ],
+      },
+    ] as unknown as ChatHistoryItem[];
+
+    const activeRows = () => {
+      const activeId = getActiveTimelineToolId(history);
+      const tools = history[0].toolCallStates!.map((tool) =>
+        getToolTimelineClass(tool.status, tool.toolCallId === activeId),
+      );
+      return [...tools, activeId ? "loader-idle" : "cukii-timeline-current"];
+    };
+
+    expect(getActiveTimelineToolId(history)).toBe("powershell-2");
+    expect(activeRows().filter((row) => row === "cukii-timeline-current")).toHaveLength(1);
+
+    history[0].toolCallStates![1].status = "done";
+    expect(getActiveTimelineToolId(history)).toBeUndefined();
+    expect(activeRows().at(-1)).toBe("cukii-timeline-current");
+    expect(activeRows().filter((row) => row === "cukii-timeline-current")).toHaveLength(1);
+
+    history[0].toolCallStates!.push({
+      toolCallId: "loader-tool",
+      toolCall: { id: "loader-tool", type: "function", function: { name: "read", arguments: "{}" } },
+      parsedArgs: {},
+      status: "generating",
+    });
+    expect(getActiveTimelineToolId(history)).toBe("loader-tool");
+    history[0].toolCallStates![2].status = "done";
+    expect(getActiveTimelineToolId(history)).toBeUndefined();
+    expect(activeRows().at(-1)).toBe("cukii-timeline-current");
   });
 });

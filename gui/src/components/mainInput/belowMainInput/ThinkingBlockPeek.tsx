@@ -76,7 +76,11 @@ function ThinkingBlockPeek({
             // ghost, а не outline: у Клода пилюля размышлений без рамки —
             // видна только надпись, а фон появляется лишь на hover.
             variant="ghost"
-            className="text-description-muted flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
+            className={`cukii-thinking-summary ${
+              inProgress
+                ? "cukii-thinking-summary-active"
+                : "cukii-thinking-summary-completed"
+            } flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 transition-colors duration-200 ease-in-out hover:brightness-125`}
             data-testid="thinking-block-peek"
             aria-expanded={open}
             aria-controls={`thinking-block-content-${index}`}

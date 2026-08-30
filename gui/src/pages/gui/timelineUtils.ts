@@ -29,9 +29,12 @@ export function getActiveTimelineToolId(
   history: readonly ChatHistoryItem[],
 ): string | undefined {
   for (let messageIndex = history.length - 1; messageIndex >= 0; messageIndex--) {
-    const active = getLastInProgressToolCallId(history[messageIndex].toolCallStates);
-    if (active) {
-      return active;
+    const toolCallStates = history[messageIndex].toolCallStates;
+    if (toolCallStates?.length) {
+      const latest = toolCallStates[toolCallStates.length - 1];
+      return isInProgressToolStatus(latest.status)
+        ? latest.toolCallId
+        : undefined;
     }
   }
   return undefined;
@@ -48,11 +51,6 @@ export function getLastInProgressToolCallId(
     return undefined;
   }
 
-  for (let i = toolCallStates.length - 1; i >= 0; i--) {
-    if (isInProgressToolStatus(toolCallStates[i].status)) {
-      return toolCallStates[i].toolCallId;
-    }
-  }
-
-  return undefined;
+  const latest = toolCallStates[toolCallStates.length - 1];
+  return isInProgressToolStatus(latest.status) ? latest.toolCallId : undefined;
 }

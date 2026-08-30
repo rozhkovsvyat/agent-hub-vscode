@@ -1,5 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { CukiiStreamingToolbar } from "./CukiiStreamingToolbar";
 
 afterEach(() => vi.useRealTimers());
@@ -33,5 +35,13 @@ describe("CukiiStreamingToolbar", () => {
     act(() => vi.advanceTimersByTime(4_000));
     expect(screen.getByText("Combulating..", { selector: '[aria-live="polite"]' })).toBeTruthy();
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+
+  it("reserves phrase width and makes character reconstruction instant for reduced motion", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    expect(css).toMatch(/\.cukii-thinking-text\s*\{[^}]*min-width:\s*21ch/s);
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.cukii-thinking-character\s*\{[^}]*animation:\s*none/s,
+    );
   });
 });

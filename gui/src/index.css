@@ -329,9 +329,18 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-main-input-shell .cukii-input-box:focus-within {
-  border-color: var(--cukii-accent) !important;
-  box-shadow: 0 0 0 1px var(--cukii-accent);
+  border-color: #E3A867 !important;
+  box-shadow: 0 0 0 1px #E3A867 !important;
   transform: none;
+}
+
+/* Validation is semantic state, not focus decoration, and therefore wins
+   even while the editor retains focus. */
+.cukii-main-input-shell .cukii-input-box[aria-invalid="true"],
+.cukii-main-input-shell .cukii-input-box[data-invalid="true"],
+.cukii-main-input-shell[data-invalid="true"] .cukii-input-box {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+  box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder, #be1100) !important;
 }
 
 .cukii-main-input-shell .cukii-editor-stack {
@@ -390,8 +399,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   align-items: center;
   padding: 2px;
   border-radius: 999px;
-  background: var(--vscode-input-background, #3c3c3c);
-  transition: background-color 160ms ease-out;
+  background: var(--vscode-input-border, #5a5a5a);
+  transition: background 150ms ease-out;
 }
 
 .cukii-toggle-thumb {
@@ -420,7 +429,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-toggle-track-on {
-  background: var(--cukii-accent);
+  background: #d97757 !important;
 }
 
 .cukii-toggle-track-on .cukii-toggle-thumb {
@@ -599,24 +608,6 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-submit-button:disabled {
   opacity: 0.4 !important;
-}
-
-/* The stop affordance is deliberately scoped: ordinary send and disabled
-   controls retain their existing appearance and semantics. */
-button.cukii-submit-button--stop,
-button.cukii-submit-button--stop:hover,
-button.cukii-submit-button--stop:active {
-  background: #E3A867 !important;
-  color: #ffffff !important;
-}
-
-button.cukii-submit-button--stop:hover,
-button.cukii-submit-button--stop:active {
-  box-shadow: 0 0 0 1px #C9873F !important;
-}
-
-button.cukii-submit-button--stop:active {
-  background: #C9873F !important;
 }
 
 .cukii-menu-surface {
@@ -909,6 +900,31 @@ button.cukii-submit-button:hover {
   transform: none !important;
 }
 
+/* Keep this state after every generic button rule: cascade order is part of
+   the stop-button contract. Ordinary send/disabled states remain untouched. */
+button.cukii-submit-button--stop,
+button.cukii-submit-button--stop:hover {
+  background: #E3A867 !important;
+  color: #ffffff !important;
+}
+
+button.cukii-submit-button--stop:hover,
+button.cukii-submit-button--stop:focus-visible {
+  background: #C9873F !important;
+  box-shadow: 0 0 0 1px #C9873F !important;
+}
+
+button.cukii-submit-button--stop:active {
+  background: #C9873F !important;
+  box-shadow: 0 0 0 1px #C9873F !important;
+}
+
+.cukii-command-menu-item-active,
+.cukii-command-menu-item-active:hover {
+  background: var(--vscode-menu-selectionBackground) !important;
+  color: var(--vscode-menu-selectionForeground) !important;
+}
+
 .thread-message {
   animation: cukiiMessageIn 220ms ease-out;
 }
@@ -1198,6 +1214,24 @@ button.cukii-submit-button:hover {
   letter-spacing: normal;
   line-height: 19.5px;
   opacity: 1;
+}
+
+.cukii-thinking-summary {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  letter-spacing: normal;
+  line-height: 19.5px;
+}
+
+.cukii-thinking-summary-active {
+  color: var(--vscode-foreground, rgb(204, 204, 204));
+  font-weight: 500;
+  opacity: 1;
+}
+
+.cukii-thinking-summary-completed {
+  color: rgba(204, 204, 204, 0.7);
+  font-weight: 400;
 }
 
 .cukii-crumbs {

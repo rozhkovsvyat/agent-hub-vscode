@@ -1,15 +1,8 @@
 import { ToolCallState } from "core";
 import { useMemo, useState } from "react";
+import { commandShellLabel } from "./shellLabel";
 
 const OUTPUT_PREVIEW_LINES = 60;
-
-function shellLabel(command: string): "PowerShell" | "Bash" {
-  return /^(?:\s*(?:\$|Get-|Set-|New-|Remove-|Copy-|Move-|Select-|Invoke-|pwsh\b|powershell\b))/i.test(
-    command,
-  )
-    ? "PowerShell"
-    : "Bash";
-}
 
 function terminalOutput(toolCallState: ToolCallState): string {
   const isFailure =
@@ -34,7 +27,12 @@ export function CukiiCommandCard({
   const [expanded, setExpanded] = useState(true);
   const [showAllOutput, setShowAllOutput] = useState(false);
   const output = terminalOutput(toolCallState);
-  const shell = shellLabel(command);
+  const trustedShell =
+    toolCallState.processedArgs?.shell ??
+    toolCallState.processedArgs?.shellType ??
+    toolCallState.parsedArgs?.shell ??
+    toolCallState.parsedArgs?.shellType;
+  const shell = commandShellLabel(command, trustedShell);
   const isRunning = toolCallState.status === "calling";
   const outputPreview = useMemo(() => {
     const lines = output.split("\n");

@@ -6,7 +6,16 @@ import {
   PencilIcon,
 } from "@heroicons/react/24/outline";
 import { InputModifiers } from "core";
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
@@ -67,6 +76,33 @@ interface InputToolbarProps {
 
 const menuItemClass =
   "cukii-menu-item flex w-full items-center justify-between gap-5 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+
+const commandSectionHeaderClass =
+  "cukii-command-section-header px-3 pb-1 pt-2 text-xs font-normal leading-4 text-[var(--vscode-descriptionForeground)]";
+const commandSectionDividerClass =
+  "cukii-command-section-divider mx-0 my-1 border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)]";
+const activeCommandItemClass =
+  "cukii-command-menu-item-active bg-[var(--vscode-menu-selectionBackground)] text-[var(--vscode-menu-selectionForeground)] hover:bg-[var(--vscode-menu-selectionBackground)]";
+
+function CommandSectionHeader(props: {
+  children: string;
+  divided?: boolean;
+}) {
+  return (
+    <>
+      {props.divided && (
+        <div
+          aria-hidden="true"
+          className={commandSectionDividerClass}
+          data-testid="cukii-command-section-divider"
+        />
+      )}
+      <div className={commandSectionHeaderClass} data-command-section={props.children}>
+        {props.children}
+      </div>
+    </>
+  );
+}
 
 const EFFORT_LEVELS: readonly BrokerEffort[] = [
   "low",
@@ -132,6 +168,10 @@ function InputToolbar(props: InputToolbarProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
   const [actionQuery, setActionQuery] = useState("");
+  const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
+    null,
+  );
+  const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
     nextSubagent: BrokerSubagent,
@@ -220,6 +260,53 @@ function InputToolbar(props: InputToolbarProps) {
   const smallFont = useFontSize(-2);
   const showAction = (label: string) =>
     label.toLowerCase().includes(actionQuery.trim().toLowerCase());
+  useEffect(() => setActiveCommandAction(null), [actionQuery]);
+  const commandActionProps = (label: string) => ({
+    "data-cukii-command-action": label,
+    className: `${menuItemClass} ${activeCommandAction === label ? activeCommandItemClass : ""}`,
+    onMouseEnter: () => setActiveCommandAction(label),
+    onMouseLeave: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (document.activeElement !== event.currentTarget) {
+        setActiveCommandAction(null);
+      }
+    },
+    onFocus: () => setActiveCommandAction(label),
+  });
+  const onCommandMenuKeyDown = (event: ReactKeyboardEvent) => {
+    const actions = [
+      ...(commandMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button[data-cukii-command-action]:not(:disabled)",
+      ) ?? []),
+    ];
+    if (
+      (event.key === "Enter" || event.key === " ") &&
+      activeCommandAction
+    ) {
+      const active = actions.find(
+        (item) => item.dataset.cukiiCommandAction === activeCommandAction,
+      );
+      if (active) {
+        event.preventDefault();
+        active.click();
+      }
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!actions.length) return;
+    event.preventDefault();
+    const currentIndex = actions.findIndex(
+      (item) => item.dataset.cukiiCommandAction === activeCommandAction,
+    );
+    const nextIndex =
+      event.key === "ArrowDown"
+        ? currentIndex < 0
+          ? 0
+          : (currentIndex + 1) % actions.length
+        : currentIndex < 0
+          ? actions.length - 1
+          : (currentIndex - 1 + actions.length) % actions.length;
+    actions[nextIndex].focus();
+  };
 
   const updateEffortFromClientX = (clientX: number, rect: DOMRect) => {
     const trackStart = rect.left + 9;
@@ -308,7 +395,10 @@ function InputToolbar(props: InputToolbarProps) {
             <Popover className="relative">
               <PopoverButton
                 data-testid="broker-menu-button"
-                onClick={() => setActionQuery("")}
+                onClick={() => {
+                  setActionQuery("");
+                  setActiveCommandAction(null);
+                }}
                 className="cukii-icon-button flex items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
                 aria-label="Commands and model"
                 title="Show command menu (/)"
@@ -317,7 +407,11 @@ function InputToolbar(props: InputToolbarProps) {
               </PopoverButton>
               <PopoverPanel className="cukii-command-menu cukii-menu-surface absolute bottom-full left-[-34px] z-[1000] mb-2 max-h-[min(62vh,520px)] w-[calc(100vw-38px)] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl">
                 {({ close }) => (
-                  <div data-testid="cukii-slash-menu">
+                  <div
+                    ref={commandMenuRef}
+                    data-testid="cukii-slash-menu"
+                    onKeyDown={onCommandMenuKeyDown}
+                  >
                     <div className="sticky top-0 z-10 bg-[var(--vscode-menu-background)] p-1">
                       <input
                         autoFocus
@@ -327,12 +421,10 @@ function InputToolbar(props: InputToolbarProps) {
                         className="cukii-menu-filter w-full rounded border border-[var(--vscode-input-border)] bg-[var(--vscode-input-background)] px-3 py-2 text-[13px] text-[var(--vscode-input-foreground)] outline-none focus:border-[var(--vscode-focusBorder)]"
                       />
                     </div>
-                    <div className="px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
-                      Context
-                    </div>
+                    <CommandSectionHeader>Context</CommandSectionHeader>
                     {showAction("Attach file") && (
                       <button
-                        className={menuItemClass}
+                        {...commandActionProps("Attach file")}
                         type="button"
                         onClick={() => {
                           close();
@@ -344,7 +436,7 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Mention file from this project") && (
                       <button
-                        className={menuItemClass}
+                        {...commandActionProps("Mention file from this project")}
                         type="button"
                         onClick={() => {
                           close();
@@ -356,7 +448,7 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Clear conversation") && (
                       <button
-                        className={menuItemClass}
+                        {...commandActionProps("Clear conversation")}
                         type="button"
                         onClick={() => {
                           close();
@@ -366,20 +458,11 @@ function InputToolbar(props: InputToolbarProps) {
                         Clear conversation
                       </button>
                     )}
-                    {showAction("Rewind") && (
-                      <button className={menuItemClass} type="button" disabled>
-                        Rewind
-                      </button>
-                    )}
-
-                    <div className="my-1 border-t border-[var(--vscode-menu-separatorBackground)]" />
-                    <div className="px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
-                      Model
-                    </div>
+                    <CommandSectionHeader divided>Model</CommandSectionHeader>
                     {showAction("Switch model") && (
                       <button
                         data-testid="broker-switch-model"
-                        className={menuItemClass}
+                        {...commandActionProps("Switch model")}
                         type="button"
                         onClick={() => {
                           close();
@@ -514,7 +597,7 @@ function InputToolbar(props: InputToolbarProps) {
                     {nativeThinkingAvailable && showAction("Thinking") && (
                       <button
                         data-testid="cukii-thinking-toggle"
-                        className={menuItemClass}
+                        {...commandActionProps("Thinking")}
                         type="button"
                         role="switch"
                         aria-checked={hasReasoningEnabled}
@@ -543,7 +626,7 @@ function InputToolbar(props: InputToolbarProps) {
                     {showAction("Fast mode") && (
                       <button
                         data-testid="cukii-speed-toggle"
-                        className={menuItemClass}
+                        {...commandActionProps("Fast mode")}
                         type="button"
                         role="switch"
                         aria-checked={
@@ -584,7 +667,7 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Manage accounts") && (
                       <button
-                        className={menuItemClass}
+                        {...commandActionProps("Manage accounts")}
                         type="button"
                         onClick={() => setVendorAccountsOpen(true)}
                       >
