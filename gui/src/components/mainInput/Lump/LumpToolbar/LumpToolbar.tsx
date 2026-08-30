@@ -112,15 +112,17 @@ export function LumpToolbar() {
 
   // Combined stop handler
   const handleStopAction = async () => {
+    // Interrupt the native session immediately. Terminal cleanup must not
+    // delay the same cancellation path used by the main Stop button and Esc.
+    const cancellation = isStreaming
+      ? dispatch(cancelStream())
+      : Promise.resolve();
+
     // Stop all terminal commands if any are running
     if (hasRunningTerminalCommand) {
       await handleStopAllTerminalCommands();
     }
-
-    // Also stop regular streaming if it's happening
-    if (isStreaming) {
-      void dispatch(cancelStream());
-    }
+    await cancellation;
   };
 
   useEffect(() => {
@@ -191,7 +193,7 @@ export function LumpToolbar() {
     const count = runningTerminalCalls.length;
     const stopText = `Stop Terminal${count > 1 ? ` (${count})` : ""}`;
     return wrap(
-      <StreamingToolbar onStop={handleStopAction} displayText={stopText} />
+      <StreamingToolbar onStop={handleStopAction} displayText={stopText} />,
     );
   }
 
@@ -201,7 +203,7 @@ export function LumpToolbar() {
 
   if (pendingApplyStates.length > 0) {
     return wrap(
-      <PendingApplyStatesToolbar pendingApplyStates={pendingApplyStates} />
+      <PendingApplyStatesToolbar pendingApplyStates={pendingApplyStates} />,
     );
   }
 

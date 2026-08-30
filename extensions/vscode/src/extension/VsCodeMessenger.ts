@@ -16,6 +16,7 @@ import type {
   BrokerSubagent,
   BrokerVendorAuthAction,
   BrokerVendorId,
+  CukiiCancelReceipt,
   CukiiPermissionMode,
 } from "core/protocol/ideWebview";
 import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
@@ -44,6 +45,7 @@ import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
 import {
+  isClaudeNativeModel,
   streamBridgeChat,
   type ClaudePermissionTransport,
 } from "./bridgeChatAdapter";
@@ -55,7 +57,8 @@ import {
   stopVoiceRecording,
   voiceRecordingStatus,
 } from "./voiceDictation";
-import { appendSteerMessage } from "./bridgeSteer";
+import { BridgeSteeringController } from "./bridgeSteer";
+import { BridgeRunCancellation } from "./bridgeRunCancellation";
 import { allVendorPermissionCapabilities } from "./permissionCapabilities";
 import {
   clearBrokerVendorAccountCache,
@@ -77,6 +80,14 @@ function sourceProtocol(
   );
 }
 
+type ActiveBridgeRun = {
+  controller: AbortController;
+  done: Promise<void>;
+  sessionId: string;
+  steering: BridgeSteeringController;
+  cancellation: BridgeRunCancellation;
+};
+
 /**
  * A shared messenger class between Core and Webview
  * so we don't have to rewrite some of the handlers
@@ -90,8 +101,22 @@ export class VsCodeMessenger {
   private readonly panelSessionIds = new Map<VsCodeWebviewProtocol, string>();
   private readonly activeBridgeRuns = new Map<
     VsCodeWebviewProtocol,
-    { controller: AbortController; done: Promise<void> }
+    ActiveBridgeRun
   >();
+
+  private async cancelBridgeRun(
+    run: ActiveBridgeRun,
+    requestId: string,
+  ): Promise<CukiiCancelReceipt> {
+    const { alreadyCancelled, receipt } = run.cancellation.cancel();
+    const result = await receipt;
+    return {
+      requestId,
+      sessionId: run.sessionId,
+      status: alreadyCancelled ? "already-cancelled" : "cancelled",
+      interrupted: result.interrupted,
+    };
+  }
 
   private panelIdForProtocol(protocol: VsCodeWebviewProtocol): string {
     return (
@@ -167,7 +192,7 @@ export class VsCodeMessenger {
   ) {
     this.webviewProtocol.onDispose((protocol) => {
       const run = this.activeBridgeRuns.get(protocol);
-      run?.controller.abort();
+      if (run) void this.cancelBridgeRun(run, `dispose:${run.sessionId}`);
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
       for (const broker of brokers) broker.denyAll();
       void Promise.all(brokers.map((broker) => broker.dispose())).finally(
@@ -654,8 +679,7 @@ export class VsCodeMessenger {
     ) => {
       const run = this.activeBridgeRuns.get(protocol);
       if (run) {
-        run.controller.abort();
-        await run.done;
+        await this.cancelBridgeRun(run, `abort:${run.sessionId}`);
       }
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
       for (const broker of brokers) {
@@ -681,12 +705,29 @@ export class VsCodeMessenger {
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       const protocol = sourceProtocol(msg, this.webviewProtocol);
       const previous = this.activeBridgeRuns.get(protocol);
-      previous?.controller.abort();
+      if (previous) {
+        void this.cancelBridgeRun(previous, `replace:${previous.sessionId}`);
+      }
       const controller = new AbortController();
       let resolveDone!: () => void;
       const done = new Promise<void>((resolve) => {
         resolveDone = resolve;
       });
+      const steering = new BridgeSteeringController(
+        msg.data.sessionId,
+        isClaudeNativeModel(msg.data.brokerModel),
+      );
+      const cancellation = new BridgeRunCancellation(
+        () => controller.abort(),
+        done,
+      );
+      const run = {
+        controller,
+        done,
+        sessionId: msg.data.sessionId,
+        steering,
+        cancellation,
+      };
       const permissionTransport: ClaudePermissionTransport = {
         panelId: this.panelIdForProtocol(protocol),
         sessionId: msg.data.sessionId,
@@ -696,6 +737,11 @@ export class VsCodeMessenger {
         onBrokerCreated: (broker) => this.addPermissionBroker(protocol, broker),
         onBrokerDisposed: (broker) =>
           this.removePermissionBroker(protocol, broker),
+        steering,
+        onToolActivity: (event) => {
+          if (event.kind === "start") cancellation.toolStarted(event.id);
+          else cancellation.toolFinished(event.id);
+        },
         abortSignal: controller.signal,
       };
       const stream = streamBridgeChat(msg.data, permissionTransport);
@@ -707,16 +753,39 @@ export class VsCodeMessenger {
           resolveDone();
         }
       })();
-      this.activeBridgeRuns.set(protocol, { controller, done });
+      this.activeBridgeRuns.set(protocol, run);
       void done.finally(() => {
+        steering.close();
         if (this.activeBridgeRuns.get(protocol)?.controller === controller) {
           this.activeBridgeRuns.delete(protocol);
         }
       });
       return wrapped;
     });
-    this.onWebview("cukii/steerDuringStream", (msg) => {
-      return appendSteerMessage(msg.data.text);
+    this.onWebview("cukii/steerDuringStream", async (msg) => {
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const run = this.activeBridgeRuns.get(protocol);
+      if (!run || run.sessionId !== msg.data.sessionId) {
+        return {
+          messageId: msg.data.messageId,
+          sessionId: msg.data.sessionId,
+          status: "deferred",
+        };
+      }
+      return run.steering.deliver(msg.data);
+    });
+    this.onWebview("cukii/cancelBridgeRun", async (msg) => {
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const run = this.activeBridgeRuns.get(protocol);
+      if (!run || run.sessionId !== msg.data.sessionId) {
+        return {
+          requestId: msg.data.requestId,
+          sessionId: msg.data.sessionId,
+          status: "already-cancelled",
+          interrupted: "turn",
+        };
+      }
+      return this.cancelBridgeRun(run, msg.data.requestId);
     });
     this.onWebviewOrCore("getSearchResults", async (msg) => {
       return ide.getSearchResults(msg.data.query, msg.data.maxResults);

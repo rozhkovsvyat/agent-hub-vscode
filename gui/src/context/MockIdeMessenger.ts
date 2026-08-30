@@ -121,6 +121,17 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     opened: true,
     message: "Authentication flow opened in the integrated terminal.",
   },
+  "cukii/steerDuringStream": {
+    messageId: "mock-steer",
+    sessionId: "mock-session",
+    status: "delivered",
+  },
+  "cukii/cancelBridgeRun": {
+    requestId: "mock-cancel",
+    sessionId: "mock-session",
+    status: "cancelled",
+    interrupted: "turn",
+  },
   "docs/getIndexedPages": [],
   "config/getSerializedProfileInfo": {
     profileId: "local",

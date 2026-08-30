@@ -209,6 +209,7 @@ export function handleStreamingToolCallUpdates(
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
   isSteer?: boolean;
+  steerStatus?: "queued" | "delivered" | "deferred" | "failed";
   // Set on the last kept assistant turn when the user cancels (Esc). Drives the
   // turn-level "Interrupted" marker for text/thinking streams that have no
   // in-flight tool call to carry the label.
@@ -222,6 +223,7 @@ type SessionState = {
   allSessionMetadata: BaseSessionMetadata[];
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
+  isCancelling?: boolean;
   title: string;
   titleManuallySet: boolean;
   revision: number;
@@ -267,6 +269,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   allSessionMetadata: [],
   history: [],
   isStreaming: false,
+  isCancelling: false,
   title: NEW_SESSION_TITLE,
   titleManuallySet: false,
   revision: 0,
@@ -324,7 +327,10 @@ export const sessionSlice = createSlice({
         curMessage.isGatheringContext = payload;
       }
     },
-    clearDanglingMessages: (state) => {
+    clearDanglingMessages: (
+      state,
+      action: PayloadAction<"turn" | "tool" | undefined>,
+    ) => {
       // This is used during cancellation
       // After the last user or tool message, we can have thinking and or valid assitant message (content or generated tool calls) OR nothing.
       // The only thing allowed after the last assistant message that has either content or generated tool calls
@@ -351,7 +357,7 @@ export const sessionSlice = createSlice({
           // Mark the turn interrupted so the transcript shows "Interrupted"
           // even when the cancel happened mid text/thinking (no tool call to
           // carry the per-tool label).
-          message.interrupted = true;
+          message.interrupted = action.payload !== "tool";
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {
@@ -578,11 +584,16 @@ export const sessionSlice = createSlice({
       }
 
       state.isStreaming = false;
+      state.isCancelling = false;
+    },
+    setCancelling: (state, action: PayloadAction<boolean>) => {
+      state.isCancelling = action.payload;
     },
     appendUserSteerMessage: (
       state,
       action: PayloadAction<{
         content: ChatMessage["content"];
+        messageId: string;
         editorState?: JSONContent;
         contextItems?: ContextItemWithId[];
       }>,
@@ -592,14 +603,27 @@ export const sessionSlice = createSlice({
       }
       state.history.push({
         message: {
-          id: uuidv4(),
+          id: action.payload.messageId,
           role: "user",
           content: action.payload.content,
         },
         contextItems: action.payload.contextItems ?? [],
         editorState: action.payload.editorState,
         isSteer: true,
+        steerStatus: "queued",
       });
+    },
+    setSteerStatus: (
+      state,
+      action: PayloadAction<{
+        messageId: string;
+        status: ChatHistoryItemWithMessageId["steerStatus"];
+      }>,
+    ) => {
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      if (item?.isSteer) item.steerStatus = action.payload.status;
     },
     abortStream: (state) => {
       state.streamAborter.abort();
@@ -608,6 +632,7 @@ export const sessionSlice = createSlice({
       // flag. This prevents the bottom loader from staying visible if a race
       // or bridge error leaves isStreaming stuck to true.
       state.isStreaming = false;
+      state.isCancelling = false;
     },
     streamUpdate: (state, action: PayloadAction<ChatMessage[]>) => {
       if (state.history.length) {
@@ -778,6 +803,7 @@ export const sessionSlice = createSlice({
       state.streamAborter = new AbortController();
 
       state.isStreaming = false;
+      state.isCancelling = false;
       state.isSessionLoading = false;
       state.symbols = {};
 
@@ -1215,7 +1241,9 @@ export const {
   addContextItemsAtIndex,
   setAppliedRulesAtIndex,
   setInactive,
+  setCancelling,
   appendUserSteerMessage,
+  setSteerStatus,
   streamUpdate,
   newSession,
   updateSessionTitle,

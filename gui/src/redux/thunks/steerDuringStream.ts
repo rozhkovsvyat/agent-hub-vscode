@@ -2,8 +2,9 @@ import { createAsyncThunk } from "@reduxjs/toolkit";
 import { JSONContent } from "@tiptap/core";
 import { InputModifiers } from "core";
 import { stripImages } from "core/util/messageContent";
+import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
-import { appendUserSteerMessage } from "../slices/sessionSlice";
+import { appendUserSteerMessage, setSteerStatus } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 
 export const steerDuringStream = createAsyncThunk<
@@ -33,15 +34,34 @@ export const steerDuringStream = createAsyncThunk<
       getState,
     });
 
+    const currentSession = getState().session;
+    if (!currentSession.isStreaming || currentSession.id !== state.session.id) {
+      return;
+    }
+    const messageId = uuidv4();
+    const sessionId = currentSession.id;
     dispatch(
       appendUserSteerMessage({
+        messageId,
         content,
         contextItems: selectedContextItems,
         editorState,
       }),
     );
-    extra.ideMessenger.post("cukii/steerDuringStream", {
-      text: stripImages(content),
-    });
+    const response = await extra.ideMessenger.request(
+      "cukii/steerDuringStream",
+      {
+        messageId,
+        sessionId,
+        text: stripImages(content),
+      },
+    );
+    dispatch(
+      setSteerStatus({
+        messageId,
+        status:
+          response.status === "success" ? response.content.status : "failed",
+      }),
+    );
   },
 );

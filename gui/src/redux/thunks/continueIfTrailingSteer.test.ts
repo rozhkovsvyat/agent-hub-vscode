@@ -66,4 +66,28 @@ describe("hasTrailingSteerMessage", () => {
       }),
     ).toBe(true);
   });
+
+  it("does not replay a follow-up already delivered to the live session", () => {
+    const delivered = item("user", "already delivered", true);
+    delivered.steerStatus = "delivered";
+    expect(
+      hasTrailingSteerMessage({
+        history: [delivered],
+        isStreaming: false,
+        isInEdit: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs an unsupported-vendor follow-up after the current response", () => {
+    const deferred = item("user", "send after current", true);
+    deferred.steerStatus = "deferred";
+    expect(
+      hasTrailingSteerMessage({
+        history: [deferred],
+        isStreaming: false,
+        isInEdit: false,
+      }),
+    ).toBe(true);
+  });
 });

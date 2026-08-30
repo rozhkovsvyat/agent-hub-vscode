@@ -42,23 +42,29 @@ describe("steerDuringStream", () => {
 
   it("no-ops when idle", async () => {
     const store = createMockStore();
-    const post = vi.spyOn(store.mockIdeMessenger, "post");
+    const request = vi.spyOn(store.mockIdeMessenger, "request");
     await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
     expect(sessionOf(store).history).toHaveLength(0);
-    expect(post).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("appends a user message and notifies the native bridge", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    const post = vi.spyOn(mockIdeMessenger, "post");
+    const request = vi.spyOn(mockIdeMessenger, "request");
     const store = createMockStore(undefined, mockIdeMessenger);
     store.dispatch(setActive());
     await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
     const history = sessionOf(store).history;
     expect(history.at(-1)?.message.role).toBe("user");
     expect(history.at(-1)?.message.content).toBe("do it this way instead");
-    expect(post).toHaveBeenCalledWith("cukii/steerDuringStream", {
-      text: "do it this way instead",
-    });
+    expect(history.at(-1)?.steerStatus).toBe("delivered");
+    expect(request).toHaveBeenCalledWith(
+      "cukii/steerDuringStream",
+      expect.objectContaining({
+        messageId: expect.any(String),
+        sessionId: sessionOf(store).id,
+        text: "do it this way instead",
+      }),
+    );
   });
 });

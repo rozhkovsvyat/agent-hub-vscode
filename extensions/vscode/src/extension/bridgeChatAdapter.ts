@@ -23,11 +23,7 @@ import {
   registerNestedWorkerFollower,
   type NestedWorkerFollower,
 } from "./nestedWorkerFollow";
-import {
-  beginSteerSession,
-  endSteerSession,
-  steerPromptInstruction,
-} from "./bridgeSteer";
+import { BridgeSteeringController } from "./bridgeSteer";
 import {
   bridgeControlPrompt,
   bridgeControlSummary,
@@ -70,6 +66,8 @@ export type ClaudePermissionTransport = {
   onRequest: (request: ClaudePermissionRequest) => Promise<void> | void;
   onBrokerCreated?: (broker: ClaudePermissionBroker) => void;
   onBrokerDisposed?: (broker: ClaudePermissionBroker) => void;
+  steering?: BridgeSteeringController;
+  onToolActivity?: (event: { kind: "start" | "finish"; id: string }) => void;
   abortSignal?: AbortSignal;
 };
 
@@ -239,7 +237,6 @@ function buildPrompt(
   brokerModel: BrokerModel,
   brokerSubagent: BrokerSubagent,
   cwd: string,
-  steerPath: string,
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode,
 ): string {
@@ -288,10 +285,18 @@ function buildPrompt(
     "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
     "Answer in the user's language and keep normal chat continuity from the transcript.",
     "While working, write short status lines often — what you are doing now, not a spinner. Long silent stretches between tools read as a freeze.",
-    steerPromptInstruction(steerPath),
+    ...(isClaudeNativeModel(brokerModel)
+      ? [
+          "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
+        ]
+      : []),
     "",
     transcript,
   ].join("\n");
+}
+
+export function isClaudeNativeModel(model: BrokerModel): boolean {
+  return ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(model);
 }
 
 /** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
@@ -979,21 +984,7 @@ export async function* streamBridgeChat(
 ): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
-  const steerPath = path.join(
-    os.tmpdir(),
-    `cukii-steer-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-  );
-  beginSteerSession(steerPath);
-  try {
-    return yield* streamBridgeChatWithSteer(
-      args,
-      cwd,
-      steerPath,
-      permissionTransport,
-    );
-  } finally {
-    endSteerSession();
-  }
+  return yield* streamBridgeChatWithSteer(args, cwd, permissionTransport);
 }
 
 async function* streamBridgeChatWithSteer(
@@ -1008,7 +999,6 @@ async function* streamBridgeChatWithSteer(
     brokerPermissionMode: CukiiPermissionMode;
   },
   cwd: string,
-  steerPath: string,
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
   // The model picker fills this cache in the normal path. A restored saved
@@ -1025,7 +1015,6 @@ async function* streamBridgeChatWithSteer(
     args.brokerModel,
     args.brokerSubagent,
     cwd,
-    steerPath,
     controls,
     args.brokerPermissionMode,
   );
@@ -1096,9 +1085,14 @@ async function* streamBridgeChatWithSteer(
     shell: false,
     windowsHide: true,
   });
+  let cancelled = false;
+  let done = false;
+  const queue: BridgeEvent[] = [];
   const abortChild = () => {
+    cancelled = true;
+    queue.length = 0;
+    done = true;
     permissionBroker?.denyAll();
-    if (child.exitCode === null && child.signalCode === null) child.kill();
   };
   permissionTransport?.abortSignal?.addEventListener("abort", abortChild, {
     once: true,
@@ -1112,23 +1106,36 @@ async function* streamBridgeChatWithSteer(
   const launchedAt = Date.now();
   let firstOutputAt: number | undefined;
 
-  if (!route.noStdin) {
+  if (!route.noStdin && !cancelled) {
     child.stdin.write(
       route.stdinFormat === "claude-stream-json"
         ? claudeStreamingInput(prompt)
         : prompt,
     );
     if (!route.stdinFormat) child.stdin.end();
+    if (route.stdinFormat === "claude-stream-json") {
+      permissionTransport?.steering?.attachWriter(
+        (text) =>
+          new Promise<boolean>((resolve) => {
+            if (child.exitCode !== null || child.signalCode !== null) {
+              resolve(false);
+              return;
+            }
+            child.stdin.write(claudeStreamingInput(text), (error) =>
+              resolve(!error),
+            );
+          }),
+      );
+    }
   }
 
   const parser = new BridgeEventParser(route.format);
-  const queue: BridgeEvent[] = [];
   const toolNamesById = new Map<string, string>();
   const followers: NestedWorkerFollower[] = [];
-  let done = false;
   let error: Error | undefined;
 
   child.stdout.on("data", (chunk: Buffer) => {
+    if (cancelled) return;
     if (firstOutputAt === undefined) {
       firstOutputAt = Date.now();
       queue.push({
@@ -1143,7 +1150,16 @@ async function* streamBridgeChatWithSteer(
     if (rawStdout.length < 2_000_000) {
       rawStdout += text;
     }
-    queue.push(...parser.push(text));
+    const events = parser.push(text);
+    for (const event of events) {
+      if (event.kind === "toolStart") {
+        permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
+      }
+      if (event.kind === "toolResult") {
+        permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
+      }
+    }
+    queue.push(...events);
   });
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8");
@@ -1151,13 +1167,24 @@ async function* streamBridgeChatWithSteer(
     fs.appendFileSync(route.logFile, text, "utf8");
   });
   child.once("error", (err) => {
+    if (cancelled) return;
     error = err;
     done = true;
   });
   child.once("close", (code) => {
     child.stdin.end();
-    queue.push(...parser.flush());
-    if (code && code !== 0) {
+    if (cancelled) {
+      done = true;
+      return;
+    }
+    const events = parser.flush();
+    for (const event of events) {
+      if (event.kind === "toolResult") {
+        permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
+      }
+    }
+    queue.push(...events);
+    if (!cancelled && code && code !== 0) {
       const detail = stderr.trim() || stdoutTail.trim();
       error = new Error(
         `${route.label} bridge exited with code ${code}.` +
@@ -1210,6 +1237,7 @@ async function* streamBridgeChatWithSteer(
     }
   } finally {
     permissionTransport?.abortSignal?.removeEventListener("abort", abortChild);
+    permissionTransport?.steering?.close();
     closeFollowers(followers);
     child.stdin.end();
     await terminateBridgeChild(child);
@@ -1222,7 +1250,7 @@ async function* streamBridgeChatWithSteer(
     }
   }
 
-  if (error) {
+  if (error && !cancelled) {
     throw error;
   }
 

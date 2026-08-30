@@ -64,6 +64,7 @@ import { CukiiStreamingToolbar } from "../../components/mainInput/Lump/LumpToolb
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
+import { shouldInterruptFromEscape } from "./interruptShortcut";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -129,6 +130,10 @@ export function Chat() {
     (store) => store.config.config.ui?.showSessionTabs,
   );
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const isCancelling = useAppSelector((state) => state.session.isCancelling);
+  const hasPendingPermission = useAppSelector(
+    (state) => Object.keys(state.session.pendingClaudePermissions).length > 0,
+  );
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -162,9 +167,17 @@ export function Chat() {
 
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
-      dispatchResponseEscape(e, isStreaming, () => {
-        void dispatch(cancelStream());
-      });
+      if (
+        shouldInterruptFromEscape(e, {
+          isStreaming,
+          isCancelling,
+          hasPendingPermission,
+        })
+      ) {
+        dispatchResponseEscape(e, isStreaming, () => {
+          void dispatch(cancelStream());
+        });
+      }
       if (
         e.key.toLowerCase() === "o" &&
         isMetaEquivalentKeyPressed(e) &&
@@ -189,7 +202,14 @@ export function Chat() {
     return () => {
       window.removeEventListener("keydown", listener);
     };
-  }, [isStreaming, isInEdit, thinkingCollapse.open, focusView]);
+  }, [
+    isStreaming,
+    isCancelling,
+    hasPendingPermission,
+    isInEdit,
+    thinkingCollapse.open,
+    focusView,
+  ]);
 
   const { widget, highlights } = useFindWidget(
     stepsDivRef,
@@ -342,6 +362,14 @@ export function Chat() {
       );
 
       if (message.role === "user") {
+        const steerLabel = item.isSteer
+          ? {
+              queued: "Queued",
+              delivered: "Delivered",
+              deferred: "Will send after current response",
+              failed: "Delivery failed",
+            }[item.steerStatus ?? "queued"]
+          : undefined;
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
             {errorBoundary(
@@ -356,6 +384,11 @@ export function Chat() {
                 appliedRules={appliedRules}
                 inputId={message.id}
               />,
+            )}
+            {steerLabel && (
+              <div className="mt-1 text-right text-[11px] text-[var(--vscode-descriptionForeground)]">
+                {steerLabel}
+              </div>
             )}
           </div>,
         ];

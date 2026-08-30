@@ -105,4 +105,30 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(returned).toHaveBeenCalled();
     expect(store.getState().session.isStreaming).toBe(false);
   });
+
+  it("ignores a stale completion that arrives after cancellation", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let complete!: (value: IteratorResult<any[], undefined>) => void;
+    const next = new Promise<IteratorResult<any[], undefined>>(
+      (resolve) => (complete = resolve),
+    );
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: () => next,
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(newSession(undefined));
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.isStreaming).toBe(true),
+    );
+    store.dispatch(abortStream());
+    complete({ done: false, value: [{ role: "assistant", content: "stale" }] });
+    await running;
+    expect(store.getState().session.history).toHaveLength(0);
+  });
 });

@@ -74,6 +74,19 @@ export type CukiiOpenChatPanel = {
   title: string;
 };
 
+export type CukiiSteerReceipt = {
+  messageId: string;
+  sessionId: string;
+  status: "delivered" | "deferred";
+};
+
+export type CukiiCancelReceipt = {
+  requestId: string;
+  sessionId: string;
+  status: "cancelled" | "already-cancelled";
+  interrupted: "turn" | "tool";
+};
+
 export type CukiiClaudePermissionRequest = {
   runId: string;
   requestId: string;
@@ -185,7 +198,14 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];
-  "cukii/steerDuringStream": [{ text: string }, boolean];
+  "cukii/steerDuringStream": [
+    { messageId: string; sessionId: string; text: string },
+    CukiiSteerReceipt,
+  ];
+  "cukii/cancelBridgeRun": [
+    { requestId: string; sessionId: string },
+    CukiiCancelReceipt,
+  ];
   "cukii/openChatPanel": [
     {
       panelId?: string;

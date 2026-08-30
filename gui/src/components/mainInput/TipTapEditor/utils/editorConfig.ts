@@ -21,6 +21,7 @@ import { selectSelectedChatModel } from "../../../../redux/slices/configSlice";
 import { AppDispatch } from "../../../../redux/store";
 import { exitEdit } from "../../../../redux/thunks/edit";
 import { steerDuringStream } from "../../../../redux/thunks/steerDuringStream";
+import { cancelStream } from "../../../../redux/thunks/cancelStream";
 import { getFontSize, isJetBrains } from "../../../../util";
 import { CodeBlock, Mention, PromptBlock, SlashCommand } from "../extensions";
 import { TipTapEditorProps } from "../TipTapEditor";
@@ -92,6 +93,10 @@ export function createEditorConfig(options: {
   const defaultModel = useAppSelector(selectSelectedChatModel);
   const sessionMode = useAppSelector((state) => state.session.mode);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const isCancelling = useAppSelector((state) => state.session.isCancelling);
+  const hasPendingPermission = useAppSelector(
+    (state) => Object.keys(state.session.pendingClaudePermissions).length > 0,
+  );
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const historyLength = useAppSelector((store) => store.session.history.length);
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
@@ -103,6 +108,8 @@ export function createEditorConfig(options: {
   const defaultModelRef = useUpdatingRef(defaultModel);
   const sessionModeRef = useUpdatingRef(sessionMode);
   const isStreamingRef = useUpdatingRef(isStreaming);
+  const isCancellingRef = useUpdatingRef(isCancelling);
+  const hasPendingPermissionRef = useUpdatingRef(hasPendingPermission);
   const getSubmenuContextItemsRef = useUpdatingRef(getSubmenuContextItems);
   const availableContextProvidersRef = useUpdatingRef(
     props.availableContextProviders,
@@ -330,12 +337,19 @@ export function createEditorConfig(options: {
               return false;
             },
             Escape: () => {
-              if (inDropdownRef.current) {
+              if (inDropdownRef.current || this.editor.view.composing) {
                 return false;
               }
               // Esc stops the turn (Claude parity). Consume it so we don't
               // also blur to the editor or close the JetBrains sidebar.
               if (isStreamingRef.current) {
+                if (
+                  isCancellingRef.current ||
+                  hasPendingPermissionRef.current
+                ) {
+                  return false;
+                }
+                void dispatch(cancelStream());
                 return true;
               }
               // In JetBrains, this is how we close the sidebar when the input box is focused

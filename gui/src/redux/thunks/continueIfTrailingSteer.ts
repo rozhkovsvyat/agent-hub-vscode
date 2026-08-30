@@ -15,7 +15,11 @@ export function hasTrailingSteerMessage(session: {
     return false;
   }
   const last = session.history.at(-1);
-  if (!last?.isSteer || last.message.role !== "user") {
+  if (
+    !last?.isSteer ||
+    last.message.role !== "user" ||
+    last.steerStatus === "delivered"
+  ) {
     return false;
   }
   return stripImages(last.message.content).trim().length > 0;

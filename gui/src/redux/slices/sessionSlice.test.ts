@@ -537,7 +537,7 @@ describe("sessionSlice mid-task steer messages", () => {
   it("ignores steer while idle", () => {
     const next = sessionSlice.reducer(
       sessionSlice.getInitialState(),
-      appendUserSteerMessage({ content: "too late" }),
+      appendUserSteerMessage({ content: "too late", messageId: "late" }),
     );
     expect(next.history).toHaveLength(0);
   });
@@ -549,11 +549,11 @@ describe("sessionSlice mid-task steer messages", () => {
     );
     const first = sessionSlice.reducer(
       streaming,
-      appendUserSteerMessage({ content: "one" }),
+      appendUserSteerMessage({ content: "one", messageId: "one" }),
     );
     const second = sessionSlice.reducer(
       first,
-      appendUserSteerMessage({ content: "two" }),
+      appendUserSteerMessage({ content: "two", messageId: "two" }),
     );
     expect(second.history.map((item) => item.message.content)).toEqual([
       "one",
@@ -572,7 +572,7 @@ describe("sessionSlice mid-task steer messages", () => {
     );
     const steered = sessionSlice.reducer(
       streaming,
-      appendUserSteerMessage({ content: "steer" }),
+      appendUserSteerMessage({ content: "steer", messageId: "steer" }),
     );
     const next = sessionSlice.reducer(steered, newSession(undefined));
     expect(next.history).toHaveLength(0);
