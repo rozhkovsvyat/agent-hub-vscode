@@ -28,12 +28,10 @@ type RaceResult<T> =
   | { kind: "value"; value: IteratorResult<T, PromptLog | undefined> }
   | { kind: "cancelled" };
 
-type BridgeTerminalMessage = ChatMessage & { cukiiTerminal?: true };
-
-function isBridgeTerminalMessage(
-  message: ChatMessage,
-): message is BridgeTerminalMessage {
-  return (message as BridgeTerminalMessage).cukiiTerminal === true;
+function isBridgeTerminalMessage(message: ChatMessage): boolean {
+  return (
+    (message as ChatMessage & { cukiiTerminal?: true }).cukiiTerminal === true
+  );
 }
 
 /**

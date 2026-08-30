@@ -29,7 +29,7 @@ describe("cancelStream", () => {
     messenger.responseHandlers["cukii/cancelBridgeRun"] = vi.fn(
       async () => receipt.promise,
     );
-    const store = createMockStore(state, messenger);
+    const store: any = createMockStore(state, messenger);
     store.dispatch(setActive());
 
     const first = store.dispatch(cancelStream() as any);
@@ -85,7 +85,7 @@ describe("cancelStream", () => {
       status: "cancelled",
       interrupted: "tool",
     };
-    const store = createMockStore(state, messenger);
+    const store: any = createMockStore(state, messenger);
     store.dispatch(setActive());
     await store.dispatch(cancelStream() as any);
     expect(store.getState().session.history[1].interrupted).toBe(false);

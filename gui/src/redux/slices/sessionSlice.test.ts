@@ -14,6 +14,7 @@ import {
   setBrokerPermissionMode,
   setInactive,
   abortStream,
+  streamUpdate,
 } from "./sessionSlice";
 
 // Mock dependencies

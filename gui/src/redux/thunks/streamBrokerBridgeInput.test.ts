@@ -222,4 +222,56 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.isStreaming).toBe(false);
     expect(returned).toHaveBeenCalledTimes(1);
   });
+
+  it("clears an explicit wait receipt when the same bridge turn becomes terminal", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let nextCall = 0;
+    let emitTerminal!: (value: IteratorResult<any[], undefined>) => void;
+    const terminal = new Promise<IteratorResult<any[], undefined>>(
+      (resolve) => (emitTerminal = resolve),
+    );
+    const returned = vi.fn(async () => ({ done: true, value: undefined }));
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: async () => {
+        nextCall += 1;
+        if (nextCall === 1) {
+          return {
+            done: false,
+            value: [
+              {
+                role: "thinking",
+                content: "",
+                cukiiBridgeWait: { condition: "native sleep" },
+              },
+            ],
+          };
+        }
+        return terminal;
+      },
+      return: returned,
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(newSession(undefined));
+
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.bridgeWait).toEqual({
+        condition: "native sleep",
+      }),
+    );
+    emitTerminal({
+      done: false,
+      value: [{ role: "assistant", content: "", cukiiTerminal: true }],
+    });
+    await running;
+
+    expect(store.getState().session.bridgeWait).toBeUndefined();
+    expect(store.getState().session.isStreaming).toBe(false);
+    expect(store.getState().session.history).toHaveLength(0);
+    expect(returned).toHaveBeenCalledTimes(1);
+  });
 });

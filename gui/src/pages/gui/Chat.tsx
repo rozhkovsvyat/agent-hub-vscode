@@ -174,7 +174,7 @@ export function Chat() {
       if (
         shouldInterruptFromEscape(e, {
           isStreaming,
-          isCancelling,
+          isCancelling: Boolean(isCancelling),
           hasPendingPermission,
         })
       ) {

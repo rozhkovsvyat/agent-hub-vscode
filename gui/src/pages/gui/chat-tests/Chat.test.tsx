@@ -9,6 +9,7 @@ import {
 import { Chat } from "../Chat";
 import {
   acceptToolCall,
+  setMode,
   setToolCallCalling,
 } from "../../../redux/slices/sessionSlice";
 
@@ -17,56 +18,12 @@ test("should render input box", async () => {
   await getElementByTestId("continue-input-box-main-editor-input");
 });
 
-test("should be able to toggle modes", async () => {
+test("shows the Cukii broker entry instead of the retired mode cycler", async () => {
   await renderWithProviders(<Chat />);
-  await getElementByText("Agent");
-
-  // Simulate cmd+. keyboard shortcut to toggle modes
-  act(() => {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: ".",
-        metaKey: true, // cmd key on Mac
-      }),
-    );
-  });
-
-  // Broker is the next mode after Agent.
-  await getElementByText("Broker");
-
-  act(() => {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: ".",
-        metaKey: true, // cmd key on Mac
-      }),
-    );
-  });
-
-  // Then the cycle wraps to Chat.
-  await getElementByText("Chat");
-
-  act(() => {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: ".",
-        metaKey: true, // cmd key on Mac
-      }),
-    );
-  });
-
-  await getElementByText("Plan");
-
-  act(() => {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: ".",
-        metaKey: true, // cmd key on Mac
-      }),
-    );
-  });
-
-  await getElementByText("Agent");
+  await getElementByTestId("broker-menu-button");
+  expect(
+    document.querySelector('[data-testid="mode-select-button"]'),
+  ).toBeNull();
 });
 
 test("should send a message and receive a response", async () => {
@@ -75,6 +32,7 @@ test("should send a message and receive a response", async () => {
   // First add and select the mock LLM
   await act(async () => {
     addAndSelectMockLlm(store, ideMessenger);
+    store.dispatch(setMode("chat"));
   });
 
   const CONTENT = "Expected response";
@@ -126,16 +84,18 @@ test("Escape uses the real cancel lifecycle once and renders Interrupted", async
     });
     store.dispatch({ type: "session/setActive" });
   });
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-  );
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "Escape",
-      repeat: true,
-      bubbles: true,
-    }),
-  );
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        repeat: true,
+        bubbles: true,
+      }),
+    );
+  });
   expect(store.getState().session.isStreaming).toBe(false);
   expect(await getElementByTestId("turn-interrupted")).toBeTruthy();
   expect(
@@ -511,7 +471,7 @@ test("tool start/start/complete race has exactly one active row and returns it t
   );
   expect(
     container.querySelector('[data-cukii-active="true"]')?.textContent,
-  ).toContain("Bash");
+  ).toContain("Shell");
 
   await act(async () => {
     store.dispatch(acceptToolCall({ toolCallId: "second" }));
