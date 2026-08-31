@@ -267,24 +267,42 @@ describe("Claude MCP permission broker", () => {
     expect(fs.existsSync(configPath)).toBe(false);
   });
 
-  it("requires an exact UI verdict for every non-bypass mode", async () => {
-    for (const mode of [
-      "manual",
-      "editAutomatically",
-      "auto",
-      "plan",
+  it("prompts every Manual action, but never turns other picker modes into duplicate dialogs", async () => {
+    const manual = await brokerFor("manual");
+    const manualResult = requestPermissionOverPipe({
+      pipeName: manual.broker.pipeName,
+      token: manual.broker.token,
+      sessionId: "session-a",
+      toolName: "Edit",
+      input: { path: "a.ts" },
+    });
+    await vi.waitFor(() => expect(manual.received).toBeDefined());
+    manual.broker.respond({ ...manual.received!, decision: "allow" });
+    await expect(manualResult).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: { path: "a.ts" },
+    });
+
+    for (const [mode, toolName, behavior] of [
+      ["editAutomatically", "Edit", "allow"],
+      ["editAutomatically", "Bash", "deny"],
+      ["auto", "Bash", "allow"],
+      ["plan", "Edit", "deny"],
     ] as const) {
       const fixture = await brokerFor(mode);
       const result = requestPermissionOverPipe({
         pipeName: fixture.broker.pipeName,
         token: fixture.broker.token,
         sessionId: "session-a",
-        toolName: "Edit",
+        toolName,
         input: { path: "a.ts" },
       });
-      await vi.waitFor(() => expect(fixture.received).toBeDefined());
-      fixture.broker.respond({ ...fixture.received!, decision: "deny" });
-      await expect(result).resolves.toEqual({ behavior: "deny" });
+      await expect(result).resolves.toEqual(
+        behavior === "allow"
+          ? { behavior, updatedInput: { path: "a.ts" } }
+          : { behavior },
+      );
+      expect(fixture.received).toBeUndefined();
       await fixture.broker.dispose();
     }
   });

@@ -26,7 +26,12 @@ export function ClaudePermissionPrompt() {
   );
   const request = Object.values(pending)[0];
   const pendingRef = useRef(pending);
+  const allowButtonRef = useRef<HTMLButtonElement>(null);
   pendingRef.current = pending;
+
+  useEffect(() => {
+    allowButtonRef.current?.focus();
+  }, [request?.runId, request?.requestId]);
 
   const deny = (item: CukiiClaudePermissionRequest) => {
     ideMessenger.post("cukii/respondClaudePermission", {
@@ -92,27 +97,40 @@ export function ClaudePermissionPrompt() {
   const preview = JSON.stringify(request.input, null, 2);
   return (
     <section
-      aria-label="Claude permission request"
-      className="fixed bottom-5 right-5 z-[2000] w-[min(420px,calc(100vw-2rem))] rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-4 shadow-2xl"
+      aria-label="Permission request"
+      aria-modal="true"
+      className="cukii-permission-request fixed bottom-5 right-5 z-[2000] w-[min(420px,calc(100vw-2rem))]"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          decide(request, "deny");
+        }
+        if (event.key === "Enter" && event.target === event.currentTarget) {
+          event.preventDefault();
+          decide(request, "allow");
+        }
+      }}
+      role="dialog"
     >
-      <div className="text-sm font-medium text-[var(--vscode-foreground)]">
-        Allow Claude to run {request.toolName}?
+      <div className="cukii-permission-request-title">
+        Allow Cukii to run {request.toolName}?
       </div>
-      <pre className="mt-3 max-h-40 overflow-auto rounded bg-[var(--vscode-textCodeBlock-background)] p-2 text-xs text-[var(--vscode-descriptionForeground)]">
+      <pre className="cukii-permission-request-preview" tabIndex={0}>
         {preview}
       </pre>
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="cukii-permission-request-actions">
         <button
           type="button"
-          className="rounded px-3 py-1.5 text-sm hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+          className="cukii-permission-request-deny"
           onClick={() => decide(request, "deny")}
         >
           Deny
         </button>
         <button
           type="button"
-          className="rounded bg-[#0e639c] px-3 py-1.5 text-sm text-white hover:bg-[#1177bb]"
+          className="cukii-permission-request-allow"
           onClick={() => decide(request, "allow")}
+          ref={allowButtonRef}
         >
           Allow
         </button>

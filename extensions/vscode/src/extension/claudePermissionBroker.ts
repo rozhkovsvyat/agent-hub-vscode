@@ -316,6 +316,15 @@ export class ClaudePermissionBroker {
       this.disposed
     )
       return reply({ behavior: "deny" });
+    // `--permission-prompt-tool` routes every native check through this MCP
+    // worker.  It must not turn the non-Manual picker modes back into Manual
+    // by showing the same dialog for every call.
+    if (this.options.mode !== "manual") {
+      const behavior = this.policyDecision(toolName);
+      return reply(
+        behavior === "allow" ? { behavior, updatedInput: input } : { behavior },
+      );
+    }
     const requestId = randomUUID();
     const request: ClaudePermissionRequest = {
       runId: this.runId,
@@ -351,5 +360,22 @@ export class ClaudePermissionBroker {
         ? { behavior: "allow", updatedInput: request.input }
         : { behavior: "deny" },
     );
+  }
+
+  private policyDecision(toolName: string): "allow" | "deny" {
+    switch (this.options.mode) {
+      case "editAutomatically":
+        // Claude's accept-edits mode is intentionally narrower than blanket
+        // approval: shell/network and other non-edit tools remain denied.
+        return /^(?:edit|write|multiedit)$/iu.test(toolName) ? "allow" : "deny";
+      case "auto":
+        // The native CLI has already selected Auto; this bridge is only its
+        // approval transport, so do not manufacture a second UI prompt.
+        return "allow";
+      case "plan":
+        return "deny";
+      case "manual":
+        return "deny";
+    }
   }
 }

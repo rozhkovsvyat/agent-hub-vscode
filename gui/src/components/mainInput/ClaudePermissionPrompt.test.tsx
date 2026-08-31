@@ -22,9 +22,10 @@ describe("ClaudePermissionPrompt", () => {
       toolName: "Bash",
       input: { command: "git status" },
     });
-    expect(
-      await screen.findByLabelText("Claude permission request"),
-    ).not.toBeNull();
+    expect(await screen.findByLabelText("Permission request")).not.toBeNull();
+    expect(screen.getByText("Allow Cukii to run Bash?")).toBeDefined();
+    expect(document.body.textContent).not.toContain("Allow Claude");
+    expect(screen.getByRole("button", { name: "Allow" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Allow" }));
     expect(post).toHaveBeenCalledWith("cukii/respondClaudePermission", {
       runId: "run-a",
@@ -56,7 +57,34 @@ describe("ClaudePermissionPrompt", () => {
       ),
     );
     expect(
-      document.querySelector('[aria-label="Claude permission request"]'),
+      document.querySelector('[aria-label="Permission request"]'),
     ).toBeNull();
+  });
+
+  it("uses Escape to deny and keeps a wrapped, scrollable request preview", async () => {
+    const messenger = new MockIdeMessenger();
+    const post = vi.spyOn(messenger, "post");
+    const { store, user } = await renderWithProviders(
+      <ClaudePermissionPrompt />,
+      {
+        mockIdeMessenger: messenger,
+      },
+    );
+    messenger.mockMessageToWebview("cukii/claudePermissionRequested", {
+      runId: "run-keyboard",
+      requestId: "request-keyboard",
+      sessionId: store.getState().session.id,
+      inputFingerprint: "fingerprint-keyboard",
+      toolName: "Edit",
+      input: { payload: "x".repeat(2_000) },
+    });
+    const dialog = await screen.findByRole("dialog");
+    const preview = dialog.querySelector("pre");
+    expect(preview).toHaveClass("cukii-permission-request-preview");
+    await user.keyboard("{Escape}");
+    expect(post).toHaveBeenCalledWith(
+      "cukii/respondClaudePermission",
+      expect.objectContaining({ runId: "run-keyboard", decision: "deny" }),
+    );
   });
 });

@@ -3,7 +3,7 @@ import { useContext, useEffect, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import {
-  setBrokerModel,
+  switchBrokerModel,
   setBrokerSubagent,
   type BrokerModel,
   type BrokerSubagent,
@@ -56,7 +56,15 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     if (onSelect) {
       onSelect(model);
     } else {
-      dispatch(setBrokerModel(model));
+      dispatch(
+        switchBrokerModel({
+          model,
+          displayName:
+            VENDORS.flatMap((vendor) => vendor.models).find(
+              (entry) => entry.value === model,
+            )?.label ?? model,
+        }),
+      );
       dispatch(setBrokerSubagent(nextSubagent));
       ideMessenger.post("cukii/setBrokerPreferences", {
         brokerModel: model,

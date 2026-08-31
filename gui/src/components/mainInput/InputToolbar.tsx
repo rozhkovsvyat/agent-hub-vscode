@@ -5,7 +5,11 @@ import {
   DocumentPlusIcon,
   PencilIcon,
 } from "@heroicons/react/24/outline";
-import { InputModifiers } from "core";
+import {
+  InputModifiers,
+  brokerVendorForModel,
+  resolvePermissionModeForVendor,
+} from "core";
 import {
   memo,
   useContext,
@@ -23,6 +27,7 @@ import {
   newSession,
   setBrokerEffort,
   setBrokerModel,
+  switchBrokerModel,
   setBrokerPermissionMode,
   setBrokerSpeed,
   setBrokerSubagent,
@@ -35,7 +40,7 @@ import type {
   BrokerSubagent,
   CukiiPermissionMode,
 } from "../../redux/slices/sessionSlice";
-import type { CukiiPickedFile } from "core/protocol/ideWebview";
+import type { BrokerVendorId, CukiiPickedFile } from "core/protocol/ideWebview";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
 import { saveCurrentSession } from "../../redux/thunks/session";
@@ -52,6 +57,10 @@ import {
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
 import { PermissionModeControl } from "./PermissionModeControl";
+
+type PermissionCapabilityMap = Partial<
+  Record<BrokerVendorId, { supportedModes: CukiiPermissionMode[] }>
+>;
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -166,12 +175,34 @@ function InputToolbar(props: InputToolbarProps) {
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const restoredPanelDraft = useRef(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [permissionCapabilities, setPermissionCapabilities] =
+    useState<PermissionCapabilityMap>({});
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
   const [actionQuery, setActionQuery] = useState("");
   const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
     null,
   );
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ideMessenger
+      .request("cukii/listPermissionCapabilities", undefined)
+      .then((response) => {
+        if (cancelled || response.status !== "success") return;
+        const capabilities: PermissionCapabilityMap = {};
+        for (const capability of response.content) {
+          capabilities[capability.vendor] = {
+            supportedModes: capability.supportedModes,
+          };
+        }
+        setPermissionCapabilities(capabilities);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ideMessenger]);
+
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
     nextSubagent: BrokerSubagent,
@@ -180,12 +211,29 @@ function InputToolbar(props: InputToolbarProps) {
     nextThinking: boolean = hasReasoningEnabled,
     nextPermissionMode: CukiiPermissionMode = brokerPermissionMode,
   ) => {
-    dispatch(setBrokerModel(nextModel));
+    const vendor = brokerVendorForModel(nextModel);
+    const capability = permissionCapabilities[vendor];
+    const resolvedPermissionMode = capability
+      ? resolvePermissionModeForVendor(
+          {
+            vendor,
+            supportedModes: capability.supportedModes,
+            helpSource: "live",
+          },
+          nextPermissionMode,
+        )
+      : nextPermissionMode;
+    dispatch(
+      switchBrokerModel({
+        model: nextModel,
+        displayName: modelInfo(nextModel)?.label ?? nextModel,
+      }),
+    );
     dispatch(setBrokerSubagent(nextSubagent));
     dispatch(setBrokerEffort(nextEffort));
     dispatch(setBrokerSpeed(nextSpeed));
     dispatch(setHasReasoningEnabled(nextThinking));
-    dispatch(setBrokerPermissionMode(nextPermissionMode));
+    dispatch(setBrokerPermissionMode(resolvedPermissionMode));
     // VS Code webview state is scoped to this panel/tab. It deliberately
     // carries a blank-tab draft without writing history metadata or sharing
     // it through extension globalState with another blank tab.
@@ -197,7 +245,7 @@ function InputToolbar(props: InputToolbarProps) {
         brokerEffort: nextEffort,
         brokerSpeed: nextSpeed,
         thinkingEnabled: nextThinking,
-        brokerPermissionMode: nextPermissionMode,
+        brokerPermissionMode: resolvedPermissionMode,
       },
     });
     if (historyLength > 0) {
@@ -207,7 +255,7 @@ function InputToolbar(props: InputToolbarProps) {
         brokerEffort: nextEffort,
         brokerSpeed: nextSpeed,
         thinkingEnabled: nextThinking,
-        brokerPermissionMode: nextPermissionMode,
+        brokerPermissionMode: resolvedPermissionMode,
         mode: "broker",
       });
       void dispatch(

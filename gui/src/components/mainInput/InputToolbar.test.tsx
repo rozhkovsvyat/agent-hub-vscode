@@ -166,6 +166,40 @@ describe("Cukii Claude-parity input toolbar", () => {
     );
   });
 
+  it("reconciles Manual against the target model before persisting a model switch", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
+      { vendor: "claude", supportedModes: ["manual", "bypass"] },
+      { vendor: "kimi", supportedModes: ["bypass"] },
+    ];
+    const postSpy = vi.spyOn(mockIdeMessenger, "post");
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch(setBrokerPermissionMode("manual"));
+    store.dispatch({
+      type: "session/streamUpdate",
+      payload: [{ role: "user", content: "Persist this model switch" }],
+    });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await getElementByText("Manual");
+    await user.click(await getElementByTestId("broker-menu-button"));
+    await user.click(await getElementByTestId("broker-switch-model"));
+    await user.click(await getElementByText("K3"));
+
+    expect(store.getState().session.brokerModel).toBe("kimi-k3");
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({
+        brokerModel: "kimi-k3",
+        brokerPermissionMode: "bypass",
+      }),
+    );
+  });
+
   it("retains a blank-tab draft while the native capability probe is pending", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =

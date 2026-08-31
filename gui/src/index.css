@@ -667,6 +667,72 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
     padding: 0 !important;
   }
 
+  /* Native Cukii permission sheet: stable geometry, keyboard focus and a
+     scrollable code preview rather than an overflowing raw JSON line. */
+  .cukii-permission-request {
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid var(--vscode-widget-border, #454545);
+    border-radius: 8px;
+    background: var(--vscode-menu-background, #252526);
+    color: var(--vscode-menu-foreground, #cccccc);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+    padding: 12px;
+  }
+
+  .cukii-permission-request-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .cukii-permission-request-preview {
+    box-sizing: border-box;
+    max-width: 100%;
+    max-height: 160px;
+    overflow: auto;
+    margin: 10px 0 0;
+    padding: 8px;
+    border: 1px solid var(--vscode-textBlockQuote-border, transparent);
+    border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background, #1e1e1e);
+    color: var(--vscode-descriptionForeground, #a0a0a0);
+    font: 12px/1.4 var(--vscode-editor-font-family, monospace);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+  .cukii-permission-request-preview:focus-visible,
+  .cukii-permission-request button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder, #007fd4);
+    outline-offset: 1px;
+  }
+  .cukii-permission-request-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .cukii-permission-request-actions button {
+    min-width: 72px;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12px;
+  }
+  .cukii-permission-request-deny {
+    border: 1px solid var(--vscode-button-border, #454545);
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+  }
+  .cukii-permission-request-deny:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  }
+  .cukii-permission-request-allow {
+    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+  }
+  .cukii-permission-request-allow:hover {
+    background: var(--vscode-button-hoverBackground, #1177bb);
+  }
+
   .cukii-permission-label {
     display: none;
   }
@@ -1234,6 +1300,48 @@ button.cukii-submit-button--stop:active {
   display: block;
   margin-top: 8px;
   margin-bottom: 8px;
+}
+
+/* Claude Code 2.1.251 webview `.divider_VBlAgQ`: a transcript boundary,
+   including the exact 14×7px repeating wave geometry. */
+.cukii-model-switch-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  color: var(--vscode-disabledForeground);
+}
+
+.cukii-model-switch-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.9em;
+}
+
+.cukii-model-switch-short {
+  display: none;
+}
+
+@media screen and (max-width: 330px) {
+  .cukii-model-switch-full {
+    display: none;
+  }
+
+  .cukii-model-switch-short {
+    display: inline;
+  }
+}
+
+.cukii-model-switch-wave {
+  flex: 1;
+  min-width: 32px;
+  height: 7px;
+  mask-image: url("data:image/svg+xml,%3Csvg width='14' height='7' viewBox='0 0 14 7' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 3.5 Q 3.5 0, 7 3.5 T 14 3.5' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E");
+  mask-repeat: repeat-x;
+  mask-position: left center;
+  background-color: currentColor;
 }
 
 .cukii-timeline-item::before {
