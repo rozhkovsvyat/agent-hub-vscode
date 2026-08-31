@@ -121,40 +121,59 @@ function decodeJwtPayload(token: unknown): Record<string, unknown> | undefined {
   }
 }
 
-function accountIdLabel(identifier: string | undefined): string | undefined {
-  return identifier ? `Account ${identifier}` : undefined;
+const SAFE_EMAIL =
+  /^[a-z0-9.!#$%&'*+/^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+function safeEmail(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim();
+  return email.length <= 254 && SAFE_EMAIL.test(email) ? email : undefined;
 }
 
-function abbreviatedAccountIdLabel(
-  identifier: string | undefined,
-): string | undefined {
-  if (!identifier) return undefined;
-  const visible =
-    identifier.length > 12
-      ? `${identifier.slice(0, 8)}…${identifier.slice(-4)}`
-      : identifier;
-  return `Account ${visible}`;
+/**
+ * Names are display-only fallbacks. In particular, opaque ids must not become
+ * an account label merely because a provider puts one in a friendly-looking
+ * claim. Keep this stricter than a general username validator.
+ */
+function safeDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  if (
+    !name ||
+    name.length > 100 ||
+    /[=\x00-\x1f\x7f]/.test(name) ||
+    (name.includes("@") && !/^@[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(name)) ||
+    /(?:api[-_]?key|access[-_]?token|id[-_]?token|refresh[-_]?token|token|secret|password|bearer)/i.test(
+      name,
+    ) ||
+    /^(?:account|acct|user|usr|org|uuid|guid|id|sub|sha(?:1|256|512)?|md5)(?:\b|[_:-])/i.test(
+      name,
+    ) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      name,
+    ) ||
+    /^[0-9a-f]{24,}$/i.test(name) ||
+    /^[A-Za-z0-9_-]{20,}$/.test(name) ||
+    /^eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){1,2}$/.test(name)
+  ) {
+    return undefined;
+  }
+  return name;
 }
 
-function jwtAccountLabel(
-  token: unknown,
-  abbreviatedId = false,
-): string | undefined {
-  const claims = decodeJwtPayload(token);
-  const profile = isRecord(claims) ? claims.profile : undefined;
-  const email = stringAt(claims, "email") ?? stringAt(profile, "email");
+function safeIdentityFromRecord(record: unknown): string | undefined {
+  const email = safeEmail(stringAt(record, "email"));
   if (email) return email;
-  const identifier = stringAt(
-    claims,
-    "account_id",
-    "accountId",
-    "sub",
-    "user_id",
-    "userId",
+  return safeDisplayName(
+    stringAt(record, "name", "preferred_username", "nickname", "username"),
   );
-  return abbreviatedId
-    ? abbreviatedAccountIdLabel(identifier)
-    : accountIdLabel(identifier);
+}
+
+function jwtAccountLabel(token: unknown): string | undefined {
+  const claims = decodeJwtPayload(token);
+  if (!claims) return undefined;
+  const profile = isRecord(claims.profile) ? claims.profile : undefined;
+  return safeIdentityFromRecord(claims) ?? safeIdentityFromRecord(profile);
 }
 
 /** Local CLI auth metadata only; no browser sessions, token text, or guessed email. */
@@ -165,36 +184,32 @@ export function accountLabelFromAuthMetadata(
   if (vendor === "codex") {
     const tokens = isRecord(metadata) ? metadata.tokens : undefined;
     return (
-      stringAt(tokens, "email") ??
-      jwtAccountLabel(stringAt(tokens, "id_token")) ??
-      accountIdLabel(stringAt(tokens, "account_id", "accountId"))
+      safeIdentityFromRecord(tokens) ??
+      jwtAccountLabel(stringAt(tokens, "id_token"))
     );
   }
   if (vendor === "grok") {
     if (!isRecord(metadata)) return undefined;
     for (const entry of Object.values(metadata)) {
-      const email = stringAt(entry, "email");
-      if (email) return email;
-      const identifier = accountIdLabel(stringAt(entry, "user_id", "userId"));
-      if (identifier) return identifier;
+      const identity = safeIdentityFromRecord(entry);
+      if (identity) return identity;
     }
     return undefined;
   }
   if (vendor === "cursor") {
     return (
-      stringAt(isRecord(metadata) ? metadata.userInfo : undefined, "email") ??
-      stringAt(metadata, "email") ??
-      accountIdLabel(stringAt(metadata, "accountId", "userId", "id"))
+      safeIdentityFromRecord(
+        isRecord(metadata) ? metadata.userInfo : undefined,
+      ) ?? safeIdentityFromRecord(metadata)
     );
   }
   if (vendor === "kimi") {
     const credentials = isRecord(metadata) ? metadata.credentials : undefined;
     if (!Array.isArray(credentials)) return undefined;
     for (const credential of credentials) {
-      const label = jwtAccountLabel(
-        stringAt(credential, "access_token", "id_token"),
-        true,
-      );
+      const label =
+        safeIdentityFromRecord(credential) ??
+        jwtAccountLabel(stringAt(credential, "access_token", "id_token"));
       if (label) return label;
     }
   }
@@ -202,11 +217,8 @@ export function accountLabelFromAuthMetadata(
 }
 
 function unknownIdentityLabel(): string {
-  return "Logged in • Identity unavailable";
+  return "Account connected";
 }
-
-const SAFE_CLI_EMAIL =
-  /^[a-z0-9.!#$%&'*+/^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
 /**
  * Native CLI output is untrusted process output. Keep this deliberately
@@ -220,11 +232,11 @@ function sanitizedNativeCliIdentity(value: unknown): string | undefined {
     /(?:api[-_]?key|access[-_]?token|id[-_]?token|refresh[-_]?token|token|secret|password|bearer|(?:^|[-_])sk[-_])/i.test(
       value,
     ) ||
-    !SAFE_CLI_EMAIL.test(value)
+    !(safeEmail(value) ?? safeDisplayName(value))
   ) {
     return undefined;
   }
-  return value;
+  return safeEmail(value) ?? safeDisplayName(value);
 }
 
 function identityFromNativeCliJson(
@@ -318,7 +330,8 @@ export function classifyVendorAuthOutput(
 ): AuthClassification {
   const text = stdout.trim();
   const accountLabel =
-    identityLabel ??
+    safeEmail(identityLabel) ??
+    safeDisplayName(identityLabel) ??
     identityFromNativeCliOutput(vendor, stdout) ??
     unknownIdentityLabel();
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => ({
@@ -352,7 +365,7 @@ export function classifyVendorAuthOutput(
     try {
       const status = JSON.parse(text) as { loggedIn?: boolean; email?: string };
       return status.loggedIn
-        ? connected(status.email ?? accountLabel, ["logout"])
+        ? connected(safeEmail(status.email) ?? accountLabel, ["logout"])
         : disconnected();
     } catch {
       return unknown();
@@ -377,7 +390,9 @@ export function classifyVendorAuthOutput(
         userInfo?: { email?: string };
       };
       return status.isAuthenticated
-        ? connected(status.userInfo?.email ?? accountLabel, ["logout"])
+        ? connected(safeEmail(status.userInfo?.email) ?? accountLabel, [
+            "logout",
+          ])
         : disconnected();
     } catch {
       return unknown();
@@ -557,8 +572,11 @@ export function probeSpec(
 }
 
 type KimiCredential = {
-  access_token?: string;
-  id_token?: string;
+  email?: string;
+  name?: string;
+  preferred_username?: string;
+  nickname?: string;
+  username?: string;
 };
 type KimiCredentialFileSystem = {
   readdirSync(directory: string): string[];
@@ -592,12 +610,19 @@ export function localKimiCredentials(
           const credential = JSON.parse(
             fileSystem.readFileSync(credentialFile, "utf8"),
           );
-          const accessToken = stringAt(credential, "access_token");
-          const idToken = stringAt(credential, "id_token");
-          if (!accessToken && !idToken) return [];
+          const claims =
+            decodeJwtPayload(stringAt(credential, "access_token")) ??
+            decodeJwtPayload(stringAt(credential, "id_token"));
+          const identity =
+            safeIdentityFromRecord(credential) ??
+            safeIdentityFromRecord(claims);
+          if (!identity) return [];
           return [
             {
-              credential: { access_token: accessToken, id_token: idToken },
+              credential: {
+                email: safeEmail(identity),
+                name: safeDisplayName(identity),
+              },
               modifiedAt: stat.mtimeMs,
               filename: entry,
             },
@@ -643,8 +668,16 @@ function localMetadata(vendor: VendorWithCli): unknown {
       const claims = decodeJwtPayload(stringAt(tokens, "id_token"));
       return {
         tokens: {
-          email: stringAt(claims, "email"),
-          account_id: stringAt(tokens, "account_id", "accountId"),
+          email: safeEmail(stringAt(claims, "email")),
+          name: safeDisplayName(
+            stringAt(
+              claims,
+              "name",
+              "preferred_username",
+              "nickname",
+              "username",
+            ),
+          ),
         },
       };
     }
@@ -653,8 +686,16 @@ function localMetadata(vendor: VendorWithCli): unknown {
         Object.entries(isRecord(raw) ? raw : {}).map(([issuer, entry]) => [
           issuer,
           {
-            email: stringAt(entry, "email"),
-            user_id: stringAt(entry, "user_id", "userId"),
+            email: safeEmail(stringAt(entry, "email")),
+            name: safeDisplayName(
+              stringAt(
+                entry,
+                "name",
+                "preferred_username",
+                "nickname",
+                "username",
+              ),
+            ),
           },
         ]),
       );
