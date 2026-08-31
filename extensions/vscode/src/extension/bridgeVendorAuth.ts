@@ -81,12 +81,21 @@ function stringAt(record: unknown, ...keys: string[]): string | undefined {
   if (!isRecord(record)) return undefined;
   for (const key of keys) {
     const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (
+      typeof value === "string" &&
+      !/[\x00-\x1f\x7f]/.test(value) &&
+      value.trim()
+    ) {
+      return value.trim();
+    }
   }
   return undefined;
 }
 
-function decodeJwtPayload(token: unknown): Record<string, unknown> | undefined {
+function decodeJwtPayload(
+  token: unknown,
+  allowExpired = false,
+): Record<string, unknown> | undefined {
   if (typeof token !== "string") return undefined;
   const parts = token.split(".");
   if (parts.length !== 3 || parts.some((part) => !part)) return undefined;
@@ -114,7 +123,9 @@ function decodeJwtPayload(token: unknown): Record<string, unknown> | undefined {
     }
     const now = Date.now() / 1_000;
     if (
-      (typeof exp === "number" && exp < now - JWT_CLOCK_SKEW_SECONDS) ||
+      (typeof exp === "number" &&
+        !allowExpired &&
+        exp < now - JWT_CLOCK_SKEW_SECONDS) ||
       (typeof nbf === "number" && nbf > now + JWT_CLOCK_SKEW_SECONDS)
     ) {
       return undefined;
@@ -130,12 +141,16 @@ const SAFE_EMAIL =
 
 function safeEmail(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
+  if (/[\x00-\x1f\x7f]/.test(value)) return undefined;
   const email = value.trim();
   return email.length <= 254 && SAFE_EMAIL.test(email) ? email : undefined;
 }
 
-function jwtAccountLabel(token: unknown): string | undefined {
-  const claims = decodeJwtPayload(token);
+function jwtAccountLabel(
+  token: unknown,
+  allowExpired = false,
+): string | undefined {
+  const claims = decodeJwtPayload(token, allowExpired);
   if (!claims) return undefined;
   const profile = isRecord(claims.profile) ? claims.profile : undefined;
   return (
@@ -182,6 +197,16 @@ export function accountLabelFromAuthMetadata(
     }
   }
   return undefined;
+}
+
+/**
+ * An expired Codex ID token is never authentication proof. Its email can still
+ * be factual display metadata when the native CLI independently confirms that
+ * the refresh-backed login is active.
+ */
+export function storedCodexAccountLabel(metadata: unknown): string | undefined {
+  const tokens = isRecord(metadata) ? metadata.tokens : undefined;
+  return jwtAccountLabel(stringAt(tokens, "id_token"), true);
 }
 
 function unknownIdentityLabel(): string {
@@ -301,22 +326,17 @@ export function classifyVendorAuthOutput(
     safeEmail(identityLabel) ??
     identityFromNativeCliOutput(vendor, stdout) ??
     unknownIdentityLabel();
-  const emailUnavailable = (): AuthClassification => ({
-    state: "unknown",
-    authenticated: false,
-    accountLabel: "Not logged in",
-    actions: ["login"],
-  });
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => {
     const email = safeEmail(label);
-    return email
-      ? {
-          state: "connected" as const,
-          authenticated: true,
-          accountLabel: email,
-          actions,
-        }
-      : emailUnavailable();
+    return {
+      state: "connected" as const,
+      authenticated: true,
+      // A verified native login is enough to report a connection. Some
+      // providers do not expose an email on their local status route; never
+      // turn that into a false "Not logged in" or invent an identity.
+      accountLabel: email ?? "Connected",
+      actions,
+    };
   };
   const disconnected = (): AuthClassification => ({
     state: "disconnected",
@@ -1101,11 +1121,13 @@ function localMetadata(vendor: VendorWithCli): unknown {
     if (!file || !fs.existsSync(file)) return undefined;
     const raw = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
     if (vendor === "codex") {
-      const tokens = isRecord(raw) ? raw.tokens : undefined;
-      const claims = decodeJwtPayload(stringAt(tokens, "id_token"));
       return {
         tokens: {
-          email: safeEmail(stringAt(claims, "email")),
+          // `codex login status` is the authentication authority. Its active
+          // refresh session can outlive the ID-token lifetime, so retain a
+          // strictly validated email claim solely as display metadata. The
+          // claim never authenticates a status on its own.
+          email: storedCodexAccountLabel(raw),
         },
       };
     }

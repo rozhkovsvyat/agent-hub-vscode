@@ -18,6 +18,7 @@ import {
   kimiCredentialFingerprint,
   terminateWindowsProcessTree,
   probeVendorExecutable,
+  storedCodexAccountLabel,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
 
@@ -44,16 +45,16 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput("codex", "Logged in using ChatGPT"),
     ).toMatchObject({
-      state: "unknown",
-      authenticated: false,
-      accountLabel: "Email unavailable — sign in again",
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
     });
     expect(
       classifyVendorAuthOutput("grok", "You are logged in with grok.com."),
     ).toMatchObject({
-      state: "unknown",
-      authenticated: false,
-      accountLabel: "Email unavailable — sign in again",
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
     });
     expect(
       classifyVendorAuthOutput(
@@ -70,17 +71,21 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
     ).toMatchObject({
-      state: "unknown",
-      authenticated: false,
-      accountLabel: "Email unavailable — sign in again",
-      actions: ["login"],
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
+      actions: ["logout"],
     });
     expect(
       classifyVendorAuthOutput(
         "qwen",
         '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
-      ).state,
-    ).toBe("unknown");
+      ),
+    ).toMatchObject({
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
+    });
   });
 
   it("uses local native auth metadata for a safe, stable account label", () => {
@@ -149,7 +154,7 @@ describe("Cukii vendor CLI accounts", () => {
     ).toBe("codex@example.test");
   });
 
-  it("never exposes technical Codex claims and falls back only after safe identity sources", () => {
+  it("never exposes technical Codex claims when a native status proves login", () => {
     const opaqueId = "26c36ff2-8f7f-4e6f-9b51-0ab3f003bd4b";
     const token = jwt({
       account_id: opaqueId,
@@ -167,15 +172,15 @@ describe("Cukii vendor CLI accounts", () => {
       guidOnly ?? opaqueId,
     );
     expect(status).toMatchObject({
-      state: "unknown",
-      authenticated: false,
-      accountLabel: "Email unavailable — sign in again",
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
     });
     expect(JSON.stringify(status)).not.toContain(opaqueId);
     expect(JSON.stringify(status)).not.toContain(token);
   });
 
-  it("handles malformed or expired Codex JWTs without changing signed-out status or emitting a token", () => {
+  it("keeps malformed or expired Codex JWTs out of identity while native status remains authoritative", () => {
     const malformed = "not-a-jwt";
     const expired = jwt({ email: "expired@example.test", exp: 0 });
     for (const idToken of [malformed, expired]) {
@@ -193,16 +198,63 @@ describe("Cukii vendor CLI accounts", () => {
         identity,
       );
       expect(connected).toMatchObject({
-        state: "unknown",
-        authenticated: false,
-        accountLabel: "Email unavailable — sign in again",
+        state: "connected",
+        authenticated: true,
+        accountLabel: "Connected",
       });
       expect(signedOut).toMatchObject({
         state: "disconnected",
-        accountLabel: "Not signed in",
+        accountLabel: "Not logged in",
       });
       expect(JSON.stringify({ connected, signedOut })).not.toContain(idToken);
     }
+  });
+
+  it("shows a structurally valid expired Codex email only after native status confirms login", () => {
+    const expired = jwt({ email: "owner@example.test", exp: 0 });
+    const metadata = { tokens: { id_token: expired } };
+
+    // General metadata extraction remains freshness-strict, so a stale token
+    // cannot authenticate or label an unverified route by itself.
+    expect(accountLabelFromAuthMetadata("codex", metadata)).toBeUndefined();
+    expect(storedCodexAccountLabel(metadata)).toBe("owner@example.test");
+    expect(
+      classifyVendorAuthOutput(
+        "codex",
+        "Logged in using ChatGPT",
+        storedCodexAccountLabel(metadata),
+      ),
+    ).toMatchObject({
+      state: "connected",
+      authenticated: true,
+      accountLabel: "owner@example.test",
+    });
+    const signedOut = classifyVendorAuthOutput(
+      "codex",
+      "not logged in",
+      storedCodexAccountLabel(metadata),
+    );
+    expect(signedOut).toMatchObject({
+      state: "disconnected",
+      authenticated: false,
+      accountLabel: "Not logged in",
+    });
+    expect(JSON.stringify(signedOut)).not.toContain("owner@example.test");
+    expect(
+      storedCodexAccountLabel({
+        tokens: {
+          id_token: jwt({ email: "future@example.test", nbf: 4_102_444_800 }),
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      storedCodexAccountLabel({
+        tokens: { id_token: jwt({ email: "owner@example.test\u000b" }) },
+      }),
+    ).toBeUndefined();
+    expect(JSON.stringify(metadata)).not.toContain(
+      storedCodexAccountLabel(metadata)!,
+    );
   });
 
   it("skips malformed Kimi credential files and prefers the newest valid one", () => {
@@ -727,8 +779,8 @@ describe("Cukii vendor CLI accounts", () => {
         '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
       ),
     ).toMatchObject({
-      state: "unknown",
-      accountLabel: "Email unavailable — sign in again",
+      state: "connected",
+      accountLabel: "Connected",
     });
   });
 
@@ -751,8 +803,9 @@ describe("Cukii vendor CLI accounts", () => {
       "managed:kimi-code source=oauth",
     );
     expect(status).toMatchObject({
-      state: "unknown",
-      accountLabel: "Email unavailable — sign in again",
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
     });
     expect(JSON.stringify(status)).not.toContain(technicalId);
   });
@@ -775,7 +828,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "managed:kimi-code source=oauth account=@moonshot",
       ).accountLabel,
-    ).toBe("Email unavailable — sign in again");
+    ).toBe("Connected");
   });
 
   it("allows terminal CRLF framing for exact Grok and Kimi status lines", () => {
@@ -794,7 +847,7 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("rejects vertical-tab framing before strict Grok and Kimi identity checks", () => {
-    const unavailable = "Email unavailable — sign in again";
+    const unavailable = "Connected";
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -831,7 +884,7 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("never derives a native CLI identity from arbitrary or secret-like output", () => {
-    const unavailable = "Email unavailable — sign in again";
+    const unavailable = "Connected";
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -910,7 +963,7 @@ describe("Cukii vendor CLI accounts", () => {
     });
   });
 
-  it("uses the required disconnected, unavailable, and identity fallback copy", () => {
+  it("uses the required disconnected, unavailable, and connected fallback copy", () => {
     expect(notInstalledVendorStatus("cursor")).toMatchObject({
       installed: false,
       authenticated: false,
@@ -923,7 +976,7 @@ describe("Cukii vendor CLI accounts", () => {
       installed: false,
       authenticated: false,
       state: "postponed",
-      accountLabel: "Not configured / not yet supported",
+      accountLabel: "Coming soon",
       actions: [],
     });
     for (const vendor of [
@@ -937,17 +990,17 @@ describe("Cukii vendor CLI accounts", () => {
       expect(classifyVendorAuthOutput(vendor, "not logged in")).toMatchObject({
         state: "disconnected",
         authenticated: false,
-        accountLabel: "Not signed in",
+        accountLabel: "Not logged in",
         actions: ["login"],
       });
     }
     expect(
       classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
     ).toMatchObject({
-      state: "unknown",
-      authenticated: false,
-      accountLabel: "Email unavailable — sign in again",
-      actions: ["login"],
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
+      actions: ["logout"],
     });
     const labels = [
       classifyVendorAuthOutput("claude", '{"loggedIn":false}').accountLabel,
@@ -957,7 +1010,7 @@ describe("Cukii vendor CLI accounts", () => {
       classifyVendorAuthOutput("kimi", "not logged in").accountLabel,
       classifyVendorAuthOutput("qwen", "not logged in").accountLabel,
     ];
-    expect(labels).not.toContain("Not logged in");
+    expect(labels).toEqual(Array(6).fill("Not logged in"));
     expect(
       classifyVendorAuthOutput("codex", "request timed out"),
     ).toMatchObject({
@@ -1042,6 +1095,7 @@ describe("Cukii vendor CLI accounts", () => {
         probeVendorExecutable(
           "codex",
           fixture("codex", "echo Logged in using ChatGPT"),
+          { metadata: undefined },
         ),
         probeVendorExecutable(
           "grok",
@@ -1073,11 +1127,11 @@ describe("Cukii vendor CLI accounts", () => {
 
       expect(statuses.map((status) => status.state)).toEqual([
         "connected",
-        "unknown",
         "connected",
         "connected",
         "connected",
-        "unknown",
+        "connected",
+        "connected",
       ]);
       expect(statuses[2].accountLabel).toBe("xai@example.test");
       expect(statuses[4].accountLabel).toBe("kimi@example.test");
@@ -1102,6 +1156,7 @@ describe("Cukii vendor CLI accounts", () => {
         probeVendorExecutable(
           "codex",
           fixture("codex", "echo Logged in using ChatGPT"),
+          { metadata: undefined },
         ),
         probeVendorExecutable(
           "claude",
@@ -1115,13 +1170,13 @@ describe("Cukii vendor CLI accounts", () => {
       ]);
 
       expect(connected).toMatchObject({
-        state: "unknown",
-        authenticated: false,
-        accountLabel: "Email unavailable — sign in again",
+        state: "connected",
+        authenticated: true,
+        accountLabel: "Connected",
       });
       expect(rejected).toMatchObject({
         state: "disconnected",
-        accountLabel: "Not signed in",
+        accountLabel: "Not logged in",
       });
       expect(timedOut).toMatchObject({
         state: "unknown",
