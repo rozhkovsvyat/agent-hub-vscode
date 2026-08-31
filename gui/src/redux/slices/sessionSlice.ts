@@ -458,8 +458,11 @@ export const sessionSlice = createSlice({
           // even when the cancel happened mid text/thinking (no tool call to
           // carry the per-tool label).
           // Only an explicit user turn-cancel paints Interrupted. Lifecycle
-          // cleanup and provider errors pass undefined and must stay silent.
-          message.interrupted = action.payload === "turn";
+          // cleanup/provider errors pass undefined and must not add OR erase
+          // a real user cancellation. A tool receipt suppresses the general
+          // marker because the tool card carries its own interruption state.
+          if (action.payload === "turn") message.interrupted = true;
+          if (action.payload === "tool") message.interrupted = false;
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {

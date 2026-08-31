@@ -52,7 +52,7 @@ describe("sessionSlice clearDanglingMessages", () => {
 
     expect(tool?.status).toBe("canceled");
     expect(tool?.output?.[0]?.content).toBe(TOOL_INTERRUPTED_MESSAGE);
-    expect(next.history[1].interrupted).toBe(false);
+    expect(next.history[1].interrupted).toBeFalsy();
   });
 
   it("paints Interrupted only for an explicit user turn cancellation", () => {
@@ -76,6 +76,13 @@ describe("sessionSlice clearDanglingMessages", () => {
       0,
     );
     expect(userStop.history.filter((item) => item.interrupted)).toHaveLength(1);
+    const lateLifecycle = sessionSlice.reducer(
+      userStop,
+      clearDanglingMessages(),
+    );
+    expect(
+      lateLifecycle.history.filter((item) => item.interrupted),
+    ).toHaveLength(1);
   });
 
   it("cancels generating tools the same way", () => {

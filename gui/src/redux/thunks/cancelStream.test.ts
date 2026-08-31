@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { createMockStore, getEmptyRootState } from "../../util/test/mockStore";
-import { newSession, setActive } from "../slices/sessionSlice";
+import {
+  type ChatHistoryItemWithMessageId,
+  newSession,
+  setActive,
+} from "../slices/sessionSlice";
 import { cancelStream } from "./cancelStream";
 
 function deferred<T>() {
@@ -110,21 +114,22 @@ describe("cancelStream", () => {
     await vi.waitFor(() =>
       expect(store.getState().session.isCancelling).toBe(true),
     );
+    const replacementHistory: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "u2", role: "user", content: "new" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a2", role: "assistant", content: "new answer" },
+        contextItems: [],
+      },
+    ];
     store.dispatch(
       newSession({
         sessionId: "replacement",
         title: "Replacement",
         workspaceDirectory: "D:/Brain/vault",
-        history: [
-          {
-            message: { id: "u2", role: "user", content: "new" },
-            contextItems: [],
-          },
-          {
-            message: { id: "a2", role: "assistant", content: "new answer" },
-            contextItems: [],
-          },
-        ],
+        history: replacementHistory,
       }),
     );
     receipt.resolve({
