@@ -16,7 +16,11 @@ const execFileAsync = promisify(execFile);
 const JWT_CLOCK_SKEW_SECONDS = 60;
 
 type VendorWithCli = Exclude<BrokerVendorId, "deepseek">;
-type ProbeSpec = { program: string; args: string[] };
+type ProbeSpec = {
+  program: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+};
 type WindowsEnvironment = {
   LOCALAPPDATA?: string;
   ProgramFiles?: string;
@@ -201,6 +205,17 @@ function unknownIdentityLabel(): string {
   return "Logged in • Identity unavailable";
 }
 
+function identityFromNativeCliOutput(
+  vendor: VendorWithCli,
+  text: string,
+): string | undefined {
+  if (vendor !== "grok" && vendor !== "kimi") return undefined;
+  const match = text.match(
+    /\b(?:as|email|account|user)\s*(?:=|:)?\s*([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)/i,
+  );
+  return match?.[1];
+}
+
 function qwenOauthSelected(metadata: unknown): boolean {
   if (!isRecord(metadata) || !isRecord(metadata.security)) return false;
   return (
@@ -223,7 +238,10 @@ export function classifyVendorAuthOutput(
   identityLabel?: string,
 ): AuthClassification {
   const text = stdout.trim();
-  const accountLabel = identityLabel ?? unknownIdentityLabel();
+  const accountLabel =
+    identityLabel ??
+    identityFromNativeCliOutput(vendor, text) ??
+    unknownIdentityLabel();
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => ({
     state: "connected" as const,
     authenticated: true,
@@ -401,10 +419,20 @@ function quoteCmdToken(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+/**
+ * `cmd.exe` expands `%VAR%` even inside quoted tokens. Do not attempt to
+ * escape that grammar: a route with control characters is unavailable rather
+ * than becoming a command line. `!` remains denied with delayed expansion off
+ * as defense in depth.
+ */
+function isSafeCmdProbeRoute(route: string): boolean {
+  return !/[%!"\r\n]/.test(route);
+}
+
 export function probeSpec(
   vendor: VendorWithCli,
   executable: string,
-): ProbeSpec {
+): ProbeSpec | undefined {
   const args = WINDOWS_PROBE_ARGS[vendor];
   if (process.platform === "win32") {
     if (executable.toLowerCase().endsWith(".ps1")) {
@@ -429,14 +457,20 @@ export function probeSpec(
         ],
       };
     }
-    const command = [
-      quoteCmdToken(executable),
-      ...args.map(quoteCmdToken),
-    ].join(" ");
-    return {
-      program: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", `call ${command}`],
-    };
+    if (executable.toLowerCase().endsWith(".cmd")) {
+      if (!isSafeCmdProbeRoute(executable)) return undefined;
+      const command = [
+        quoteCmdToken(executable),
+        ...args.map(quoteCmdToken),
+      ].join(" ");
+      return {
+        program: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
+        args: ["/d", "/v:off", "/s", "/c", `call ${command}`],
+        // Node otherwise quotes the complete /c command and cmd receives the
+        // script's route with literal backslashes before its quotes.
+        windowsVerbatimArguments: true,
+      };
+    }
   }
   return { program: executable, args };
 }
@@ -582,19 +616,42 @@ export function notSupportedVendorStatus(): BrokerVendorAuthStatus {
   };
 }
 
-async function probeVendor(
+type VendorProbeOptions = {
+  metadata?: unknown;
+  timeoutMs?: number;
+};
+
+function unavailableVendorStatus(
   vendor: VendorWithCli,
+): BrokerVendorAuthStatus {
+  return {
+    id: vendor,
+    label: cukiiVendorLabel(vendor),
+    installed: true,
+    state: "unknown",
+    authenticated: false,
+    accountLabel: "Account status unavailable",
+    actions: ["login"],
+  };
+}
+
+/** Exercise the production native-child probe against one known executable. */
+export async function probeVendorExecutable(
+  vendor: VendorWithCli,
+  executable: string,
+  options: VendorProbeOptions = {},
 ): Promise<BrokerVendorAuthStatus> {
-  const executable = resolveNativeCli(vendor);
-  if (!executable) return notInstalledVendorStatus(vendor);
-  const metadata = localMetadata(vendor);
+  const metadata =
+    "metadata" in options ? options.metadata : localMetadata(vendor);
   const identity = accountLabelFromAuthMetadata(vendor, metadata);
   const spec = probeSpec(vendor, executable);
+  if (!spec) return unavailableVendorStatus(vendor);
   try {
     const { stdout, stderr } = await execFileAsync(spec.program, spec.args, {
-      timeout: 10_000,
+      timeout: options.timeoutMs ?? 10_000,
       windowsHide: true,
       maxBuffer: 256 * 1024,
+      windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
     const output =
       vendor === "qwen"
@@ -607,7 +664,12 @@ async function probeVendor(
       ...classifyVendorAuthOutput(vendor, output, identity),
     };
   } catch (error) {
-    if (isMissingCliError(error)) return notInstalledVendorStatus(vendor);
+    // A wrapper that exists but fails internally is still installed. In
+    // particular, Cursor's native Windows agent must not become “Not
+    // installed” merely because its own command returned an error.
+    if (isMissingCliError(error) && !fs.existsSync(executable)) {
+      return notInstalledVendorStatus(vendor);
+    }
     const output =
       vendor === "qwen" ? JSON.stringify(metadata ?? {}) : errorText(error);
     return {
@@ -617,6 +679,14 @@ async function probeVendor(
       ...classifyVendorAuthOutput(vendor, output, identity),
     };
   }
+}
+
+async function probeVendor(
+  vendor: VendorWithCli,
+): Promise<BrokerVendorAuthStatus> {
+  const executable = resolveNativeCli(vendor);
+  if (!executable) return notInstalledVendorStatus(vendor);
+  return probeVendorExecutable(vendor, executable);
 }
 
 // No state is retained between requests: after a terminal login/logout every

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 
 import {
   accountLabelFromAuthMetadata,
@@ -9,6 +11,7 @@ import {
   classifyVendorAuthOutput,
   isMissingCliError,
   localKimiCredentials,
+  probeVendorExecutable,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
 
@@ -161,19 +164,19 @@ describe("Cukii vendor CLI accounts", () => {
     );
   });
 
-  it("never derives Grok or Kimi identity from CLI output", () => {
+  it("uses an identity explicitly reported by the Grok or Kimi CLI", () => {
     expect(
       classifyVendorAuthOutput(
         "grok",
         "You are logged in with grok.com as stdout-leak@example.test",
       ).accountLabel,
-    ).toBe("Logged in • Identity unavailable");
+    ).toBe("stdout-leak@example.test");
     expect(
       classifyVendorAuthOutput(
         "kimi",
-        "managed:kimi-code source=oauth stdout-leak@example.test",
+        "managed:kimi-code source=oauth account=stdout-leak@example.test",
       ).accountLabel,
-    ).toBe("Logged in • Identity unavailable");
+    ).toBe("stdout-leak@example.test");
   });
 
   it("discovers Cursor from native Windows product locations before PATH", () => {
@@ -318,5 +321,140 @@ describe("Cukii vendor CLI accounts", () => {
       isMissingCliError({ stderr: "bash: cursor-agent: command not found" }),
     ).toBe(true);
     expect(isMissingCliError(new Error("authentication expired"))).toBe(false);
+  });
+
+  it("runs each native Windows .cmd account probe without shell quoting loss", async () => {
+    if (process.platform !== "win32") return;
+    const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-auth-stubs-");
+    const fixture = (name: string, body: string) => {
+      const file = path.join(directory, `${name}.cmd`);
+      fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
+      return file;
+    };
+
+    try {
+      const statuses = await Promise.all([
+        probeVendorExecutable(
+          "claude",
+          fixture(
+            "claude",
+            'echo {"loggedIn":true,"email":"claude@example.test"}',
+          ),
+        ),
+        probeVendorExecutable(
+          "codex",
+          fixture("codex", "echo Logged in using ChatGPT"),
+        ),
+        probeVendorExecutable(
+          "grok",
+          fixture(
+            "grok",
+            "echo You are logged in with grok.com as xai@example.test",
+          ),
+          { metadata: undefined },
+        ),
+        probeVendorExecutable(
+          "cursor",
+          fixture(
+            "cursor",
+            'echo {"isAuthenticated":true,"userInfo":{"email":"cursor@example.test"}}',
+          ),
+        ),
+        probeVendorExecutable(
+          "kimi",
+          fixture(
+            "kimi",
+            "echo managed:kimi-code source=oauth account=kimi@example.test",
+          ),
+          { metadata: undefined },
+        ),
+        probeVendorExecutable("qwen", fixture("qwen", "echo 0.22.2"), {
+          metadata: { security: { auth: { selectedType: "qwen-oauth" } } },
+        }),
+      ]);
+
+      expect(statuses.map((status) => status.state)).toEqual([
+        "connected",
+        "connected",
+        "connected",
+        "connected",
+        "connected",
+        "connected",
+      ]);
+      expect(statuses[2].accountLabel).toBe("xai@example.test");
+      expect(statuses[4].accountLabel).toBe("kimi@example.test");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates native rejection and timeout to their own vendor", async () => {
+    if (process.platform !== "win32") return;
+    const directory = fs.mkdtempSync(
+      "D:\\Scratch\\cukii-vendor-auth-failures-",
+    );
+    const fixture = (name: string, body: string) => {
+      const file = path.join(directory, `${name}.cmd`);
+      fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
+      return file;
+    };
+
+    try {
+      const [connected, rejected, timedOut] = await Promise.all([
+        probeVendorExecutable(
+          "codex",
+          fixture("codex", "echo Logged in using ChatGPT"),
+        ),
+        probeVendorExecutable(
+          "claude",
+          fixture("claude", "echo Not signed in\r\nexit /b 1"),
+        ),
+        probeVendorExecutable(
+          "grok",
+          fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
+          { timeoutMs: 50 },
+        ),
+      ]);
+
+      expect(connected).toMatchObject({
+        state: "connected",
+        authenticated: true,
+      });
+      expect(rejected).toMatchObject({
+        state: "disconnected",
+        accountLabel: "Not signed in",
+      });
+      expect(timedOut).toMatchObject({
+        state: "unknown",
+        accountLabel: "Account status unavailable",
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("never passes a hostile .cmd route to ComSpec", async () => {
+    if (process.platform !== "win32") return;
+    const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-auth-hostile-");
+    const marker = path.join(directory, "executed.txt");
+    const route = path.join(directory, "grok%CUKII_UNSAFE_ROUTE%.cmd");
+    fs.writeFileSync(
+      route,
+      `@echo off\r\necho executed>"${marker}"\r\n`,
+      "utf8",
+    );
+
+    try {
+      await expect(probeVendorExecutable("grok", route)).resolves.toMatchObject(
+        {
+          installed: true,
+          state: "unknown",
+          accountLabel: "Account status unavailable",
+        },
+      );
+      expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
