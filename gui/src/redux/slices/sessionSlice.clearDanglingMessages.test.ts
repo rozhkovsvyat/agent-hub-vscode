@@ -52,6 +52,30 @@ describe("sessionSlice clearDanglingMessages", () => {
 
     expect(tool?.status).toBe("canceled");
     expect(tool?.output?.[0]?.content).toBe(TOOL_INTERRUPTED_MESSAGE);
+    expect(next.history[1].interrupted).toBe(false);
+  });
+
+  it("paints Interrupted only for an explicit user turn cancellation", () => {
+    const initial = sessionSlice.getInitialState();
+    const withHistory = {
+      ...initial,
+      history: [userItem(), assistantWithTool("done")],
+      isStreaming: true,
+    };
+
+    const lifecycle = sessionSlice.reducer(
+      withHistory,
+      clearDanglingMessages(),
+    );
+    const userStop = sessionSlice.reducer(
+      withHistory,
+      clearDanglingMessages("turn"),
+    );
+
+    expect(lifecycle.history.filter((item) => item.interrupted)).toHaveLength(
+      0,
+    );
+    expect(userStop.history.filter((item) => item.interrupted)).toHaveLength(1);
   });
 
   it("cancels generating tools the same way", () => {

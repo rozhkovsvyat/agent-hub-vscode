@@ -247,7 +247,7 @@ function ParallelListeners() {
   // ON LOAD
   useEffect(() => {
     // Override persisted state
-    void dispatch(cancelStream());
+    void dispatch(cancelStream({ source: "lifecycle" }));
 
     const jetbrains = isJetBrains();
     setDocumentStylesFromLocalStorage(jetbrains);
@@ -306,7 +306,7 @@ function ParallelListeners() {
   );
 
   useWebviewListener("setInactive", async () => {
-    void dispatch(cancelStream());
+    void dispatch(cancelStream({ source: "lifecycle" }));
   });
 
   useWebviewListener("setTTSActive", async (status) => {

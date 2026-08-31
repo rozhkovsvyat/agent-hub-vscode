@@ -1,7 +1,6 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
-import { hasImageAttachments, stripImages } from "core/util/messageContent";
+import { stripImages } from "core/util/messageContent";
 import type { ChatHistoryItemWithMessageId } from "../slices/sessionSlice";
-import { setSteerStatus } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 import { saveCurrentSession } from "./session";
 import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
@@ -9,11 +8,10 @@ import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
 const MAX_QUEUED_FOLLOW_UP_TURNS = 8;
 const drainingSessions = new Set<string>();
 
-function hasPayload(item: ChatHistoryItemWithMessageId): boolean {
-  return (
-    stripImages(item.message.content).trim().length > 0 ||
-    hasImageAttachments(item.message.content)
-  );
+function hasSupportedPayload(item: ChatHistoryItemWithMessageId): boolean {
+  // Stateless bridge transcripts currently replace images with a placeholder.
+  // Keep image-only follow-ups pending until the route carries image bytes.
+  return stripImages(item.message.content).trim().length > 0;
 }
 
 /** Old assistant output may follow the bubble, so scan the whole timeline. */
@@ -31,7 +29,7 @@ export function nextQueuedSteerMessage(session: {
       item.isSteer &&
       item.message.role === "user" &&
       (item.steerStatus === "queued" || item.steerStatus === "deferred") &&
-      hasPayload(item),
+      hasSupportedPayload(item),
   );
 }
 
@@ -59,9 +57,8 @@ export const continueIfTrailingSteer = createAsyncThunk<
       const messageId = followUp?.message.id;
       if (!messageId) return;
 
-      // Claim durably before opening the fresh vendor turn. Duplicate terminal
-      // receipts and a concurrent drain can no longer submit the same id.
-      dispatch(setSteerStatus({ messageId, status: "delivered" }));
+      // Persist the still-pending outbox before launch. Do not claim delivery:
+      // a crash between save and vendor activity must remain replayable.
       unwrapResult(
         await dispatch(
           saveCurrentSession({
@@ -89,24 +86,27 @@ export const continueIfTrailingSteer = createAsyncThunk<
               ).cukiiTerminalError === true,
           );
         if (terminalErrorArrived) {
-          await dispatch(
-            saveCurrentSession({
-              openNewSession: false,
-              generateTitle: false,
-            }),
+          unwrapResult(
+            await dispatch(
+              saveCurrentSession({
+                openNewSession: false,
+                generateTitle: false,
+              }),
+            ),
           );
           return;
         }
       } catch {
-        // No terminal success: make the durable outbox retryable on the next
-        // idle/reload, but never spin in this drain after a bridge failure.
+        // No positive vendor activity: keep the durable item pending for a
+        // later reload/reconnect, but never spin in this live drain.
         if (getState().session.id === sessionId) {
-          dispatch(setSteerStatus({ messageId, status: "deferred" }));
-          await dispatch(
-            saveCurrentSession({
-              openNewSession: false,
-              generateTitle: false,
-            }),
+          unwrapResult(
+            await dispatch(
+              saveCurrentSession({
+                openNewSession: false,
+                generateTitle: false,
+              }),
+            ),
           );
         }
         return;
@@ -121,6 +121,16 @@ export const continueIfTrailingSteer = createAsyncThunk<
           }),
         ),
       );
+      const delivered = getState().session.history.find(
+        (item) => item.message.id === messageId,
+      );
+      if (
+        delivered?.steerStatus === "queued" ||
+        delivered?.steerStatus === "deferred"
+      ) {
+        // A clean terminal without positive acceptance is not delivery.
+        return;
+      }
     }
   } finally {
     drainingSessions.delete(sessionId);

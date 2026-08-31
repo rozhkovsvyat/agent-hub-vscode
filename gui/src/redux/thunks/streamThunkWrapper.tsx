@@ -45,12 +45,12 @@ export const streamThunkWrapper = createAsyncThunk<
         isOverloadedErrorMessage(message) && attempt < OVERLOADED_RETRIES;
 
       if (shouldRetry) {
-        await dispatch(cancelStream());
+        await dispatch(cancelStream({ source: "error" }));
         const delayMs = OVERLOADED_DELAY_MS * 2 ** attempt;
         await new Promise((resolve) => setTimeout(resolve, delayMs));
-        await dispatch(cancelStream());
+        await dispatch(cancelStream({ source: "error" }));
       } else {
-        await dispatch(cancelStream());
+        await dispatch(cancelStream({ source: "error" }));
         dispatch(setDialogMessage(<StreamErrorDialog error={e} />));
         dispatch(setShowDialog(true));
 

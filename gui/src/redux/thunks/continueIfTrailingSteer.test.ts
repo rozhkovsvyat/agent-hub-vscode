@@ -3,6 +3,7 @@ import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import {
   ChatHistoryItemWithMessageId,
   newSession,
+  normalizeRestoredHistory,
 } from "../slices/sessionSlice";
 import { setupStore } from "../store";
 import {
@@ -24,7 +25,7 @@ function item(
 }
 
 describe("hasTrailingSteerMessage", () => {
-  it("drains two messages FIFO exactly once when terminal triggers race", async () => {
+  it("drains two messages FIFO once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
@@ -93,6 +94,35 @@ describe("hasTrailingSteerMessage", () => {
     expect(store.getState().session.history[0].steerStatus).toBe("deferred");
   });
 
+  it("does not launch when the pre-stream durable save is rejected", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["history/save"] = vi.fn(async () => {
+      throw new Error("disk unavailable");
+    });
+    messenger.streamRequest = vi.fn(async function* () {
+      yield [{ role: "assistant", content: "must not run" }];
+    }) as typeof messenger.streamRequest;
+    const pending = item("user", "persist me first", true);
+    pending.steerStatus = "deferred";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "save-rejected",
+        title: "Save rejected",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [pending],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    const result = await store.dispatch(continueIfTrailingSteer());
+
+    expect(result.meta.requestStatus).toBe("rejected");
+    expect(messenger.streamRequest).not.toHaveBeenCalled();
+    expect(store.getState().session.history[0].steerStatus).toBe("deferred");
+  });
+
   it("stops FIFO after a terminal bridge error instead of dispatching the next item", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[] = [];
@@ -125,6 +155,12 @@ describe("hasTrailingSteerMessage", () => {
     await store.dispatch(continueIfTrailingSteer());
 
     expect(dispatched).toEqual([first.message.id]);
+    expect(
+      store
+        .getState()
+        .session.history.find((entry) => entry.message.id === first.message.id)
+        ?.steerStatus,
+    ).toBe("deferred");
     expect(
       store
         .getState()
@@ -285,6 +321,25 @@ describe("hasTrailingSteerMessage", () => {
     );
   });
 
+  it("keeps a crash-boundary queued item eligible after serialized restore", () => {
+    const queued = item("user", "resume after reconnect", true);
+    queued.steerStatus = "queued";
+    queued.steerSentAt = 10;
+    queued.messageReceipt = { sentAt: 10, status: "queued" };
+    const restored = normalizeRestoredHistory(
+      JSON.parse(JSON.stringify([queued])),
+    );
+
+    expect(
+      nextQueuedSteerMessage({
+        history: restored,
+        isStreaming: false,
+        isInEdit: false,
+      })?.message.id,
+    ).toBe(queued.message.id);
+    expect(restored[0].steerStatus).toBe("queued");
+  });
+
   it("selects two queued follow-ups in FIFO order and ignores claimed ones", () => {
     const first = item("user", "first", true);
     first.steerStatus = "deferred";
@@ -313,7 +368,7 @@ describe("hasTrailingSteerMessage", () => {
     ).toBeUndefined();
   });
 
-  it("runs an image-only deferred follow-up after the current response", () => {
+  it("keeps an image-only follow-up pending until the route carries image bytes", () => {
     const deferred = item("user", "image", true);
     deferred.message.content = [
       {
@@ -328,6 +383,6 @@ describe("hasTrailingSteerMessage", () => {
         isStreaming: false,
         isInEdit: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

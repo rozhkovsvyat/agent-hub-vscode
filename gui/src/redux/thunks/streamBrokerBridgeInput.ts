@@ -1,4 +1,4 @@
-import { createAsyncThunk } from "@reduxjs/toolkit";
+import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
 import { renderChatMessage } from "core/util/messageContent";
 import {
@@ -14,6 +14,7 @@ import {
   setInactive,
   setInlineErrorMessage,
   setIsPruned,
+  setSteerStatus,
   setToolCallCalling,
   streamUpdate,
   updateToolCallOutput,
@@ -164,6 +165,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   "chat/streamBrokerBridgeInput",
   async (options, { dispatch, extra, getState }) => {
     const state = getState();
+    const sessionId = state.session.id;
     const queuedFollowUpMessageId = options?.queuedFollowUpMessageId;
     const brokerModel = state.session.brokerModel ?? "fable-5";
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
@@ -207,10 +209,35 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     let terminalSettled = false;
 
     const settleTerminal = () => {
-      if (!terminalSettled) {
+      if (!terminalSettled && getState().session.id === sessionId) {
         terminalSettled = true;
         dispatch(setInactive());
       }
+    };
+
+    const markAcceptedAndPersist = async (messageId: string) => {
+      const current = getState().session;
+      if (current.id !== sessionId) return;
+      const item = current.history.find(
+        (entry) => entry.message.id === messageId,
+      );
+      if (item?.steerStatus === "read") return;
+      if (
+        item?.isSteer &&
+        (item.steerStatus === "queued" || item.steerStatus === "deferred")
+      ) {
+        dispatch(setSteerStatus({ messageId, status: "delivered" }));
+      }
+      dispatch(markSteerRead({ messageId }));
+      const { saveCurrentSession } = await import("./session");
+      unwrapResult(
+        await dispatch(
+          saveCurrentSession({
+            openNewSession: false,
+            generateTitle: false,
+          }),
+        ),
+      );
     };
 
     const isDuplicateTerminalError = (message: ChatMessage) => {
@@ -267,6 +294,10 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             }
             break;
           }
+          if (getState().session.id !== sessionId) {
+            await gen.return(undefined);
+            break;
+          }
           if (!getState().session.isStreaming) {
             dispatch(abortStream());
             await gen.return(undefined);
@@ -280,9 +311,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
               break;
             }
             if (message.cukiiSteerReadMessageId) {
-              dispatch(
-                markSteerRead({ messageId: message.cukiiSteerReadMessageId }),
-              );
+              await markAcceptedAndPersist(message.cukiiSteerReadMessageId);
               continue;
             }
             if (isBridgeTerminalError(message)) {
@@ -298,8 +327,12 @@ export const streamBrokerBridgeInput = createAsyncThunk<
               dispatch(setBridgeWait(message.cukiiBridgeWait));
               continue;
             }
-            if (message.cukiiVendorActivity && initialUserReceiptId) {
-              dispatch(markSteerRead({ messageId: initialUserReceiptId }));
+            if (message.cukiiVendorActivity) {
+              if (queuedFollowUpMessageId) {
+                await markAcceptedAndPersist(queuedFollowUpMessageId);
+              } else if (initialUserReceiptId) {
+                dispatch(markSteerRead({ messageId: initialUserReceiptId }));
+              }
             }
             dispatch(streamUpdate([message]));
             settleObservedToolCalls([message], dispatch);

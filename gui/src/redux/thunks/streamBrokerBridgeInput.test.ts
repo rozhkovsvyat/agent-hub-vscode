@@ -25,6 +25,73 @@ function messageWithId<T extends ChatMessage>(
 }
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("keeps a queued follow-up pending until factual vendor activity, then persists read", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const request = vi.spyOn(ideMessenger, "request");
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    let localConsumed!: () => void;
+    const consumed = new Promise<void>((resolve) => (localConsumed = resolve));
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      yield [{ role: "thinking", content: "Launching native command" }];
+      localConsumed();
+      await blocked;
+      yield [
+        {
+          role: "thinking",
+          content: "Native bridge first output",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const followUp: ChatHistoryItemWithMessageId = {
+      message: messageWithId(
+        { role: "user", content: "wait for acceptance" },
+        "activity-follow-up",
+      ),
+      contextItems: [],
+      isSteer: true,
+      steerStatus: "deferred",
+      steerSentAt: 1,
+      messageReceipt: { sentAt: 1, status: "deferred" },
+    };
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "activity-receipt",
+        title: "Activity receipt",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [followUp],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    const running = store.dispatch(
+      streamBrokerBridgeInput({
+        queuedFollowUpMessageId: "activity-follow-up",
+      }),
+    );
+    await consumed;
+    expect(store.getState().session.history[0].steerStatus).toBe("deferred");
+    release();
+    await running;
+
+    expect(store.getState().session.history[0].steerStatus).toBe("read");
+    expect(
+      request.mock.calls
+        .filter(([type]) => type === "history/save")
+        .some(([, saved]) =>
+          (saved as any).history.some(
+            (entry: ChatHistoryItemWithMessageId) =>
+              entry.message.id === "activity-follow-up" &&
+              entry.steerStatus === "read",
+          ),
+        ),
+    ).toBe(true);
+  });
+
   it("dispatches exactly one claimed queued follow-up as the final FIFO user turn", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: any[] = [];
@@ -54,7 +121,7 @@ describe("streamBrokerBridgeInput controls", () => {
         ),
         contextItems: [],
         isSteer: true,
-        steerStatus: "delivered",
+        steerStatus: "deferred",
         steerSentAt: 1,
       },
       {
@@ -153,6 +220,56 @@ describe("streamBrokerBridgeInput controls", () => {
     store.dispatch(setActive());
     store.dispatch(newSession(undefined));
     expect(store.getState().session.isStreaming).toBe(false);
+  });
+
+  it("never settles a replacement session from a stale terminal receipt", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      await blocked;
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "old-run",
+        title: "Old",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: messageWithId(
+              { role: "user", content: "old request" },
+              "old-user",
+            ),
+            contextItems: [],
+          },
+        ],
+        mode: "broker",
+      }),
+    );
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.isStreaming).toBe(true),
+    );
+    store.dispatch(
+      newSession({
+        sessionId: "replacement",
+        title: "Replacement",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        mode: "broker",
+      }),
+    );
+    store.dispatch(setActive());
+
+    release();
+    await running;
+
+    expect(store.getState().session.id).toBe("replacement");
+    expect(store.getState().session.isStreaming).toBe(true);
+    // Let the losing cancellation-race poller settle before Vitest exits.
+    store.dispatch(setInactive());
   });
 
   it("sends a switched Manual permission mode and this tab's controls in the bridge request", async () => {
@@ -402,6 +519,9 @@ describe("streamBrokerBridgeInput controls", () => {
 
     expect(store.getState().session.isStreaming).toBe(false);
     expect(returned).toHaveBeenCalledTimes(1);
+    expect(
+      store.getState().session.history.filter((item) => item.interrupted),
+    ).toHaveLength(0);
   });
 
   it("clears an explicit wait receipt when the same bridge turn becomes terminal", async () => {
@@ -515,6 +635,9 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(assistantText).toBe(`  ${limit}  `);
     expect(store.getState().session.isStreaming).toBe(false);
     expect(returned).toHaveBeenCalledTimes(1);
+    expect(
+      store.getState().session.history.filter((item) => item.interrupted),
+    ).toHaveLength(0);
   });
 
   it("suppresses a terminal receipt without mutating prior assistant text", async () => {

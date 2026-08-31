@@ -1,4 +1,4 @@
-import { createAsyncThunk } from "@reduxjs/toolkit";
+import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { JSONContent } from "@tiptap/core";
 import { InputModifiers } from "core";
 import { v4 as uuidv4 } from "uuid";
@@ -51,8 +51,10 @@ export const steerDuringStream = createAsyncThunk<
     // This is a durable outbox item, not transient composer state. Save it
     // before asking the live bridge so reload/Remote-SSH reconnect cannot
     // erase a bubble that already carries its sent checkmark.
-    await dispatch(
-      saveCurrentSession({ openNewSession: false, generateTitle: false }),
+    unwrapResult(
+      await dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      ),
     );
     try {
       const response = await extra.ideMessenger.request(
@@ -74,8 +76,10 @@ export const steerDuringStream = createAsyncThunk<
       // The persisted bubble stays retryable if the live bridge disappeared.
       dispatch(setSteerStatus({ messageId, status: "deferred" }));
     }
-    await dispatch(
-      saveCurrentSession({ openNewSession: false, generateTitle: false }),
+    unwrapResult(
+      await dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      ),
     );
   },
 );

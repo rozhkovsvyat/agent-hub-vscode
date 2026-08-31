@@ -457,7 +457,9 @@ export const sessionSlice = createSlice({
           // Mark the turn interrupted so the transcript shows "Interrupted"
           // even when the cancel happened mid text/thinking (no tool call to
           // carry the per-tool label).
-          message.interrupted = action.payload !== "tool";
+          // Only an explicit user turn-cancel paints Interrupted. Lifecycle
+          // cleanup and provider errors pass undefined and must stay silent.
+          message.interrupted = action.payload === "turn";
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {

@@ -77,6 +77,26 @@ describe("steerDuringStream", () => {
     });
   });
 
+  it("rejects before live delivery when the durable outbox save fails", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["history/save"] = vi.fn(async () => {
+      throw new Error("history unavailable");
+    });
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+
+    const result = await store.dispatch(
+      steerDuringStream({ editorState, modifiers }) as any,
+    );
+
+    expect(result.meta.requestStatus).toBe("rejected");
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/steerDuringStream"),
+    ).toBe(false);
+    expect(sessionOf(store).history.at(-1)?.steerStatus).toBe("queued");
+  });
+
   it("keeps image attachments in an active-run steering payload", async () => {
     vi.mocked(resolveEditorContent).mockResolvedValueOnce({
       selectedContextItems: [],
