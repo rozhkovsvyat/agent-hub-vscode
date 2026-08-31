@@ -24,8 +24,10 @@ models/whisper-base/**
 e2e
 
 server/exe/**
-!out/node_modules/**
-!out/runtime/**
+# VSCE collects ignores and re-includes as separate sets, so a bare `/**`
+# re-include would override `**/*.map` regardless of line order.
+!out/node_modules/**/!(*.map)
+!out/runtime/**/!(*.map)
 !node_modules/@vscode/ripgrep/bin/rg
 
 # Do not ship esbuild in VSIX

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const state = vi.hoisted(() => ({
   commands: new Map<string, (...args: any[]) => any>(),
@@ -78,7 +80,14 @@ describe("saved Cukii sidebar session opening", () => {
     }
   });
 
-  it("redirects the legacy history command to the session navigator", () => {
+  it("keeps the legacy history command hidden and redirects it to the session navigator", () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"),
+    );
+    expect(manifest.contributes.commands).not.toContainEqual(
+      expect.objectContaining({ command: "continue.viewHistory" }),
+    );
+
     const sidebar = register({ invoke: vi.fn() });
 
     state.commands.get("continue.viewHistory")!();

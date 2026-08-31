@@ -260,13 +260,6 @@
         "group": "Cukii"
       },
       {
-        "command": "continue.viewHistory",
-        "category": "Cukii",
-        "title": "Show Session Navigator",
-        "icon": "$(history)",
-        "group": "Cukii"
-      },
-      {
         "command": "continue.viewLogs",
         "category": "Cukii",
         "title": "View Logs",

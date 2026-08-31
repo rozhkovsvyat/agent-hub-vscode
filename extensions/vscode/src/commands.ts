@@ -503,6 +503,8 @@ const getCommandsMap: (
         void vscode.window.showErrorMessage(errorMessage);
       }
     },
+    // Kept unlisted so persisted invocations from pre-navigator releases land
+    // in the current Cukii session navigator instead of a removed history view.
     "continue.viewHistory": () => {
       void vscode.commands.executeCommand("continue.continueGUIView.focus");
     },
