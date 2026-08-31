@@ -195,9 +195,11 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                   <span className="block text-[13px] text-[var(--vscode-foreground)]">
                     {account.label}
                   </span>
-                  <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
-                    {account.accountLabel}
-                  </span>
+                  {account.accountLabel && (
+                    <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
+                      {account.accountLabel}
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 items-center">
                   {account.actions.map((action) => {

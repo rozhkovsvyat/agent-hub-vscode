@@ -34,10 +34,10 @@ type WindowsEnvironment = {
   ProgramFiles?: string;
   "ProgramFiles(x86)"?: string;
 };
-type AuthClassification = Pick<
+type AuthClassification = Omit<
   BrokerVendorAuthStatus,
-  "state" | "authenticated" | "accountLabel" | "actions"
->;
+  "id" | "label" | "installed" | "accountLabel"
+> & { accountLabel?: string };
 
 const CLI_PROGRAMS: Record<VendorWithCli, string> = {
   claude: "claude",
@@ -342,14 +342,18 @@ export function classifyVendorAuthOutput(
     identityFromNativeCliOutput(vendor, stdout) ??
     unknownIdentityLabel();
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => {
-    const email = safeEmail(label);
+    const displayIdentity = safeEmail(label);
     return {
       state: "connected" as const,
       authenticated: true,
       // A verified native login is enough to report a connection. Some
       // providers do not expose an email on their local status route; never
       // turn that into a false "Not logged in" or invent an identity.
-      accountLabel: email ?? "Connected",
+      ...(displayIdentity
+        ? { accountLabel: displayIdentity }
+        : vendor === "kimi"
+          ? {}
+          : { accountLabel: "Connected" }),
       actions,
     };
   };
@@ -636,7 +640,9 @@ const KIMI_SERVER_TIMEOUT_MS = 800;
 const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 3_500;
 const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
 const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
-const kimiEmailCache = new Map<string, string>();
+const kimiIdentityCache = new Map<string, string>();
+const kimiProfileIdentityCache = new Map<string, string>();
+const KIMI_CODE_ME_URL = new URL("https://api.kimi.ai/coding/v1/me");
 
 type KimiWebStartup = {
   endpoint: URL;
@@ -1003,11 +1009,40 @@ export function kimiCredentialFingerprint(
  * Identity is therefore read only from an ephemeral child on the port this
  * process reserved, and its bearer never escapes this function.
  */
-export async function localKimiServerEmail(
+function safeKimiNickname(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 80) return undefined;
+  if (/[\x00-\x1f\x7f]/.test(value)) return undefined;
+  const nickname = value.trim().replace(/\s+/g, " ");
+  if (
+    !nickname ||
+    /^(?:connected|not logged in|account (?:status|identity) unavailable)$/i.test(
+      nickname,
+    )
+  ) {
+    return undefined;
+  }
+  return nickname;
+}
+
+/**
+ * Kimi Code's official `/coding/v1/me` contract makes email optional. Its
+ * local web facade returns the same profile as `data.userInfo`. Use email when
+ * present; otherwise retain only the official nickname. Opaque provider ids
+ * are deliberately not promoted into account labels.
+ */
+export function kimiDisplayIdentityFromUserInfo(
+  userInfo: unknown,
+): string | undefined {
+  const email = safeEmail(stringAt(userInfo, "email"));
+  if (email) return email;
+  return safeKimiNickname(stringAt(userInfo, "nickname"));
+}
+
+export async function localKimiServerIdentity(
   options: KimiServerProbeOptions = {},
 ): Promise<string | undefined> {
   if (options.cacheKey) {
-    const cached = kimiEmailCache.get(options.cacheKey);
+    const cached = kimiIdentityCache.get(options.cacheKey);
     if (cached) return cached;
   }
   let ephemeral: ChildProcess | undefined;
@@ -1036,10 +1071,10 @@ export async function localKimiServerEmail(
       const data = isRecord(response) ? response.data : undefined;
       const userInfo =
         isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
-      const email = safeEmail(stringAt(userInfo, "email"));
-      if (email && options.cacheKey)
-        kimiEmailCache.set(options.cacheKey, email);
-      return email;
+      const identity = kimiDisplayIdentityFromUserInfo(userInfo);
+      if (identity && options.cacheKey)
+        kimiIdentityCache.set(options.cacheKey, identity);
+      return identity;
     }
   } catch {
     // Token and endpoint failures deliberately remain non-diagnostic.
@@ -1059,6 +1094,13 @@ export async function localKimiServerEmail(
     bearerToken = undefined;
   }
   return undefined;
+}
+
+/** Compatibility wrapper for callers that specifically require an email. */
+export async function localKimiServerEmail(
+  options: KimiServerProbeOptions = {},
+): Promise<string | undefined> {
+  return safeEmail(await localKimiServerIdentity(options));
 }
 
 /**
@@ -1111,6 +1153,121 @@ export function localKimiCredentials(
       .map(({ credential }) => credential);
   } catch {
     return [];
+  }
+}
+
+type KimiManagedProfileRequest = (
+  accessToken: string,
+  timeoutMs: number,
+) => Promise<{ status: number; payload?: unknown }>;
+
+function kimiManagedProfileRequest(
+  accessToken: string,
+  timeoutMs: number,
+): Promise<{ status: number; payload?: unknown }> {
+  return fetch(KIMI_CODE_ME_URL, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  }).then(async (response) => {
+    const contentLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
+      return { status: response.status };
+    }
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.length > 64 * 1024) return { status: response.status };
+    return {
+      status: response.status,
+      payload: parseJson(body.toString("utf8")),
+    };
+  });
+}
+
+type CurrentKimiCredential = {
+  accessToken: string;
+};
+
+function currentKimiCredential(
+  credentialsDirectory: string,
+  fileSystem: KimiCredentialFileSystem,
+): CurrentKimiCredential | undefined {
+  try {
+    const candidates = fileSystem
+      .readdirSync(credentialsDirectory)
+      .filter((entry) => entry.endsWith(".json"))
+      .flatMap((entry) => {
+        try {
+          const file = path.join(credentialsDirectory, entry);
+          const stat = fileSystem.statSync(file);
+          if (!stat.isFile() || stat.size > 64 * 1024) return [];
+          return [{ entry, file, modifiedAt: stat.mtimeMs }];
+        } catch {
+          return [];
+        }
+      })
+      .sort(
+        (left, right) =>
+          right.modifiedAt - left.modifiedAt ||
+          left.entry.localeCompare(right.entry),
+      );
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(
+          fileSystem.readFileSync(candidate.file, "utf8"),
+        );
+        const accessToken = stringAt(parsed, "access_token");
+        if (accessToken) {
+          return {
+            accessToken,
+          };
+        }
+      } catch {
+        // A malformed sibling must not hide a usable active credential.
+      }
+    }
+  } catch {
+    // Missing native credential directory means no official profile probe.
+  }
+  return undefined;
+}
+
+export async function managedKimiProfileIdentity(
+  options: {
+    userHome?: string;
+    fileSystem?: KimiCredentialFileSystem;
+    request?: KimiManagedProfileRequest;
+    timeoutMs?: number;
+    cacheKey?: string;
+  } = {},
+): Promise<string | undefined> {
+  if (options.cacheKey) {
+    const cached = kimiProfileIdentityCache.get(options.cacheKey);
+    if (cached) return cached;
+  }
+  const fileSystem = options.fileSystem ?? fs;
+  const credentialsDirectory = path.join(
+    options.userHome ?? os.homedir(),
+    ".kimi-code",
+    "credentials",
+  );
+  const credential = currentKimiCredential(credentialsDirectory, fileSystem);
+  if (!credential) return undefined;
+  try {
+    const request = options.request ?? kimiManagedProfileRequest;
+    const profile = await request(
+      credential.accessToken,
+      options.timeoutMs ?? 8_000,
+    );
+    if (profile.status !== 200) return undefined;
+    const identity = kimiDisplayIdentityFromUserInfo(profile.payload);
+    if (identity && options.cacheKey) {
+      kimiProfileIdentityCache.set(options.cacheKey, identity);
+    }
+    return identity;
+  } catch {
+    return undefined;
   }
 }
 
@@ -1248,31 +1405,36 @@ export async function probeVendorExecutable(
     vendor === "qwen" ? await qwenAuthProbePayload(metadata) : undefined;
   try {
     const { stdout, stderr } = await execFileAsync(spec.program, spec.args, {
-      timeout: options.timeoutMs ?? 10_000,
+      timeout: options.timeoutMs ?? (vendor === "kimi" ? 20_000 : 10_000),
       windowsHide: true,
       maxBuffer: 256 * 1024,
       windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
     const output = qwenProbe ? qwenProbe.output : `${stdout}\n${stderr}`;
-    const kimiEmail =
+    const outputIdentity = identityFromNativeCliOutput(vendor, output);
+    const kimiIdentity =
       vendor === "kimi" &&
       !identity &&
+      !outputIdentity &&
       (/source=oauth/i.test(output) ||
         nativeCliJsonIndicatesAuthenticated("kimi", output))
-        ? await localKimiServerEmail({
-            executable,
+        ? await managedKimiProfileIdentity({
             cacheKey: `${executable}:${kimiCredentialFingerprint(os.homedir()) ?? "missing"}`,
           })
         : undefined;
+    const classified = classifyVendorAuthOutput(
+      vendor,
+      output,
+      identity ?? qwenProbe?.identity,
+    );
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
       installed: true,
-      ...classifyVendorAuthOutput(
-        vendor,
-        output,
-        identity ?? qwenProbe?.identity ?? kimiEmail,
-      ),
+      ...classified,
+      ...(vendor === "kimi" && kimiIdentity && classified.authenticated
+        ? { accountLabel: kimiIdentity }
+        : {}),
     };
   } catch (error) {
     // A wrapper that exists but fails internally is still installed. In
@@ -1306,7 +1468,8 @@ async function probeVendor(
 // No state is retained between requests: after a terminal login/logout every
 // modal refresh launches fresh native probes. Kept explicit for the action path.
 export function clearBrokerVendorAccountCache(): void {
-  kimiEmailCache.clear();
+  kimiIdentityCache.clear();
+  kimiProfileIdentityCache.clear();
 }
 
 export async function listBrokerVendorAccounts(): Promise<

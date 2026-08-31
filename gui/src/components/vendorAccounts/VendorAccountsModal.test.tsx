@@ -346,6 +346,30 @@ describe("VendorAccountsModal", () => {
     expect(document.querySelector("input")).toBeNull();
   });
 
+  it("omits a synthetic subtitle for an authenticated account without identity", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "kimi",
+        label: "Moonshot AI",
+        installed: true,
+        authenticated: true,
+        state: "connected",
+        actions: ["logout"],
+      } as BrokerVendorAuthStatus,
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("Moonshot AI");
+    await getElementByText("Log out");
+    expect(document.body.textContent).not.toMatch(
+      /Connected|identity unavailable|Email unavailable/i,
+    );
+  });
+
   it("coalesces timer ticks without starving a slow current probe", async () => {
     vi.useFakeTimers();
     let unmount: (() => void) | undefined;

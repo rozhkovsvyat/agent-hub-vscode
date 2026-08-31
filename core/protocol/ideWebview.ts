@@ -55,7 +55,7 @@ export type BrokerVendorAuthStatus = {
   authenticated: boolean;
   state: "connected" | "disconnected" | "unavailable" | "postponed" | "unknown";
   /** Account identity shown below the vendor name. Never put transport/auth diagnostics here. */
-  accountLabel: string;
+  accountLabel?: string;
   actions: BrokerVendorAuthAction[];
 };
 

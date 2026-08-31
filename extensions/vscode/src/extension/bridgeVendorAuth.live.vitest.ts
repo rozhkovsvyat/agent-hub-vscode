@@ -5,10 +5,11 @@ import { listBrokerVendorAccounts } from "./bridgeVendorAuth";
 const liveIt = process.env.CUKII_LIVE_AUTH_PROBE === "1" ? it : it.skip;
 const EMAIL = /^[^@\s]+@[^@\s]+$/;
 
-function redactedIdentity(label: string): string {
+function redactedIdentity(label: string | undefined): string | undefined {
+  if (!label) return undefined;
   return EMAIL.test(label)
     ? `<redacted>@${label.slice(label.lastIndexOf("@") + 1)}`
-    : label;
+    : "<provider-profile>";
 }
 
 describe("live broker vendor account probe", () => {
@@ -50,11 +51,10 @@ describe("live broker vendor account probe", () => {
       expect(kimi?.installed).toBe(true);
       expect(kimi?.authenticated).toBe(true);
       expect(kimi?.state).toBe("connected");
+      expect(kimi?.accountLabel).toBeTruthy();
+      expect(kimi?.accountLabel).not.toBe("Connected");
       expect(kimi?.accountLabel).not.toBe("Not logged in");
-      expect(
-        kimi?.accountLabel === "Connected" ||
-          EMAIL.test(kimi?.accountLabel ?? ""),
-      ).toBe(true);
+      expect(kimi?.actions).toEqual(["logout"]);
 
       expect(qwen?.installed).toBe(true);
       expect(qwen?.authenticated).toBe(true);

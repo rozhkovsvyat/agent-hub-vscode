@@ -13,8 +13,10 @@ import {
   notSupportedVendorStatus,
   classifyVendorAuthOutput,
   isMissingCliError,
+  kimiDisplayIdentityFromUserInfo,
   localKimiCredentials,
   localKimiServerEmail,
+  managedKimiProfileIdentity,
   kimiCredentialFingerprint,
   terminateWindowsProcessTree,
   probeVendorExecutable,
@@ -68,14 +70,16 @@ describe("Cukii vendor CLI accounts", () => {
       state: "connected",
       accountLabel: "owner@example.com",
     });
-    expect(
-      classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
-    ).toMatchObject({
+    const kimiWithoutIdentity = classifyVendorAuthOutput(
+      "kimi",
+      "managed:kimi-code source=oauth",
+    );
+    expect(kimiWithoutIdentity).toMatchObject({
       state: "connected",
       authenticated: true,
-      accountLabel: "Connected",
       actions: ["logout"],
     });
+    expect(kimiWithoutIdentity).not.toHaveProperty("accountLabel");
     expect(
       classifyVendorAuthOutput(
         "qwen",
@@ -821,9 +825,69 @@ describe("Cukii vendor CLI accounts", () => {
     expect(status).toMatchObject({
       state: "connected",
       authenticated: true,
-      accountLabel: "Connected",
     });
+    expect(status).not.toHaveProperty("accountLabel");
     expect(JSON.stringify(status)).not.toContain(technicalId);
+  });
+
+  it("derives a stable automatic Moonshot identity from the official profile", () => {
+    expect(
+      kimiDisplayIdentityFromUserInfo({
+        email: "moonshot@example.test",
+        nickname: "ignored when email is available",
+        globalId: "account-000001",
+      }),
+    ).toBe("moonshot@example.test");
+    expect(
+      kimiDisplayIdentityFromUserInfo({
+        nickname: "Workspace owner",
+        globalId: "account-123456",
+      }),
+    ).toBe("Workspace owner");
+    expect(
+      kimiDisplayIdentityFromUserInfo({ globalId: "account-abcdef" }),
+    ).toBeUndefined();
+    expect(
+      kimiDisplayIdentityFromUserInfo({
+        nickname: "Connected",
+        globalId: "too-short",
+      }),
+    ).toBeUndefined();
+    expect(
+      kimiDisplayIdentityFromUserInfo({
+        nickname: "unsafe\u0000name",
+        globalId: "short",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("uses the official Moonshot profile without an email seed", async () => {
+    const bearer = "test-bearer-do-not-display";
+    const identity = await managedKimiProfileIdentity({
+      userHome: "C:\\Users\\owner",
+      fileSystem: {
+        readdirSync: () => ["active.json"],
+        statSync: () => ({
+          isFile: () => true,
+          size: 200,
+          mtimeMs: 100,
+        }),
+        readFileSync: () => JSON.stringify({ access_token: bearer }),
+      },
+      request: async (actualBearer) => {
+        expect(actualBearer).toBe(bearer);
+        return {
+          status: 200,
+          payload: {
+            nickname: "Moonshot owner",
+            global_id: "official-account-654321",
+          },
+        };
+      },
+    });
+
+    expect(identity).toBe("Moonshot owner");
+    expect(JSON.stringify({ identity })).not.toContain(bearer);
   });
 
   it("uses identities from exact Grok and Kimi CLI status formats", () => {
@@ -844,7 +908,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "managed:kimi-code source=oauth account=@moonshot",
       ).accountLabel,
-    ).toBe("Connected");
+    ).toBeUndefined();
   });
 
   it("allows terminal CRLF framing for exact Grok and Kimi status lines", () => {
@@ -864,6 +928,7 @@ describe("Cukii vendor CLI accounts", () => {
 
   it("rejects vertical-tab framing before strict Grok and Kimi identity checks", () => {
     const unavailable = "Connected";
+    const kimiUnavailable = undefined;
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -875,7 +940,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "\u000Bmanaged:kimi-code source=oauth account=owner@example.test\u000B",
       ).accountLabel,
-    ).toBe(unavailable);
+    ).toBe(kimiUnavailable);
   });
 
   it("accepts only allowlisted JSON identity fields from Grok and Kimi", () => {
@@ -901,6 +966,7 @@ describe("Cukii vendor CLI accounts", () => {
 
   it("never derives a native CLI identity from arbitrary or secret-like output", () => {
     const unavailable = "Connected";
+    const kimiUnavailable = undefined;
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -912,7 +978,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "managed:kimi-code source=oauth account=api_key=sk-live-secret@example.test",
       ).accountLabel,
-    ).toBe(unavailable);
+    ).toBe(kimiUnavailable);
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -924,7 +990,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "managed:kimi-code source=oauth diagnostics=user=arbitrary@example.test",
       ).accountLabel,
-    ).toBe(unavailable);
+    ).toBe(kimiUnavailable);
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -939,7 +1005,7 @@ describe("Cukii vendor CLI accounts", () => {
           account: { email: "token-owner@example.test" },
         }),
       ).accountLabel,
-    ).toBe(unavailable);
+    ).toBe(kimiUnavailable);
   });
 
   it("discovers Cursor from native Windows product locations before PATH", () => {
@@ -1010,14 +1076,16 @@ describe("Cukii vendor CLI accounts", () => {
         actions: ["login"],
       });
     }
-    expect(
-      classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
-    ).toMatchObject({
+    const connectedKimiWithoutIdentity = classifyVendorAuthOutput(
+      "kimi",
+      "managed:kimi-code source=oauth",
+    );
+    expect(connectedKimiWithoutIdentity).toMatchObject({
       state: "connected",
       authenticated: true,
-      accountLabel: "Connected",
       actions: ["logout"],
     });
+    expect(connectedKimiWithoutIdentity).not.toHaveProperty("accountLabel");
     const labels = [
       classifyVendorAuthOutput("claude", '{"loggedIn":false}').accountLabel,
       classifyVendorAuthOutput("codex", "not logged in").accountLabel,
