@@ -298,6 +298,80 @@ test("read follow-up uses the compact overlapping double-check SVG", async () =>
   );
   expect(readStatus?.querySelectorAll("path")).toHaveLength(2);
   expect(receipt?.textContent).toBe("01:13");
+  expect(readStatus).toHaveAttribute("width", "16");
+  expect(readStatus).toHaveAttribute("height", "10");
+});
+
+test("short, multiline and image user turns stay in the right bubble lane while agent rows stay left", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "responsive-user-bubbles",
+        title: "Responsive user bubbles",
+        history: [
+          {
+            message: { id: "short", role: "user", content: "Hi" },
+            contextItems: [],
+            isSteer: true,
+            steerSentAt: 1_700_000_000_000,
+            steerStatus: "delivered",
+          },
+          {
+            message: {
+              id: "multiline",
+              role: "user",
+              content:
+                "First line\nSecond line with a-very-long-token-that-wraps",
+            },
+            contextItems: [],
+            isSteer: true,
+            steerSentAt: 1_700_000_000_000,
+            steerStatus: "read",
+          },
+          {
+            message: {
+              id: "image",
+              role: "user",
+              content: [
+                { type: "text", text: "Image" },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+                },
+              ],
+            },
+            contextItems: [],
+            isSteer: true,
+            steerSentAt: 1_700_000_000_000,
+            steerStatus: "delivered",
+          },
+          {
+            message: { id: "agent", role: "assistant", content: "Answer" },
+            contextItems: [],
+          },
+        ],
+      },
+    });
+  });
+
+  const userRows = container.querySelectorAll(".cukii-user-row");
+  expect(userRows).toHaveLength(3);
+  for (const row of userRows) {
+    expect(row.querySelector(".cukii-user-message-bubble")).not.toBeNull();
+  }
+  expect(
+    container.querySelector('[data-testid="cukii-message-receipt-short"]'),
+  ).not.toBeNull();
+  expect(
+    container.querySelector('[data-testid="cukii-message-receipt-multiline"]'),
+  ).not.toBeNull();
+  expect(
+    container.querySelector('[data-testid="cukii-message-receipt-image"]'),
+  ).not.toBeNull();
+  expect(container.querySelector('[data-testid="saved-row-3"]')).toBeNull();
+  expect(container.textContent).toContain("Answer");
 });
 
 test("deferred image follow-up visibly reports that it will run next turn", async () => {

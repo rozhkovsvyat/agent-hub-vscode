@@ -174,28 +174,51 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
-  it("lays receipt metadata inside the bubble without overlaying its content", () => {
+  it("lays a fixed receipt slot inside the bubble without shifting or overlaying content", () => {
     const css = source("index.css");
-    const start = css.indexOf(".cukii-user-message {");
+    const start = css.indexOf(".cukii-user-row {");
     const metadata = css.indexOf(".cukii-user-metadata {");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(metadata).toBeGreaterThan(start);
     const bubbleContract = css.slice(start, metadata);
     const metadataContract = css.slice(metadata, metadata + 600);
+    expect(bubbleContract).toContain("display: flex;");
+    expect(bubbleContract).toContain("justify-content: flex-end;");
     expect(bubbleContract).toContain("display: inline-flex;");
     expect(bubbleContract).toContain("flex-direction: column;");
     expect(bubbleContract).toContain("align-items: flex-start;");
     expect(bubbleContract).toContain(".cukii-user-message-bubble");
-    expect(bubbleContract).toContain("display: inline-grid;");
-    expect(bubbleContract).toContain(
-      "grid-template-columns: minmax(0, 1fr) auto;",
-    );
-    expect(bubbleContract).not.toContain("position: absolute");
-    expect(metadataContract).toContain("grid-column: 2;");
-    expect(metadataContract).toContain("justify-self: end;");
-    expect(metadataContract).toContain("margin-top: 0;");
+    expect(bubbleContract).toContain("margin-left: auto;");
+    expect(bubbleContract).toContain("max-width: min(100%, 640px);");
+    expect(bubbleContract).toContain("display: inline-block;");
+    expect(bubbleContract).toContain("position: relative;");
+    expect(bubbleContract).toContain("padding-bottom: 17px;");
+    expect(metadataContract).toContain("position: absolute;");
+    expect(metadataContract).toContain("right: 6px;");
+    expect(metadataContract).toContain("bottom: 3px;");
+    expect(metadataContract).toContain("width: 46px;");
+    expect(metadataContract).toContain("height: 12px;");
     expect(metadataContract).toContain("font-size: 10px;");
     expect(metadataContract).toContain("line-height: 12px;");
+  });
+
+  it("keeps right-lane bubbles responsive and leaves the agent timeline left", () => {
+    const css = source("index.css");
+    const userStart = css.indexOf(".cukii-user-row {");
+    const timelineStart = css.indexOf(".cukii-timeline-item {", userStart);
+    const contract = css.slice(userStart, timelineStart);
+    const proseStart = css.indexOf(".cukii-user-bubble .scroll-container");
+    const proseContract = css.slice(proseStart, proseStart + 550);
+    expect(contract).toContain("min-width: 0;");
+    expect(contract).toContain("max-width: min(100%, 640px);");
+    expect(contract).toContain("width: fit-content;");
+    expect(contract).toContain("max-width: 100%;");
+    expect(proseContract).toContain("overflow-wrap: anywhere;");
+    expect(proseContract).toContain("max-height: none !important;");
+    expect(proseContract).toContain("overflow: visible !important;");
+    const timeline = css.slice(timelineStart, timelineStart + 500);
+    expect(timeline).not.toContain("margin-left: auto");
+    expect(timeline).not.toContain("justify-content: flex-end");
   });
 
   it("uses the exact shared Claude toggle accent and transition", () => {

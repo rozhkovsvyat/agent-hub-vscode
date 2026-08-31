@@ -1150,25 +1150,28 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-user-row {
+  display: flex;
+  justify-content: flex-end;
   margin: 12px 0 16px;
   min-width: 0;
 }
 
-/* MAX-style message bubble: the receipt is inside the lower-right corner but
-   gets its own grid row, so long text and images can never be overlaid. */
+/* MAX-style message bubble: user turns own the right lane while the timeline
+   for assistant/tool/thinking remains untouched on the left. */
 .cukii-user-message {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
   max-width: min(100%, 640px);
+  margin-left: auto;
 }
 
 .cukii-user-message-bubble {
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  position: relative;
+  display: inline-block;
   width: fit-content;
-  min-width: 0;
+  min-width: 54px;
   max-width: 100%;
   overflow: hidden;
   background: var(--vscode-input-background, var(--cukii-shell));
@@ -1177,7 +1180,6 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-user-message-bubble > .cukii-user-bubble {
-  grid-column: 1 / -1;
   min-width: 0;
   max-width: 100%;
 }
@@ -1186,18 +1188,23 @@ button.cukii-submit-button--stop:active {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
+  /* Own a clear final line for the overlaid receipt. Text, code and images
+     grow naturally above it and can never collide with the fixed slot. */
+  padding-bottom: 17px;
 }
 
 .cukii-user-metadata {
-  grid-column: 2;
+  position: absolute;
+  right: 6px;
+  bottom: 3px;
   display: inline-flex;
+  width: 46px;
+  height: 12px;
   align-items: baseline;
-  justify-self: end;
   justify-content: flex-end;
   gap: 2px;
-  min-height: 12px;
-  margin-top: 0;
-  padding: 0 6px 3px;
+  margin: 0;
+  padding: 0;
   color: var(--vscode-descriptionForeground, #a0a0a0);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -1211,6 +1218,7 @@ button.cukii-submit-button--stop:active {
   display: inline-flex;
   flex: 0 0 16px;
   width: 16px;
+  height: 10px;
   vertical-align: -1px;
 }
 
