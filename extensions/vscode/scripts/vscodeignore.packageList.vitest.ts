@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe("VSIX package list", () => {
-  it("excludes source maps after restoring the runtime payload", () => {
+  it("keeps deep native/runtime payloads while excluding source maps", () => {
     fs.copyFileSync(
       path.join(extensionRoot, ".vscodeignore"),
       path.join(fixtureRoot, ".vscodeignore"),
@@ -28,8 +28,12 @@ describe("VSIX package list", () => {
     );
 
     for (const file of [
-      "out/node_modules/runtime.node",
-      "out/node_modules/runtime.map",
+      "out/node_modules/@lancedb/vectordb-win32-x64-msvc/index.node",
+      "out/node_modules/@lancedb/vectordb-win32-x64-msvc/index.js.map",
+      "out/node_modules/@vscode/ripgrep/bin/rg.exe",
+      "out/node_modules/@vscode/ripgrep/lib/index.js.map",
+      "out/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node",
+      "out/node_modules/onnxruntime-node/dist/index.js.map",
       "out/runtime/ffmpeg.exe",
       "out/runtime/ffmpeg.map",
     ]) {
@@ -51,8 +55,14 @@ describe("VSIX package list", () => {
       { cwd: fixtureRoot, encoding: "utf8" },
     ).split(/\r?\n/);
 
-    expect(packageList).toContain("out/node_modules/runtime.node");
-    expect(packageList).toContain("out/runtime/ffmpeg.exe");
+    expect(packageList).toEqual(
+      expect.arrayContaining([
+        "out/node_modules/@lancedb/vectordb-win32-x64-msvc/index.node",
+        "out/node_modules/@vscode/ripgrep/bin/rg.exe",
+        "out/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node",
+        "out/runtime/ffmpeg.exe",
+      ]),
+    );
     expect(packageList.filter((file) => file.endsWith(".map"))).toEqual([]);
   });
 });
