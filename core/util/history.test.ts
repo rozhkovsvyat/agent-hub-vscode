@@ -101,6 +101,25 @@ describe("SQLite session history", () => {
       brokerEffort: "high",
       titleManuallySet: true,
     });
+    expect(
+      (await history.list()).find((item) => item.sessionId === id),
+    ).toMatchObject({
+      title: "ручное имя",
+      revision: automatic.revision,
+    });
+  });
+  test("concurrent manual renames retry at the CAS boundary without losing either commit", async () => {
+    const id = `rename-race-${uuid()}`;
+    const initial = await history.save(make(id, "A", [user("u", "x")]));
+    const [one, two] = await Promise.all([
+      history.renameExisting(id, "B"),
+      history.renameExisting(id, "C"),
+    ]);
+    expect(one?.revision).not.toBe(two?.revision);
+    const final = await history.load(id);
+    expect(["B", "C"]).toContain(final.title);
+    expect(final.revision).toBe(initial.revision! + 2);
+    expect(final.titleManuallySet).toBe(true);
   });
   test("legacy JSON migration is idempotent and retains source", async () => {
     const id = `legacy-${uuid()}`,

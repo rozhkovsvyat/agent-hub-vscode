@@ -106,6 +106,22 @@ export class VsCodeMessenger {
     VsCodeWebviewProtocol,
     ActiveBridgeRun
   >();
+  /** Preserve click order when two panels rename the same session together. */
+  private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
+
+  private enqueueSessionRename<T>(sessionId: string, work: () => Promise<T>) {
+    const previous =
+      this.sessionRenameQueues.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(work);
+    this.sessionRenameQueues.set(sessionId, current);
+    const cleanup = () => {
+      if (this.sessionRenameQueues.get(sessionId) === current) {
+        this.sessionRenameQueues.delete(sessionId);
+      }
+    };
+    void current.then(cleanup, cleanup);
+    return current;
+  }
 
   private async cancelBridgeRun(
     run: ActiveBridgeRun,
@@ -246,39 +262,43 @@ export class VsCodeMessenger {
 
     this.onWebview("cukii/listOpenChatPanels", () => listOpenCukiiPanels());
 
-    this.onWebview("cukii/renameSession", async ({ data }) => {
-      const trimmed = data.title.trim();
-      if (!trimmed) {
-        return { ok: false };
-      }
-      const saved = await this.inProcessMessenger.externalRequest(
-        "history/rename",
-        { id: data.sessionId, title: trimmed },
-      );
-      if (!saved) return { ok: false };
-      // The persistence boundary may have retained a concurrent manual title.
-      // Reflect the effective value, never the stale requested value.
-      const effectiveTitle = saved.title;
-      syncCukiiPanelTitleForSession(data.sessionId, effectiveTitle);
-      const titlePayload = {
-        sessionId: data.sessionId,
-        title: effectiveTitle,
-        titleManuallySet: Boolean(saved.titleManuallySet),
-      };
-      for (const entry of cukiiPanelRegistry.values()) {
-        entry.panel.protocol.send("cukii/sessionTitleChanged", titlePayload);
-      }
-      this.webviewProtocol.send("cukii/sessionTitleChanged", titlePayload);
-      this.webviewProtocol.send(
-        "cukii/openChatPanelsChanged",
-        listOpenCukiiPanels(),
-      );
-      return {
-        ok: true,
-        title: effectiveTitle,
-        titleManuallySet: Boolean(saved.titleManuallySet),
-      };
-    });
+    this.onWebview("cukii/renameSession", async ({ data }) =>
+      this.enqueueSessionRename(data.sessionId, async () => {
+        const trimmed = data.title.trim();
+        if (!trimmed) {
+          return { ok: false };
+        }
+        const saved = await this.inProcessMessenger.externalRequest(
+          "history/rename",
+          { id: data.sessionId, title: trimmed },
+        );
+        if (!saved) return { ok: false };
+        // The persistence boundary may have retained a concurrent manual title.
+        // Reflect the effective value, never the stale requested value.
+        const effectiveTitle = saved.title;
+        syncCukiiPanelTitleForSession(data.sessionId, effectiveTitle);
+        const titlePayload = {
+          sessionId: data.sessionId,
+          title: effectiveTitle,
+          titleManuallySet: Boolean(saved.titleManuallySet),
+          revision: saved.revision,
+        };
+        for (const entry of cukiiPanelRegistry.values()) {
+          entry.panel.protocol.send("cukii/sessionTitleChanged", titlePayload);
+        }
+        this.webviewProtocol.send("cukii/sessionTitleChanged", titlePayload);
+        this.webviewProtocol.send(
+          "cukii/openChatPanelsChanged",
+          listOpenCukiiPanels(),
+        );
+        return {
+          ok: true,
+          title: effectiveTitle,
+          titleManuallySet: Boolean(saved.titleManuallySet),
+          revision: saved.revision,
+        };
+      }),
+    );
 
     this.onWebview("acceptDiff", async ({ data: { filepath, streamId } }) => {
       await vscode.commands.executeCommand(

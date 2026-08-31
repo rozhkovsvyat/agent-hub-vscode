@@ -364,6 +364,91 @@ describe("CukiiSessionNavigator Claude parity", () => {
     expect(await screen.findByTitle("D")).toBeInTheDocument();
   });
 
+  it("submits a rapid Enter plus blur only once and keeps stale polling from undoing it", async () => {
+    const messenger = new MockIdeMessenger();
+    const renameSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      title: "B",
+      revision: 2,
+    });
+    messenger.responseHandlers["cukii/renameSession"] = renameSpy;
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "A",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+        revision: 1,
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [
+      { panelId: "panel", sessionId: "session", title: "A" },
+    ];
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    fireEvent.click(await screen.findByLabelText("Rename A"));
+    const input = await screen.findByLabelText("Rename A");
+    fireEvent.change(input, { target: { value: "B" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    expect(await screen.findByTitle("B")).toBeInTheDocument();
+    expect(renameSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            messageType: "cukii/openChatPanelsChanged",
+            messageId: "stale-poll",
+            data: [{ panelId: "panel", sessionId: "session", title: "A" }],
+          },
+        }),
+      );
+    });
+    expect(await screen.findByTitle("B")).toBeInTheDocument();
+    expect(screen.queryByTitle("A")).toBeNull();
+  });
+
+  it("rejects stale concurrent title broadcasts and accepts the next revision", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "B",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+        revision: 2,
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+    expect(await screen.findByTitle("B")).toBeInTheDocument();
+
+    const broadcast = async (title: string, revision: number) => {
+      await act(async () => {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: {
+              messageType: "cukii/sessionTitleChanged",
+              messageId: `title-${revision}`,
+              data: { sessionId: "session", title, revision },
+            },
+          }),
+        );
+      });
+    };
+    await broadcast("stale A", 1);
+    expect(screen.getByTitle("B")).toBeInTheDocument();
+    await broadcast("C", 3);
+    expect(await screen.findByTitle("C")).toBeInTheDocument();
+    await broadcast("late B", 2);
+    expect(screen.getByTitle("C")).toBeInTheDocument();
+  });
+
   it("updates the sidebar row and reopen payload from the authoritative title broadcast", async () => {
     const messenger = new MockIdeMessenger();
     messenger.responses["history/list"] = [

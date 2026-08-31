@@ -527,25 +527,32 @@ export class HistoryManager {
       where = " WHERE workspace=? COLLATE NOCASE";
       args.push(options.workspaceDirectory);
     }
-    let sql = `SELECT id,title,created_at,workspace,message_count FROM sessions${where} ORDER BY created_order DESC,id DESC`;
+    let sql = `SELECT id,title,created_at,workspace,message_count,revision FROM sessions${where} ORDER BY created_order DESC,id DESC`;
     if (options.limit) {
       sql += " LIMIT ? OFFSET ?";
       args.push(options.limit, options.offset || 0);
     }
     const rows = await db.all<
       Array<
-        Pick<Row, "id" | "title" | "created_at" | "workspace" | "message_count">
+        Pick<
+          Row,
+          | "id"
+          | "title"
+          | "created_at"
+          | "workspace"
+          | "message_count"
+          | "revision"
+        >
       >
     >(sql, args);
-    return rows.map(
-      (r): BaseSessionMetadata => ({
-        sessionId: r.id,
-        title: r.title,
-        dateCreated: r.created_at,
-        workspaceDirectory: r.workspace,
-        messageCount: r.message_count,
-      }),
-    );
+    return rows.map((r): BaseSessionMetadata => ({
+      sessionId: r.id,
+      title: r.title,
+      dateCreated: r.created_at,
+      workspaceDirectory: r.workspace,
+      messageCount: r.message_count,
+      revision: r.revision,
+    }));
   }
   async load(id: string) {
     this.validId(id);
@@ -634,10 +641,18 @@ export class HistoryManager {
     return result;
   }
   async renameExisting(id: string, title: string) {
-    const current = await this.load(id);
-    if (current.title === NEW_SESSION_TITLE && !current.history.length)
-      return undefined;
-    return this.save({ ...current, title, titleManuallySet: true });
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const current = await this.load(id);
+      if (current.title === NEW_SESSION_TITLE && !current.history.length)
+        return undefined;
+      try {
+        return await this.save({ ...current, title, titleManuallySet: true });
+      } catch (error) {
+        if (error instanceof HistoryConflictError && attempt < 3) continue;
+        throw error;
+      }
+    }
+    return undefined;
   }
   async delete(id: string) {
     this.validId(id);

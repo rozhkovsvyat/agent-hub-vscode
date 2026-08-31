@@ -23,21 +23,12 @@ export type BrokerModel = string;
 export type BrokerSubagent = "auto" | BrokerModel;
 
 export type BrokerEffort =
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+  "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type BrokerSpeed = "standard" | "fast";
 
 export type CukiiPermissionMode =
-  | "manual"
-  | "editAutomatically"
-  | "plan"
-  | "auto"
-  | "bypass";
+  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
 
 export type BrokerVendorAuthAction = "install" | "login" | "logout";
 
@@ -222,7 +213,12 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/initialSessionLoadFailed": [{ sessionId: string }, void];
   "cukii/renameSession": [
     { sessionId: string; title: string },
-    { ok: boolean; title?: string; titleManuallySet?: boolean },
+    {
+      ok: boolean;
+      title?: string;
+      titleManuallySet?: boolean;
+      revision?: number;
+    },
   ];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [
@@ -274,7 +270,12 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
     { accepted: boolean },
   ];
   "cukii/sessionTitleChanged": [
-    { sessionId: string; title: string; titleManuallySet?: boolean },
+    {
+      sessionId: string;
+      title: string;
+      titleManuallySet?: boolean;
+      revision?: number;
+    },
     void,
   ];
   setTheme: [{ theme: any }, void];

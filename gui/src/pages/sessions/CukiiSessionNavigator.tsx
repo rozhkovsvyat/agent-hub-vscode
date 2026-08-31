@@ -310,28 +310,59 @@ export default function CukiiSessionNavigator() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
   const renameSavingRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const renameSequenceRef = useRef(0);
+  const latestRenameRef = useRef(new Map<string, number>());
+  const titleVersionsRef = useRef(
+    new Map<string, { title: string; revision: number }>(),
+  );
   const deletingSessionIdsRef = useRef(new Set<string>());
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
   );
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequenceRef.current;
     const [historyResult, panelResult] = await Promise.all([
       messenger.request("history/list", {}),
       messenger.request("cukii/listOpenChatPanels", undefined),
     ]);
+    if (sequence !== loadSequenceRef.current) return;
     if (historyResult.status === "success") {
       setSessions(
-        historyResult.content.filter(
-          (session) => !deletingSessionIdsRef.current.has(session.sessionId),
-        ),
+        historyResult.content
+          .filter(
+            (session) => !deletingSessionIdsRef.current.has(session.sessionId),
+          )
+          .map((session) => {
+            const known = titleVersionsRef.current.get(session.sessionId);
+            const revision = Number(session.revision ?? 0);
+            if (known && known.revision > revision) {
+              return { ...session, title: known.title };
+            }
+            if (!known || revision >= known.revision) {
+              titleVersionsRef.current.set(session.sessionId, {
+                title: session.title,
+                revision,
+              });
+            }
+            return session;
+          }),
       );
     }
     if (panelResult.status === "success") {
       setOpenPanels(
-        panelResult.content.filter(
-          (panel) => !deletingSessionIdsRef.current.has(panel.sessionId ?? ""),
-        ),
+        panelResult.content
+          .filter(
+            (panel) =>
+              !deletingSessionIdsRef.current.has(panel.sessionId ?? ""),
+          )
+          .map((panel) => {
+            const known = panel.sessionId
+              ? titleVersionsRef.current.get(panel.sessionId)
+              : undefined;
+            return known ? { ...panel, title: known.title } : panel;
+          }),
       );
     }
   }, [messenger]);
@@ -355,9 +386,16 @@ export default function CukiiSessionNavigator() {
   );
   useWebviewListener(
     "cukii/sessionTitleChanged",
-    async ({ sessionId, title }) => {
+    async ({ sessionId, title, revision }) => {
       const effectiveTitle = title.trim();
       if (!effectiveTitle) return;
+      const known = titleVersionsRef.current.get(sessionId);
+      const effectiveRevision = Number(revision ?? (known?.revision ?? 0) + 1);
+      if (known && effectiveRevision < known.revision) return;
+      titleVersionsRef.current.set(sessionId, {
+        title: effectiveTitle,
+        revision: effectiveRevision,
+      });
       setSessions((items) =>
         items.map((item) =>
           item.sessionId === sessionId
@@ -440,7 +478,6 @@ export default function CukiiSessionNavigator() {
       title: session.title,
     });
   const beginRename = (session: CukiiNavigatorSession) => {
-    renameSavingRef.current = false;
     setRenameError(null);
     setRenameDraft(session.title);
     setEditingSessionId(session.sessionId);
@@ -498,17 +535,29 @@ export default function CukiiSessionNavigator() {
       return;
     }
     renameSavingRef.current = true;
+    const sequence = ++renameSequenceRef.current;
+    latestRenameRef.current.set(session.sessionId, sequence);
     try {
       const result = await messenger.request("cukii/renameSession", {
         sessionId: session.sessionId,
         title,
       });
       if (result.status !== "success" || !result.content.ok) {
+        if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
         setRenameError("Could not rename session. Try again.");
         cancelRename();
         return;
       }
+      if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
       const effectiveTitle = result.content.title?.trim() || title;
+      const known = titleVersionsRef.current.get(session.sessionId);
+      const revision = Number(
+        result.content.revision ?? (known?.revision ?? 0) + 1,
+      );
+      titleVersionsRef.current.set(session.sessionId, {
+        title: effectiveTitle,
+        revision,
+      });
       // Update both sources immediately. The extension also broadcasts the same
       // title to an already-open chat panel, so neither side needs a reload.
       setSessions((items) =>
@@ -527,10 +576,13 @@ export default function CukiiSessionNavigator() {
       );
       cancelRename();
     } catch {
+      if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
       setRenameError("Could not rename session. Try again.");
       cancelRename();
     } finally {
-      renameSavingRef.current = false;
+      if (latestRenameRef.current.get(session.sessionId) === sequence) {
+        renameSavingRef.current = false;
+      }
     }
   };
   const deleteSession = async (session: CukiiNavigatorSession) => {
