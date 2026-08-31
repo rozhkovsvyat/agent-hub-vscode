@@ -308,6 +308,124 @@ function qwenOauthSelected(metadata: unknown): boolean {
   );
 }
 
+const QWEN_CODING_PLAN_MODEL = "qwen3.8-max";
+const QWEN_RUNTIME_PROBE_MARKER = "QWEN_RUNTIME_OK";
+const QWEN_RUNTIME_PROBE_PROMPT = `Cukii connectivity probe. Reply with exactly ${QWEN_RUNTIME_PROBE_MARKER} and nothing else.`;
+const QWEN_CODING_PLAN_PROBE_TIMEOUT_MS = 90_000;
+const MAX_BAILIAN_CONFIG_BYTES = 64 * 1024;
+
+/**
+ * A Coding Plan is Bailian account state, not UI text. Only the presence and
+ * shape of an active plan are checked here: the secret-bearing plan object is
+ * never copied, retained, logged, or returned.
+ */
+export function qwenCodingPlanShapeValid(
+  qwenSettings: unknown,
+  bailianConfig: unknown,
+): boolean {
+  const security = isRecord(qwenSettings) ? qwenSettings.security : undefined;
+  const selectedType = stringAt(
+    isRecord(security) ? security.auth : undefined,
+    "selectedType",
+  );
+  if (!selectedType) return false;
+  if (!isRecord(bailianConfig)) return false;
+  const activePlan = bailianConfig.active_config;
+  if (typeof activePlan !== "string" || !activePlan.trim()) return false;
+  const plan = bailianConfig[activePlan.trim()];
+  return isRecord(plan) && Object.keys(plan).length > 0;
+}
+
+function bailianConfigFromDisk(userHome: string): unknown {
+  try {
+    const file = path.join(userHome, ".bailian", "config.json");
+    const stat = fs.statSync(file);
+    // Native Bailian configs are small. Never load an unexpected bulk file.
+    if (!stat.isFile() || stat.size > MAX_BAILIAN_CONFIG_BYTES) {
+      return undefined;
+    }
+    return JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The bounded connectivity probe's envelope is untrusted CLI output. Accept
+ * only a successful terminal result event echoing the exact probe marker.
+ */
+export function qwenRuntimeProbeSucceeded(stdout: string): boolean {
+  const events = parseJson(stdout);
+  if (!Array.isArray(events)) return false;
+  return events.some(
+    (event) =>
+      isRecord(event) &&
+      event.type === "result" &&
+      event.subtype === "success" &&
+      event.is_error === false &&
+      typeof event.result === "string" &&
+      event.result.trim() === QWEN_RUNTIME_PROBE_MARKER,
+  );
+}
+
+async function qwenCodingPlanRuntimeProbe(
+  executable: string,
+  timeoutMs = QWEN_CODING_PLAN_PROBE_TIMEOUT_MS,
+): Promise<"ok" | "failed"> {
+  const spec = probeSpec("qwen", executable, [
+    "-p",
+    QWEN_RUNTIME_PROBE_PROMPT,
+    "-m",
+    QWEN_CODING_PLAN_MODEL,
+    "--output-format",
+    "json",
+  ]);
+  if (!spec) return "failed";
+  try {
+    const { stdout } = await execFileAsync(spec.program, spec.args, {
+      timeout: timeoutMs,
+      windowsHide: true,
+      maxBuffer: 512 * 1024,
+      windowsVerbatimArguments: spec.windowsVerbatimArguments,
+    });
+    return qwenRuntimeProbeSucceeded(stdout) ? "ok" : "failed";
+  } catch {
+    // A failed probe (missing CLI, quota, timeout) stays non-diagnostic:
+    // native output is never retained or logged.
+    return "failed";
+  }
+}
+
+/**
+ * Completes Coding Plan metadata with the bounded native probe verdict. A
+ * precomputed verdict is accepted as-is, and an OAuth-selected account never
+ * triggers the probe.
+ */
+async function qwenAccountProbeMetadata(
+  executable: string,
+  metadata: unknown,
+): Promise<unknown> {
+  if (!isRecord(metadata) || qwenOauthSelected(metadata)) return metadata;
+  const codingPlan = isRecord(metadata.codingPlan)
+    ? metadata.codingPlan
+    : undefined;
+  if (codingPlan?.configured !== true) return metadata;
+  if (codingPlan.probe === "ok" || codingPlan.probe === "failed") {
+    return metadata;
+  }
+  const probe = await qwenCodingPlanRuntimeProbe(executable);
+  return { ...metadata, codingPlan: { ...codingPlan, probe } };
+}
+
+function qwenCodingPlanVerified(metadata: unknown): boolean {
+  const codingPlan = isRecord(metadata) ? metadata.codingPlan : undefined;
+  return (
+    isRecord(codingPlan) &&
+    codingPlan.configured === true &&
+    codingPlan.probe === "ok"
+  );
+}
+
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -402,7 +520,8 @@ export function classifyVendorAuthOutput(
       ? connected(accountLabel, ["logout"])
       : unknown();
   }
-  return qwenOauthSelected(parseJson(text))
+  const qwenMetadata = parseJson(text);
+  return qwenOauthSelected(qwenMetadata) || qwenCodingPlanVerified(qwenMetadata)
     ? connected(accountLabel, [])
     : disconnected();
 }
@@ -526,8 +645,8 @@ function isSafeCmdProbeRoute(route: string): boolean {
 export function probeSpec(
   vendor: VendorWithCli,
   executable: string,
+  args: string[] = WINDOWS_PROBE_ARGS[vendor],
 ): ProbeSpec | undefined {
-  const args = WINDOWS_PROBE_ARGS[vendor];
   if (process.platform === "win32") {
     if (executable.toLowerCase().endsWith(".ps1")) {
       const powershell = path.win32.join(
@@ -1147,6 +1266,12 @@ function localMetadata(vendor: VendorWithCli): unknown {
       security: {
         auth: { selectedType: stringAt(auth, "selectedType") },
       },
+      codingPlan: {
+        configured: qwenCodingPlanShapeValid(
+          raw,
+          bailianConfigFromDisk(userHome),
+        ),
+      },
     };
   } catch {
     return undefined;
@@ -1216,9 +1341,13 @@ export async function probeVendorExecutable(
       maxBuffer: 256 * 1024,
       windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
+    const qwenMetadata =
+      vendor === "qwen"
+        ? await qwenAccountProbeMetadata(executable, metadata)
+        : metadata;
     const output =
       vendor === "qwen"
-        ? JSON.stringify(metadata ?? {})
+        ? JSON.stringify(qwenMetadata ?? {})
         : `${stdout}\n${stderr}`;
     const kimiEmail =
       vendor === "kimi" &&

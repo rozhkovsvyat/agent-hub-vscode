@@ -18,6 +18,8 @@ import {
   kimiCredentialFingerprint,
   terminateWindowsProcessTree,
   probeVendorExecutable,
+  qwenCodingPlanShapeValid,
+  qwenRuntimeProbeSucceeded,
   storedCodexAccountLabel,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -1207,6 +1209,225 @@ describe("Cukii vendor CLI accounts", () => {
         },
       );
       expect(fs.existsSync(marker)).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a verified Coding Plan configuration as connected", () => {
+    const verified = classifyVendorAuthOutput(
+      "qwen",
+      JSON.stringify({
+        security: { auth: { selectedType: "openai" } },
+        codingPlan: { configured: true, probe: "ok" },
+      }),
+    );
+    expect(verified).toMatchObject({
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
+      actions: [],
+    });
+    expect(verified.accountLabel).not.toBe("Email unavailable");
+    expect(verified.accountLabel).not.toBe("Not logged in");
+
+    for (const metadata of [
+      { security: { auth: { selectedType: "openai" } } },
+      {
+        security: { auth: { selectedType: "openai" } },
+        codingPlan: { configured: true },
+      },
+      {
+        security: { auth: { selectedType: "openai" } },
+        codingPlan: { configured: true, probe: "failed" },
+      },
+      {
+        security: { auth: { selectedType: "openai" } },
+        codingPlan: { configured: false, probe: "ok" },
+      },
+    ]) {
+      expect(
+        classifyVendorAuthOutput("qwen", JSON.stringify(metadata)),
+      ).toMatchObject({
+        state: "disconnected",
+        authenticated: false,
+        accountLabel: "Not logged in",
+        actions: ["login"],
+      });
+    }
+  });
+
+  it("keeps the Qwen OAuth account connected alongside Coding Plan state", () => {
+    expect(
+      classifyVendorAuthOutput(
+        "qwen",
+        JSON.stringify({
+          security: { auth: { selectedType: "qwen-oauth" } },
+          codingPlan: { configured: false },
+        }),
+      ),
+    ).toMatchObject({
+      state: "connected",
+      authenticated: true,
+      accountLabel: "Connected",
+      actions: [],
+    });
+  });
+
+  it("validates Coding Plan presence and shape without reading plan secrets", () => {
+    const settings = {
+      security: { auth: { selectedType: "openai" } },
+    };
+    const bailian = {
+      "token-plan": { plan: "shape-only-fixture" },
+      active_config: "token-plan",
+    };
+    expect(qwenCodingPlanShapeValid(settings, bailian)).toBe(true);
+    expect(
+      qwenCodingPlanShapeValid(settings, { active_config: "token-plan" }),
+    ).toBe(false);
+    expect(
+      qwenCodingPlanShapeValid(settings, {
+        "token-plan": {},
+        active_config: "token-plan",
+      }),
+    ).toBe(false);
+    expect(
+      qwenCodingPlanShapeValid(settings, {
+        "token-plan": { plan: "shape-only-fixture" },
+        active_config: "   ",
+      }),
+    ).toBe(false);
+    expect(
+      qwenCodingPlanShapeValid(settings, {
+        "token-plan": { plan: "shape-only-fixture" },
+        active_config: "other-plan",
+      }),
+    ).toBe(false);
+    expect(qwenCodingPlanShapeValid({ security: { auth: {} } }, bailian)).toBe(
+      false,
+    );
+    expect(qwenCodingPlanShapeValid(undefined, bailian)).toBe(false);
+    expect(qwenCodingPlanShapeValid(settings, "not-a-record")).toBe(false);
+  });
+
+  it("accepts only the exact probe marker in a successful result envelope", () => {
+    const envelope = (
+      result: unknown,
+      overrides: Record<string, unknown> = {},
+    ) =>
+      JSON.stringify([
+        { type: "system", subtype: "init" },
+        {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result,
+          ...overrides,
+        },
+      ]);
+    expect(qwenRuntimeProbeSucceeded(envelope("QWEN_RUNTIME_OK"))).toBe(true);
+    expect(
+      qwenRuntimeProbeSucceeded(`${envelope("QWEN_RUNTIME_OK")}\r\n`),
+    ).toBe(true);
+    expect(
+      qwenRuntimeProbeSucceeded(envelope("QWEN_RUNTIME_OK and more")),
+    ).toBe(false);
+    expect(
+      qwenRuntimeProbeSucceeded(envelope("QWEN_RUNTIME_OK", { is_error: true })),
+    ).toBe(false);
+    expect(
+      qwenRuntimeProbeSucceeded(
+        envelope("QWEN_RUNTIME_OK", { subtype: "error_max_turns" }),
+      ),
+    ).toBe(false);
+    expect(qwenRuntimeProbeSucceeded(envelope("sk-live-secret"))).toBe(false);
+    expect(qwenRuntimeProbeSucceeded("QWEN_RUNTIME_OK")).toBe(false);
+    expect(
+      qwenRuntimeProbeSucceeded(
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "QWEN_RUNTIME_OK",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("never surfaces Coding Plan secrets in the Qwen account status", () => {
+    const secret = "sk-cukii-hotfix-fixture-secret";
+    const status = classifyVendorAuthOutput(
+      "qwen",
+      JSON.stringify({
+        security: {
+          auth: { selectedType: "openai", apiKey: secret },
+        },
+        env: { DASHSCOPE_API_KEY: secret },
+        codingPlan: { configured: true, probe: "ok" },
+      }),
+    );
+    expect(status).toMatchObject({
+      state: "connected",
+      accountLabel: "Connected",
+    });
+    expect(JSON.stringify(status)).not.toContain(secret);
+  });
+
+  it("probes the Coding Plan through the native CLI without leaking secrets", async () => {
+    if (process.platform !== "win32") return;
+    const directory = fs.mkdtempSync(
+      "D:\\Scratch\\cukii-vendor-auth-qwen-plan-",
+    );
+    const executable = path.join(directory, "qwen.cmd");
+    fs.writeFileSync(
+      executable,
+      '@echo off\r\necho [{"type":"result","subtype":"success","is_error":false,"result":"QWEN_RUNTIME_OK"}]\r\n',
+      "utf8",
+    );
+    const secret = "sk-cukii-hotfix-fixture-secret";
+
+    try {
+      const connected = await probeVendorExecutable("qwen", executable, {
+        metadata: {
+          security: { auth: { selectedType: "openai", apiKey: secret } },
+          codingPlan: { configured: true },
+        },
+      });
+      expect(connected).toMatchObject({
+        installed: true,
+        state: "connected",
+        authenticated: true,
+        accountLabel: "Connected",
+        actions: [],
+      });
+      expect(JSON.stringify(connected)).not.toContain(secret);
+
+      const failedProbe = await probeVendorExecutable("qwen", executable, {
+        metadata: {
+          security: { auth: { selectedType: "openai" } },
+          codingPlan: { configured: true, probe: "failed" },
+        },
+      });
+      expect(failedProbe).toMatchObject({
+        installed: true,
+        state: "disconnected",
+        authenticated: false,
+        accountLabel: "Not logged in",
+        actions: ["login"],
+      });
+
+      const oauth = await probeVendorExecutable("qwen", executable, {
+        metadata: {
+          security: { auth: { selectedType: "qwen-oauth" } },
+          codingPlan: { configured: false },
+        },
+      });
+      expect(oauth).toMatchObject({
+        state: "connected",
+        authenticated: true,
+        accountLabel: "Connected",
+      });
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

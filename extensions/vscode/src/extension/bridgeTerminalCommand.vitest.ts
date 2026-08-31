@@ -48,7 +48,7 @@ describe("interactive bridge terminal command", () => {
     ["claude", [], "claude"],
     ["codex", ["--cd", "D:\\Brain\\repo"], "codex"],
     ["grok", ["--cwd", "D:\\Brain\\repo"], "grok"],
-    ["qwen", ["--model", "qwen3.8-max-preview"], "qwen"],
+    ["qwen", ["--model", "qwen3.8-max"], "qwen"],
   ])("preserves %s native terminal argv", (agent, args, program) => {
     const spec = bridgeTerminalLaunchSpec(
       agent,
