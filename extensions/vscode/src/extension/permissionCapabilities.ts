@@ -148,6 +148,16 @@ function quoteCmdToken(value: string): string {
 }
 
 /**
+ * `cmd.exe` expands `%VAR%` even inside quoted tokens. Do not attempt to
+ * escape that grammar: routes with expansion or quote-control characters are
+ * unavailable, rather than becoming a command line. `!` is denied as defense
+ * in depth even though probes also explicitly disable delayed expansion.
+ */
+function isSafeCmdProbeRoute(route: string): boolean {
+  return !/[%!"\r\n]/.test(route);
+}
+
+/**
  * Windows cannot CreateProcess a .cmd directly (EINVAL). Invoke only a known
  * candidate plus a fixed probe flag through ComSpec, with shell disabled.
  */
@@ -157,7 +167,7 @@ export function probeCommandForRoute(route: string): ProbeCommand {
   }
   return {
     program: process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe",
-    argsPrefix: ["/d", "/s", "/c", `call ${quoteCmdToken(route)}`],
+    argsPrefix: ["/d", "/v:off", "/s", "/c", `call ${quoteCmdToken(route)}`],
     route,
   };
 }
@@ -238,6 +248,10 @@ async function probeCliCommand(
   version?: string;
   route?: string;
 }> {
+  // This is before runProbe(), so an unsafe route never reaches spawn().
+  if (command.argsPrefix.length > 0 && !isSafeCmdProbeRoute(command.route)) {
+    return { help: "" };
+  }
   const [help, version] = await Promise.all([
     runProbe(command, "--help"),
     runProbe(command, "--version"),

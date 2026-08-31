@@ -14,6 +14,7 @@ describe("native permission capability probing", () => {
     expect(probe.program.toLowerCase()).toContain("cmd.exe");
     expect(probe.argsPrefix).toEqual([
       "/d",
+      "/v:off",
       "/s",
       "/c",
       'call "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\claude.cmd"',
@@ -69,6 +70,51 @@ describe("native permission capability probing", () => {
           path.join(fixtureDir, "missing.cmd"),
         );
         expect(missing).toEqual({ help: "" });
+
+        const environmentVariable = "CUKII_REVIEW_ESCAPE";
+        const marker = path.join(fixtureDir, "INJECTED.txt");
+        const childMarker = path.join(fixtureDir, "CHILD_EXECUTED.txt");
+        const childRoute = path.join(fixtureDir, "hostile child.cmd");
+        const hostileRoute = path.join(
+          fixtureDir,
+          `literal%${environmentVariable}%percent`,
+          "codex.cmd",
+        );
+        await fs.mkdir(path.dirname(hostileRoute));
+        await fs.writeFile(hostileRoute, "@echo off\r\nexit /b 0\r\n");
+        await fs.writeFile(
+          childRoute,
+          `@echo off\r\necho child > "${childMarker}"\r\nexit /b 0\r\n`,
+        );
+        const previousValue = process.env[environmentVariable];
+        try {
+          process.env[environmentVariable] =
+            `" & echo injected > "${marker}" & call "${childRoute}" & rem "`;
+          const hostile = await probeCliRoute("codex", hostileRoute);
+          expect(hostile).toEqual({ help: "" });
+          await expect(fs.access(marker)).rejects.toThrow();
+          await expect(fs.access(childMarker)).rejects.toThrow();
+        } finally {
+          if (previousValue === undefined) {
+            delete process.env[environmentVariable];
+          } else {
+            process.env[environmentVariable] = previousValue;
+          }
+        }
+
+        const previousComSpec = process.env.ComSpec;
+        try {
+          process.env.ComSpec = path.join(fixtureDir, "missing-cmd.exe");
+          await expect(probeCliRoute("codex", fixture)).resolves.toEqual({
+            help: "",
+          });
+        } finally {
+          if (previousComSpec === undefined) {
+            delete process.env.ComSpec;
+          } else {
+            process.env.ComSpec = previousComSpec;
+          }
+        }
       } finally {
         await fs.rm(fixtureDir, { recursive: true, force: true });
       }
