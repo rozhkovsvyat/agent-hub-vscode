@@ -49,6 +49,8 @@ export const CUKII_PERMISSION_MODE_COPY: Record<
 export type VendorPermissionCapabilities = {
   vendor: BrokerVendorId;
   supportedModes: CukiiPermissionMode[];
+  /** A noninteractive CLI transport with an intrinsic, non-flag permission policy. */
+  nonInteractiveRoute?: "prompt-mode";
   cliVersion?: string;
   helpSource: string;
 };
@@ -80,6 +82,8 @@ export const VENDOR_CLI_HELP_FIXTURES: Record<BrokerVendorId, string> = {
     "--trust Trust the current workspace without prompting",
   ].join("\n"),
   kimi: [
+    "-p, --prompt <prompt> Run one prompt non-interactively and print the response.",
+    "--output-format <format> Output format for prompt mode.",
     "-y, --yolo Auto-approve regular tool calls",
     "--auto Start in auto permission mode: fully autonomous",
     "--plan Start in plan mode",
@@ -167,8 +171,10 @@ export function parseVendorPermissionCapabilities(
       break;
     }
     case "kimi": {
-      if (helpIncludes(help, "--plan")) supported.add("plan");
-      if (helpIncludes(help, "--auto")) supported.add("bypass");
+      // Kimi documents that -p rejects --auto/-y/--plan because prompt-mode
+      // already runs noninteractively under its intrinsic auto policy. Its
+      // only verified headless route is therefore prompt-mode, not a flag.
+      if (helpIncludes(help, "--prompt")) supported.add("bypass");
       break;
     }
     case "qwen": {
@@ -187,6 +193,9 @@ export function parseVendorPermissionCapabilities(
   return {
     vendor,
     supportedModes,
+    ...(vendor === "kimi" && helpIncludes(help, "--prompt")
+      ? { nonInteractiveRoute: "prompt-mode" as const }
+      : {}),
     cliVersion,
     helpSource: help.slice(0, 240),
   };
@@ -356,18 +365,11 @@ function cursorPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {
   }
 }
 
-function kimiPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {
-  switch (mode) {
-    case "plan":
-      return { args: ["--plan"], forbidden: ["--yolo", "-y", "--auto"] };
-    case "bypass":
-      return {
-        args: ["--auto"],
-        forbidden: ["--yolo", "-y", "--plan"],
-      };
-    default:
-      return { args: [], forbidden: ["--yolo", "-y", "--auto", "--plan"] };
-  }
+function kimiPermissionArgv(_mode: CukiiPermissionMode): PermissionArgvSpec {
+  // Kimi rejects --auto, -y and --plan with -p: prompt-mode has documented
+  // implicit auto permission for regular tools and still enforces static deny
+  // rules. No redundant or incompatible permission flag is permitted here.
+  return { args: [], forbidden: ["--yolo", "-y", "--auto", "--plan"] };
 }
 
 function qwenPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {

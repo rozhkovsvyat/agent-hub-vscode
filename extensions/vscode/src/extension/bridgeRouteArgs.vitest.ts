@@ -88,6 +88,29 @@ describe("native bridge argv", () => {
     expect(lstatSync).not.toHaveBeenCalledWith(os.homedir());
   });
 
+  it("routes selected K3 with the exact verified prompt-mode argv", () => {
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      "reply with only K3_CANARY_OK",
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.args).toEqual(
+      expect.arrayContaining([
+        "-p",
+        "reply with only K3_CANARY_OK",
+        "--output-format",
+        "stream-json",
+        "-m",
+        "kimi-code/k3",
+      ]),
+    );
+    expect(route.args).not.toContain("--auto");
+    expect(route.args).not.toContain("--yolo");
+    expect(route.args).not.toContain("--plan");
+  });
+
   it("keeps an exact Unicode/multiline Kimi prompt in argv without any Scratch file", () => {
     const prefix = "Первая строка\n🙂 第二行\n";
     const prompt = prefix + "x".repeat(1_024);
@@ -344,8 +367,7 @@ describe("native bridge argv", () => {
       "xhigh",
       "--settings",
       '{"fastMode":true,"alwaysThinkingEnabled":true}',
-      "--permission-mode",
-      "manual",
+      "--dangerously-skip-permissions",
       "-p",
       "--input-format",
       "stream-json",
@@ -447,7 +469,6 @@ describe("native bridge argv", () => {
       ],
       ["grok-4-6", "plan", "--permission-mode plan", "--always-approve"],
       ["composer-2-5", "plan", "--plan", "--trust"],
-      ["kimi-k3", "bypass", "--auto", "--yolo"],
       [
         "qwen-3-8-max",
         "bypass",

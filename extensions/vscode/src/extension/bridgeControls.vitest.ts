@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { clearPermissionCapabilityCacheForTests } from "./permissionCapabilities";
 
 import {
   bridgeControlPrompt,
@@ -6,6 +7,7 @@ import {
   claudeControlArgs,
   codexControlArgs,
   cursorModelId,
+  permissionControlArgs,
   grokControlArgs,
   resolveBridgeControls,
 } from "./bridgeControls";
@@ -70,7 +72,12 @@ describe("Cukii bridge controls", () => {
   });
 
   it("keeps Opus 5 disabled-thinking argv valid while preserving the requested effort", () => {
-    const controls = resolveBridgeControls("opus-5", "ultra", "standard", false);
+    const controls = resolveBridgeControls(
+      "opus-5",
+      "ultra",
+      "standard",
+      false,
+    );
     expect(controls).toMatchObject({
       requestedEffort: "ultra",
       nativeEffort: "high",
@@ -89,7 +96,12 @@ describe("Cukii bridge controls", () => {
   });
 
   it("does not expose or send a Thinking switch for Fable 5", () => {
-    const controls = resolveBridgeControls("fable-5", "high", "standard", false);
+    const controls = resolveBridgeControls(
+      "fable-5",
+      "high",
+      "standard",
+      false,
+    );
     expect(controls).toMatchObject({
       requestedThinking: false,
       effectiveThinking: true,
@@ -130,6 +142,17 @@ describe("Cukii bridge controls", () => {
       effectiveThinking: true,
       thinkingTransport: "unavailable",
     });
+  });
+
+  it("keeps Kimi K3 usable from a cold capability cache through prompt-mode", () => {
+    clearPermissionCapabilityCacheForTests();
+    expect(permissionControlArgs("kimi-k3", "bypass")).toEqual([]);
+    expect(() => permissionControlArgs("kimi-k3", "plan")).toThrow(
+      "kimi has no verified permission mode",
+    );
+    expect(() => permissionControlArgs("kimi-k3", "manual")).toThrow(
+      "kimi has no verified permission mode",
+    );
   });
 
   it("uses Grok's native reasoning knob and clamps unsupported Max", () => {

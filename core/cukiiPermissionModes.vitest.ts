@@ -38,7 +38,8 @@ describe("Cukii permission modes", () => {
     expect(visiblePermissionModes(codex)).not.toContain("editAutomatically");
 
     const kimi = defaultVendorPermissionCapabilities("kimi");
-    expect(visiblePermissionModes(kimi)).toEqual(["plan", "bypass"]);
+    expect(visiblePermissionModes(kimi)).toEqual(["bypass"]);
+    expect(kimi.nonInteractiveRoute).toBe("prompt-mode");
     expect(visiblePermissionModes(kimi)).not.toContain("auto");
   });
 
@@ -126,8 +127,7 @@ describe("Cukii permission modes", () => {
     ["grok", "bypass", ["--permission-mode", "bypassPermissions"]],
     ["cursor", "plan", ["--plan"]],
     ["cursor", "bypass", ["--force"]],
-    ["kimi", "plan", ["--plan"]],
-    ["kimi", "bypass", ["--auto"]],
+    ["kimi", "bypass", []],
     ["qwen", "plan", ["--approval-mode", "plan"]],
     ["qwen", "bypass", ["--approval-mode", "yolo"]],
   ] as const)("maps %s %s to its native argv", (vendor, mode, expected) => {

@@ -6,6 +6,7 @@ import type {
 } from "core/protocol/ideWebview";
 import {
   brokerVendorForModel,
+  defaultVendorPermissionCapabilities,
   permissionArgvForVendor,
   resolvePermissionModeForVendor,
 } from "core/cukiiPermissionModes";
@@ -203,6 +204,36 @@ export function permissionControlArgs(
   // restored session must not race its asynchronous capability probe.
   if (vendor === "claude") {
     return permissionArgvForVendor(vendor, mode).args;
+  }
+  if (vendor === "kimi") {
+    // Kimi 0.38 documents --auto and --plan in its native --help. The picker
+    // and first routed K3 turn can race asynchronous discovery, so its captured
+    // help contract is the bounded cold-start capability set.
+    const capabilities =
+      cachedVendorPermissionCapabilities("kimi") ??
+      defaultVendorPermissionCapabilities("kimi");
+    if (capabilities.nonInteractiveRoute === "prompt-mode") {
+      // The existing default Bypass selector enters Kimi's sole verified
+      // headless route, but must not translate into --auto/-y/--plan: 0.38
+      // rejects every one of those flags with -p. Kimi documents this as its
+      // intrinsic prompt-mode auto policy for regular tools (static deny rules
+      // remain), so Bypass is the compatible Cukii selector rather than argv.
+      if (mode !== "bypass") {
+        throw new Error(
+          "kimi has no verified permission mode for this noninteractive bridge route.",
+        );
+      }
+      return [];
+    }
+    // Do not silently turn a user-selected unsupported mode into --auto. The
+    // route default is already Bypass, while every explicit unsupported choice
+    // fails closed before native process creation.
+    if (!capabilities.supportedModes.includes(mode)) {
+      throw new Error(
+        "kimi has no verified permission mode for this noninteractive bridge route.",
+      );
+    }
+    return permissionArgvForVendor("kimi", mode).args;
   }
   const capabilities = cachedVendorPermissionCapabilities(vendor) ?? {
     vendor,
