@@ -545,15 +545,20 @@ export class VsCodeMessenger {
         "cukii.thinkingEnabled",
         true,
       ),
-      brokerPermissionMode: coerceStoredPermissionMode(
-        this.context.globalState.get<CukiiPermissionMode | boolean>(
-          "cukii.brokerPermissionMode",
-        ),
-        this.context.globalState.get<boolean>(
-          "cukii.allowAllPermissions",
-          false,
-        ),
-      ),
+      brokerPermissionMode: (() => {
+        const stored = this.context.globalState.get<
+          CukiiPermissionMode | boolean
+        >("cukii.brokerPermissionMode");
+        return stored === undefined
+          ? "bypass"
+          : coerceStoredPermissionMode(
+              stored,
+              this.context.globalState.get<boolean>(
+                "cukii.allowAllPermissions",
+                false,
+              ),
+            );
+      })(),
       mode: this.context.globalState.get<"chat" | "plan" | "agent" | "broker">(
         "cukii.brokerMode",
         "broker",

@@ -147,9 +147,12 @@ body {
   --cukii-text: #2c241c;
   --cukii-on-dark: #eee9df;
   --cukii-muted: var(--vscode-input-placeholderForeground, #a6a6a6);
-  --cukii-accent: #f48771;
-  --cukii-accent-strong: #e9775f;
+  --cukii-accent: #e3a867;
+  --cukii-accent-strong: #c9873f;
   --cukii-accent-soft: #ead7c5;
+  --cukii-primary-action-background: #e3a867;
+  --cukii-primary-action-background-hover: #c9873f;
+  --cukii-primary-action-icon: #5c3a28;
   --cukii-thinking: #f4814d;
   --cukii-shadow: 0 16px 38px rgba(0, 0, 0, 0.32);
 }
@@ -288,6 +291,18 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   padding: 0 !important;
 }
 
+/* Sent turns are prose, not a second composer. The footer's hidden utility
+   still left its min-height/padding in layout, producing a 100px one-line
+   bubble. Keep it completely out of the historical-message flow. */
+.cukii-user-bubble .cukii-input-footer {
+  display: none !important;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  transform: none;
+}
+
 /* A queued message uses this exact node after it enters history.  Let a
    one-line draft remain a compact bubble, then grow only up to the transcript
    cap; the editor itself owns overflow so it never jumps on queued -> sent. */
@@ -302,6 +317,10 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.cukii-user-bubble .ProseMirror p {
+  margin: 0;
 }
 
 .cukii-main-input-shell {
@@ -585,6 +604,62 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   white-space: nowrap;
 }
 
+/* Permission modes are a single Claude-style surface: no per-option light
+   cards, no gaps, and no modes that the current bridge did not advertise. */
+.cukii-permission-popover {
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 8px;
+  background: var(--vscode-menu-background, #252526) !important;
+  color: var(--vscode-menu-foreground, #cccccc);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+}
+
+.cukii-permission-mode-row {
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.cukii-permission-mode-row:hover,
+.cukii-permission-mode-row:focus-visible {
+  background: var(--vscode-list-hoverBackground, #3a3d41) !important;
+  color: var(--vscode-list-hoverForeground, #ffffff) !important;
+}
+
+.cukii-permission-mode-row:focus-visible {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  outline: none;
+}
+
+.cukii-permission-mode-row .cukii-permission-mode-description {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+}
+
+.cukii-permission-mode-row.cukii-permission-mode-selected,
+.cukii-permission-mode-row.cukii-permission-mode-selected:hover,
+.cukii-permission-mode-row.cukii-permission-mode-selected:focus-visible {
+  border-color: #0e639c;
+  background: #0e639c !important;
+  color: #ffffff !important;
+}
+
+.cukii-permission-mode-selected .cukii-permission-mode-description {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+html[data-cukii-panel-tone="light"] .cukii-permission-popover {
+  background: var(--vscode-menu-background, #ffffff) !important;
+  color: var(--vscode-menu-foreground, #333333);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
 @media screen and (max-width: 300px) {
   .cukii-permission-button {
     width: 26px !important;
@@ -602,8 +677,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   margin: 0 !important;
   align-items: center;
   justify-content: center;
-  background: var(--cukii-accent) !important;
-  color: #ffffff !important;
+  background: var(--cukii-primary-action-background) !important;
+  color: var(--cukii-primary-action-icon) !important;
 }
 
 .cukii-submit-button:disabled {
@@ -895,28 +970,42 @@ button.cukii-submit-button:hover {
   padding: 0 !important;
   border: 0 !important;
   border-radius: 5px !important;
-  background: var(--cukii-accent) !important;
+  background: var(--cukii-primary-action-background) !important;
   box-shadow: none !important;
+  color: var(--cukii-primary-action-icon) !important;
+  filter: none !important;
   transform: none !important;
+}
+
+button.cukii-submit-button:hover,
+button.cukii-submit-button:focus-visible,
+button.cukii-submit-button:active {
+  background: var(--cukii-primary-action-background-hover) !important;
+  color: var(--cukii-primary-action-icon) !important;
+  filter: none !important;
+}
+
+.cukii-submit-stop-icon {
+  background: var(--cukii-primary-action-icon);
 }
 
 /* Keep this state after every generic button rule: cascade order is part of
    the stop-button contract. Ordinary send/disabled states remain untouched. */
 button.cukii-submit-button--stop,
 button.cukii-submit-button--stop:hover {
-  background: #e3a867 !important;
-  color: #ffffff !important;
+  background: var(--cukii-primary-action-background) !important;
+  color: var(--cukii-primary-action-icon) !important;
 }
 
 button.cukii-submit-button--stop:hover,
 button.cukii-submit-button--stop:focus-visible {
-  background: #c9873f !important;
-  box-shadow: 0 0 0 1px #c9873f !important;
+  background: var(--cukii-primary-action-background-hover) !important;
+  box-shadow: 0 0 0 1px var(--cukii-primary-action-background-hover) !important;
 }
 
 button.cukii-submit-button--stop:active {
-  background: #c9873f !important;
-  box-shadow: 0 0 0 1px #c9873f !important;
+  background: var(--cukii-primary-action-background-hover) !important;
+  box-shadow: 0 0 0 1px var(--cukii-primary-action-background-hover) !important;
 }
 
 .cukii-command-menu-item-active,
@@ -1205,6 +1294,10 @@ button.cukii-submit-button--stop:active {
   align-items: flex-start;
   min-height: 1.5em;
   margin-top: 6px;
+  /* Cukii's composer is in normal flow, unlike Claude's bottom overlay.
+     This measured 12px spacer yields the same visible loader-to-composer gap
+     without importing the overlay's large transcript reservation. */
+  margin-bottom: 12px;
   /* Глиф в жёлобе таймлайна (left: 8px, 12px), текст начинается ближе к нему,
      чтобы ровняться с текстом строк выше, как у Claude. */
   padding-left: 24px;
@@ -1322,6 +1415,12 @@ button.cukii-submit-button--stop:active {
 .cukii-thinking-character {
   display: inline-block;
   animation: cukiiThinkingCharacter 300ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* Whitespace is deliberately not an animated inline-block: that construction
+   collapses word gaps in the browser. Preserve every source whitespace unit. */
+.cukii-thinking-space {
+  white-space: pre;
 }
 
 @keyframes cukiiThinkingCharacter {

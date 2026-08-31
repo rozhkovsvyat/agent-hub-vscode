@@ -105,6 +105,24 @@ const StepsDiv = styled.div`
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
 
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () =>
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!media) return;
+    const update = () => setPrefersReducedMotion(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
 
@@ -162,6 +180,7 @@ export function Chat() {
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const hasDismissedExploreDialog = useAppSelector(
     (state) => state.ui.hasDismissedExploreDialog,
@@ -335,6 +354,10 @@ export function Chat() {
     () => getActiveTimelineToolId(history),
     [history],
   );
+  // Rendering belongs to the active stream, not to whether its latest event is
+  // a tool call. A tool may be quiet for seconds while the stream is alive.
+  const shouldRenderStreamingToolbar =
+    isStreaming && !isInEdit && !bridgeWait && !prefersReducedMotion;
 
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
     const transcriptHistory = history.slice(transcriptStart);
@@ -588,15 +611,15 @@ export function Chat() {
           !isInEdit &&
           (bridgeWait ? (
             <CukiiWaitingReceipt wait={bridgeWait} />
-          ) : (
+          ) : shouldRenderStreamingToolbar ? (
             <div
               className="cukii-spinner-row"
               data-testid="cukii-spinner-row"
-              data-cukii-active={activeTimelineToolId ? undefined : "true"}
+              data-cukii-active="true"
             >
-              <CukiiStreamingToolbar active={!activeTimelineToolId} />
+              <CukiiStreamingToolbar active />
             </div>
-          ))}
+          ) : null)}
       </StepsDiv>
       {!isSessionLoading && (
         <div className={"cukii-main-input-shell relative shrink-0"}>

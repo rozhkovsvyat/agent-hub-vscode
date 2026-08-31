@@ -46,9 +46,15 @@ describe("Cukii permission modes", () => {
     const visible = visiblePermissionModes(
       defaultVendorPermissionCapabilities("claude"),
     );
-    expect(visible).toEqual(["plan", "bypass"]);
-    expect(cyclePermissionMode("plan", visible)).toBe("bypass");
-    expect(cyclePermissionMode("bypass", visible)).toBe("plan");
+    expect(visible).toEqual([
+      "manual",
+      "editAutomatically",
+      "plan",
+      "auto",
+      "bypass",
+    ]);
+    expect(cyclePermissionMode("plan", visible)).toBe("auto");
+    expect(cyclePermissionMode("bypass", visible)).toBe("manual");
   });
 
   it("restores legacy allow-all as bypass and defaults unknown to manual", () => {
@@ -103,13 +109,11 @@ describe("Cukii permission modes", () => {
     ).toEqual([]);
   });
 
-  it("exposes all five Claude modes only after the MCP runner is verified", () => {
+  it("exposes all five Claude CLI modes from native capability evidence", () => {
     expect(
       parseVendorPermissionCapabilities(
         "claude",
         VENDOR_CLI_HELP_FIXTURES.claude,
-        undefined,
-        true,
       ).supportedModes,
     ).toEqual(["manual", "editAutomatically", "plan", "auto", "bypass"]);
   });

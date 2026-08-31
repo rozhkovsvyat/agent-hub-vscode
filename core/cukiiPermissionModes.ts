@@ -118,23 +118,21 @@ export function parseVendorPermissionCapabilities(
   vendor: BrokerVendorId,
   helpText: string,
   cliVersion?: string,
-  claudePermissionPromptToolReady = false,
+  _claudePermissionPromptToolReady = false,
 ): VendorPermissionCapabilities {
   const supported = new Set<CukiiPermissionMode>();
   const help = helpText.trim();
 
   switch (vendor) {
     case "claude": {
-      // Manual/Edit/Plan/Auto are only valid after the locally bundled MCP
-      // permission worker has passed its self-test. Without it, expose only
-      // routes which cannot strand an approval request.
+      // Claude Code 2.1.251 accepts all five Cukii mode mappings.  Capability
+      // discovery must describe the native CLI, not hide valid rows because a
+      // separate prompt transport has not been instantiated yet.
       if (helpIncludes(help, "permission-mode") && helpIncludes(help, "plan")) {
         supported.add("plan");
-        if (claudePermissionPromptToolReady) {
-          supported.add("manual");
-          supported.add("editAutomatically");
-          supported.add("auto");
-        }
+        supported.add("manual");
+        supported.add("editAutomatically");
+        supported.add("auto");
       }
       if (helpIncludes(help, "dangerously-skip-permissions")) {
         supported.add("bypass");

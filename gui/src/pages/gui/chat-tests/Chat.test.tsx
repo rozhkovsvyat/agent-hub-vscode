@@ -1,4 +1,5 @@
 import { act } from "@testing-library/react";
+import { vi } from "vitest";
 import { addAndSelectMockLlm } from "../../../util/test/config";
 import { renderWithProviders } from "../../../util/test/render";
 import {
@@ -10,6 +11,8 @@ import { Chat } from "../Chat";
 import {
   acceptToolCall,
   setMode,
+  setBridgeWait,
+  setIsInEdit,
   setToolCallCalling,
 } from "../../../redux/slices/sessionSlice";
 
@@ -435,7 +438,7 @@ test("shell tool calls render compact IN/OUT command cards without legacy termin
   });
 });
 
-test("tool start/start/complete race has exactly one active row and returns it to the terminal loader", async () => {
+test("tool start/start/complete race keeps the stream loader active while a tool is active", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
   const tools = ["first", "second"].map((id) => ({
     toolCallId: id,
@@ -467,11 +470,14 @@ test("tool start/start/complete race has exactly one active row and returns it t
     store.dispatch(setToolCallCalling({ toolCallId: "second" }));
   });
   expect(container.querySelectorAll('[data-cukii-active="true"]')).toHaveLength(
-    1,
+    2,
   );
   expect(
-    container.querySelector('[data-cukii-active="true"]')?.textContent,
+    container.querySelector(".cukii-timeline-current")?.textContent,
   ).toContain("Shell");
+  expect(
+    container.querySelector('[data-testid="cukii-spinner-row"] .cukii-crumbs'),
+  ).toHaveClass("cukii-crumbs-active");
 
   await act(async () => {
     store.dispatch(acceptToolCall({ toolCallId: "second" }));
@@ -487,6 +493,56 @@ test("tool start/start/complete race has exactly one active row and returns it t
   expect(spinner?.compareDocumentPosition(cards[cards.length - 1]) ?? 0).toBe(
     Node.DOCUMENT_POSITION_PRECEDING,
   );
+});
+
+test("loader renders and cycles for an active tool, but yields to bridge wait and edit mode", async () => {
+  vi.useFakeTimers();
+  const { store, container } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({ type: "session/setActive" });
+    store.dispatch(
+      setToolCallCalling({
+        toolCallId: "streaming-tool",
+      }),
+    );
+  });
+  const toolbar = container.querySelector(
+    '[data-testid="cukii-streaming-toolbar"]',
+  );
+  expect(toolbar).not.toBeNull();
+  expect(toolbar?.querySelector(".cukii-crumbs")).toHaveClass(
+    "cukii-crumbs-active",
+  );
+  await act(async () => {
+    vi.advanceTimersByTime(4_000);
+  });
+  expect(toolbar?.textContent).toContain("Combulating..");
+  const css = await import("../../../index.css?raw");
+  expect(css.default).toMatch(
+    /\.cukii-crumbs-active circle\s*\{[^}]*animation:\s*cukiiCrumbVertex\s+1\.26s[^}]*infinite/s,
+  );
+  expect(css.default).not.toMatch(
+    /\.cukii-crumbs-active circle\s*\{[^}]*animation-fill-mode/s,
+  );
+
+  await act(async () => {
+    store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
+  });
+  expect(
+    container.querySelector('[data-testid="cukii-spinner-row"]'),
+  ).toBeNull();
+  expect(
+    container.querySelector('[data-testid="cukii-waiting-receipt"]'),
+  ).not.toBeNull();
+
+  await act(async () => {
+    store.dispatch(setBridgeWait(undefined));
+    store.dispatch(setIsInEdit(true));
+  });
+  expect(
+    container.querySelector('[data-testid="cukii-spinner-row"]'),
+  ).toBeNull();
+  vi.useRealTimers();
 });
 
 test("Interrupted is a sibling timeline row, never a detached transcript footer", async () => {

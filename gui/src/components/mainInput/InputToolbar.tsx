@@ -84,10 +84,7 @@ const commandSectionDividerClass =
 const activeCommandItemClass =
   "cukii-command-menu-item-active bg-[var(--vscode-menu-selectionBackground)] text-[var(--vscode-menu-selectionForeground)] hover:bg-[var(--vscode-menu-selectionBackground)]";
 
-function CommandSectionHeader(props: {
-  children: string;
-  divided?: boolean;
-}) {
+function CommandSectionHeader(props: { children: string; divided?: boolean }) {
   return (
     <>
       {props.divided && (
@@ -97,7 +94,10 @@ function CommandSectionHeader(props: {
           data-testid="cukii-command-section-divider"
         />
       )}
-      <div className={commandSectionHeaderClass} data-command-section={props.children}>
+      <div
+        className={commandSectionHeaderClass}
+        data-command-section={props.children}
+      >
         {props.children}
       </div>
     </>
@@ -278,10 +278,7 @@ function InputToolbar(props: InputToolbarProps) {
         "button[data-cukii-command-action]:not(:disabled)",
       ) ?? []),
     ];
-    if (
-      (event.key === "Enter" || event.key === " ") &&
-      activeCommandAction
-    ) {
+    if ((event.key === "Enter" || event.key === " ") && activeCommandAction) {
       const active = actions.find(
         (item) => item.dataset.cukiiCommandAction === activeCommandAction,
       );
@@ -436,7 +433,9 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Mention file from this project") && (
                       <button
-                        {...commandActionProps("Mention file from this project")}
+                        {...commandActionProps(
+                          "Mention file from this project",
+                        )}
                         type="button"
                         onClick={() => {
                           close();
@@ -741,7 +740,7 @@ function InputToolbar(props: InputToolbarProps) {
               disabled={isEnterDisabled}
             >
               {showStop ? (
-                <span className="h-2.5 w-2.5 rounded-[1px] bg-white" />
+                <span className="cukii-submit-stop-icon h-2.5 w-2.5 rounded-[1px]" />
               ) : isInEdit ? (
                 isRetry ? (
                   <ArrowPathIcon className="h-4 w-4" />

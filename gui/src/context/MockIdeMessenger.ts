@@ -43,13 +43,13 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     brokerEffort: "high",
     brokerSpeed: "standard",
     thinkingEnabled: true,
-    brokerPermissionMode: "manual",
+    brokerPermissionMode: "bypass",
   },
   "cukii/getActiveEditorSelectionState": { hasSelection: false },
   "cukii/listPermissionCapabilities": [
     {
       vendor: "claude",
-      supportedModes: ["plan", "bypass"],
+      supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
     },
     {
       vendor: "codex",

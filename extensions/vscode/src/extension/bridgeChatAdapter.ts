@@ -658,7 +658,7 @@ export function routeForModel(
   prompt: string,
   messages: ChatMessage[],
   controls: BridgeControlResolution,
-  permissionMode: CukiiPermissionMode = "manual",
+  permissionMode: CukiiPermissionMode = "bypass",
 ): BridgeRoute {
   const logFile = bridgeLogFile(model);
   // There is no executable DeepSeek route yet.  Do this before resolving a

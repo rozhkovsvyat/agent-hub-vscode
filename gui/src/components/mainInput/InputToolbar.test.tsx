@@ -37,7 +37,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     const commands = await getElementByTestId("broker-menu-button");
     expect(attach.querySelector('svg[viewBox="0 0 20 20"]')).not.toBeNull();
     expect(commands.querySelector('svg[viewBox="0 0 20 20"]')).not.toBeNull();
-    expect(await getElementByText("Plan")).toBeDefined();
+    expect(await getElementByText("Bypass permissions")).toBeDefined();
 
     await user.click(attach);
     await user.click(await getElementByText("Upload from computer"));
@@ -53,7 +53,7 @@ describe("Cukii Claude-parity input toolbar", () => {
       <InputToolbar {...props} />,
     );
 
-    await user.click(await getElementByText("Plan"));
+    await user.click(await getElementByText("Bypass permissions"));
     expect(await getElementByText("Modes")).toBeDefined();
     expect(document.querySelectorAll(".cukii-permission-keycap")).toHaveLength(
       2,
@@ -84,14 +84,14 @@ describe("Cukii Claude-parity input toolbar", () => {
         bubbles: true,
       }),
     );
-    expect(store.getState().session.brokerPermissionMode).toBe("plan");
+    expect(store.getState().session.brokerPermissionMode).toBe("manual");
     composer.remove();
 
-    await user.click(await getElementByText("Plan"));
+    await user.click(await getElementByText("Manual"));
     const selected = document.querySelector(".cukii-permission-mode-selected");
-    expect(selected).toHaveClass("bg-[#0e639c]");
+    expect(selected).not.toBeNull();
     expect(
-      selected?.querySelector('[data-testid="cukii-permission-icon-plan"]'),
+      selected?.querySelector('[data-testid="cukii-permission-icon-manual"]'),
     ).not.toBeNull();
     expect(selected?.querySelector("svg")).not.toBeNull();
     expect(document.querySelector(".cukii-permission-keycap")).not.toBeNull();
@@ -106,6 +106,64 @@ describe("Cukii Claude-parity input toolbar", () => {
     });
 
     expect(document.querySelector(".cukii-permission-button")).toBeNull();
+  });
+
+  it("shows only permission modes supported by the current model vendor", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
+      { vendor: "claude", supportedModes: ["plan", "bypass"] },
+      { vendor: "codex", supportedModes: ["bypass"] },
+    ];
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
+
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await user.click(await getElementByText("Bypass permissions"));
+    expect(
+      document.querySelector('[data-testid="cukii-permission-mode-plan"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-permission-mode-bypass"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-permission-mode-manual"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector(
+        '[data-testid="cukii-permission-mode-editAutomatically"]',
+      ),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-permission-mode-auto"]'),
+    ).toBeNull();
+  });
+
+  it("switches Manual to a supported mode in session state and persists the bridge preference", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    const postSpy = vi.spyOn(mockIdeMessenger, "post");
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch(setBrokerPermissionMode("manual"));
+    store.dispatch({
+      type: "session/streamUpdate",
+      payload: [{ role: "user", content: "Use the chosen mode" }],
+    });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await user.click(await getElementByText("Manual"));
+    await user.click(await getElementByText("Plan"));
+
+    expect(store.getState().session.brokerPermissionMode).toBe("plan");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({ brokerPermissionMode: "plan" }),
+    );
   });
 
   it("retains a blank-tab draft while the native capability probe is pending", async () => {

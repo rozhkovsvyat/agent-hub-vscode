@@ -123,7 +123,7 @@ describe("sessionSlice streamUpdate", () => {
     const blank = sessionSlice.reducer(restored, newSession(undefined));
     expect(blank.brokerEffort).toBe("high");
     expect(blank.brokerSpeed).toBe("standard");
-    expect(blank.brokerPermissionMode).toBe("manual");
+    expect(blank.brokerPermissionMode).toBe("bypass");
     expect(blank.hasReasoningEnabled).toBe(true);
   });
 

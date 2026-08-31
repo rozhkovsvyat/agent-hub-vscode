@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   CukiiStreamingToolbar,
   CukiiWaitingReceipt,
+  splitThinkingPhrase,
 } from "./CukiiStreamingToolbar";
 
 afterEach(() => vi.useRealTimers());
@@ -42,6 +43,25 @@ describe("CukiiStreamingToolbar", () => {
       screen.getByText("Combulating..", { selector: '[aria-live="polite"]' }),
     ).toBeTruthy();
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+
+  it("keeps rendered word gaps as non-animated whitespace, not collapsed character spans", () => {
+    render(<CukiiStreamingToolbar />);
+
+    const toolbar = screen.getByTestId("cukii-streaming-toolbar");
+    const spaces = toolbar.querySelectorAll(
+      '[data-testid="cukii-thinking-space"]',
+    );
+    expect(spaces).toHaveLength(2);
+    spaces.forEach((space) => {
+      expect(space.textContent).toBe(" ");
+      expect(space).not.toHaveClass("cukii-thinking-character");
+    });
+    expect(toolbar.querySelectorAll(".cukii-thinking-character")).toHaveLength(
+      splitThinkingPhrase("Crumbing through it..").length - spaces.length,
+    );
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    expect(css).toMatch(/\.cukii-thinking-space\s*\{[^}]*white-space:\s*pre/s);
   });
 
   it("reserves phrase width and makes character reconstruction instant for reduced motion", () => {

@@ -13,7 +13,7 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { Popover, PopoverButton, PopoverPanel } from "../ui";
 
 const modeRowClass =
-  "cukii-permission-mode-row flex w-full items-start gap-3 rounded px-3 py-2.5 text-left hover:bg-[var(--vscode-list-hoverBackground)]";
+  "cukii-permission-mode-row flex w-full items-start gap-3 px-3 py-2 text-left";
 
 function PermissionModeIcon({ mode }: { mode: CukiiPermissionMode }) {
   const paths: Record<CukiiPermissionMode, string> = {
@@ -149,7 +149,10 @@ export function PermissionModeControl({
       >
         <span className="cukii-permission-label">{currentCopy.title}</span>
       </PopoverButton>
-      <PopoverPanel className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[min(360px,calc(100vw-2rem))] rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-xl">
+      <PopoverPanel
+        className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[min(360px,calc(100vw-2rem))]"
+        data-testid="cukii-permission-popover"
+      >
         {({ close }) => (
           <>
             <div className="flex items-center justify-between px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
@@ -172,10 +175,9 @@ export function PermissionModeControl({
                   key={mode}
                   type="button"
                   className={`${modeRowClass} ${
-                    selected
-                      ? "cukii-permission-mode-selected bg-[#0e639c] text-white"
-                      : "text-[var(--vscode-foreground)]"
+                    selected ? "cukii-permission-mode-selected" : ""
                   }`}
+                  data-testid={`cukii-permission-mode-${mode}`}
                   onClick={() => {
                     onChange(mode);
                     close();
@@ -183,16 +185,10 @@ export function PermissionModeControl({
                 >
                   <PermissionModeIcon mode={mode} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] font-medium">
+                    <span className="cukii-permission-mode-title block text-[13px] font-medium">
                       {copy.title}
                     </span>
-                    <span
-                      className={`mt-0.5 block text-xs ${
-                        selected
-                          ? "text-white opacity-90"
-                          : "text-[var(--vscode-descriptionForeground)]"
-                      }`}
-                    >
+                    <span className="cukii-permission-mode-description mt-0.5 block text-xs">
                       {copy.description}
                     </span>
                   </span>

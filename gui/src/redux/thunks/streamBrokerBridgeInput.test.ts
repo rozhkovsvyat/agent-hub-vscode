@@ -66,7 +66,7 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.isStreaming).toBe(false);
   });
 
-  it("sends this tab's effort and speed in the bridge request", async () => {
+  it("sends a switched Manual permission mode and this tab's controls in the bridge request", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: Array<{ messageType: string; data: unknown }> = [];
     ideMessenger.streamRequest = vi.fn(async function* (messageType, data) {
@@ -91,9 +91,10 @@ describe("streamBrokerBridgeInput controls", () => {
         brokerEffort: "medium",
         brokerSpeed: "fast",
         hasReasoningEnabled: false,
-        brokerPermissionMode: "auto",
+        brokerPermissionMode: "manual",
       }),
     );
+    store.dispatch(setBrokerPermissionMode("plan"));
 
     await store.dispatch(streamBrokerBridgeInput());
 
@@ -106,7 +107,7 @@ describe("streamBrokerBridgeInput controls", () => {
         brokerEffort: "medium",
         brokerSpeed: "fast",
         thinkingEnabled: false,
-        brokerPermissionMode: "auto",
+        brokerPermissionMode: "plan",
       }),
     });
   });

@@ -6,6 +6,17 @@ export type CukiiWaitReceipt = {
   deadline?: string;
 };
 
+const graphemeSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : undefined;
+
+export function splitThinkingPhrase(phrase: string): string[] {
+  return graphemeSegmenter
+    ? Array.from(graphemeSegmenter.segment(phrase), ({ segment }) => segment)
+    : Array.from(phrase);
+}
+
 /**
  * Живой лоадер текущего ответа: самая нижняя строка хода.
  *
@@ -33,15 +44,25 @@ export function CukiiStreamingToolbar({
       <div className="cukii-thinking-row min-w-0">
         <CukiiCrumbs active={active} />
         <span className="cukii-thinking-text" aria-hidden="true">
-          {announcement.split("").map((character, index) => (
-            <span
-              className="cukii-thinking-character"
-              key={`${phrase}-${index}`}
-              style={{ animationDelay: `${index * 18}ms` }}
-            >
-              {character}
-            </span>
-          ))}
+          {splitThinkingPhrase(announcement).map((grapheme, index) =>
+            /^\s$/u.test(grapheme) ? (
+              <span
+                className="cukii-thinking-space"
+                data-testid="cukii-thinking-space"
+                key={`${phrase}-${index}`}
+              >
+                {grapheme}
+              </span>
+            ) : (
+              <span
+                className="cukii-thinking-character"
+                key={`${phrase}-${index}`}
+                style={{ animationDelay: `${index * 18}ms` }}
+              >
+                {grapheme}
+              </span>
+            ),
+          )}
         </span>
         <span className="sr-only" aria-live="polite" aria-atomic="true">
           {announcement}

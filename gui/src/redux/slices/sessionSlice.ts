@@ -290,7 +290,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   brokerSubagent: "auto",
   brokerEffort: "high",
   brokerSpeed: "standard",
-  brokerPermissionMode: "manual",
+  brokerPermissionMode: "bypass",
   pendingClaudePermissions: {},
   hasReasoningEnabled: true,
   isInEdit: false,
@@ -852,9 +852,10 @@ export const sessionSlice = createSlice({
         // Capability discovery belongs to the native bridge and is async. Do
         // not use help fixtures here: preserve the session's draft, let the
         // live capability response reconcile it, and fail closed meanwhile.
-        state.brokerPermissionMode = coerceStoredPermissionMode(
-          payload.brokerPermissionMode,
-        );
+        state.brokerPermissionMode =
+          payload.brokerPermissionMode === undefined
+            ? "bypass"
+            : coerceStoredPermissionMode(payload.brokerPermissionMode);
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
@@ -866,7 +867,7 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = "auto";
         state.brokerEffort = "high";
         state.brokerSpeed = "standard";
-        state.brokerPermissionMode = "manual";
+        state.brokerPermissionMode = "bypass";
         state.hasReasoningEnabled = true;
       }
     },

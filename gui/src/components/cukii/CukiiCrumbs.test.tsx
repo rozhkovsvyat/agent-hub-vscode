@@ -7,6 +7,17 @@ import { CukiiCrumbs } from "./CukiiCrumbs";
 
 describe("CukiiCrumbs", () => {
   it("uses the title SVG cookie-hole geometry and one exact fill", () => {
+    const titleSvg = readFileSync(
+      join(
+        process.cwd(),
+        "..",
+        "extensions",
+        "vscode",
+        "media",
+        "cukii-activity.svg",
+      ),
+      "utf8",
+    );
     render(<CukiiCrumbs />);
     const mark = screen.getByTestId("cukii-crumbs");
     expect(mark).toHaveAttribute("aria-hidden", "true");
@@ -22,6 +33,7 @@ describe("CukiiCrumbs", () => {
       { cx: "39.9", cy: "35", r: "5.25" },
       { cx: "28.2", cy: "40.6", r: "4.1" },
     ]);
+    expect(titleSvg).toMatch(/<circle cx="26\.6" cy="28\.8" r="3\.75"/);
     expect(
       [...mark.querySelectorAll("[data-cukii-crumb]")].map((crumb) =>
         crumb.getAttribute("fill"),

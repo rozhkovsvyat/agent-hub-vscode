@@ -19,26 +19,52 @@ describe("Cukii GUI contracts", () => {
       .querySelectorAll('style[data-cukii-contract="true"]')
       .forEach((style) => style.remove());
     document.documentElement.style.removeProperty("--vscode-foreground");
+    document.documentElement.style.removeProperty(
+      "--cukii-primary-action-background",
+    );
+    document.documentElement.style.removeProperty(
+      "--cukii-primary-action-background-hover",
+    );
+    document.documentElement.style.removeProperty(
+      "--cukii-primary-action-icon",
+    );
   });
 
-  it("wins the real cascade with cookie stop colors while preserving the white square", () => {
+  it("uses shared cookie action tokens for both Start and Stop chips", () => {
     const css = source("index.css");
     const toolbar = source("components/mainInput/InputToolbar.tsx");
-    mountContractRules(/button\.cukii-submit-button[^{}]*\{[^{}]*\}/g);
     const button = document.createElement("button");
     button.className =
       "bg-primary cukii-submit-button cukii-submit-button--stop";
     document.body.append(button);
     expect(toolbar).toContain('showStop ? "cukii-submit-button--stop" : ""');
-    expect(toolbar).toContain("bg-white");
-    expect(getComputedStyle(button).backgroundColor).toBe("rgb(227, 168, 103)");
-    expect(getComputedStyle(button).color).toBe("rgb(255, 255, 255)");
+    expect(toolbar).toContain("cukii-submit-stop-icon");
     expect(css.lastIndexOf("button.cukii-submit-button--stop")).toBeGreaterThan(
       css.lastIndexOf("button.cukii-submit-button,"),
     );
     const canonicalCss = css.toLowerCase();
-    expect(canonicalCss).toContain("box-shadow: 0 0 0 1px #c9873f !important;");
-    expect(canonicalCss).toContain("background: #c9873f !important;");
+    expect(canonicalCss).toContain(
+      "--cukii-primary-action-background: #e3a867;",
+    );
+    expect(canonicalCss).toContain(
+      "--cukii-primary-action-background-hover: #c9873f;",
+    );
+    expect(canonicalCss).toContain("--cukii-primary-action-icon: #5c3a28;");
+    expect(canonicalCss).toContain(
+      "background: var(--cukii-primary-action-background) !important;",
+    );
+    expect(canonicalCss).toContain(
+      "color: var(--cukii-primary-action-icon) !important;",
+    );
+    expect(canonicalCss).toContain(
+      "background: var(--cukii-primary-action-background-hover) !important;",
+    );
+    expect(canonicalCss).toContain(
+      "background: var(--cukii-primary-action-icon);",
+    );
+    expect(canonicalCss).not.toMatch(
+      /cukii-submit-button[\s\S]{0,900}#(?:f48771|e9775f|fff(?:fff)?)/,
+    );
   });
 
   it("declares cookie-orange focus and semantic invalid-state precedence", () => {
@@ -97,6 +123,34 @@ describe("Cukii GUI contracts", () => {
     expect(getComputedStyle(completed).fontWeight).toBe("400");
   });
 
+  it("keeps the measured 12px non-overlay loader-to-composer gap", () => {
+    const css = source("index.css");
+    const start = css.indexOf(".cukii-spinner-row {");
+    const contract = css.slice(
+      start,
+      css.indexOf(".cukii-spinner-row .cukii-thinking-row", start),
+    );
+    expect(contract).toContain("margin-bottom: 12px;");
+    expect(contract).toContain("margin-top: 6px;");
+    expect(contract).not.toContain("40px");
+  });
+
+  it("keeps sent one-line bubbles compact and lets only wrapped prose grow", () => {
+    const css = source("index.css");
+    const start = css.indexOf(".cukii-user-bubble .cukii-input-box");
+    const contract = css.slice(
+      start,
+      css.indexOf(".cukii-main-input-shell", start),
+    );
+    expect(contract).toContain("min-height: 0;");
+    expect(contract).toContain(".cukii-user-bubble .cukii-input-footer");
+    expect(contract).toContain("display: none !important;");
+    expect(contract).toContain("white-space: pre-wrap;");
+    expect(contract).toContain(".cukii-user-bubble .ProseMirror p");
+    expect(contract).toContain("margin: 0;");
+    expect(contract).not.toContain("min-height: 78px");
+  });
+
   it("uses the exact shared Claude toggle accent and transition", () => {
     mountContractRules(/\.cukii-toggle-(?:track|thumb)[^{}]*\{[^{}]*\}/g);
     const toggle = document.createElement("span");
@@ -126,5 +180,25 @@ describe("Cukii GUI contracts", () => {
     expect(selectionRule).toContain("--vscode-menu-selectionBackground");
     expect(selectionRule).toContain("--vscode-menu-selectionForeground");
     expect(selectionRule).not.toContain("--vscode-list-activeSelection");
+  });
+
+  it("keeps permission modes on a compact dark or light panel and selected blue", () => {
+    const css = source("index.css");
+    const panelStart = css.indexOf(".cukii-permission-popover {");
+    const panelContract = css.slice(
+      panelStart,
+      css.indexOf("@media screen and (max-width: 300px)", panelStart),
+    );
+    expect(panelContract).toContain("padding: 4px;");
+    expect(panelContract).toContain(
+      "background: var(--vscode-menu-background, #252526) !important;",
+    );
+    expect(panelContract).toContain("min-height: 48px;");
+    expect(panelContract).toContain("background: transparent !important;");
+    expect(panelContract).toContain("background: #0e639c !important;");
+    expect(panelContract).toContain("color: #ffffff !important;");
+    expect(panelContract).toContain('html[data-cukii-panel-tone="light"]');
+    expect(panelContract).toContain("#ffffff) !important;");
+    expect(panelContract).toContain(".cukii-permission-mode-row:focus-visible");
   });
 });
