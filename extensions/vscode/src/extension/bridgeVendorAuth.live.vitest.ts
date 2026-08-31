@@ -1,6 +1,11 @@
+import * as fs from "fs";
 import { describe, expect, it } from "vitest";
 
-import { listBrokerVendorAccounts } from "./bridgeVendorAuth";
+import {
+  listBrokerVendorAccounts,
+  localKimiServerIdentity,
+  nativeCliCandidates,
+} from "./bridgeVendorAuth";
 
 const liveIt = process.env.CUKII_LIVE_AUTH_PROBE === "1" ? it : it.skip;
 const EMAIL = /^[^@\s]+@[^@\s]+$/;
@@ -13,6 +18,27 @@ function redactedIdentity(label: string | undefined): string | undefined {
 }
 
 describe("live broker vendor account probe", () => {
+  liveIt(
+    "obtains Kimi identity through its official child-owned local server",
+    async () => {
+      const executable = nativeCliCandidates("kimi").find((candidate) =>
+        fs.existsSync(candidate),
+      );
+      expect(executable).toBeTruthy();
+      const identity = await localKimiServerIdentity({
+        executable,
+        cacheKey: `live-child:${Date.now()}`,
+      });
+      console.info(
+        "LIVE_KIMI_CHILD_IDENTITY_REDACTED=" + redactedIdentity(identity),
+      );
+      expect(identity).toBeTruthy();
+      expect(identity).not.toBe("Connected");
+      expect(identity).not.toBe("Not logged in");
+    },
+    30_000,
+  );
+
   liveIt(
     "reports the current Codex identity and truthful Kimi OAuth state",
     async () => {

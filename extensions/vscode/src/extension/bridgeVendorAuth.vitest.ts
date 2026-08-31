@@ -15,11 +15,13 @@ import {
   isMissingCliError,
   kimiDisplayIdentityFromUserInfo,
   localKimiCredentials,
+  localKimiServerIdentity,
   localKimiServerEmail,
   managedKimiProfileIdentity,
   kimiCredentialFingerprint,
   terminateWindowsProcessTree,
   probeVendorExecutable,
+  resolveKimiAccountIdentity,
   storedCodexAccountLabel,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -429,6 +431,44 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       JSON.stringify({ email, requested: { endpoint: requested?.endpoint } }),
     ).not.toContain(bearer);
+  });
+
+  it("survives the Windows launcher exit and accepts Kimi's own port-0 binding", async () => {
+    const bearer = "dynamic-port-bearer-do-not-display";
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      killed: false,
+      stdout,
+      stderr,
+    }) as unknown as import("child_process").ChildProcess;
+    let requests = 0;
+    const identity = await localKimiServerIdentity({
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      launchTimeoutMs: 100,
+      launch: (_executable, port) => {
+        expect(port).toBe(0);
+        setImmediate(() => {
+          child.emit("exit", 0, null);
+          stderr.end(`Kimi server: http://127.0.0.1:61337/#token=${bearer}\n`);
+        });
+        return child;
+      },
+      request: async (endpoint, actualBearer) => {
+        requests += 1;
+        expect(endpoint.toString()).toBe("http://127.0.0.1:61337/");
+        expect(actualBearer).toBe(bearer);
+        return {
+          data: { kind: "ok", userInfo: { nickname: "Moonshot owner" } },
+        };
+      },
+      stopEphemeral: async () => undefined,
+    });
+
+    expect(identity).toBe("Moonshot owner");
+    expect(requests).toBe(1);
+    expect(JSON.stringify({ identity, requests })).not.toContain(bearer);
   });
 
   it("rejects hostile, oversized, timed-out, and aborted Kimi banners and always cleans up its child", async () => {
@@ -888,6 +928,23 @@ describe("Cukii vendor CLI accounts", () => {
 
     expect(identity).toBe("Moonshot owner");
     expect(JSON.stringify({ identity })).not.toContain(bearer);
+  });
+
+  it("falls back to the native Kimi server when the stored access token is stale", async () => {
+    const calls: string[] = [];
+    await expect(
+      resolveKimiAccountIdentity(
+        async () => {
+          calls.push("expired-profile");
+          return undefined;
+        },
+        async () => {
+          calls.push("native-refresh-session");
+          return "Moonshot owner";
+        },
+      ),
+    ).resolves.toBe("Moonshot owner");
+    expect(calls).toEqual(["expired-profile", "native-refresh-session"]);
   });
 
   it("uses identities from exact Grok and Kimi CLI status formats", () => {

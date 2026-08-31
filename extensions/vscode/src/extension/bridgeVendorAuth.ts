@@ -11,7 +11,6 @@ import type {
 } from "core/protocol/ideWebview";
 import * as fs from "fs";
 import * as http from "http";
-import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
@@ -614,7 +613,7 @@ type KimiServerRequest = (
 type KimiServerProbeOptions = {
   instancesDirectory?: string;
   /**
-   * Retained for callers that provide a filesystem fixture.  A registry token
+   * Retained for callers that provide a filesystem fixture. A registry token
    * is deliberately never read: any local process could publish a registry
    * entry and receive it back over loopback.
    */
@@ -636,8 +635,8 @@ type KimiServerProbeOptions = {
   ) => Promise<void>;
 };
 
-const KIMI_SERVER_TIMEOUT_MS = 800;
-const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 3_500;
+const KIMI_SERVER_TIMEOUT_MS = 8_000;
+const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 20_000;
 const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
 const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
 const kimiIdentityCache = new Map<string, string>();
@@ -730,19 +729,6 @@ function kimiShutdownRequest(
   });
 }
 
-function reserveLoopbackPort(): Promise<number | undefined> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once("error", () => resolve(undefined));
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port =
-        typeof address === "object" && address ? address.port : undefined;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
 function launchKimiWeb(executable: string, port: number): ChildProcess {
   return spawn(
     executable,
@@ -776,23 +762,32 @@ function isExactKimiLoopbackEndpoint(endpoint: URL, port?: number): boolean {
 /**
  * Kimi 0.38 writes a local startup URL with the ephemeral bearer in its hash.
  * Older canaries used a sole `token` query member. Never generalize this into
- * a banner scraper: only the exact 127.0.0.1 URL for our reserved port is
- * accepted, and all output remains private to this bounded parser.
+ * a banner scraper: only an exact 127.0.0.1 URL (and the injected fixed port
+ * in tests) is accepted, and all output remains private to this parser.
  */
 function kimiStartupFromBanner(
   output: Buffer,
   port: number,
 ): KimiWebStartup | undefined {
+  const portPattern = port === 0 ? "[1-9][0-9]{0,4}" : String(port);
   const prefixes = [
-    { prefix: `http://127.0.0.1:${port}/#token=`, kind: "hash" as const },
-    { prefix: `http://127.0.0.1:${port}/?token=`, kind: "query" as const },
+    {
+      pattern: new RegExp(`http://127\\.0\\.0\\.1:${portPattern}/#token=`, "g"),
+      kind: "hash" as const,
+    },
+    {
+      pattern: new RegExp(
+        `http://127\\.0\\.0\\.1:${portPattern}/\\?token=`,
+        "g",
+      ),
+      kind: "query" as const,
+    },
   ];
   const text = output.toString("utf8");
-  for (const { prefix, kind } of prefixes) {
-    let offset = 0;
-    while (offset < text.length) {
-      const start = text.indexOf(prefix, offset);
-      if (start < 0) break;
+  for (const { pattern, kind } of prefixes) {
+    for (const match of text.matchAll(pattern)) {
+      const prefix = match[0];
+      const start = match.index;
       const before = start === 0 ? "" : text[start - 1];
       const tokenStart = start + prefix.length;
       const tokenMatch = new RegExp(
@@ -819,14 +814,16 @@ function kimiStartupFromBanner(
                 query[0][1] === token;
           endpoint.hash = "";
           endpoint.search = "";
-          if (validBearer && isExactKimiLoopbackEndpoint(endpoint, port)) {
+          if (
+            validBearer &&
+            isExactKimiLoopbackEndpoint(endpoint, port === 0 ? undefined : port)
+          ) {
             return { endpoint, bearerToken: token };
           }
         } catch {
           // Continue checking a later complete startup URL in the bounded banner.
         }
       }
-      offset = tokenStart;
     }
   }
   return undefined;
@@ -850,7 +847,6 @@ function waitForKimiStartup(
       child.stdout?.removeListener("data", onStdout);
       child.stderr?.removeListener("data", onStderr);
       child.removeListener("error", onFailure);
-      child.removeListener("exit", onFailure);
       signal?.removeEventListener("abort", onFailure);
       // Best-effort zeroization: neither stream nor bearer is ever logged.
       stdout.fill(0);
@@ -891,7 +887,9 @@ function waitForKimiStartup(
     child.stdout?.on("data", onStdout);
     child.stderr?.on("data", onStderr);
     child.once("error", onFailure);
-    child.once("exit", onFailure);
+    // The Windows kimi.exe launcher may exit after spawning the actual native
+    // server, whose inherited streams publish the startup bearer a moment
+    // later. Launcher exit is therefore not a terminal startup signal.
     signal?.addEventListener("abort", onFailure, { once: true });
   });
 }
@@ -1047,8 +1045,11 @@ export async function localKimiServerIdentity(
   try {
     if (options.signal?.aborted) return undefined;
     if (options.executable) {
-      const port = await (options.reservePort ?? reserveLoopbackPort)();
-      if (!port || options.signal?.aborted) return undefined;
+      // Let Kimi bind port 0 itself in production. A reserve-close-bind handoff
+      // races Windows excluded-port state and has produced real EACCES failures.
+      // Tests may still inject a fixed port to exercise exact-origin controls.
+      const port = options.reservePort ? await options.reservePort() : 0;
+      if (port === undefined || options.signal?.aborted) return undefined;
       ephemeral = (options.launch ?? launchKimiWeb)(options.executable, port);
       const startup = await waitForKimiStartup(
         ephemeral,
@@ -1267,6 +1268,13 @@ export async function managedKimiProfileIdentity(
   }
 }
 
+export async function resolveKimiAccountIdentity(
+  managedProfile: () => Promise<string | undefined>,
+  nativeServer: () => Promise<string | undefined>,
+): Promise<string | undefined> {
+  return (await managedProfile()) ?? (await nativeServer());
+}
+
 function localMetadata(vendor: VendorWithCli): unknown {
   const userHome = os.homedir();
   const file =
@@ -1408,15 +1416,21 @@ export async function probeVendorExecutable(
     });
     const output = qwenProbe ? qwenProbe.output : `${stdout}\n${stderr}`;
     const outputIdentity = identityFromNativeCliOutput(vendor, output);
+    const kimiCacheKey = `${executable}:${kimiCredentialFingerprint(os.homedir()) ?? "missing"}`;
     const kimiIdentity =
       vendor === "kimi" &&
       !identity &&
       !outputIdentity &&
       (/source=oauth/i.test(output) ||
         nativeCliJsonIndicatesAuthenticated("kimi", output))
-        ? await managedKimiProfileIdentity({
-            cacheKey: `${executable}:${kimiCredentialFingerprint(os.homedir()) ?? "missing"}`,
-          })
+        ? await resolveKimiAccountIdentity(
+            () => managedKimiProfileIdentity({ cacheKey: kimiCacheKey }),
+            () =>
+              localKimiServerIdentity({
+                executable,
+                cacheKey: kimiCacheKey,
+              }),
+          )
         : undefined;
     const classified = classifyVendorAuthOutput(
       vendor,
