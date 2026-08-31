@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { cukiiVendorLabel } from "core/cukiiVendorRegistry";
 import type {
   BrokerVendorAuthAction,
@@ -7,6 +7,7 @@ import type {
 } from "core/protocol/ideWebview";
 import * as fs from "fs";
 import * as http from "http";
+import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
@@ -575,12 +576,27 @@ type KimiServerProbeOptions = {
   fileSystem?: KimiServerProbeFileSystem;
   request?: KimiServerRequest;
   timeoutMs?: number;
+  executable?: string;
+  cacheKey?: string;
+  signal?: AbortSignal;
+  launch?: (executable: string, port: number) => ChildProcess;
+  reservePort?: () => Promise<number | undefined>;
+  launchTimeoutMs?: number;
+  stopEphemeral?: (
+    child: ChildProcess,
+    endpoint: URL | undefined,
+    bearerToken: string | undefined,
+    timeoutMs: number,
+  ) => Promise<void>;
 };
 
 const KIMI_SERVER_TIMEOUT_MS = 800;
+const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 3_500;
+const KIMI_SERVER_POLL_MS = 100;
 const KIMI_MAX_INSTANCE_FILES = 8;
 const KIMI_MAX_INSTANCE_FILE_SIZE = 8 * 1024;
 const KIMI_MAX_TOKEN_FILE_SIZE = 4 * 1024;
+const kimiEmailCache = new Map<string, string>();
 
 function localLoopbackKimiServerEndpoints(
   instancesDirectory: string,
@@ -687,10 +703,143 @@ function kimiUserInfoRequest(
   });
 }
 
+function kimiShutdownRequest(
+  endpoint: URL,
+  bearerToken: string,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const request = http.request(
+      new URL("/api/v1/shutdown", endpoint),
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${bearerToken}` },
+      },
+      (response) => {
+        response.resume();
+        resolve();
+      },
+    );
+    request.once("error", () => resolve());
+    request.setTimeout(timeoutMs, () => {
+      request.destroy();
+      resolve();
+    });
+    request.end();
+  });
+}
+
+function reserveLoopbackPort(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(undefined));
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port =
+        typeof address === "object" && address ? address.port : undefined;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+function launchKimiWeb(executable: string, port: number): ChildProcess {
+  return spawn(executable, ["web", "--no-open", "--port", String(port)], {
+    shell: false,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+}
+
+function waitForKimiEndpoint(
+  instancesDirectory: string,
+  port: number,
+  fileSystem: KimiServerProbeFileSystem,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<URL | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (signal?.aborted || Date.now() >= deadline) {
+        resolve(undefined);
+        return;
+      }
+      const endpoint = localLoopbackKimiServerEndpoints(
+        instancesDirectory,
+        fileSystem,
+      ).find((candidate) => Number(candidate.port) === port);
+      if (endpoint) {
+        resolve(endpoint);
+        return;
+      }
+      setTimeout(poll, KIMI_SERVER_POLL_MS);
+    };
+    poll();
+  });
+}
+
+async function stopEphemeralKimiWeb(
+  child: ChildProcess,
+  endpoint: URL | undefined,
+  bearerToken: string | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  if (endpoint && bearerToken) {
+    try {
+      await kimiShutdownRequest(endpoint, bearerToken, timeoutMs);
+    } catch {
+      // Cleanup must continue even if an invalidated bearer rejects locally.
+    }
+  }
+  if (child.killed || !child.pid) return;
+  const exited = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 300);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+  if (exited || child.killed) return;
+  try {
+    if (process.platform === "win32") {
+      await execFileAsync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        timeout: 1_000,
+        windowsHide: true,
+      });
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The exact child already exited or could not be signalled.
+    }
+  }
+}
+
+function kimiCredentialFingerprint(userHome: string): string | undefined {
+  const credentialsDirectory = path.join(userHome, ".kimi-code", "credentials");
+  try {
+    return fs
+      .readdirSync(credentialsDirectory)
+      .filter((entry) => entry.endsWith(".json"))
+      .sort()
+      .map((entry) => {
+        const stat = fs.statSync(path.join(credentialsDirectory, entry));
+        return stat.isFile() ? `${entry}:${stat.size}:${stat.mtimeMs}` : "";
+      })
+      .filter(Boolean)
+      .join("|");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Reuses only a registered loopback Kimi server. Starting `kimi web` would
- * print a bearer credential and can leave a child process behind, so this
- * probe intentionally never launches a server.
+ * Reuses a registered loopback Kimi server when available. Otherwise it
+ * starts an exact, short-lived local process with all stdio ignored, reads no
+ * banner, and shuts down only that child in finally.
  */
 export async function localKimiServerEmail(
   options: KimiServerProbeOptions = {},
@@ -702,19 +851,46 @@ export async function localKimiServerEmail(
   const tokenFile =
     options.tokenFile ?? path.join(userHome, ".kimi-code", "server.token");
   const fileSystem = options.fileSystem ?? fs;
-  const endpoints = localLoopbackKimiServerEndpoints(
+  if (options.cacheKey) {
+    const cached = kimiEmailCache.get(options.cacheKey);
+    if (cached) return cached;
+  }
+  let endpoints = localLoopbackKimiServerEndpoints(
     instancesDirectory,
     fileSystem,
   );
-  if (endpoints.length === 0) return undefined;
+  let ephemeral: ChildProcess | undefined;
+  let ephemeralEndpoint: URL | undefined;
+  let bearerToken: string | undefined;
   try {
+    if (options.signal?.aborted) return undefined;
+    if (endpoints.length === 0 && options.executable) {
+      const port = await (options.reservePort ?? reserveLoopbackPort)();
+      if (!port || options.signal?.aborted) return undefined;
+      ephemeral = (options.launch ?? launchKimiWeb)(options.executable, port);
+      ephemeral.once("error", () => undefined);
+      ephemeralEndpoint = await waitForKimiEndpoint(
+        instancesDirectory,
+        port,
+        fileSystem,
+        options.signal,
+        options.launchTimeoutMs ?? KIMI_SERVER_LAUNCH_TIMEOUT_MS,
+      );
+      if (!ephemeralEndpoint) return undefined;
+      endpoints = [ephemeralEndpoint];
+    }
+    if (endpoints.length === 0) return undefined;
     const tokenStat = fileSystem.statSync(tokenFile);
     if (!tokenStat.isFile() || tokenStat.size > KIMI_MAX_TOKEN_FILE_SIZE) {
       return undefined;
     }
-    const bearerToken = fileSystem.readFileSync(tokenFile, "utf8").trim();
-    if (!bearerToken || /[\x00-\x1f\x7f]/.test(bearerToken)) return undefined;
+    const candidateBearer = fileSystem.readFileSync(tokenFile, "utf8").trim();
+    if (!candidateBearer || /[\x00-\x1f\x7f]/.test(candidateBearer)) {
+      return undefined;
+    }
+    bearerToken = candidateBearer;
     for (const endpoint of endpoints) {
+      if (options.signal?.aborted) return undefined;
       const response = await (options.request ?? kimiUserInfoRequest)(
         endpoint,
         bearerToken,
@@ -724,10 +900,22 @@ export async function localKimiServerEmail(
       const userInfo =
         isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
       const email = safeEmail(stringAt(userInfo, "email"));
-      if (email) return email;
+      if (email) {
+        if (options.cacheKey) kimiEmailCache.set(options.cacheKey, email);
+        return email;
+      }
     }
   } catch {
     // Token and endpoint failures deliberately remain non-diagnostic.
+  } finally {
+    if (ephemeral) {
+      await (options.stopEphemeral ?? stopEphemeralKimiWeb)(
+        ephemeral,
+        ephemeralEndpoint,
+        bearerToken,
+        options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
+      );
+    }
   }
   return undefined;
 }
@@ -909,7 +1097,10 @@ export async function probeVendorExecutable(
       !identity &&
       (/source=oauth/i.test(output) ||
         nativeCliJsonIndicatesAuthenticated("kimi", output))
-        ? await localKimiServerEmail()
+        ? await localKimiServerEmail({
+            executable,
+            cacheKey: `${executable}:${kimiCredentialFingerprint(os.homedir()) ?? "missing"}`,
+          })
         : undefined;
     return {
       id: vendor,
@@ -945,7 +1136,9 @@ async function probeVendor(
 
 // No state is retained between requests: after a terminal login/logout every
 // modal refresh launches fresh native probes. Kept explicit for the action path.
-export function clearBrokerVendorAccountCache(): void {}
+export function clearBrokerVendorAccountCache(): void {
+  kimiEmailCache.clear();
+}
 
 export async function listBrokerVendorAccounts(): Promise<
   BrokerVendorAuthStatus[]

@@ -316,6 +316,116 @@ describe("Cukii vendor CLI accounts", () => {
     }
   });
 
+  it("cleans up exactly its bounded ephemeral Kimi probe on success, failure, and abort", async () => {
+    const makeProbe = (response: unknown, abortOnLaunch = false) => {
+      let launched = false;
+      let stopped = 0;
+      const controller = new AbortController();
+      const child = {
+        pid: 4242,
+        killed: false,
+        once: () => child,
+      } as unknown as import("child_process").ChildProcess;
+      const probe = localKimiServerEmail({
+        executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+        instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+        tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+        launchTimeoutMs: 30,
+        reservePort: async () => 58627,
+        signal: controller.signal,
+        fileSystem: {
+          readdirSync: () => (launched ? ["instance.json"] : []),
+          statSync: () => ({ isFile: () => true, size: 20 }),
+          readFileSync: (file) =>
+            file.endsWith(".token")
+              ? "test-bearer-do-not-display"
+              : JSON.stringify({ host: "127.0.0.1", port: 58627 }),
+        },
+        launch: () => {
+          launched = true;
+          if (abortOnLaunch) controller.abort();
+          return child;
+        },
+        request: async () => response,
+        stopEphemeral: async (actualChild) => {
+          expect(actualChild).toBe(child);
+          stopped += 1;
+        },
+      });
+      return { probe, getLaunched: () => launched, getStopped: () => stopped };
+    };
+
+    const success = makeProbe({
+      data: { kind: "ok", userInfo: { email: "ephemeral@example.test" } },
+    });
+    await expect(success.probe).resolves.toBe("ephemeral@example.test");
+    expect(success.getLaunched()).toBe(true);
+    expect(success.getStopped()).toBe(1);
+
+    const malformed = makeProbe({
+      data: {
+        kind: "ok",
+        userInfo: {
+          email: "not-an-email",
+          echoedBearer: "test-bearer-do-not-display",
+        },
+      },
+    });
+    await expect(malformed.probe).resolves.toBeUndefined();
+    expect(malformed.getStopped()).toBe(1);
+
+    const failure = makeProbe(undefined);
+    await expect(failure.probe).resolves.toBeUndefined();
+    expect(failure.getStopped()).toBe(1);
+
+    const aborted = makeProbe(undefined, true);
+    await expect(aborted.probe).resolves.toBeUndefined();
+    expect(aborted.getLaunched()).toBe(true);
+    expect(aborted.getStopped()).toBe(1);
+  });
+
+  it("caches Kimi email by credential fingerprint without respawning", async () => {
+    let launches = 0;
+    let live = false;
+    const options = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      cacheKey: "test-fingerprint-1",
+      instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+      tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+      launchTimeoutMs: 30,
+      reservePort: async () => 58627,
+      fileSystem: {
+        readdirSync: () => (live ? ["instance.json"] : []),
+        statSync: () => ({ isFile: () => true, size: 20 }),
+        readFileSync: (file: string) =>
+          file.endsWith(".token")
+            ? "test-bearer-do-not-display"
+            : JSON.stringify({ host: "127.0.0.1", port: 58627 }),
+      },
+      launch: () => {
+        launches += 1;
+        live = true;
+        return {
+          pid: 4242,
+          killed: false,
+          once: () => undefined,
+        } as unknown as import("child_process").ChildProcess;
+      },
+      request: async () => ({
+        data: { kind: "ok", userInfo: { email: "cached@example.test" } },
+      }),
+      stopEphemeral: async () => undefined,
+    };
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "cached@example.test",
+    );
+    live = false;
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "cached@example.test",
+    );
+    expect(launches).toBe(1);
+  });
+
   it("keeps connected vendor labels distinguishable by exact email", () => {
     const labels = [
       classifyVendorAuthOutput(
