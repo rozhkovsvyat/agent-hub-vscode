@@ -840,8 +840,8 @@ function waitForKimiStartup(
 ): Promise<KimiWebStartup | undefined> {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
-    let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-    let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let stdout: Buffer = Buffer.alloc(0);
+    let stderr: Buffer = Buffer.alloc(0);
     let settled = false;
     const finish = (result: KimiWebStartup | undefined) => {
       if (settled) return;
@@ -859,13 +859,9 @@ function waitForKimiStartup(
       stderr = Buffer.alloc(0);
       resolve(result);
     };
-    const accept = (
-      output: Buffer<ArrayBufferLike>,
-    ): KimiWebStartup | undefined => kimiStartupFromBanner(output, port);
-    const append = (
-      current: Buffer<ArrayBufferLike>,
-      chunk: unknown,
-    ): Buffer<ArrayBufferLike> | undefined => {
+    const accept = (output: Buffer): KimiWebStartup | undefined =>
+      kimiStartupFromBanner(output, port);
+    const append = (current: Buffer, chunk: unknown): Buffer | undefined => {
       const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
       if (current.length + next.length > KIMI_MAX_STARTUP_OUTPUT_SIZE) {
         return undefined;
