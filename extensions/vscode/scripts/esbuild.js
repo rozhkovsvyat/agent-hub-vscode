@@ -1,11 +1,80 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const { writeBuildTimestamp } = require("./utils");
 
 const esbuild = require("esbuild");
 
 const flags = process.argv.slice(2);
+
+function getSharpNativeBindingPath(outputModules) {
+  return path.join(
+    outputModules,
+    "sharp",
+    "build",
+    "Release",
+    `sharp-${process.platform}-${process.arch}.node`,
+  );
+}
+
+function validateSharpNativeBinding(outputModules) {
+  const nativeBinding = getSharpNativeBindingPath(outputModules);
+  if (!fs.existsSync(nativeBinding)) {
+    throw new Error(
+      `Missing target-specific sharp native binding: ${nativeBinding}`,
+    );
+  }
+
+  const load = spawnSync(
+    process.execPath,
+    ["-e", "require(process.argv[1])", nativeBinding],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (load.status !== 0) {
+    throw new Error(
+      `Copied sharp native binding is unloadable: ${nativeBinding}: ${load.stderr || load.error?.message || "unknown error"}`,
+    );
+  }
+}
+
+function copyPackageTree(
+  packageName,
+  outputModules,
+  resolveFrom = __dirname,
+  copiedPackages = new Set(),
+) {
+  if (copiedPackages.has(packageName)) return;
+  const packageJson = require.resolve(`${packageName}/package.json`, {
+    paths: [resolveFrom],
+  });
+  const packageRoot = path.dirname(packageJson);
+  const manifest = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+  const outputPackageRoot = path.join(outputModules, ...packageName.split("/"));
+  copiedPackages.add(packageName);
+  fs.cpSync(packageRoot, outputPackageRoot, { recursive: true, force: true });
+  for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+    copyPackageTree(dependency, outputModules, packageRoot, copiedPackages);
+  }
+}
+
+function copySharpRuntime(outputModules, resolveFrom = __dirname) {
+  const stagingRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "cukii-sharp-runtime-"),
+  );
+  const stagingModules = path.join(stagingRoot, "node_modules");
+  try {
+    // Validate a fresh copy first, so an old output binding cannot hide a
+    // missing or broken binding in the package we are about to ship.
+    copyPackageTree("sharp", stagingModules, resolveFrom);
+    validateSharpNativeBinding(stagingModules);
+    copyPackageTree("sharp", outputModules, resolveFrom);
+    validateSharpNativeBinding(outputModules);
+  } finally {
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+  }
+}
 
 function copyVoiceRuntime() {
   const source = require("ffmpeg-static");
@@ -34,25 +103,7 @@ function copyVoiceRuntime() {
     });
   }
 
-  const copiedPackages = new Set();
-  function copyPackageTree(packageName, resolveFrom = __dirname) {
-    if (copiedPackages.has(packageName)) return;
-    const packageJson = require.resolve(`${packageName}/package.json`, {
-      paths: [resolveFrom],
-    });
-    const packageRoot = path.dirname(packageJson);
-    const manifest = JSON.parse(fs.readFileSync(packageJson, "utf8"));
-    copiedPackages.add(packageName);
-    fs.cpSync(
-      packageRoot,
-      path.join(outputModules, ...packageName.split("/")),
-      { recursive: true, force: true },
-    );
-    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-      copyPackageTree(dependency, packageRoot);
-    }
-  }
-  copyPackageTree("sharp");
+  copySharpRuntime(outputModules);
 
   const nativeRoot = path.join(
     outputModules,
@@ -121,7 +172,11 @@ const esbuildConfig = {
                 JSON.stringify(result.metafile, null, 2),
               );
             } catch (e) {
-              console.error("Failed to write esbuild meta file", e);
+              console.error(
+                "Failed to copy voice runtime or write esbuild meta file",
+                e,
+              );
+              throw e;
             }
             console.log("VS Code Extension esbuild complete"); // used verbatim in vscode tasks to detect completion
           }
@@ -162,7 +217,7 @@ const claudePermissionMcpWorkerEsbuildConfig = {
   plugins: [],
 };
 
-void (async () => {
+async function main() {
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
   // Bundles the extension into one file
@@ -208,4 +263,14 @@ void (async () => {
     await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
     await esbuild.build(esbuildConfig);
   }
-})();
+}
+
+module.exports = {
+  copySharpRuntime,
+  getSharpNativeBindingPath,
+  validateSharpNativeBinding,
+};
+
+if (require.main === module) {
+  void main();
+}
