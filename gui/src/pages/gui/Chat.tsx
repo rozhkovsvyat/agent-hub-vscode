@@ -630,7 +630,7 @@ export function Chat() {
             {transcriptStart > 0 && (
               <button
                 type="button"
-                className="cukii-load-earlier mx-auto my-3 rounded px-3 py-1 text-[12px] text-[var(--vscode-descriptionForeground)]"
+                className="cukii-load-earlier mx-auto my-3"
                 onClick={() =>
                   setTranscriptWindow({
                     sessionId,

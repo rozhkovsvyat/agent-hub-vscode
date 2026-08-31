@@ -142,6 +142,22 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("40px");
   });
 
+  it("owns every Load earlier messages visual state without a native white fallback", () => {
+    const css = source("index.css");
+    const start = css.indexOf(".cukii-load-earlier {");
+    const end = css.indexOf(".cukii-user-row", start);
+    const contract = css.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(contract).toContain("background: transparent;");
+    expect(contract).toContain("border: 1px solid var(--vscode-widget-border");
+    expect(contract).toContain("font-family: inherit;");
+    expect(contract).toContain(".cukii-load-earlier:hover:not(:disabled)");
+    expect(contract).toContain(".cukii-load-earlier:focus-visible");
+    expect(contract).toContain("var(--vscode-focusBorder");
+    expect(contract).toContain(".cukii-load-earlier:disabled");
+    expect(contract).not.toMatch(/background:\s*(?:white|#fff(?:fff)?)/i);
+  });
+
   it("keeps sent one-line bubbles compact and lets only wrapped prose grow", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-bubble .cukii-input-box");

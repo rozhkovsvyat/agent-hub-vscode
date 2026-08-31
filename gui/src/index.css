@@ -1115,6 +1115,40 @@ button.cukii-submit-button--stop:active {
   padding: 20px 20px 8px;
 }
 
+/* Claude-style transcript pagination is a quiet secondary action. Keep every
+   state explicit so Electron never falls back to the platform's white button. */
+.cukii-load-earlier {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border: 1px solid var(--vscode-widget-border, var(--cukii-line));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.cukii-load-earlier:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-load-earlier:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.cukii-load-earlier:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .cukii-user-row {
   margin: 12px 0 16px;
   min-width: 0;

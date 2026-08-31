@@ -138,6 +138,42 @@ describe("Cukii saved-session loading", () => {
     );
   });
 
+  it("exposes dark pagination as a native keyboard-operable secondary button", async () => {
+    const { store, container, user } = await renderWithProviders(<Chat />);
+    const history = Array.from(
+      { length: INITIAL_TRANSCRIPT_WINDOW + 1 },
+      (_, index) => ({
+        message: {
+          id: `assistant-${index}`,
+          role: "assistant" as const,
+          content: `assistant-${index}`,
+        },
+        contextItems: [],
+      }),
+    );
+    await act(async () => {
+      store.dispatch(
+        newSession({
+          sessionId: "keyboard-pagination",
+          title: "Keyboard pagination",
+          workspaceDirectory: "D:/Brain/vault",
+          history,
+        }),
+      );
+    });
+
+    const button = container.querySelector<HTMLButtonElement>(
+      "button.cukii-load-earlier",
+    );
+    expect(button).not.toBeNull();
+    expect(button).toHaveAttribute("type", "button");
+    button!.focus();
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(container.querySelector(".cukii-load-earlier")).toBeNull();
+    expect(container.textContent).toContain("assistant-0");
+  });
+
   it("keeps saved rows memoized for parent updates but reacts to live row inputs", async () => {
     const { store, container } = await renderWithProviders(<Chat />);
     const history = Array.from(
