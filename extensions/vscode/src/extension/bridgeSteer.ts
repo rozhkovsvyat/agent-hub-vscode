@@ -79,7 +79,12 @@ export class BridgeSteeringController {
       (message) => message.text === text,
     );
     if (index < 0) return undefined;
-    return this.awaitingVendorEcho.splice(index, 1)[0].messageId;
+    const messageId = this.awaitingVendorEcho.splice(index, 1)[0].messageId;
+    // A duplicate text is held in FIFO until this exact echo retires the
+    // earlier message. Without that gate, two equal strings have no vendor
+    // identifier and an out-of-order echo could paint ✓✓ on the wrong bubble.
+    void this.flush();
+    return messageId;
   }
 
   private async flush(): Promise<void> {
@@ -89,6 +94,16 @@ export class BridgeSteeringController {
     this.flushing = true;
     try {
       while (this.pending.length && this.writer === writer && !this.closed) {
+        const next = this.pending[0];
+        // Native user envelopes carry text, not the Cukii message id. Keep
+        // equal follow-ups serialized until their predecessor is observed.
+        if (
+          this.awaitingVendorEcho.some(
+            (awaiting) => awaiting.text === next.message.text,
+          )
+        ) {
+          break;
+        }
         const pending = this.pending.shift()!;
         this.inFlight = pending;
         let delivered = false;
@@ -111,7 +126,17 @@ export class BridgeSteeringController {
       }
     } finally {
       this.flushing = false;
-      if (this.pending.length && this.writer && !this.closed) void this.flush();
+      const next = this.pending[0];
+      if (
+        next &&
+        this.writer &&
+        !this.closed &&
+        !this.awaitingVendorEcho.some(
+          (awaiting) => awaiting.text === next.message.text,
+        )
+      ) {
+        void this.flush();
+      }
     }
   }
 

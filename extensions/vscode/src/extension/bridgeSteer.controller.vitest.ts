@@ -111,6 +111,34 @@ describe("BridgeSteeringController", () => {
     expect(controller.consumeVendorEcho("two")).toBe("two");
   });
 
+  it("serializes equal follow-ups until each exact echo retires its ID", async () => {
+    const writes: string[] = [];
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(async (text) => {
+      writes.push(text);
+      return true;
+    });
+
+    const first = controller.deliver({
+      messageId: "first",
+      sessionId: "session-1",
+      text: "repeat this",
+    });
+    const second = controller.deliver({
+      messageId: "second",
+      sessionId: "session-1",
+      text: "repeat this",
+    });
+
+    await expect(first).resolves.toMatchObject({ status: "delivered" });
+    await Promise.resolve();
+    expect(writes).toEqual(["repeat this"]);
+    expect(controller.consumeVendorEcho("repeat this")).toBe("first");
+    await expect(second).resolves.toMatchObject({ status: "delivered" });
+    expect(writes).toEqual(["repeat this", "repeat this"]);
+    expect(controller.consumeVendorEcho("repeat this")).toBe("second");
+  });
+
   it("never reports delivered when close wins an in-flight stdin write", async () => {
     let started!: () => void;
     let finish!: (delivered: boolean) => void;
