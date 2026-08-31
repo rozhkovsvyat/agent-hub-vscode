@@ -303,7 +303,7 @@ function finishActiveThinking(history: ChatHistoryItemWithMessageId[]): void {
 /**
  * A stored preference belongs to its former vendor. On a model switch retain
  * it only where the target CLI verifies it; otherwise use that vendor's
- * visible Bypass default when available (Kimi's `--auto` route), before any
+ * visible Bypass default when available (Kimi's prompt-mode route), before any
  * subsequent turn can read the state.
  */
 function reconcilePermissionModeForBrokerModel(
@@ -316,6 +316,24 @@ function reconcilePermissionModeForBrokerModel(
   if (capabilities.supportedModes.includes(current)) return current;
   if (capabilities.supportedModes.includes("bypass")) return "bypass";
   return resolvePermissionModeForVendor(capabilities, current);
+}
+
+/**
+ * A saved Kimi session can predate prompt-mode routing and retain Manual.
+ * Unlike a fresh model switch, restore must not rewrite other vendors' saved
+ * policy while their live capability probe is still pending. Kimi's bounded
+ * cold-start contract has one verified noninteractive route, so repair only
+ * that stale pair before a first restored turn reaches bridgeControls.
+ */
+function reconcileRestoredPermissionMode(
+  model: BrokerModel,
+  current: CukiiPermissionMode,
+): CukiiPermissionMode {
+  const capabilities = defaultVendorPermissionCapabilities(
+    brokerVendorForModel(model),
+  );
+  if (capabilities.nonInteractiveRoute !== "prompt-mode") return current;
+  return capabilities.supportedModes.includes(current) ? current : "bypass";
 }
 
 /** An explicit native-worker pause, carried separately from chat text. */
@@ -990,13 +1008,17 @@ export const sessionSlice = createSlice({
         state.brokerEffort = payload.brokerEffort ?? "high";
         state.brokerSpeed = payload.brokerSpeed ?? "standard";
         state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
-        // Capability discovery belongs to the native bridge and is async. Do
-        // not use help fixtures here: preserve the session's draft, let the
-        // live capability response reconcile it, and fail closed meanwhile.
+        // Restored vendors normally keep their saved draft while live
+        // discovery is pending. Kimi is the exception: its only verified
+        // headless prompt-mode route is Bypass, so stale Manual must not
+        // reach bridgeControls before the picker is opened.
         state.brokerPermissionMode =
           payload.brokerPermissionMode === undefined
             ? "bypass"
-            : coerceStoredPermissionMode(payload.brokerPermissionMode);
+            : reconcileRestoredPermissionMode(
+                state.brokerModel,
+                coerceStoredPermissionMode(payload.brokerPermissionMode),
+              );
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;

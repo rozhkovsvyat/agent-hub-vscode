@@ -222,6 +222,46 @@ describe("sessionSlice streamUpdate", () => {
     expect(sonnet.brokerPermissionMode).toBe("plan");
   });
 
+  it("restores stale Kimi Manual as its verified prompt-mode bypass route", () => {
+    const restoredKimi = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-kimi-manual",
+        title: "Restored Kimi session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "kimi-k3",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+
+    expect(restoredKimi).toMatchObject({
+      brokerModel: "kimi-k3",
+      brokerPermissionMode: "bypass",
+    });
+
+    const restoredCodex = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-codex-manual",
+        title: "Restored Codex session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "codex-5-6-terra",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+    expect(restoredCodex.brokerPermissionMode).toBe("manual");
+  });
+
   it("restores a manual title and clears its lock for a fresh tab", () => {
     const restored = sessionSlice.reducer(
       undefined,
