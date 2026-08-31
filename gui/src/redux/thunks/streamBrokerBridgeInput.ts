@@ -6,7 +6,6 @@ import {
   addPromptCompletionPair,
   abortStream,
   errorToolCall,
-  replaceTerminalErrorText,
   setActive,
   setBridgeWait,
   setContextPercentage,
@@ -178,19 +177,19 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     }
   };
 
-  const duplicateTerminalError = (message: ChatMessage) => {
+  const isDuplicateTerminalError = (message: ChatMessage) => {
     const normalized = normalizeTerminalError(message);
-    if (!normalized || seenTerminalErrors.has(normalized)) return undefined;
+    if (!normalized || seenTerminalErrors.has(normalized)) return true;
 
-    const priorMessage = getState()
+    const appearedThisRun = getState()
       .session.history.slice(historyLengthAtRunStart)
-      .find(
+      .some(
         (item) =>
           item.message.role === "assistant" &&
           isSameTerminalError(item.message, message),
       );
     seenTerminalErrors.add(normalized);
-    return priorMessage?.message ?? null;
+    return appearedThisRun;
   };
 
   dispatch(setActive());
@@ -243,18 +242,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             break;
           }
           if (isBridgeTerminalError(message)) {
-            const duplicate = duplicateTerminalError(message);
-            if (duplicate?.id) {
-              dispatch(
-                replaceTerminalErrorText({
-                  messageId: duplicate.id,
-                  content: normalizeTerminalError(duplicate),
-                }),
-              );
-            } else if (duplicate === undefined) {
-              // Empty and already-observed terminal frames have no visible
-              // payload. Their receipt still settles the run below.
-            } else {
+            if (!isDuplicateTerminalError(message)) {
               dispatch(streamUpdate([message]));
             }
             hasTerminalReceipt = true;

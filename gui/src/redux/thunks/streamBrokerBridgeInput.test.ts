@@ -352,9 +352,52 @@ describe("streamBrokerBridgeInput controls", () => {
       .session.history.filter((item) => item.message.role === "assistant")
       .map((item) => String(item.message.content))
       .join("");
-    expect(assistantText).toBe(limit);
+    expect(assistantText).toBe(`  ${limit}  `);
     expect(store.getState().session.isStreaming).toBe(false);
     expect(returned).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses a terminal receipt without mutating prior assistant text", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const prior = "  Error: Disk full  ";
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: vi.fn(async () => ({
+        done: false,
+        value: [
+          { role: "assistant", content: prior },
+          {
+            role: "assistant",
+            content: "Disk full",
+            cukiiTerminalError: true,
+          },
+        ],
+      })),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "terminal-error-prior-text",
+        title: "Terminal error prior text",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { role: "user", content: "Start native bridge" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+
+    await store.dispatch(streamBrokerBridgeInput());
+
+    expect(store.getState().session.history.at(-1)?.message.content).toBe(
+      prior,
+    );
   });
 
   it("allows the same terminal error once in a subsequent run", async () => {

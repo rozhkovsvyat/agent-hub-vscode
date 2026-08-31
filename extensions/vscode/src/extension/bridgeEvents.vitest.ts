@@ -274,6 +274,26 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("keeps a Codex item error non-terminal until its turn receipt", () => {
+    const { events } = collect("codex-thread", [
+      '{"type":"item.completed","item":{"id":"item_error","type":"error","message":"Disk full"}}',
+      '{"type":"turn.completed"}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "error", text: "Disk full" },
+      { kind: "complete" },
+    ]);
+  });
+
+  it("does not guess a Kimi meta error is a turn receipt", () => {
+    const { events } = collect("kimi-ndjson", [
+      '{"role":"meta","type":"error","message":"Retrying"}',
+    ]);
+
+    expect(events).toEqual([{ kind: "error", text: "Retrying" }]);
+  });
+
   it("не подавляет raw fallback от одного непонятного JSON-события", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(
