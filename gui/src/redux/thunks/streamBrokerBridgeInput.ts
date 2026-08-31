@@ -28,6 +28,8 @@ type CukiiBridgeMessage = ChatMessage & {
   cukiiTerminalError?: true;
   /** Private transport receipt emitted only for a matching vendor user echo. */
   cukiiSteerReadMessageId?: string;
+  /** First factual stdout from the native CLI, never a local launch status. */
+  cukiiVendorActivity?: true;
 };
 
 type RaceResult<T> =
@@ -171,6 +173,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   )?.message.id;
 
   const messages: ChatMessage[] = state.session.history
+    // A model switch is a local timeline receipt. It must not become a
+    // system turn in the next vendor request, even on the direct bridge path.
+    .filter((item) => !item.modelSwitch)
     .map((item) => item.message)
     .filter((message) => message.role !== "thinking");
   const historyLengthAtRunStart = state.session.history.length;
@@ -268,7 +273,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             dispatch(setBridgeWait(message.cukiiBridgeWait));
             continue;
           }
-          if (initialUserReceiptId) {
+          if (message.cukiiVendorActivity && initialUserReceiptId) {
             dispatch(markSteerRead({ messageId: initialUserReceiptId }));
           }
           dispatch(streamUpdate([message]));

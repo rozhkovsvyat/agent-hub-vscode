@@ -1020,6 +1020,8 @@ export type CukiiBridgeChatMessage = ChatMessage & {
   cukiiTerminalError?: true;
   /** Exact follow-up that the native vendor echoed as input. */
   cukiiSteerReadMessageId?: string;
+  /** First factual stdout from the native CLI, never a local launch status. */
+  cukiiVendorActivity?: true;
 };
 
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
@@ -1037,7 +1039,13 @@ export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
         },
       ];
     case "thinking":
-      return [{ role: "thinking", content: event.text }];
+      return [
+        {
+          role: "thinking",
+          content: event.text,
+          ...(event.vendorActivity ? { cukiiVendorActivity: true } : {}),
+        },
+      ];
     case "toolStart":
       return [
         {
@@ -1297,6 +1305,10 @@ async function* streamBridgeChatWithSteer(
       queue.push({
         kind: "thinking",
         text: `Native bridge first output after ${((firstOutputAt - launchedAt) / 1000).toFixed(1)} s.\n`,
+        // This is the first factual vendor activity. The earlier local
+        // "Launching native command" status must never upgrade a user
+        // receipt to the second checkmark.
+        vendorActivity: true,
       });
     }
     const text = chunk.toString("utf8");

@@ -139,6 +139,75 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.allSessionMetadata).toHaveLength(0);
   });
 
+  it("keeps the initial receipt at one check until factual vendor activity and omits a model-switch receipt from the request", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: unknown[] = [];
+    let emitVendorActivity!: () => void;
+    const vendorActivity = new Promise<void>((resolve) => {
+      emitVendorActivity = resolve;
+    });
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [{ role: "thinking", content: "Launching native command" }];
+      await vendorActivity;
+      yield [
+        {
+          role: "thinking",
+          content: "Native bridge first output after 0.1 s.",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "receipt-activity",
+        title: "Receipt activity",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { id: "switch", role: "system", content: "" },
+            contextItems: [],
+            modelSwitch: {
+              model: "codex-5-6-terra",
+              displayName: "GPT-5.6 Terra",
+            },
+          },
+          {
+            message: { id: "prompt", role: "user", content: "Run it" },
+            contextItems: [],
+            messageReceipt: { sentAt: 1_700_000_000_000, status: "queued" },
+          },
+        ],
+      }),
+    );
+
+    const running = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.history.at(-1)?.reasoning?.text).toBe(
+        "Launching native command",
+      ),
+    );
+    expect(store.getState().session.history[1].messageReceipt?.status).toBe(
+      "delivered",
+    );
+    emitVendorActivity();
+    await running;
+
+    expect(store.getState().session.history[1].messageReceipt?.status).toBe(
+      "read",
+    );
+    expect(captured).toEqual([
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({ role: "user", content: "Run it" }),
+        ],
+      }),
+    ]);
+  });
+
   it("awaits generator return when Stop cancels a live bridge", async () => {
     const ideMessenger = new MockIdeMessenger();
     const returned = vi.fn(async () => ({ done: true, value: undefined }));

@@ -21,7 +21,12 @@ export type BridgeEvent =
   | { kind: "userEcho"; text: string }
   /** Private bridge transport event; never rendered as transcript text. */
   | { kind: "steerRead"; messageId: string }
-  | { kind: "thinking"; text: string }
+  | {
+      kind: "thinking";
+      text: string;
+      /** The native CLI has emitted stdout for this turn. */
+      vendorActivity?: true;
+    }
   | { kind: "toolStart"; id: string; name: string; args: string }
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
   | { kind: "error"; text: string }

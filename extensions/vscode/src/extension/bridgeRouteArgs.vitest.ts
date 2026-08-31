@@ -37,6 +37,7 @@ import {
   nativeDelegateHint,
   nativePromptCacheArgs,
   routeForModel,
+  toChatMessages,
   windowsCommandLineUtf16Length,
 } from "./bridgeChatAdapter";
 import { ClaudePermissionBroker } from "./claudePermissionBroker";
@@ -71,6 +72,25 @@ function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
 }
 
 describe("native bridge argv", () => {
+  it("marks only factual vendor stdout as receipt activity", () => {
+    expect(
+      toChatMessages({
+        kind: "thinking",
+        text: "Native bridge first output after 0.1 s.\n",
+        vendorActivity: true,
+      }),
+    ).toEqual([
+      {
+        role: "thinking",
+        content: "Native bridge first output after 0.1 s.\n",
+        cukiiVendorActivity: true,
+      },
+    ]);
+    expect(
+      toChatMessages({ kind: "thinking", text: "Launching native command" }),
+    ).toEqual([{ role: "thinking", content: "Launching native command" }]);
+  });
+
   it("uses the ordinary native Kimi component chain, without lstat on homedir", () => {
     const paths = nativeKimiPaths();
     const lstatSync = vi.spyOn(fs, "lstatSync");
