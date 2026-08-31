@@ -180,6 +180,13 @@ function runProbe(command: ProbeCommand, flag: string): Promise<ProbeOutput> {
     const child = spawn(command.program, args, {
       shell: false,
       windowsHide: true,
+      // Node quotes each argument for CreateProcess by default. For the fixed
+      // `cmd.exe /c call "<trusted .cmd route>" --help` form that changes the
+      // route quotes into literal backslashes, so cmd cannot find the script.
+      // Pass this known command line verbatim; native executables retain the
+      // usual Node argument quoting.
+      windowsVerbatimArguments:
+        process.platform === "win32" && command.argsPrefix.length > 0,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -205,6 +212,32 @@ async function probeCli(program: string): Promise<{
 }> {
   const command = resolveProbeCommand(program);
   if (!command) return { help: "" };
+  return probeCliCommand(program, command);
+}
+
+/**
+ * Exercise the same live child-process probe against a supplied route.
+ * Production discovery still accepts routes only from commandCandidates().
+ */
+export async function probeCliRoute(
+  program: string,
+  route: string,
+): Promise<{
+  help: string;
+  version?: string;
+  route?: string;
+}> {
+  return probeCliCommand(program, probeCommandForRoute(route));
+}
+
+async function probeCliCommand(
+  program: string,
+  command: ProbeCommand,
+): Promise<{
+  help: string;
+  version?: string;
+  route?: string;
+}> {
   const [help, version] = await Promise.all([
     runProbe(command, "--help"),
     runProbe(command, "--version"),
