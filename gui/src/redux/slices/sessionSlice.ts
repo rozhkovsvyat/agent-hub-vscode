@@ -44,12 +44,7 @@ import type {
 } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
-import {
-  brokerVendorForModel,
-  coerceStoredPermissionMode,
-  defaultVendorPermissionCapabilities,
-  resolvePermissionModeForVendor,
-} from "core/cukiiPermissionModes";
+import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
 import { toolCallCtxItemToCtxItemWithId } from "../../pages/gui/ToolCallDiv/utils";
 import { addToolCallDeltaToState, isEditTool } from "../../util/toolCallState";
@@ -110,8 +105,7 @@ export function handleToolCallsInMessage(
     // Update the message's toolCalls array to reflect the processed tool calls
     // We can safely cast because we verified the role above
     const curMessage = lastItem.message as
-      | AssistantChatMessage
-      | ThinkingChatMessage;
+      AssistantChatMessage | ThinkingChatMessage;
     curMessage.toolCalls = lastItem.toolCallStates.map(
       (state) => state.toolCall,
     );
@@ -301,40 +295,15 @@ function finishActiveThinking(history: ChatHistoryItemWithMessageId[]): void {
 }
 
 /**
- * A stored preference belongs to its former vendor. On a model switch retain
- * it only where the target CLI verifies it; otherwise use that vendor's
- * visible Bypass default when available (Kimi's prompt-mode route), before any
- * subsequent turn can read the state.
- */
-function reconcilePermissionModeForBrokerModel(
-  model: BrokerModel,
-  current: CukiiPermissionMode,
-): CukiiPermissionMode {
-  const capabilities = defaultVendorPermissionCapabilities(
-    brokerVendorForModel(model),
-  );
-  if (capabilities.supportedModes.includes(current)) return current;
-  if (capabilities.supportedModes.includes("bypass")) return "bypass";
-  return resolvePermissionModeForVendor(capabilities, current);
-}
-
-/**
- * Restore has one intentionally narrow repair: a vendor with exactly one
- * verified visible noninteractive mode, Bypass. A persisted Manual from a
- * former route would otherwise reach bridgeControls before async discovery.
- * Claude Manual and unknown/empty capability routes stay fail-closed.
+ * Restore never guesses vendor capability from a bundled help fixture. The
+ * live host snapshot reconciles this value after discovery and the bridge
+ * validates it again before process creation.
  */
 export function reconcileRestoredPermissionMode(
-  model: BrokerModel,
+  _model: BrokerModel,
   current: CukiiPermissionMode,
 ): CukiiPermissionMode {
-  const capabilities = defaultVendorPermissionCapabilities(
-    brokerVendorForModel(model),
-  );
-  const bypassOnly =
-    capabilities.supportedModes.length === 1 &&
-    capabilities.supportedModes[0] === "bypass";
-  return bypassOnly && current !== "bypass" ? "bypass" : current;
+  return current;
 }
 
 /** An explicit native-worker pause, carried separately from chat text. */
@@ -1316,10 +1285,6 @@ export const sessionSlice = createSlice({
       if ((state.brokerModel ?? "qwen-3-8-max") === model) return;
 
       state.brokerModel = model;
-      state.brokerPermissionMode = reconcilePermissionModeForBrokerModel(
-        model,
-        state.brokerPermissionMode,
-      );
       state.history.push({
         message: {
           id: uuidv4(),

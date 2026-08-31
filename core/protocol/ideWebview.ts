@@ -143,6 +143,18 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       cliVersion?: string;
     }[],
   ];
+  /** Authoritative capability snapshot for exactly one selected vendor route. */
+  "cukii/getPermissionCapabilities": [
+    { vendor: BrokerVendorId },
+    {
+      vendor: BrokerVendorId;
+      supportedModes: CukiiPermissionMode[];
+      cliVersion?: string;
+      route?: string;
+      generation?: number;
+      helpSource: string;
+    },
+  ];
   /** Reply to a native Claude permission request. The extension verifies the
    * originating webview, run, request and input fingerprint; this is never an
    * authority to alter the tool input. */

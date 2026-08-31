@@ -607,24 +607,68 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 /* Permission modes are a single Claude-style surface: no per-option light
    cards, no gaps, and no modes that the current bridge did not advertise. */
 .cukii-permission-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow: hidden;
-  padding: 4px;
-  border: 1px solid var(--vscode-widget-border, #454545);
+  width: 300px;
+  max-width: none;
+  padding: 6px 0 4px;
+  border: 1px solid
+    color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
   border-radius: 8px;
   background: var(--vscode-menu-background, #252526) !important;
   color: var(--vscode-menu-foreground, #cccccc);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+  box-shadow: none;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cukii-permission-header {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 24px;
+  padding: 4px 12px;
+  font-size: 13px;
 }
 
 .cukii-permission-mode-row {
-  min-height: 48px;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  min-height: 52px;
+  margin: 0 4px;
+  padding: 4px 8px;
+  gap: 10px;
+  border: 0;
+  border-radius: 4px;
   background: transparent !important;
   color: var(--vscode-menu-foreground, #cccccc) !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11.7px;
+  line-height: normal;
   transition:
     background-color 120ms ease,
     color 120ms ease;
+}
+
+.cukii-permission-mode-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.cukii-permission-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cukii-permission-mode-title {
+  font-weight: 500;
 }
 
 .cukii-permission-mode-row:hover,
@@ -634,8 +678,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-permission-mode-row:focus-visible {
-  border-color: var(--vscode-focusBorder, #007fd4);
-  outline: none;
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
 }
 
 .cukii-permission-mode-row .cukii-permission-mode-description {
@@ -645,9 +689,12 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 .cukii-permission-mode-row.cukii-permission-mode-selected,
 .cukii-permission-mode-row.cukii-permission-mode-selected:hover,
 .cukii-permission-mode-row.cukii-permission-mode-selected:focus-visible {
-  border-color: #0e639c;
-  background: #0e639c !important;
+  background: rgb(4, 57, 94) !important;
   color: #ffffff !important;
+}
+
+.cukii-permission-mode-check {
+  margin-left: auto;
 }
 
 .cukii-permission-mode-selected .cukii-permission-mode-description {

@@ -121,7 +121,7 @@ describe("sessionSlice streamUpdate", () => {
     );
     expect(restored.brokerEffort).toBe("medium");
     expect(restored.brokerSpeed).toBe("fast");
-    expect(restored.brokerPermissionMode).toBe("bypass");
+    expect(restored.brokerPermissionMode).toBe("auto");
     expect(restored.hasReasoningEnabled).toBe(false);
     expect(restored.titleManuallySet).toBe(false);
 
@@ -192,7 +192,7 @@ describe("sessionSlice streamUpdate", () => {
     ]);
   });
 
-  it("reconciles an unsupported permission preference before a Kimi turn, but preserves a supported one", () => {
+  it("does not guess permission capability during a model transition", () => {
     const manualClaude = sessionSlice.reducer(
       sessionSlice.getInitialState(),
       setBrokerPermissionMode("manual"),
@@ -203,12 +203,12 @@ describe("sessionSlice streamUpdate", () => {
     );
 
     expect(kimi.brokerModel).toBe("kimi-k3");
-    expect(kimi.brokerPermissionMode).toBe("bypass");
-    // The session serializer reads these exact reducer fields, so its next
-    // save persists the reconciled route instead of stale Manual.
+    expect(kimi.brokerPermissionMode).toBe("manual");
+    // The live capability snapshot owned by the extension reconciles this
+    // later; a pure reducer must not trust bundled CLI help.
     expect(kimi).toMatchObject({
       brokerModel: "kimi-k3",
-      brokerPermissionMode: "bypass",
+      brokerPermissionMode: "manual",
     });
 
     const claudePlan = sessionSlice.reducer(
@@ -222,7 +222,7 @@ describe("sessionSlice streamUpdate", () => {
     expect(sonnet.brokerPermissionMode).toBe("plan");
   });
 
-  it("reconciles restored bypass-only vendor drafts without weakening Claude Manual", () => {
+  it("preserves restored modes until the live host snapshot is available", () => {
     const restoredKimi = sessionSlice.reducer(
       undefined,
       newSession({
@@ -241,7 +241,7 @@ describe("sessionSlice streamUpdate", () => {
 
     expect(restoredKimi).toMatchObject({
       brokerModel: "kimi-k3",
-      brokerPermissionMode: "bypass",
+      brokerPermissionMode: "manual",
     });
 
     const restoredCodex = sessionSlice.reducer(
@@ -261,7 +261,7 @@ describe("sessionSlice streamUpdate", () => {
     );
     expect(restoredCodex).toMatchObject({
       brokerModel: "codex-5-6-terra",
-      brokerPermissionMode: "bypass",
+      brokerPermissionMode: "manual",
     });
 
     const restoredClaude = sessionSlice.reducer(

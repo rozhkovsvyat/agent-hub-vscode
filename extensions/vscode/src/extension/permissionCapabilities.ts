@@ -22,10 +22,20 @@ const VENDOR_PROGRAMS: Record<BrokerVendorId, string | undefined> = {
 
 type ProbeCommand = { program: string; argsPrefix: string[]; route: string };
 type ProbeOutput = { stdout: string; stderr: string; failed: boolean };
+type DiscoveredVendorPermissionCapabilities = VendorPermissionCapabilities & {
+  route?: string;
+  generation?: number;
+};
 
 // Failed probes are deliberately not cached: installing a CLI while VS Code
 // stays open must be visible on the next request.
-const cache = new Map<string, VendorPermissionCapabilities>();
+const cache = new Map<string, DiscoveredVendorPermissionCapabilities>();
+const latestProbeGeneration = new Map<BrokerVendorId, number>();
+const inFlightProbe = new Map<
+  BrokerVendorId,
+  Promise<DiscoveredVendorPermissionCapabilities>
+>();
+let nextProbeGeneration = 0;
 let claudePermissionWorkerReady: Promise<boolean> | undefined;
 
 /**
@@ -274,41 +284,122 @@ async function probeCliCommand(
 
 export function clearPermissionCapabilityCacheForTests(): void {
   cache.clear();
+  latestProbeGeneration.clear();
+  inFlightProbe.clear();
   claudePermissionWorkerReady = undefined;
 }
 
 export function cachedVendorPermissionCapabilities(
   vendor: BrokerVendorId,
-): VendorPermissionCapabilities | undefined {
+): DiscoveredVendorPermissionCapabilities | undefined {
   const prefix = `${vendor}:`;
   return [...cache.entries()].find(([key]) => key.startsWith(prefix))?.[1];
 }
 
-export async function vendorPermissionCapabilities(
-  vendor: BrokerVendorId,
-): Promise<VendorPermissionCapabilities> {
-  const program = VENDOR_PROGRAMS[vendor];
-  if (!program)
-    return { vendor, supportedModes: [], helpSource: "unavailable-route" };
-  const probe = await probeCli(program);
-  if (!probe.help || !probe.version || !probe.route) {
-    return { vendor, supportedModes: [], helpSource: "unavailable-route" };
+function cacheVendorPermissionCapabilities(
+  key: string,
+  capabilities: DiscoveredVendorPermissionCapabilities,
+): DiscoveredVendorPermissionCapabilities {
+  const prefix = `${capabilities.vendor}:`;
+  const current = cachedVendorPermissionCapabilities(capabilities.vendor);
+  if (
+    current?.generation !== undefined &&
+    capabilities.generation !== undefined &&
+    current.generation > capabilities.generation
+  ) {
+    return current;
   }
-  const key = `${vendor}:${probe.route}:${probe.version}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const capabilities = parseVendorPermissionCapabilities(
-    vendor,
-    probe.help,
-    probe.version,
-    vendor === "claude" ? await selfTestClaudePermissionWorker() : false,
-  );
+  for (const existingKey of cache.keys()) {
+    if (existingKey.startsWith(prefix)) cache.delete(existingKey);
+  }
   cache.set(key, capabilities);
   return capabilities;
 }
 
+export function cacheVendorPermissionCapabilitiesForTests(
+  identity: string,
+  capabilities: VendorPermissionCapabilities,
+): void {
+  const generation = ++nextProbeGeneration;
+  latestProbeGeneration.set(capabilities.vendor, generation);
+  cacheVendorPermissionCapabilities(`${capabilities.vendor}:${identity}`, {
+    ...capabilities,
+    route: identity,
+    generation,
+  });
+}
+
+export async function vendorPermissionCapabilities(
+  vendor: BrokerVendorId,
+): Promise<DiscoveredVendorPermissionCapabilities> {
+  const inFlight = inFlightProbe.get(vendor);
+  if (inFlight) return inFlight;
+  const generation = ++nextProbeGeneration;
+  latestProbeGeneration.set(vendor, generation);
+  const probe = discoverVendorPermissionCapabilities(vendor, generation);
+  inFlightProbe.set(vendor, probe);
+  void probe.finally(() => {
+    if (inFlightProbe.get(vendor) === probe) inFlightProbe.delete(vendor);
+  });
+  return probe;
+}
+
+async function discoverVendorPermissionCapabilities(
+  vendor: BrokerVendorId,
+  generation: number,
+): Promise<DiscoveredVendorPermissionCapabilities> {
+  const program = VENDOR_PROGRAMS[vendor];
+  if (!program)
+    return {
+      vendor,
+      supportedModes: [],
+      generation,
+      helpSource: "unavailable-route",
+    };
+  const probe = await probeCli(program);
+  if (!probe.help || !probe.version || !probe.route) {
+    return {
+      vendor,
+      supportedModes: [],
+      generation,
+      helpSource: "unavailable-route",
+    };
+  }
+  const claudeWorkerReady =
+    vendor === "claude" ? await selfTestClaudePermissionWorker() : false;
+  const key = `${vendor}:${probe.route}:${probe.version}:${claudeWorkerReady ? "permission-worker" : "no-permission-worker"}`;
+  const cached = cache.get(key);
+  if (cached) {
+    return cacheVendorPermissionCapabilities(key, {
+      ...cached,
+      generation,
+    });
+  }
+  const capabilities: DiscoveredVendorPermissionCapabilities = {
+    ...parseVendorPermissionCapabilities(
+      vendor,
+      probe.help,
+      probe.version,
+      claudeWorkerReady,
+    ),
+    route: probe.route,
+    generation,
+  };
+  if (latestProbeGeneration.get(vendor) !== generation) {
+    return (
+      cachedVendorPermissionCapabilities(vendor) ?? {
+        vendor,
+        supportedModes: [],
+        generation,
+        helpSource: "superseded-probe",
+      }
+    );
+  }
+  return cacheVendorPermissionCapabilities(key, capabilities);
+}
+
 export async function allVendorPermissionCapabilities(): Promise<
-  Record<BrokerVendorId, VendorPermissionCapabilities>
+  Record<BrokerVendorId, DiscoveredVendorPermissionCapabilities>
 > {
   const vendors = [
     "claude",
@@ -324,5 +415,5 @@ export async function allVendorPermissionCapabilities(): Promise<
   );
   return Object.fromEntries(
     results.map((result) => [result.vendor, result]),
-  ) as Record<BrokerVendorId, VendorPermissionCapabilities>;
+  ) as Record<BrokerVendorId, DiscoveredVendorPermissionCapabilities>;
 }

@@ -9,6 +9,7 @@ import {
   isAlibabaChatModel,
   isAlibabaNonChatCapability,
 } from "core/cukiiAlibabaCatalog";
+import { brokerVendorForModel } from "core/cukiiPermissionModes";
 import type {
   BrokerEffort,
   BrokerModel,
@@ -61,6 +62,7 @@ import {
   runtimeCanaryTurn,
   type RuntimeCanaryReporter,
 } from "./runtimeCanaryAttestation";
+import { vendorPermissionCapabilities } from "./permissionCapabilities";
 
 export type BridgeRoute = {
   label: string;
@@ -1198,6 +1200,17 @@ async function* streamBridgeChatWithSteer(
   // The model picker fills this cache in the normal path. A restored saved
   // session may send before that picker opens, so rebuild it on demand.
   await ensureCursorCatalogVariants(args.brokerModel);
+  const permissionVendors = new Set([
+    brokerVendorForModel(args.brokerModel),
+    ...(args.brokerSubagent === "auto"
+      ? []
+      : [brokerVendorForModel(args.brokerSubagent)]),
+  ]);
+  await Promise.all(
+    [...permissionVendors].map((vendor) =>
+      vendorPermissionCapabilities(vendor),
+    ),
+  );
   const controls = resolveBridgeControls(
     args.brokerModel,
     args.brokerEffort,

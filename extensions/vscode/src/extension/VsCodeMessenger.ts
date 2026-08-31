@@ -61,7 +61,10 @@ import {
 } from "./voiceDictation";
 import { BridgeSteeringController } from "./bridgeSteer";
 import { BridgeRunCancellation } from "./bridgeRunCancellation";
-import { allVendorPermissionCapabilities } from "./permissionCapabilities";
+import {
+  allVendorPermissionCapabilities,
+  vendorPermissionCapabilities,
+} from "./permissionCapabilities";
 import { runAlibabaAuthAction } from "./alibabaTokenPlan";
 import {
   clearBrokerVendorAccountCache,
@@ -638,6 +641,9 @@ export class VsCodeMessenger {
           cliVersion,
         }),
       );
+    });
+    this.onWebview("cukii/getPermissionCapabilities", async ({ data }) => {
+      return vendorPermissionCapabilities(data.vendor);
     });
     this.onWebview("cukii/listVendorAccounts", async () => {
       return listBrokerVendorAccounts();

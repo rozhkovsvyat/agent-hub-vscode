@@ -25,7 +25,9 @@ vi.mock("./permissionCapabilities", () => ({
         ? ["bypass"]
         : vendor === "deepseek"
           ? []
-          : ["plan", "bypass"],
+          : vendor === "qwen"
+            ? ["manual", "editAutomatically", "plan", "auto", "bypass"]
+            : ["plan", "bypass"],
     helpSource: "test-route",
   }),
 }));
@@ -550,6 +552,32 @@ describe("native bridge argv", () => {
       expect(route.args.join(" ")).not.toContain(forbidden);
     }
   });
+
+  it.each([
+    ["manual", "default"],
+    ["editAutomatically", "auto-edit"],
+    ["plan", "plan"],
+    ["auto", "auto"],
+    ["bypass", "yolo"],
+  ] as const)(
+    "carries Qwen %s through the production route as --approval-mode %s",
+    (mode, nativeMode) => {
+      const route = routeForModel(
+        "qwen-3-8-max",
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("qwen-3-8-max", "high", "standard"),
+        mode,
+      );
+      const approvalIndex = route.args.indexOf("--approval-mode");
+      expect(approvalIndex).toBeGreaterThan(-1);
+      expect(route.args[approvalIndex + 1]).toBe(nativeMode);
+      expect(
+        route.args.filter((arg) => arg === "--approval-mode"),
+      ).toHaveLength(1);
+    },
+  );
 
   it("keeps nested delegate hints on the selected, verified permission route", () => {
     const codexBypass = nativeDelegateHint(

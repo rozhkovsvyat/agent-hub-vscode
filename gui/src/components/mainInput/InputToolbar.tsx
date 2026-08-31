@@ -8,7 +8,6 @@ import {
 import { InputModifiers } from "core";
 import {
   brokerVendorForModel,
-  defaultVendorPermissionCapabilities,
   resolvePermissionModeForVendor,
 } from "core/cukiiPermissionModes";
 import {
@@ -61,10 +60,6 @@ import {
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
 import { PermissionModeControl } from "./PermissionModeControl";
-
-type PermissionCapabilityMap = Partial<
-  Record<BrokerVendorId, { supportedModes: CukiiPermissionMode[] }>
->;
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -170,8 +165,15 @@ function InputToolbar(props: InputToolbarProps) {
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const restoredPanelDraft = useRef(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [permissionCapabilities, setPermissionCapabilities] =
-    useState<PermissionCapabilityMap>({});
+  const selectedVendor = brokerVendorForModel(
+    brokerModel ?? "qwen-3-8-max",
+  );
+  const [permissionCapabilities, setPermissionCapabilities] = useState<{
+    vendor: BrokerVendorId;
+    supportedModes: CukiiPermissionMode[];
+    route?: string;
+    generation?: number;
+  } | null>(null);
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
   const [actionQuery, setActionQuery] = useState("");
   const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
@@ -181,25 +183,21 @@ function InputToolbar(props: InputToolbarProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setPermissionCapabilities(null);
     void ideMessenger
-      .request("cukii/listPermissionCapabilities", undefined)
+      .request("cukii/getPermissionCapabilities", { vendor: selectedVendor })
       .then((response) => {
         if (cancelled || response.status !== "success") return;
-        const capabilities: PermissionCapabilityMap = {};
-        for (const capability of response.content) {
-          capabilities[capability.vendor] = {
-            supportedModes: capability.supportedModes,
-          };
-        }
-        setPermissionCapabilities(capabilities);
+        if (response.content.vendor !== selectedVendor) return;
+        setPermissionCapabilities(response.content);
       })
       .catch(() => {
-        // The selector retains its static verified vendor contract on error.
+        // Keep the current preference, but advertise no unverified mode.
       });
     return () => {
       cancelled = true;
     };
-  }, [ideMessenger]);
+  }, [ideMessenger, selectedVendor]);
 
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
@@ -211,32 +209,20 @@ function InputToolbar(props: InputToolbarProps) {
   ) => {
     const resolvedEffort = normalizeEffortForModel(nextModel, nextEffort);
     const vendor = brokerVendorForModel(nextModel);
-    const capability = permissionCapabilities[vendor];
-    const staticCapability = ["claude", "codex", "kimi", "qwen"].includes(
-      vendor,
-    )
-      ? defaultVendorPermissionCapabilities(vendor)
-      : undefined;
+    const capability =
+      permissionCapabilities?.vendor === vendor
+        ? permissionCapabilities
+        : undefined;
     const targetCapabilities = {
       vendor,
-      supportedModes: [
-        ...new Set([
-          ...(staticCapability?.supportedModes ?? []),
-          ...(capability?.supportedModes ?? []),
-        ]),
-      ],
-      helpSource: capability ? "live+static" : "static",
+      supportedModes: capability?.supportedModes ?? [],
+      helpSource: capability ? "live" : "pending",
     };
-    const resolvedPermissionMode = targetCapabilities.supportedModes.includes(
-      nextPermissionMode,
-    )
+    // While the probe is pending preserve intent without claiming support.
+    // Route dispatch performs the same live probe before process creation.
+    const resolvedPermissionMode = !capability
       ? nextPermissionMode
-      : targetCapabilities.supportedModes.includes("bypass")
-        ? "bypass"
-        : resolvePermissionModeForVendor(
-            targetCapabilities,
-            nextPermissionMode,
-          );
+      : resolvePermissionModeForVendor(targetCapabilities, nextPermissionMode);
     dispatch(
       switchBrokerModel({
         model: nextModel,

@@ -65,14 +65,21 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     },
     {
       vendor: "kimi",
-      supportedModes: ["plan", "bypass"],
+      supportedModes: ["bypass"],
     },
     {
       vendor: "qwen",
-      supportedModes: ["plan", "bypass"],
+      supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
     },
     { vendor: "deepseek", supportedModes: [] },
   ],
+  "cukii/getPermissionCapabilities": {
+    vendor: "claude",
+    supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
+    route: "mock-claude",
+    generation: 1,
+    helpSource: "mock-live",
+  },
   "cukii/listVendorAccounts": [
     {
       id: "claude",
@@ -211,6 +218,20 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
 };
 
 const DEFAULT_MOCK_CORE_RESPONSE_HANDLERS: MockResponseHandlers = {
+  "cukii/getPermissionCapabilities": async ({ vendor }) => ({
+    vendor,
+    supportedModes:
+      vendor === "claude" || vendor === "qwen"
+        ? ["manual", "editAutomatically", "plan", "auto", "bypass"]
+        : vendor === "grok" || vendor === "cursor"
+          ? ["plan", "bypass"]
+          : vendor === "kimi" || vendor === "codex"
+            ? ["bypass"]
+            : [],
+    route: `mock-${vendor}`,
+    generation: 1,
+    helpSource: "mock-live",
+  }),
   "history/save": async (session) => session,
   "history/rename": async ({ id, title }) => ({
     sessionId: id,

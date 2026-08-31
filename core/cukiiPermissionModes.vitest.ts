@@ -45,7 +45,12 @@ describe("Cukii permission modes", () => {
 
   it("cycles only through visible modes with Shift+Tab semantics", () => {
     const visible = visiblePermissionModes(
-      defaultVendorPermissionCapabilities("claude"),
+      parseVendorPermissionCapabilities(
+        "claude",
+        VENDOR_CLI_HELP_FIXTURES.claude,
+        "2.1.251",
+        true,
+      ),
     );
     expect(visible).toEqual([
       "manual",
@@ -115,6 +120,29 @@ describe("Cukii permission modes", () => {
       parseVendorPermissionCapabilities(
         "claude",
         VENDOR_CLI_HELP_FIXTURES.claude,
+        "2.1.251",
+        true,
+      ).supportedModes,
+    ).toEqual(["manual", "editAutomatically", "plan", "auto", "bypass"]);
+  });
+
+  it("hides Claude interactive modes when the permission worker is unavailable", () => {
+    expect(
+      parseVendorPermissionCapabilities(
+        "claude",
+        VENDOR_CLI_HELP_FIXTURES.claude,
+        "2.1.251",
+        false,
+      ).supportedModes,
+    ).toEqual(["plan", "bypass"]);
+  });
+
+  it("maps all five native Qwen approval choices into Cukii modes", () => {
+    expect(
+      parseVendorPermissionCapabilities(
+        "qwen",
+        VENDOR_CLI_HELP_FIXTURES.qwen,
+        "0.22.2",
       ).supportedModes,
     ).toEqual(["manual", "editAutomatically", "plan", "auto", "bypass"]);
   });
@@ -128,7 +156,10 @@ describe("Cukii permission modes", () => {
     ["cursor", "plan", ["--plan"]],
     ["cursor", "bypass", ["--force"]],
     ["kimi", "bypass", []],
+    ["qwen", "manual", ["--approval-mode", "default"]],
+    ["qwen", "editAutomatically", ["--approval-mode", "auto-edit"]],
     ["qwen", "plan", ["--approval-mode", "plan"]],
+    ["qwen", "auto", ["--approval-mode", "auto"]],
     ["qwen", "bypass", ["--approval-mode", "yolo"]],
   ] as const)("maps %s %s to its native argv", (vendor, mode, expected) => {
     const argv = permissionArgvForVendor(vendor, mode);

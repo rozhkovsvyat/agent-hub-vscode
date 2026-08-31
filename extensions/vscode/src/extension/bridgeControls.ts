@@ -6,7 +6,6 @@ import type {
 } from "core/protocol/ideWebview";
 import {
   brokerVendorForModel,
-  defaultVendorPermissionCapabilities,
   permissionArgvForVendor,
   resolvePermissionModeForVendor,
 } from "core/cukiiPermissionModes";
@@ -206,12 +205,15 @@ export function permissionControlArgs(
     return permissionArgvForVendor(vendor, mode).args;
   }
   if (vendor === "kimi") {
-    // Kimi 0.38 documents --auto and --plan in its native --help. The picker
-    // and first routed K3 turn can race asynchronous discovery, so its captured
-    // help contract is the bounded cold-start capability set.
-    const capabilities =
-      cachedVendorPermissionCapabilities("kimi") ??
-      defaultVendorPermissionCapabilities("kimi");
+    // Kimi prompt-mode has an intrinsic permission policy. Only the exact
+    // capability snapshot discovered from the executable used by this host is
+    // authoritative; help fixtures are never a production fallback.
+    const capabilities = cachedVendorPermissionCapabilities("kimi");
+    if (!capabilities) {
+      throw new Error(
+        "kimi permission capabilities have not been verified for this bridge route.",
+      );
+    }
     if (capabilities.nonInteractiveRoute === "prompt-mode") {
       // The existing default Bypass selector enters Kimi's sole verified
       // headless route, but must not translate into --auto/-y/--plan: 0.38
@@ -236,13 +238,15 @@ export function permissionControlArgs(
     return permissionArgvForVendor("kimi", mode).args;
   }
   if (vendor === "qwen") {
-    // Qwen's noninteractive bridge route is synchronously assembled as
-    // `--safe-mode --prompt ... --approval-mode <mode>`. Its captured native
-    // approval-mode contract keeps the first routed turn from racing the
-    // asynchronous capability probe, while a completed probe still wins.
-    const capabilities =
-      cachedVendorPermissionCapabilities("qwen") ??
-      defaultVendorPermissionCapabilities("qwen");
+    // Qwen's noninteractive bridge route is assembled as
+    // `--safe-mode --prompt ... --approval-mode <mode>`. The caller prewarms
+    // the exact live executable snapshot before route construction.
+    const capabilities = cachedVendorPermissionCapabilities("qwen");
+    if (!capabilities) {
+      throw new Error(
+        "qwen permission capabilities have not been verified for this bridge route.",
+      );
+    }
     if (!capabilities.supportedModes.includes(mode)) {
       throw new Error(
         "qwen has no verified permission mode for this noninteractive bridge route.",

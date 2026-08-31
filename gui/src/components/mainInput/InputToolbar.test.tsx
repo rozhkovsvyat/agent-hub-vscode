@@ -118,9 +118,7 @@ describe("Cukii Claude-parity input toolbar", () => {
 
     await user.click(await getElementByText("Bypass permissions"));
     expect(await getElementByText("Modes")).toBeDefined();
-    expect(document.querySelectorAll(".cukii-permission-keycap")).toHaveLength(
-      2,
-    );
+    expect(await getElementByText("⇧ + tab to switch")).toBeDefined();
     expect(document.querySelector('[aria-label="Shift+Tab"]')).not.toBeNull();
     expect(
       await getElementByText(
@@ -157,26 +155,50 @@ describe("Cukii Claude-parity input toolbar", () => {
       selected?.querySelector('[data-testid="cukii-permission-icon-manual"]'),
     ).not.toBeNull();
     expect(selected?.querySelector("svg")).not.toBeNull();
-    expect(document.querySelector(".cukii-permission-keycap")).not.toBeNull();
+    expect(
+      document.querySelector(".cukii-permission-mode-icon"),
+    ).not.toBeNull();
+    for (const icon of document.querySelectorAll(
+      ".cukii-permission-mode-icon",
+    )) {
+      expect(icon).toHaveAttribute("viewBox", "0 0 20 20");
+    }
+    const css = canonicalCss();
+    expect(css).toContain("width: 300px;");
+    expect(css).toContain("min-height: 52px;");
+    expect(css).toContain("padding: 4px 8px;");
+    expect(css).toContain("gap: 10px;");
+    expect(css).toContain("background: rgb(4, 57, 94) !important;");
   });
 
-  it("keeps the static verified Claude route visible when live capabilities are empty", async () => {
+  it("advertises no permission route when live capabilities are empty", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [];
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
+      async ({ vendor }) => ({
+        vendor,
+        supportedModes: [],
+        generation: 1,
+        helpSource: "live empty",
+      });
 
     await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
     });
 
-    expect(await getElementByText("Bypass permissions")).toBeDefined();
+    expect(
+      document.querySelector('[aria-label="Toggle permission mode"]'),
+    ).toBeNull();
   });
 
-  it("lets live capabilities refine but not erase the static Claude routes", async () => {
+  it("uses the successful live capability set as authoritative", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
-      { vendor: "claude", supportedModes: ["plan", "bypass"] },
-      { vendor: "codex", supportedModes: ["bypass"] },
-    ];
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
+      async ({ vendor }) => ({
+        vendor,
+        supportedModes: vendor === "claude" ? ["plan", "bypass"] : ["bypass"],
+        generation: 1,
+        helpSource: "live exact route",
+      });
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
 
@@ -194,44 +216,69 @@ describe("Cukii Claude-parity input toolbar", () => {
     ).not.toBeNull();
     expect(
       document.querySelector('[data-testid="cukii-permission-mode-manual"]'),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(
       document.querySelector(
         '[data-testid="cukii-permission-mode-editAutomatically"]',
       ),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(
       document.querySelector('[data-testid="cukii-permission-mode-auto"]'),
-    ).not.toBeNull();
+    ).toBeNull();
   });
 
-  it("keeps a static Qwen Bypass selection when the live probe reports only Plan", async () => {
-    const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
-      { vendor: "qwen", supportedModes: ["plan"] },
-    ];
-    const postSpy = vi.spyOn(mockIdeMessenger, "post");
-    const store = setupStore({ ideMessenger: mockIdeMessenger });
-    store.dispatch({ type: "session/setBrokerModel", payload: "qwen-3-8-max" });
-    store.dispatch(setBrokerPermissionMode("plan"));
-    seedSavedHistory(store);
-    retainInitializedSession(mockIdeMessenger, store);
+  it.each([
+    ["manual", "Manual"],
+    ["editAutomatically", "Edit automatically"],
+    ["plan", "Plan"],
+    ["auto", "Auto"],
+    ["bypass", "Bypass permissions"],
+  ] as const)(
+    "persists Qwen %s from the live five-mode picker",
+    async (mode, title) => {
+      const mockIdeMessenger = new MockIdeMessenger();
+      mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
+        async ({ vendor }) => ({
+          vendor,
+          supportedModes: [
+            "manual",
+            "editAutomatically",
+            "plan",
+            "auto",
+            "bypass",
+          ],
+          cliVersion: "0.22.2",
+          generation: 1,
+          helpSource: "live qwen",
+        });
+      const postSpy = vi.spyOn(mockIdeMessenger, "post");
+      const store = setupStore({ ideMessenger: mockIdeMessenger });
+      store.dispatch({
+        type: "session/setBrokerModel",
+        payload: "qwen-3-8-max",
+      });
+      store.dispatch(setBrokerPermissionMode("bypass"));
+      seedSavedHistory(store);
+      retainInitializedSession(mockIdeMessenger, store);
 
-    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
-      mockIdeMessenger,
-      store,
-    });
+      const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+        mockIdeMessenger,
+        store,
+      });
 
-    await user.click(await getElementByText("Plan"));
-    await user.click(await getElementByTestId("cukii-permission-mode-bypass"));
+      await user.click(await getElementByText("Bypass permissions"));
+      await user.click(
+        await getElementByTestId(`cukii-permission-mode-${mode}`),
+      );
 
-    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
-    expect(postSpy).toHaveBeenCalledWith(
-      "cukii/setBrokerPreferences",
-      expect.objectContaining({ brokerPermissionMode: "bypass" }),
-    );
-    expect(await getElementByText("Bypass permissions")).toBeDefined();
-  });
+      expect(store.getState().session.brokerPermissionMode).toBe(mode);
+      expect(postSpy).toHaveBeenCalledWith(
+        "cukii/setBrokerPreferences",
+        expect.objectContaining({ brokerPermissionMode: mode }),
+      );
+      expect(await getElementByText(title)).toBeDefined();
+    },
+  );
 
   it("switches Manual to a supported mode in session state and persists the bridge preference", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
@@ -258,10 +305,13 @@ describe("Cukii Claude-parity input toolbar", () => {
 
   it("reconciles Manual against the target model before persisting a model switch", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
-      { vendor: "claude", supportedModes: ["manual", "bypass"] },
-      { vendor: "kimi", supportedModes: ["bypass"] },
-    ];
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
+      async ({ vendor }) => ({
+        vendor,
+        supportedModes: vendor === "claude" ? ["manual", "bypass"] : ["bypass"],
+        generation: 1,
+        helpSource: "live exact route",
+      });
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
@@ -317,10 +367,10 @@ describe("Cukii Claude-parity input toolbar", () => {
     );
   });
 
-  it("retains a blank-tab draft while the native capability probe is pending", async () => {
+  it("retains a blank-tab draft without advertising modes while the native probe is pending", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
-      () => new Promise<never>(() => {});
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] = () =>
+      new Promise<never>(() => {});
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch(setBrokerPermissionMode("bypass"));
 
@@ -330,14 +380,16 @@ describe("Cukii Claude-parity input toolbar", () => {
     });
 
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
-    expect(await getElementByText("Bypass permissions")).toBeDefined();
+    expect(
+      document.querySelector('[aria-label="Toggle permission mode"]'),
+    ).toBeNull();
   });
 
   it.each(["codex-5-6-sol", "kimi-k3"] as const)(
-    "shows and reconciles Bypass for %s while capability discovery is unavailable",
+    "preserves state but advertises no mode for %s while discovery is unavailable",
     async (model) => {
       const mockIdeMessenger = new MockIdeMessenger();
-      mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
+      mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
         () => new Promise<never>(() => {});
       const store = setupStore({ ideMessenger: mockIdeMessenger });
       store.dispatch({ type: "session/setBrokerModel", payload: model });
@@ -348,14 +400,16 @@ describe("Cukii Claude-parity input toolbar", () => {
         store,
       });
 
-      expect(await getElementByText("Bypass permissions")).toBeDefined();
-      expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+      expect(
+        document.querySelector('[aria-label="Toggle permission mode"]'),
+      ).toBeNull();
+      expect(store.getState().session.brokerPermissionMode).toBe("manual");
     },
   );
 
-  it("keeps the static Codex selector visible after a capability probe error", async () => {
+  it("keeps the Codex selector hidden after a capability probe error", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
       async () => {
         throw new Error("capability probe failed");
       };
@@ -370,10 +424,12 @@ describe("Cukii Claude-parity input toolbar", () => {
       store,
     });
 
-    expect(await getElementByText("Bypass permissions")).toBeDefined();
+    expect(
+      document.querySelector('[aria-label="Toggle permission mode"]'),
+    ).toBeNull();
   });
 
-  it("uses the verified cold-cache Kimi fallback before storing its model switch", async () => {
+  it("preserves explicit Kimi Bypass intent while the live probe is pending", async () => {
     let panelState: Record<string, unknown> = {};
     window.cukiiVscode = {
       getState: () => panelState,
@@ -382,8 +438,8 @@ describe("Cukii Claude-parity input toolbar", () => {
       },
     };
     const mockIdeMessenger = new MockIdeMessenger();
-    mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
-      () => new Promise<never>(() => {});
+    mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] = () =>
+      new Promise<never>(() => {});
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch(setBrokerPermissionMode("manual"));

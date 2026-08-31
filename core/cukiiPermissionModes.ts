@@ -7,11 +7,7 @@ import type { BrokerVendorId } from "./cukiiVendorRegistry";
 
 /** Canonical Cukii permission modes (Claude-parity ids). */
 export type CukiiPermissionMode =
-  | "manual"
-  | "editAutomatically"
-  | "plan"
-  | "auto"
-  | "bypass";
+  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
 
 export const CUKII_PERMISSION_MODE_ORDER: readonly CukiiPermissionMode[] = [
   "manual",
@@ -56,6 +52,9 @@ export type VendorPermissionCapabilities = {
   /** A noninteractive CLI transport with an intrinsic, non-flag permission policy. */
   nonInteractiveRoute?: "prompt-mode";
   cliVersion?: string;
+  /** Exact executable route and monotonic discovery generation on this host. */
+  route?: string;
+  generation?: number;
   helpSource: string;
 };
 
@@ -132,21 +131,23 @@ export function parseVendorPermissionCapabilities(
   vendor: BrokerVendorId,
   helpText: string,
   cliVersion?: string,
-  _claudePermissionPromptToolReady = false,
+  claudePermissionPromptToolReady = false,
 ): VendorPermissionCapabilities {
   const supported = new Set<CukiiPermissionMode>();
   const help = helpText.trim();
 
   switch (vendor) {
     case "claude": {
-      // Claude Code 2.1.251 accepts all five Cukii mode mappings.  Capability
-      // discovery must describe the native CLI, not hide valid rows because a
-      // separate prompt transport has not been instantiated yet.
       if (helpIncludes(help, "permission-mode") && helpIncludes(help, "plan")) {
         supported.add("plan");
-        supported.add("manual");
-        supported.add("editAutomatically");
-        supported.add("auto");
+        // Manual/Edit/Auto require the packaged permission-prompt MCP worker.
+        // Native help alone is not enough: without this transport those rows
+        // deadlock a headless bridge instead of enforcing their policy.
+        if (claudePermissionPromptToolReady) {
+          supported.add("manual");
+          supported.add("editAutomatically");
+          supported.add("auto");
+        }
       }
       if (helpIncludes(help, "dangerously-skip-permissions")) {
         supported.add("bypass");
@@ -188,7 +189,12 @@ export function parseVendorPermissionCapabilities(
       break;
     }
     case "qwen": {
+      if (helpIncludes(help, '"default"')) supported.add("manual");
+      if (helpIncludes(help, '"auto-edit"')) {
+        supported.add("editAutomatically");
+      }
       if (helpIncludes(help, '"plan"')) supported.add("plan");
+      if (helpIncludes(help, '"auto"')) supported.add("auto");
       if (helpIncludes(help, "yolo")) supported.add("bypass");
       break;
     }
@@ -383,13 +389,19 @@ function kimiPermissionArgv(_mode: CukiiPermissionMode): PermissionArgvSpec {
 }
 
 function qwenPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {
-  if (mode === "plan") {
-    return { args: ["--approval-mode", "plan"], forbidden: ["yolo"] };
-  }
-  if (mode === "bypass") {
-    return { args: ["--approval-mode", "yolo"], forbidden: ["plan"] };
-  }
-  return { args: [], forbidden: ["--approval-mode"] };
+  const nativeMode: Record<CukiiPermissionMode, string> = {
+    manual: "default",
+    editAutomatically: "auto-edit",
+    plan: "plan",
+    auto: "auto",
+    bypass: "yolo",
+  };
+  return {
+    args: ["--approval-mode", nativeMode[mode]],
+    forbidden: Object.values(nativeMode).filter(
+      (candidate) => candidate !== nativeMode[mode],
+    ),
+  };
 }
 
 export function permissionArgvForModel(

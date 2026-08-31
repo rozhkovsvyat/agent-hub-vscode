@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { clearPermissionCapabilityCacheForTests } from "./permissionCapabilities";
+import {
+  cacheVendorPermissionCapabilitiesForTests,
+  clearPermissionCapabilityCacheForTests,
+} from "./permissionCapabilities";
 
 import {
   bridgeControlPrompt,
@@ -144,8 +147,14 @@ describe("Cukii bridge controls", () => {
     });
   });
 
-  it("keeps Kimi K3 usable from a cold capability cache through prompt-mode", () => {
+  it("uses Kimi prompt-mode only after a live capability snapshot", () => {
     clearPermissionCapabilityCacheForTests();
+    cacheVendorPermissionCapabilitiesForTests("kimi-route:v0.38", {
+      vendor: "kimi",
+      supportedModes: ["bypass"],
+      nonInteractiveRoute: "prompt-mode",
+      helpSource: "live kimi probe",
+    });
     expect(permissionControlArgs("kimi-k3", "bypass")).toEqual([]);
     expect(() => permissionControlArgs("kimi-k3", "plan")).toThrow(
       "kimi has no verified permission mode",
@@ -155,17 +164,54 @@ describe("Cukii bridge controls", () => {
     );
   });
 
-  it("keeps Qwen bypass usable from a cold capability cache", () => {
-    clearPermissionCapabilityCacheForTests();
-    expect(permissionControlArgs("qwen-3-8-max", "bypass")).toEqual([
-      "--approval-mode",
-      "yolo",
-    ]);
-  });
+  it.each([
+    ["manual", "default"],
+    ["editAutomatically", "auto-edit"],
+    ["plan", "plan"],
+    ["auto", "auto"],
+    ["bypass", "yolo"],
+  ] as const)(
+    "routes Qwen %s through native approval mode %s",
+    (mode, native) => {
+      clearPermissionCapabilityCacheForTests();
+      cacheVendorPermissionCapabilitiesForTests("qwen-route:v0.22.2", {
+        vendor: "qwen",
+        supportedModes: [
+          "manual",
+          "editAutomatically",
+          "plan",
+          "auto",
+          "bypass",
+        ],
+        helpSource: "live qwen probe",
+      });
+      expect(permissionControlArgs("qwen-3-8-max", mode)).toEqual([
+        "--approval-mode",
+        native,
+      ]);
+    },
+  );
 
-  it("fails closed for an unsupported Qwen permission mode on a cold cache", () => {
+  it("fails closed before the Qwen executable snapshot is verified", () => {
     clearPermissionCapabilityCacheForTests();
     expect(() => permissionControlArgs("qwen-3-8-max", "manual")).toThrow(
+      "qwen permission capabilities have not been verified",
+    );
+  });
+
+  it("lets a newer Qwen probe replace stale permission capabilities", () => {
+    clearPermissionCapabilityCacheForTests();
+    cacheVendorPermissionCapabilitiesForTests("route:v1", {
+      vendor: "qwen",
+      supportedModes: ["bypass"],
+      helpSource: "qwen v1",
+    });
+    cacheVendorPermissionCapabilitiesForTests("route:v2", {
+      vendor: "qwen",
+      supportedModes: [],
+      helpSource: "qwen v2",
+    });
+    expect(() => permissionControlArgs("qwen-3-8-max", "bypass")).toThrow(
       "qwen has no verified permission mode",
     );
   });
