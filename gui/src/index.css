@@ -1120,8 +1120,8 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
-/* Messenger metadata is ordinary layout below the completed bubble. The old
-   absolute overlay could land on its final text/image line at narrow widths. */
+/* MAX-style message bubble: the receipt is inside the lower-right corner but
+   gets its own grid row, so long text and images can never be overlaid. */
 .cukii-user-message {
   display: inline-flex;
   flex-direction: column;
@@ -1130,20 +1130,40 @@ button.cukii-submit-button--stop:active {
   max-width: min(100%, 640px);
 }
 
-.cukii-user-message > .cukii-user-bubble {
+.cukii-user-message-bubble {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--vscode-input-background, var(--cukii-shell));
+  border: 1px solid var(--vscode-input-border, var(--cukii-line));
+  border-radius: 6px;
+}
+
+.cukii-user-message-bubble > .cukii-user-bubble {
+  grid-column: 1 / -1;
   min-width: 0;
   max-width: 100%;
 }
 
+.cukii-user-message-bubble .cukii-input-box {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
 .cukii-user-metadata {
+  grid-column: 2;
   display: inline-flex;
   align-items: baseline;
-  align-self: stretch;
+  justify-self: end;
   justify-content: flex-end;
   gap: 2px;
   min-height: 12px;
-  margin-top: 2px;
-  padding: 0 4px;
+  margin-top: 0;
+  padding: 0 6px 3px;
   color: var(--vscode-descriptionForeground, #a0a0a0);
   font-size: 10px;
   font-variant-numeric: tabular-nums;

@@ -158,7 +158,7 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
-  it("lays receipt metadata below every bubble instead of overlaying its content", () => {
+  it("lays receipt metadata inside the bubble without overlaying its content", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-message {");
     const metadata = css.indexOf(".cukii-user-metadata {");
@@ -169,13 +169,15 @@ describe("Cukii GUI contracts", () => {
     expect(bubbleContract).toContain("display: inline-flex;");
     expect(bubbleContract).toContain("flex-direction: column;");
     expect(bubbleContract).toContain("align-items: flex-start;");
+    expect(bubbleContract).toContain(".cukii-user-message-bubble");
+    expect(bubbleContract).toContain("display: inline-grid;");
     expect(bubbleContract).toContain(
-      ".cukii-user-message > .cukii-user-bubble",
+      "grid-template-columns: minmax(0, 1fr) auto;",
     );
     expect(bubbleContract).not.toContain("position: absolute");
-    expect(bubbleContract).not.toContain("padding-right: 52px");
-    expect(metadataContract).toContain("align-self: stretch;");
-    expect(metadataContract).toContain("margin-top: 2px;");
+    expect(metadataContract).toContain("grid-column: 2;");
+    expect(metadataContract).toContain("justify-self: end;");
+    expect(metadataContract).toContain("margin-top: 0;");
     expect(metadataContract).toContain("font-size: 10px;");
     expect(metadataContract).toContain("line-height: 12px;");
   });

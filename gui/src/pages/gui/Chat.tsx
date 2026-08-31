@@ -399,47 +399,51 @@ export function Chat() {
         const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
         const receiptStatus = item.messageReceipt?.status;
         const visualReceiptStatus =
-          receiptStatus === "read" ||
-          receiptStatus === "delivered" ||
-          receiptStatus === "deferred"
-            ? receiptStatus
-            : undefined;
+          receiptStatus === "read"
+            ? "read"
+            : receiptStatus === "queued" ||
+                receiptStatus === "delivered" ||
+                receiptStatus === "deferred"
+              ? "sent"
+              : undefined;
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
             <div className="cukii-user-message">
-              {errorBoundary(
-                <ContinueInputBox
-                  onEnter={(nextEditorState, modifiers) =>
-                    sendInput(nextEditorState, modifiers, historyIndex)
-                  }
-                  isLastUserInput={isLastUserInput(historyIndex)}
-                  isMainInput={false}
-                  editorState={editorState ?? message.content}
-                  contextItems={contextItems}
-                  appliedRules={appliedRules}
-                  inputId={message.id}
-                />,
-              )}
-              {sentTime && (
-                <span
-                  className="cukii-user-metadata"
-                  data-testid={`cukii-message-receipt-${message.id}`}
-                  aria-label={
-                    visualReceiptStatus === "read"
-                      ? `Sent ${sentTime}, read`
-                      : visualReceiptStatus
-                        ? visualReceiptStatus === "deferred"
+              <div className="cukii-user-message-bubble">
+                {errorBoundary(
+                  <ContinueInputBox
+                    onEnter={(nextEditorState, modifiers) =>
+                      sendInput(nextEditorState, modifiers, historyIndex)
+                    }
+                    isLastUserInput={isLastUserInput(historyIndex)}
+                    isMainInput={false}
+                    editorState={editorState ?? message.content}
+                    contextItems={contextItems}
+                    appliedRules={appliedRules}
+                    inputId={message.id}
+                  />,
+                )}
+                {sentTime && (
+                  <span
+                    className="cukii-user-metadata"
+                    data-testid={`cukii-message-receipt-${message.id}`}
+                    aria-label={
+                      visualReceiptStatus === "read"
+                        ? `Sent ${sentTime}, read`
+                        : receiptStatus === "deferred"
                           ? `Sent ${sentTime}, queued for the next turn`
-                          : `Sent ${sentTime}, delivered`
-                        : `Sent ${sentTime}`
-                  }
-                >
-                  <time>{sentTime}</time>
-                  {visualReceiptStatus && (
-                    <CukiiMessageReceiptStatus status={visualReceiptStatus} />
-                  )}
-                </span>
-              )}
+                          : visualReceiptStatus
+                            ? `Sent ${sentTime}, delivered`
+                            : `Sent ${sentTime}`
+                    }
+                  >
+                    <time>{sentTime}</time>
+                    {visualReceiptStatus && (
+                      <CukiiMessageReceiptStatus status={visualReceiptStatus} />
+                    )}
+                  </span>
+                )}
+              </div>
             </div>
           </div>,
         ];

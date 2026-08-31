@@ -4,9 +4,9 @@ import { CukiiMessageReceiptStatus } from "./CukiiMessageReceiptStatus";
 
 describe("CukiiMessageReceiptStatus", () => {
   it("renders one messenger check for a sent message", () => {
-    render(<CukiiMessageReceiptStatus status="delivered" />);
+    render(<CukiiMessageReceiptStatus status="sent" />);
 
-    const icon = screen.getByTestId("cukii-message-receipt-status-delivered");
+    const icon = screen.getByTestId("cukii-message-receipt-status-sent");
     expect(icon.tagName).toBe("svg");
     expect(icon.querySelectorAll("path")).toHaveLength(1);
   });

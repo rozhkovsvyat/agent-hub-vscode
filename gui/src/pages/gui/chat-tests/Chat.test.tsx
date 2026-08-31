@@ -228,7 +228,7 @@ test("user bubbles are not timeline items", async () => {
   expect(userBox?.closest(".cukii-timeline-checkpoint")).toBeNull();
 });
 
-test("follow-up metadata follows its bubble and renders a single sent SVG check", async () => {
+test("a queued follow-up immediately renders one sent check inside its bubble", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -242,7 +242,7 @@ test("follow-up metadata follows its bubble and renders a single sent SVG check"
             message: { id: "follow-up", role: "user", content: "Short text" },
             contextItems: [],
             isSteer: true,
-            steerStatus: "delivered",
+            steerStatus: "queued",
             steerSentAt: 1_700_000_000_000,
           },
         ],
@@ -255,14 +255,13 @@ test("follow-up metadata follows its bubble and renders a single sent SVG check"
   );
   expect(receipt?.textContent).toMatch(/^01:13$/);
   expect(
-    receipt?.querySelector(
-      '[data-testid="cukii-message-receipt-status-delivered"]',
-    ),
+    receipt?.querySelector('[data-testid="cukii-message-receipt-status-sent"]'),
   ).not.toBeNull();
   expect(container.textContent).not.toContain("Delivered");
-  const bubble = receipt?.previousElementSibling;
-  expect(bubble).toHaveClass("cukii-user-bubble");
-  expect(receipt?.parentElement).toHaveClass("cukii-user-message");
+  const bubble = receipt?.closest(".cukii-user-message-bubble");
+  expect(bubble).not.toBeNull();
+  expect(bubble?.querySelector(".cukii-user-bubble")).not.toBeNull();
+  expect(receipt?.parentElement).toHaveClass("cukii-user-message-bubble");
 });
 
 test("read follow-up uses the compact overlapping double-check SVG", async () => {
@@ -336,7 +335,9 @@ test("deferred image follow-up visibly reports that it will run next turn", asyn
   const receipt = container.querySelector(
     '[data-testid="cukii-message-receipt-image-follow-up"]',
   );
-  expect(receipt?.textContent).toMatch(/↷$/);
+  expect(
+    receipt?.querySelector('[data-testid="cukii-message-receipt-status-sent"]'),
+  ).not.toBeNull();
   expect(receipt).toHaveAttribute(
     "aria-label",
     expect.stringContaining("queued for the next turn"),

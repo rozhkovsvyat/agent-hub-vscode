@@ -1,4 +1,4 @@
-type ReceiptStatus = "delivered" | "read" | "deferred";
+type ReceiptStatus = "sent" | "read";
 
 interface CukiiMessageReceiptStatusProps {
   status: ReceiptStatus;
@@ -12,18 +12,6 @@ interface CukiiMessageReceiptStatusProps {
 export function CukiiMessageReceiptStatus({
   status,
 }: CukiiMessageReceiptStatusProps) {
-  if (status === "deferred") {
-    return (
-      <span
-        aria-hidden="true"
-        className="cukii-receipt-status cukii-receipt-status--deferred"
-        data-testid="cukii-message-receipt-status-deferred"
-      >
-        ↷
-      </span>
-    );
-  }
-
   const isRead = status === "read";
   return (
     <svg
