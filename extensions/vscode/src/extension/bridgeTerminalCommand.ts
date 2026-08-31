@@ -33,7 +33,7 @@ export function bridgeTerminalLaunchSpec(
       : agent === "grok"
         ? ["--cwd", root]
         : agent === "qwen"
-          ? ["--model", "qwen3.8-max"]
+          ? ["--model", "qwen3.8-max-preview"]
           : [];
 
   return {

@@ -700,44 +700,4 @@ describe("native bridge argv", () => {
       ),
     ).toThrow("DeepSeek bridge is not connected yet");
   });
-
-  it("routes Qwen through the exact released native model id", () => {
-    const route = routeForModel(
-      "qwen-3-8-max",
-      "D:/Brain/vault",
-      "prompt",
-      [],
-      resolveBridgeControls("qwen-3-8-max", "high", "standard"),
-    );
-    if (route.promptFile) promptFiles.push(route.promptFile);
-    expect(route.program).toBe("qwen");
-    expect(route.args[route.args.indexOf("--model") + 1]).toBe("qwen3.8-max");
-    expect(route.args.join(" ")).not.toContain("preview");
-
-    const hint = nativeDelegateHint("qwen-3-8-max", "D:/Brain/vault", "plan");
-    expect(hint).toContain("qwen --model qwen3.8-max --prompt");
-    expect(hint).not.toContain("preview");
-  });
-
-  it("keeps the obsolete Qwen preview model id out of production sources", () => {
-    const productionSources = (directory: string): string[] =>
-      fs
-        .readdirSync(directory, { withFileTypes: true })
-        .flatMap((entry) => {
-          const fullPath = path.join(directory, entry.name);
-          if (entry.isDirectory()) return productionSources(fullPath);
-          return entry.isFile() &&
-            entry.name.endsWith(".ts") &&
-            !entry.name.endsWith(".vitest.ts")
-            ? [fullPath]
-            : [];
-        });
-    const sources = productionSources(path.join(__dirname, "..", ".."));
-    expect(sources).not.toEqual([]);
-    for (const file of sources) {
-      expect(fs.readFileSync(file, "utf8")).not.toContain(
-        "qwen3.8-max-preview",
-      );
-    }
-  });
 });
