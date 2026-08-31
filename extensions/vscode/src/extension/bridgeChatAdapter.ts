@@ -47,6 +47,12 @@ import {
   removeBridgeScratchFile,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
+import {
+  RuntimeCanaryTrace,
+  runtimeCanaryExtensionBinding,
+  runtimeCanaryResult,
+  runtimeCanaryTurn,
+} from "./runtimeCanaryTrace";
 
 export type BridgeRoute = {
   label: string;
@@ -1193,6 +1199,21 @@ async function* streamBridgeChatWithSteer(
     controls,
     args.brokerPermissionMode,
   );
+  // The harness canary is deliberately limited to Kimi.  It carries a nonce
+  // from the exact submitted user turn and emits no record for normal chats.
+  const canaryTurn = runtimeCanaryTurn(args.messages);
+  const activeExtension = vscode.extensions.getExtension("cukii.cukii-vscode");
+  const extensionBinding = activeExtension
+    ? runtimeCanaryExtensionBinding(
+        activeExtension.extensionPath,
+        activeExtension.packageJSON.version,
+      )
+    : undefined;
+  const canary =
+    canaryTurn && args.brokerModel.startsWith("kimi") && extensionBinding
+      ? new RuntimeCanaryTrace(canaryTurn, args.brokerModel, extensionBinding)
+      : undefined;
+  canary?.record("ui_submit");
   let permissionBroker: ClaudePermissionBroker | undefined;
   if (
     ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(args.brokerModel) &&
@@ -1250,6 +1271,7 @@ async function* streamBridgeChatWithSteer(
     shell: false,
     windowsHide: true,
   });
+  canary?.record("bridge_dispatch");
   let cancelled = false;
   let done = false;
   const queue: BridgeEvent[] = [];
@@ -1374,6 +1396,12 @@ async function* streamBridgeChatWithSteer(
             : " Native CLI stopped before returning a normal response.") +
           (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
       );
+    }
+    if (!cancelled) {
+      canary?.record("vendor_completed", {
+        result: runtimeCanaryResult(code, rawStdout, stderr),
+        exit_code: code,
+      });
     }
     done = true;
   });
