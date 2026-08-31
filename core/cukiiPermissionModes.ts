@@ -1,3 +1,7 @@
+import {
+  isAlibabaChatModel,
+  isAlibabaNonChatCapability,
+} from "./cukiiAlibabaCatalog";
 import type { BrokerModel } from "./protocol/ideWebview";
 import type { BrokerVendorId } from "./cukiiVendorRegistry";
 
@@ -109,7 +113,13 @@ export function brokerVendorForModel(model: BrokerModel): BrokerVendorId {
   if (model === "composer-2-5" || model.startsWith("cursor:")) return "cursor";
   if (model.startsWith("kimi:") || model.startsWith("kimi-")) return "kimi";
   if (model === "deepseek-v4-pro") return "deepseek";
-  if (model === "qwen-3-8-max" || model.startsWith("qwen:")) return "qwen";
+  if (
+    isAlibabaChatModel(model) ||
+    isAlibabaNonChatCapability(model) ||
+    model.startsWith("qwen")
+  ) {
+    return "qwen";
+  }
   return "claude";
 }
 

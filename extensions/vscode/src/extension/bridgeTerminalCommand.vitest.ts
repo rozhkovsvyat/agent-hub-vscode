@@ -83,6 +83,22 @@ describe("interactive bridge terminal command", () => {
     ).toEqual(["--model", "qwen3.8-max"]);
   });
 
+  it("points Qwen at the Singapore compatible-mode endpoint without secrets", () => {
+    const spec = bridgeTerminalLaunchSpec(
+      "qwen",
+      "D:\\Brain\\repo",
+      "bridge-session",
+      "subagent",
+      "module",
+      "win32",
+    );
+    expect(spec.env.OPENAI_BASE_URL).toBe(
+      "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    );
+    expect(spec.env.OPENAI_BASE_URL).not.toContain("anthropic");
+    expect(JSON.stringify(spec)).not.toMatch(/sk-|api[_-]?key|BAILIAN_/i);
+  });
+
   it("keeps the interactive UI route free of WSL launch machinery", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "VsCodeExtension.ts"),

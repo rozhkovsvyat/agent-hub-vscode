@@ -46,6 +46,7 @@ import {
   openBridgeSession,
   recoverBridgeSession,
 } from "./bridgeUiClient";
+import { bindAlibabaSecretStore, alibabaSpawnEnv } from "./alibabaTokenPlan";
 import { bridgeTerminalLaunchSpec } from "./bridgeTerminalCommand";
 
 import { modelSupportsNextEdit } from "core/llm/autodetect";
@@ -208,6 +209,7 @@ export class VsCodeExtension {
     this.ide = new VsCodeIde(this.webviewProtocolPromise, context);
     this.ideUtils = new VsCodeIdeUtils();
     this.extensionContext = context;
+    bindAlibabaSecretStore(context.secrets);
     this.windowId = uuidv4();
 
     // Check if model supports next edit to determine if we should use full file diff.
@@ -343,7 +345,7 @@ export class VsCodeExtension {
           );
           if (!parent) return;
           const requestedWorker = await vscode.window.showQuickPick(
-            ["auto", "deepseek", "claude", "codex", "grok", "cursor", "qwen"],
+            ["auto", "qwen", "claude", "codex", "grok", "cursor", "deepseek"],
             {
               placeHolder: "Cukii: выберите vendor worker-а",
             },
@@ -557,12 +559,14 @@ export class VsCodeExtension {
                 role,
                 scope,
               );
+              const alibabaEnv =
+                agent === "qwen" ? await alibabaSpawnEnv("qwen-3-8-max") : {};
               const terminal = vscode.window.createTerminal({
                 name: `Cukii · ${agent} · ${role}`,
                 cwd: command.cwd,
                 shellPath: command.program,
                 shellArgs: command.args,
-                env: command.env,
+                env: { ...command.env, ...alibabaEnv },
               });
               terminal.show();
               void vscode.window.showInformationMessage(

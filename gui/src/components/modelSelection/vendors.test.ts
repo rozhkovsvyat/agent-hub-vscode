@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_MODELS,
   applyRuntimeVendorCatalog,
+  BROKER_MODEL_OPTIONS,
   cukiiCapabilityRating,
   displayModelLabel,
   presentVendorModels,
@@ -37,6 +38,14 @@ describe("Cukii model context labels", () => {
       "kimi-k3-256k": "Kimi K3-256K",
       "deepseek-v4-pro": "V4 Pro",
       "qwen-3-8-max": "Qwen 3.8 Max",
+      "qwen-3-8-flash": "Qwen 3.8 Flash",
+      "qwen-3-7-plus": "Qwen 3.7 Plus",
+      "qwen-3-7-max": "Qwen 3.7 Max",
+      "qwen-3-6-flash": "Qwen 3.6 Flash",
+      "qwen-deepseek-v4-pro-0813": "DeepSeek V4 Pro 0813",
+      "qwen-deepseek-v4-pro": "DeepSeek V4 Pro",
+      "qwen-deepseek-v4-flash-0731": "DeepSeek V4 Flash",
+      "qwen-glm-5-2": "GLM 5.2",
     });
   });
 
@@ -65,14 +74,34 @@ describe("Cukii model context labels", () => {
 
   it("uses one canonical vendor list in the picker", () => {
     expect(VENDORS.map((vendor) => vendor.label)).toEqual([
+      "Alibaba",
       "Anthropic",
       "OpenAI",
       "xAI",
       "Cursor",
       "Moonshot AI",
-      "Alibaba Cloud",
       "DeepSeek",
     ]);
+    expect(VENDORS[0]?.id).toBe("qwen");
+    expect(ALL_MODELS[0]?.value).toBe("qwen-3-8-max");
+    expect(BROKER_MODEL_OPTIONS[0]?.value).toBe("qwen-3-8-max");
+  });
+
+  it("does not put Alibaba image/audio/video capabilities in the chat picker", () => {
+    const picker = new Set(ALL_MODELS.map((model) => model.value));
+    for (const id of [
+      "qwen-image-3.0-pro",
+      "qwen-audio-3.0-asr-flash",
+      "qwen-audio-3.0-tts-plus",
+      "qwen-audio-3.0-realtime-plus",
+      "wan2.7-image",
+      "wan2.7-image-pro",
+      "happyhorse-1.1-i2v",
+      "happyhorse-1.1-t2v",
+      "happyhorse-1.1-r2v",
+    ]) {
+      expect(picker.has(id), id).toBe(false);
+    }
   });
 
   it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
@@ -89,7 +118,17 @@ describe("Cukii model context labels", () => {
       grok: ["grok-4-6", "grok-4-5"],
       cursor: ["composer-2-5"],
       kimi: ["kimi-k3", "kimi-k3-256k", "kimi-k2", "kimi-k2-highspeed"],
-      qwen: ["qwen-3-8-max"],
+      qwen: [
+        "qwen-3-8-max",
+        "qwen-3-7-max",
+        "qwen-deepseek-v4-pro-0813",
+        "qwen-deepseek-v4-pro",
+        "qwen-3-7-plus",
+        "qwen-glm-5-2",
+        "qwen-3-8-flash",
+        "qwen-3-6-flash",
+        "qwen-deepseek-v4-flash-0731",
+      ],
       deepseek: ["deepseek-v4-pro"],
     } as const;
 

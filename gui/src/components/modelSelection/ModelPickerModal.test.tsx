@@ -51,7 +51,7 @@ describe("ModelPickerModal", () => {
       store.dispatch(setBrokerPermissionMode("manual"));
     });
 
-    await user.click(await getElementByText("K3"));
+    await user.click(await getElementByText("Kimi K3"));
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
     expect(postSpy).toHaveBeenCalledWith(
       "cukii/setBrokerPreferences",
@@ -77,7 +77,7 @@ describe("ModelPickerModal", () => {
     await user.click(disabledModel);
 
     // Selection should not change from the default.
-    expect(store.getState().session.brokerModel).toBe("opus-5");
+    expect(store.getState().session.brokerModel).toBe("qwen-3-8-max");
   });
 
   it("renders compact monochrome SVG milk ratings with one accessible label", async () => {

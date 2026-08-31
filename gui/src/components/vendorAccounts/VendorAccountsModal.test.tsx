@@ -311,6 +311,41 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Not installed");
   });
 
+  it("shows Alibaba with shared login copy and no token field", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "qwen",
+        label: "Alibaba",
+        installed: true,
+        authenticated: false,
+        state: "disconnected",
+        accountLabel: "Not logged in",
+        actions: ["login"],
+      },
+      {
+        id: "codex",
+        label: "OpenAI",
+        installed: true,
+        authenticated: true,
+        state: "connected",
+        accountLabel: "owner@alibaba.example",
+        actions: ["logout"],
+      },
+    ];
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+    await getElementByText("Alibaba");
+    await getElementByText("Log in");
+    await getElementByText("Not logged in");
+    await getElementByText("Log out");
+    expect(document.body.textContent).not.toMatch(
+      /api key|token|sk-|endpoint|settings\.json/i,
+    );
+    expect(document.querySelector("input")).toBeNull();
+  });
+
   it("coalesces timer ticks without starving a slow current probe", async () => {
     vi.useFakeTimers();
     let unmount: (() => void) | undefined;

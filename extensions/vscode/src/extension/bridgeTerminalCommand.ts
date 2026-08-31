@@ -1,3 +1,5 @@
+import { ALIBABA_TOKEN_PLAN_COMPATIBLE_ENDPOINT } from "core/cukiiAlibabaCatalog";
+
 export interface BridgeTerminalLaunchSpec {
   program: string;
   args: string[];
@@ -44,6 +46,9 @@ export function bridgeTerminalLaunchSpec(
       AGENT_HUB_BRIDGE_SESSION: bridgeSessionId,
       AGENT_HUB_BRIDGE_ROLE: role,
       AGENT_HUB_BRIDGE_SCOPE: scope,
+      ...(agent === "qwen"
+        ? { OPENAI_BASE_URL: ALIBABA_TOKEN_PLAN_COMPATIBLE_ENDPOINT }
+        : {}),
     },
   };
 }

@@ -87,7 +87,11 @@ export function describeBridgeLaunch(program: string, args: string[]): string {
       i += 1;
       continue;
     }
-    redacted.push(args[i]);
+    redacted.push(
+      args[i]
+        .replace(/sk-sp-[A-Za-z0-9._~+/-]+/g, "sk-sp-[redacted]")
+        .replace(/sk-[A-Za-z0-9._~+/-]{8,}/g, "sk-[redacted]"),
+    );
   }
   return `${program} ${redacted.join(" ")}`;
 }

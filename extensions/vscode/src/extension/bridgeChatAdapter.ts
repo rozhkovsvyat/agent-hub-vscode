@@ -4,6 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { ChatMessage, MessageContent, PromptLog } from "core";
+import {
+  ALIBABA_CHAT_MODELS,
+  isAlibabaChatModel,
+  isAlibabaNonChatCapability,
+} from "core/cukiiAlibabaCatalog";
 import type {
   BrokerEffort,
   BrokerModel,
@@ -12,6 +17,7 @@ import type {
   CukiiPermissionMode,
 } from "core/protocol/ideWebview";
 import * as vscode from "vscode";
+import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
@@ -124,7 +130,9 @@ const MODEL_LABELS: Record<string, string> = {
   "kimi-k3": "Kimi K3",
   "kimi-k3-256k": "Kimi K3-256K",
   "deepseek-v4-pro": "DeepSeek V4 Pro",
-  "qwen-3-8-max": "Qwen 3.8 Max",
+  ...Object.fromEntries(
+    ALIBABA_CHAT_MODELS.map((model) => [model.value, model.label]),
+  ),
 };
 
 const CODEX_NATIVE_MODELS: Record<string, string> = {
@@ -392,6 +400,7 @@ function brokerAgentId(
   // Broker protocol пока использует claude worker-channel для Moonshot.
   if (kimiNativeModel(model) !== undefined || model === "kimi-k2")
     return "claude";
+  if (isAlibabaChatModel(model) || model.startsWith("qwen")) return "qwen";
   if (model === "deepseek-v4-pro") return "deepseek";
   return "qwen";
 }
@@ -431,9 +440,13 @@ export function nativeDelegateHint(
       return `claude --model claude-haiku-4-5${suffix} -p "<task>"`;
     case "composer-2-5":
       return `${process.platform === "win32" ? "agent" : "cursor-agent"} -p --output-format text --model composer-2.5${suffix}`;
-    case "qwen-3-8-max":
-      return `qwen --model qwen3.8-max --prompt "<task>" --output-format stream-json${suffix}`;
     default:
+      if (isAlibabaNonChatCapability(model)) {
+        return `${displayBridgeModel(model)} is Coming soon`;
+      }
+      if (isAlibabaChatModel(model) || model.startsWith("qwen")) {
+        return `qwen ${alibabaQwenArgv(model).join(" ")} --prompt "<task>" --output-format stream-json${suffix}`;
+      }
       return `${displayBridgeModel(model)} bridge route`;
   }
 }
@@ -704,6 +717,9 @@ export function routeForModel(
   // deliberate transport error below.
   if (model === "deepseek-v4-pro") {
     throw new Error("DeepSeek bridge is not connected yet");
+  }
+  if (isAlibabaNonChatCapability(model)) {
+    throw new Error(`${displayBridgeModel(model)} is Coming soon`);
   }
   const permissionArgs = permissionControlArgs(model, permissionMode);
   const claudeModel = {
@@ -986,25 +1002,25 @@ export function routeForModel(
       throw new Error(
         "DeepSeek bridge is not connected yet. Select another model.",
       );
-    case "qwen-3-8-max":
-      return {
-        label: displayBridgeModel(model),
-        program: "qwen",
-        args: [
-          "--model",
-          "qwen3.8-max",
-          "--prompt",
-          "Follow the Cukii broker instructions supplied on stdin.",
-          "--output-format",
-          "stream-json",
-          ...permissionArgs,
-        ],
-        // Qwen Code stream-json follows the assistant/user/result envelope
-        // consumed by the same parser as Claude and Grok.
-        format: "anthropic-envelope",
-        logFile,
-      };
     default:
+      if (isAlibabaChatModel(model) || model.startsWith("qwen")) {
+        return {
+          label: displayBridgeModel(model),
+          program: "qwen",
+          args: [
+            ...alibabaQwenArgv(model),
+            "--prompt",
+            "Follow the Cukii broker instructions supplied on stdin.",
+            "--output-format",
+            "stream-json",
+            ...permissionArgs,
+          ],
+          // Qwen Code compatible-mode stream-json follows the assistant/user/result
+          // envelope consumed by the same parser as Claude and Grok.
+          format: "anthropic-envelope",
+          logFile,
+        };
+      }
       if (model.startsWith("kimi:")) {
         const modelArg = kimiNativeModel(model);
         return routeForModel(
@@ -1275,7 +1291,10 @@ async function* streamBridgeChatWithSteer(
 
   const child = childProcess.spawn(command.program, command.args, {
     cwd,
-    env: bridgeEnv(args.brokerModel, args.brokerSubagent),
+    env: {
+      ...bridgeEnv(args.brokerModel, args.brokerSubagent),
+      ...(await alibabaSpawnEnv(args.brokerModel)),
+    },
     shell: false,
     windowsHide: true,
   });

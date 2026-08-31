@@ -4,6 +4,7 @@ import type {
   BrokerModel,
   BrokerSubagent,
 } from "core/protocol/ideWebview";
+import { alibabaChatCatalog } from "core/cukiiAlibabaCatalog";
 import { CUKII_VENDOR_REGISTRY } from "core/cukiiVendorRegistry";
 import {
   canonicalCukiiModelDescription,
@@ -139,14 +140,8 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
   },
   {
     id: "qwen",
-    label: "Alibaba Cloud",
-    models: [
-      {
-        value: "qwen-3-8-max",
-        label: "Qwen 3.8 Max",
-        contextWindowLabel: "1M",
-      },
-    ],
+    label: "Alibaba",
+    models: alibabaChatCatalog(),
   },
 ];
 

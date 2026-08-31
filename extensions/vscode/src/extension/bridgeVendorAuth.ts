@@ -1,6 +1,9 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash } from "crypto";
-import { cukiiVendorLabel } from "core/cukiiVendorRegistry";
+import {
+  CUKII_VENDOR_REGISTRY,
+  cukiiVendorLabel,
+} from "core/cukiiVendorRegistry";
 import type {
   BrokerVendorAuthAction,
   BrokerVendorAuthStatus,
@@ -12,6 +15,7 @@ import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
+import { alibabaIdentity } from "./alibabaTokenPlan";
 
 const execFileAsync = promisify(execFile);
 type ProcessTreeRunner = (program: string, args: string[]) => Promise<unknown>;
@@ -196,6 +200,14 @@ export function accountLabelFromAuthMetadata(
       if (label) return label;
     }
   }
+  if (vendor === "qwen") {
+    return (
+      safeEmail(stringAt(metadata, "email", "accountLabel")) ??
+      safeEmail(
+        stringAt(isRecord(metadata) ? metadata.account : undefined, "email"),
+      )
+    );
+  }
   return undefined;
 }
 
@@ -300,120 +312,15 @@ function identityFromNativeCliOutput(
   return sanitizedNativeCliIdentity(candidate);
 }
 
-function qwenOauthSelected(metadata: unknown): boolean {
-  if (!isRecord(metadata) || !isRecord(metadata.security)) return false;
-  return (
-    isRecord(metadata.security.auth) &&
-    metadata.security.auth.selectedType === "qwen-oauth"
-  );
-}
-
-function hasPresentSecret(value: unknown): boolean {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function safeQwenModelId(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 64) return undefined;
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(trimmed)) return undefined;
-  if (/(?:api[-_]?key|token|secret|password|bearer)/i.test(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function qwenCodingPlanConfigured(metadata: unknown): boolean {
-  return (
-    isRecord(metadata) &&
-    isRecord(metadata.codingPlan) &&
-    metadata.codingPlan.configured === true
-  );
-}
-
-function qwenSessionConnected(metadata: unknown): boolean {
-  return qwenOauthSelected(metadata) || qwenCodingPlanConfigured(metadata);
-}
-
-function readSmallJson(file: string): unknown {
-  try {
-    if (!fs.existsSync(file)) return undefined;
-    const stat = fs.statSync(file);
-    if (!stat.isFile() || stat.size > 64 * 1024) return undefined;
-    return JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Local Qwen/Bailian files may contain provider tokens. Copy only safe form
- * fields and a boolean credential presence flag; never the secret itself.
- */
-export function sanitizeQwenLocalAuth(
-  settings: unknown,
-  bailian?: unknown,
-): {
-  security: { auth: { selectedType?: string } };
-  model?: { name?: string };
-  codingPlan?: { configured: boolean; model?: string };
-} {
-  const settingsRecord = isRecord(settings) ? settings : undefined;
-  const security = isRecord(settingsRecord?.security)
-    ? settingsRecord.security
-    : undefined;
+function qwenTokenPlanConnected(metadata: unknown): boolean {
+  if (!isRecord(metadata)) return false;
+  if (metadata.credentialPresent === true) return true;
+  const security = isRecord(metadata.security) ? metadata.security : undefined;
   const auth = isRecord(security?.auth) ? security.auth : undefined;
-  const model = isRecord(settingsRecord?.model)
-    ? settingsRecord.model
-    : undefined;
-  const env = isRecord(settingsRecord?.env) ? settingsRecord.env : undefined;
-  const providers = isRecord(settingsRecord?.modelProviders)
-    ? settingsRecord.modelProviders
-    : undefined;
-  const openaiProviders = Array.isArray(providers?.openai)
-    ? providers.openai
-    : [];
-
-  const selectedType = stringAt(auth, "selectedType");
-  const modelName =
-    safeQwenModelId(stringAt(model, "name")) ??
-    openaiProviders
-      .map((entry) => safeQwenModelId(stringAt(entry, "id")))
-      .find((id): id is string => Boolean(id));
-
-  const settingsCredential =
-    hasPresentSecret(auth?.apiKey) || hasPresentSecret(env?.DASHSCOPE_API_KEY);
-
-  const bailianRecord = isRecord(bailian) ? bailian : undefined;
-  const tokenPlan = isRecord(bailianRecord?.["token-plan"])
-    ? bailianRecord["token-plan"]
-    : undefined;
-  const activeConfig = stringAt(bailianRecord, "active_config");
-  const bailianCredential = hasPresentSecret(tokenPlan?.api_key);
-  const bailianModel = safeQwenModelId(
-    stringAt(tokenPlan, "default_text_model"),
+  return (
+    isRecord(metadata.tokenPlan) &&
+    (auth?.selectedType === "openai" || auth?.selectedType === "token-plan")
   );
-
-  const codingPlanForm =
-    selectedType === "openai" || activeConfig === "token-plan";
-  const configured =
-    Boolean(codingPlanForm) && (settingsCredential || bailianCredential);
-  const codingPlanModel = bailianModel ?? modelName;
-
-  return {
-    security: {
-      auth: { selectedType },
-    },
-    ...(modelName ? { model: { name: modelName } } : {}),
-    ...(codingPlanForm
-      ? {
-          codingPlan: {
-            configured,
-            ...(codingPlanModel ? { model: codingPlanModel } : {}),
-          },
-        }
-      : {}),
-  };
 }
 
 function parseJson(value: string): unknown {
@@ -510,8 +417,8 @@ export function classifyVendorAuthOutput(
       ? connected(accountLabel, ["logout"])
       : unknown();
   }
-  return qwenSessionConnected(parseJson(text))
-    ? connected(accountLabel, [])
+  return qwenTokenPlanConnected(parseJson(text))
+    ? connected(accountLabel, ["logout"])
     : disconnected();
 }
 
@@ -1209,12 +1116,6 @@ export function localKimiCredentials(
 
 function localMetadata(vendor: VendorWithCli): unknown {
   const userHome = os.homedir();
-  if (vendor === "qwen") {
-    return sanitizeQwenLocalAuth(
-      readSmallJson(path.join(userHome, ".qwen", "settings.json")),
-      readSmallJson(path.join(userHome, ".bailian", "config.json")),
-    );
-  }
   const file =
     vendor === "codex"
       ? path.join(userHome, ".codex", "auth.json")
@@ -1304,6 +1205,30 @@ function unavailableVendorStatus(
   };
 }
 
+async function qwenAuthProbePayload(metadata: unknown): Promise<{
+  output: string;
+  identity?: string;
+}> {
+  if (metadata !== undefined) {
+    const identity = accountLabelFromAuthMetadata("qwen", metadata);
+    return {
+      output: JSON.stringify({
+        ...(isRecord(metadata) ? metadata : {}),
+        credentialPresent: qwenTokenPlanConnected(metadata),
+      }),
+      identity,
+    };
+  }
+  const identity = await alibabaIdentity();
+  return {
+    output: JSON.stringify({
+      credentialPresent: identity.authenticated,
+      accountLabel: identity.accountLabel,
+    }),
+    identity: identity.authenticated ? identity.accountLabel : undefined,
+  };
+}
+
 /** Exercise the production native-child probe against one known executable. */
 export async function probeVendorExecutable(
   vendor: VendorWithCli,
@@ -1311,10 +1236,16 @@ export async function probeVendorExecutable(
   options: VendorProbeOptions = {},
 ): Promise<BrokerVendorAuthStatus> {
   const metadata =
-    "metadata" in options ? options.metadata : localMetadata(vendor);
+    vendor === "qwen" && !("metadata" in options)
+      ? undefined
+      : "metadata" in options
+        ? options.metadata
+        : localMetadata(vendor);
   const identity = accountLabelFromAuthMetadata(vendor, metadata);
   const spec = probeSpec(vendor, executable);
   if (!spec) return unavailableVendorStatus(vendor);
+  const qwenProbe =
+    vendor === "qwen" ? await qwenAuthProbePayload(metadata) : undefined;
   try {
     const { stdout, stderr } = await execFileAsync(spec.program, spec.args, {
       timeout: options.timeoutMs ?? 10_000,
@@ -1322,10 +1253,7 @@ export async function probeVendorExecutable(
       maxBuffer: 256 * 1024,
       windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
-    const output =
-      vendor === "qwen"
-        ? JSON.stringify(metadata ?? {})
-        : `${stdout}\n${stderr}`;
+    const output = qwenProbe ? qwenProbe.output : `${stdout}\n${stderr}`;
     const kimiEmail =
       vendor === "kimi" &&
       !identity &&
@@ -1340,7 +1268,11 @@ export async function probeVendorExecutable(
       id: vendor,
       label: cukiiVendorLabel(vendor),
       installed: true,
-      ...classifyVendorAuthOutput(vendor, output, identity ?? kimiEmail),
+      ...classifyVendorAuthOutput(
+        vendor,
+        output,
+        identity ?? qwenProbe?.identity ?? kimiEmail,
+      ),
     };
   } catch (error) {
     // A wrapper that exists but fails internally is still installed. In
@@ -1349,13 +1281,16 @@ export async function probeVendorExecutable(
     if (isMissingCliError(error) && !fs.existsSync(executable)) {
       return notInstalledVendorStatus(vendor);
     }
-    const output =
-      vendor === "qwen" ? JSON.stringify(metadata ?? {}) : errorText(error);
+    const output = qwenProbe ? qwenProbe.output : errorText(error);
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
       installed: true,
-      ...classifyVendorAuthOutput(vendor, output, identity),
+      ...classifyVendorAuthOutput(
+        vendor,
+        output,
+        identity ?? qwenProbe?.identity,
+      ),
     };
   }
 }
@@ -1378,8 +1313,8 @@ export async function listBrokerVendorAccounts(): Promise<
   BrokerVendorAuthStatus[]
 > {
   const live = await Promise.all(
-    (["claude", "codex", "grok", "cursor", "kimi", "qwen"] as const).map(
-      probeVendor,
+    CUKII_VENDOR_REGISTRY.filter((vendor) => vendor.id !== "deepseek").map(
+      (vendor) => probeVendor(vendor.id as VendorWithCli),
     ),
   );
   return [...live, notSupportedVendorStatus()];
@@ -1423,9 +1358,6 @@ export function vendorAuthTerminalCommand(
     },
     qwen: {
       install: "npm install -g @qwen-code/qwen-code@latest",
-      // Interactive OAuth only. A configured Coding Plan is already connected,
-      // so Manage Accounts does not need this button in that case.
-      login: "qwen /auth",
     },
   };
   const command = install

@@ -101,4 +101,15 @@ describe("describeBridgeLaunch", () => {
     expect(line).not.toContain("data:image");
     expect(line).not.toContain(json.slice(0, 40));
   });
+
+  it("redacts Alibaba token-plan secrets if they ever reach argv", () => {
+    const line = describeBridgeLaunch("qwen", [
+      "--model",
+      "qwen3.8-max",
+      "sk-sp-should-never-be-logged",
+    ]);
+    expect(line).toContain("qwen3.8-max");
+    expect(line).toContain("sk-sp-[redacted]");
+    expect(line).not.toContain("sk-sp-should-never-be-logged");
+  });
 });

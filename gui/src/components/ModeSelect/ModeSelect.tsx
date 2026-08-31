@@ -51,7 +51,7 @@ export function ModeSelect() {
         return;
       }
       ideMessenger.post("cukii/setBrokerPreferences", {
-        brokerModel: brokerModel ?? "opus-5",
+        brokerModel: brokerModel ?? "qwen-3-8-max",
         brokerSubagent: brokerSubagent ?? "auto",
         brokerEffort,
         brokerSpeed,

@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import { alibabaChatCatalog } from "core/cukiiAlibabaCatalog";
 import {
   CUKII_VENDOR_REGISTRY,
   cukiiVendorLabel,
@@ -84,13 +85,7 @@ const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
       contextWindowLabel: "256K",
     },
   ],
-  qwen: [
-    {
-      value: "qwen-3-8-max",
-      label: "Qwen 3.8 Max",
-      contextWindowLabel: "1M",
-    },
-  ],
+  qwen: alibabaChatCatalog(),
   deepseek: [
     {
       value: "deepseek-v4-pro",

@@ -20,6 +20,7 @@ import type {
   CukiiPermissionMode,
   CukiiSteerReceipt,
 } from "core/protocol/ideWebview";
+import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
 import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
 import {
@@ -61,6 +62,7 @@ import {
 import { BridgeSteeringController } from "./bridgeSteer";
 import { BridgeRunCancellation } from "./bridgeRunCancellation";
 import { allVendorPermissionCapabilities } from "./permissionCapabilities";
+import { runAlibabaAuthAction } from "./alibabaTokenPlan";
 import {
   clearBrokerVendorAccountCache,
   listBrokerVendorAccounts,
@@ -531,7 +533,7 @@ export class VsCodeMessenger {
     this.onWebview("cukii/getBrokerPreferences", () => ({
       brokerModel: this.context.globalState.get<BrokerModel>(
         "cukii.brokerModel",
-        "opus-5",
+        CUKII_DEFAULT_BROKER_MODEL,
       ),
       brokerSubagent: this.context.globalState.get<BrokerSubagent>(
         "cukii.brokerSubagent",
@@ -650,10 +652,25 @@ export class VsCodeMessenger {
     );
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
       clearBrokerVendorAccountCache();
-      const spec = vendorAuthTerminalCommand(
-        msg.data.vendor as BrokerVendorId,
-        msg.data.action as BrokerVendorAuthAction,
-      );
+      const vendor = msg.data.vendor as BrokerVendorId;
+      const action = msg.data.action as BrokerVendorAuthAction;
+      if (vendor === "qwen" && (action === "login" || action === "logout")) {
+        const result = await runAlibabaAuthAction(action, {
+          host: {
+            openExternal: (url) =>
+              vscode.env.openExternal(vscode.Uri.parse(url)),
+            readClipboard: () => vscode.env.clipboard.readText(),
+            promptSecret: () =>
+              vscode.window.showInputBox({
+                password: true,
+                ignoreFocusOut: true,
+                title: "Alibaba",
+              }),
+          },
+        });
+        if (result) return result;
+      }
+      const spec = vendorAuthTerminalCommand(vendor, action);
       if (!spec) {
         return {
           opened: false,
@@ -670,7 +687,7 @@ export class VsCodeMessenger {
       return {
         opened: true,
         message:
-          msg.data.action === "install"
+          action === "install"
             ? "Latest CLI installation opened in the integrated terminal."
             : "Authentication flow opened in the integrated terminal.",
       };

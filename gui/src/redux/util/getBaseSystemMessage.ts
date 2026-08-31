@@ -27,6 +27,14 @@ export const BROKER_MODEL_LABELS: Record<string, string> = {
   "kimi-k3": "K3",
   "kimi-k3-256k": "K3-256K",
   "qwen-3-8-max": "Qwen 3.8 Max",
+  "qwen-3-8-flash": "Qwen 3.8 Flash",
+  "qwen-3-7-plus": "Qwen 3.7 Plus",
+  "qwen-3-7-max": "Qwen 3.7 Max",
+  "qwen-3-6-flash": "Qwen 3.6 Flash",
+  "qwen-deepseek-v4-pro-0813": "DeepSeek V4 Pro 0813",
+  "qwen-deepseek-v4-pro": "DeepSeek V4 Pro",
+  "qwen-deepseek-v4-flash-0731": "DeepSeek V4 Flash",
+  "qwen-glm-5-2": "GLM 5.2",
 };
 
 function brokerModelLabel(value?: string): string | undefined {

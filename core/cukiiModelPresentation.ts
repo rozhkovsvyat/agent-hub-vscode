@@ -74,6 +74,22 @@ export function canonicalCukiiModelDescription(
       : "Coding model for completion and routine development";
   if (matches(/qwen[-\s]?3[.-]8[-\s]max/))
     return "Max model for tool use and agent workflows";
+  if (matches(/qwen[-\s]?3[.-]8[-\s]flash/))
+    return "Fast Alibaba model for everyday coding";
+  if (matches(/qwen[-\s]?3[.-]7[-\s]plus/))
+    return "Vision-capable Alibaba model for coding and screenshots";
+  if (matches(/qwen[-\s]?3[.-]7[-\s]max/))
+    return "High-capacity Alibaba model for agentic coding";
+  if (matches(/qwen[-\s]?3[.-]6[-\s]flash/))
+    return "Fast Alibaba model for routine development";
+  if (matches(/qwen[-\s]?deepseek[-\s]?v4[-\s]?pro[-\s]?0813/))
+    return "Dated DeepSeek Pro checkpoint on Alibaba Token Plan";
+  if (matches(/qwen[-\s]?deepseek[-\s]?v4[-\s]?flash/))
+    return "Fast DeepSeek model on Alibaba Token Plan";
+  if (matches(/qwen[-\s]?deepseek[-\s]?v4[-\s]?pro/))
+    return "DeepSeek Pro on Alibaba Token Plan";
+  if (matches(/qwen[-\s]?glm[-\s]?5[.-]2/))
+    return "GLM reasoning model on Alibaba Token Plan";
   if (matches(/gemini/)) return "Gemini model available through Cursor";
   if (matches(/glm/)) return "GLM model available through Cursor";
   if (matches(/deepseek/)) return "DeepSeek coding model";
@@ -96,7 +112,9 @@ export function cukiiCapabilityRating(
     matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
     matches(/gpt[-\s]?5[.-]5/) ||
     matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
-    matches(/qwen[-\s]?3[.-]8[-\s]max/)
+    matches(/qwen[-\s]?3[.-]8[-\s]max/) ||
+    matches(/qwen[-\s]?3[.-]7[-\s]max/) ||
+    matches(/deepseek[-\s]?v4[-\s]?pro/)
   ) {
     return 3;
   }
@@ -104,7 +122,9 @@ export function cukiiCapabilityRating(
     matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
     matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
     matches(/gpt[-\s]?5[.-]4/) ||
-    matches(/(?:^|[-\s])grok(?:[-\s]|$)/)
+    matches(/(?:^|[-\s])grok(?:[-\s]|$)/) ||
+    matches(/qwen[-\s]?3[.-]7[-\s]plus/) ||
+    matches(/glm[-\s]?5[.-]2/)
   ) {
     return 2;
   }

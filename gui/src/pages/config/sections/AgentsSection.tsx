@@ -4,6 +4,7 @@ import { IdeMessengerContext } from "../../../context/IdeMessenger";
 import { ConfigHeader } from "../components/ConfigHeader";
 
 const NATIVE_AGENTS = [
+  { id: "qwen", title: "Alibaba", detail: "Native Qwen Code CLI" },
   {
     id: "deepseek",
     title: "DeepSeek",
@@ -17,7 +18,6 @@ const NATIVE_AGENTS = [
     title: "Cursor",
     detail: "Native Cursor Agent for Windows",
   },
-  { id: "qwen", title: "Qwen", detail: "Native Qwen Code CLI" },
 ] as const;
 
 export function AgentsSection() {

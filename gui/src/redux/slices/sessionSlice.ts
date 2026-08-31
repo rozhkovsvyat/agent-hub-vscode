@@ -407,7 +407,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamAborter: new AbortController(),
   symbols: {},
   mode: "broker",
-  brokerModel: "opus-5",
+  brokerModel: "qwen-3-8-max",
   brokerSubagent: "auto",
   brokerEffort: "high",
   brokerSpeed: "standard",
@@ -1004,7 +1004,7 @@ export const sessionSlice = createSlice({
         if (payload.mode) {
           state.mode = payload.mode;
         }
-        state.brokerModel = payload.brokerModel ?? "opus-5";
+        state.brokerModel = payload.brokerModel ?? "qwen-3-8-max";
         state.brokerSubagent = payload.brokerSubagent ?? "auto";
         state.brokerEffort = payload.brokerEffort ?? "high";
         state.brokerSpeed = payload.brokerSpeed ?? "standard";
@@ -1027,7 +1027,7 @@ export const sessionSlice = createSlice({
         state.revision = 0;
         state.id = uuidv4();
         state.mode = "broker";
-        state.brokerModel = "opus-5";
+        state.brokerModel = "qwen-3-8-max";
         state.brokerSubagent = "auto";
         state.brokerEffort = "high";
         state.brokerSpeed = "standard";
@@ -1313,7 +1313,7 @@ export const sessionSlice = createSlice({
       action: PayloadAction<{ model: BrokerModel; displayName: string }>,
     ) => {
       const { model, displayName } = action.payload;
-      if ((state.brokerModel ?? "opus-5") === model) return;
+      if ((state.brokerModel ?? "qwen-3-8-max") === model) return;
 
       state.brokerModel = model;
       state.brokerPermissionMode = reconcilePermissionModeForBrokerModel(

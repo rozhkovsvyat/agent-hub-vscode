@@ -166,5 +166,21 @@ describe("Cukii live subscription model catalog", () => {
     expect(staticCatalogForUnavailableDiscovery("qwen")).toContainEqual(
       expect.objectContaining({ value: "qwen-3-8-max" }),
     );
+    expect(
+      staticCatalogForUnavailableDiscovery("qwen").map((model) => model.value),
+    ).toEqual([
+      "qwen-3-8-max",
+      "qwen-3-8-flash",
+      "qwen-3-7-plus",
+      "qwen-3-7-max",
+      "qwen-3-6-flash",
+      "qwen-deepseek-v4-pro-0813",
+      "qwen-deepseek-v4-pro",
+      "qwen-deepseek-v4-flash-0731",
+      "qwen-glm-5-2",
+    ]);
+    expect(
+      staticCatalogForUnavailableDiscovery("qwen").map((model) => model.value),
+    ).not.toContain("qwen-image-3.0-pro");
   });
 });

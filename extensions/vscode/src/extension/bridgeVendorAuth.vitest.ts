@@ -79,12 +79,14 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput(
         "qwen",
-        '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
+        '{"credentialPresent":true,"accountLabel":"owner@alibaba.example"}',
+        "owner@alibaba.example",
       ),
     ).toMatchObject({
       state: "connected",
       authenticated: true,
-      accountLabel: "Connected",
+      accountLabel: "owner@alibaba.example",
+      actions: ["logout"],
     });
   });
 
@@ -113,6 +115,12 @@ describe("Cukii vendor CLI accounts", () => {
         ],
       }),
     ).toBeUndefined();
+    expect(
+      accountLabelFromAuthMetadata("qwen", {
+        email: "owner@alibaba.example",
+        credentialPresent: true,
+      }),
+    ).toBe("owner@alibaba.example");
     expect(
       accountLabelFromAuthMetadata("kimi", {
         credentials: [{ access_token: "not-a-jwt" }],
@@ -774,13 +782,21 @@ describe("Cukii vendor CLI accounts", () => {
       labels.length,
     );
     expect(
+      classifyVendorAuthOutput("qwen", '{"credentialPresent":true}'),
+    ).toMatchObject({
+      state: "connected",
+      accountLabel: "Connected",
+      actions: ["logout"],
+    });
+    expect(
       classifyVendorAuthOutput(
         "qwen",
         '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
       ),
     ).toMatchObject({
-      state: "connected",
-      accountLabel: "Connected",
+      state: "disconnected",
+      accountLabel: "Not logged in",
+      actions: ["login"],
     });
   });
 
@@ -1035,9 +1051,7 @@ describe("Cukii vendor CLI accounts", () => {
       followup: "/logout",
     });
     expect(vendorAuthTerminalCommand("qwen", "logout")).toBeUndefined();
-    expect(vendorAuthTerminalCommand("qwen", "login")?.command).toBe(
-      "qwen /auth",
-    );
+    expect(vendorAuthTerminalCommand("qwen", "login")).toBeUndefined();
     expect(vendorAuthTerminalCommand("deepseek", "login")).toBeUndefined();
   });
 
@@ -1121,7 +1135,10 @@ describe("Cukii vendor CLI accounts", () => {
           { metadata: undefined },
         ),
         probeVendorExecutable("qwen", fixture("qwen", "echo 0.22.2"), {
-          metadata: { security: { auth: { selectedType: "qwen-oauth" } } },
+          metadata: {
+            credentialPresent: true,
+            email: "alibaba@example.test",
+          },
         }),
       ]);
 
@@ -1135,6 +1152,12 @@ describe("Cukii vendor CLI accounts", () => {
       ]);
       expect(statuses[2].accountLabel).toBe("xai@example.test");
       expect(statuses[4].accountLabel).toBe("kimi@example.test");
+      expect(statuses[5]).toMatchObject({
+        id: "qwen",
+        label: "Alibaba",
+        accountLabel: "alibaba@example.test",
+        actions: ["logout"],
+      });
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

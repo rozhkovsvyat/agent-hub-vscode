@@ -716,4 +716,52 @@ describe("native bridge argv", () => {
       ),
     ).toThrow("DeepSeek bridge is not connected yet");
   });
+
+  it("routes Alibaba chat models through native Qwen compatible argv", () => {
+    const route = routeForModel(
+      "qwen-3-8-max",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("qwen-3-8-max", "high", "standard"),
+      "bypass",
+    );
+    expect(route.program).toBe("qwen");
+    expect(route.args.slice(0, 4)).toEqual([
+      "--model",
+      "qwen3.8-max",
+      "--prompt",
+      "Follow the Cukii broker instructions supplied on stdin.",
+    ]);
+    expect(route.args).toContain("stream-json");
+    expect(route.args.join(" ")).not.toContain("qwen3.8-max-preview");
+    expect(route.args.join(" ")).not.toContain("anthropic");
+    expect(nativeDelegateHint("qwen-glm-5-2", "D:/Brain/vault", "plan")).toBe(
+      'qwen --model glm-5.2 --prompt "<task>" --output-format stream-json --approval-mode plan',
+    );
+  });
+
+  it("does not invent fake chat routes for Alibaba image/audio/video models", () => {
+    for (const model of [
+      "qwen-image-3.0-pro",
+      "qwen-audio-3.0-asr-flash",
+      "qwen-audio-3.0-tts-plus",
+      "qwen-audio-3.0-realtime-plus",
+      "wan2.7-image",
+      "wan2.7-image-pro",
+      "happyhorse-1.1-i2v",
+      "happyhorse-1.1-t2v",
+      "happyhorse-1.1-r2v",
+    ]) {
+      expect(() =>
+        routeForModel(
+          model,
+          "D:/Brain/vault",
+          "prompt",
+          [],
+          resolveBridgeControls("qwen-3-8-max", "high", "standard"),
+        ),
+      ).toThrow("Coming soon");
+    }
+  });
 });

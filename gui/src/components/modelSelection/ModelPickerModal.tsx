@@ -26,7 +26,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
   const currentModel =
-    useAppSelector((state) => state.session.brokerModel) ?? "opus-5";
+    useAppSelector((state) => state.session.brokerModel) ?? "qwen-3-8-max";
   const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
   const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
   const thinkingEnabled = useAppSelector(
