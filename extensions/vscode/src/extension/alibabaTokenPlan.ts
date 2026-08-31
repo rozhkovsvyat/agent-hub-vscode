@@ -19,6 +19,7 @@ export const ALIBABA_SECRET_KEY = "cukii.alibaba.tokenPlanCredential";
 const SETTINGS_ENV_KEYS = [
   ALIBABA_TOKEN_PLAN_ENV_KEY,
   "BAILIAN_CODING_PLAN_API_KEY",
+  "DASHSCOPE_API_KEY",
   "OPENAI_API_KEY",
 ] as const;
 
@@ -310,8 +311,13 @@ export async function migratePlaintextAlibabaSettings(
   const plaintext = plaintextSettingsKey(settings);
   if (!plaintext || !store) return false;
   const existing = await readAlibabaCredential(store);
-  if (!existing) {
-    await storeAlibabaCredential(plaintext, settingsEmail(settings), store);
+  const email = settingsEmail(settings);
+  if (!existing || (!existing.accountLabel && email)) {
+    await storeAlibabaCredential(
+      existing?.credential ?? plaintext,
+      existing?.accountLabel ?? email,
+      store,
+    );
   }
   // Import into VS Code SecretStorage without mutating Qwen Code's own
   // working configuration. Manage Accounts is an observer here: opening it
@@ -327,9 +333,15 @@ export async function alibabaIdentity(
     store?: ProtectedSecretStore;
   } = {},
 ): Promise<{ authenticated: boolean; accountLabel: string }> {
+  const fileSystem = options.fileSystem ?? fs;
+  const settings = readSettings(
+    alibabaSettingsPath(options.userHome),
+    fileSystem,
+  );
+  const configuredCredential = plaintextSettingsKey(settings);
   await migratePlaintextAlibabaSettings(options);
   const stored = await readAlibabaCredential(options.store ?? secretStore);
-  if (!stored) {
+  if (!stored && !configuredCredential) {
     return {
       authenticated: false,
       accountLabel: VENDOR_ACCOUNT_COPY.disconnected,
@@ -337,7 +349,10 @@ export async function alibabaIdentity(
   }
   return {
     authenticated: true,
-    accountLabel: stored.accountLabel ?? VENDOR_ACCOUNT_COPY.connectedFallback,
+    accountLabel:
+      stored?.accountLabel ??
+      settingsEmail(settings) ??
+      VENDOR_ACCOUNT_COPY.connectedFallback,
   };
 }
 

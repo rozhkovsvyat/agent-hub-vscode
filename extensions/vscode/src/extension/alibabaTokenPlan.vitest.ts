@@ -54,6 +54,71 @@ function tempHome(): string {
 }
 
 describe("Alibaba Token Plan credentials", () => {
+  it("reports the exact configured account when SecretStorage is cold", async () => {
+    const home = tempHome();
+    const settingsFile = alibabaSettingsPath(home);
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify({
+        email: "alibaba-owner@example.test",
+        env: {
+          DASHSCOPE_API_KEY: "sk-sp-existing-token-plan-key",
+        },
+      }),
+      "utf8",
+    );
+
+    try {
+      await expect(
+        alibabaIdentity({ userHome: home, store: undefined }),
+      ).resolves.toEqual({
+        authenticated: true,
+        accountLabel: "alibaba-owner@example.test",
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("enriches an imported credential with the settings account email", async () => {
+    const home = tempHome();
+    const store = memoryStore();
+    const settingsFile = alibabaSettingsPath(home);
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify({
+        email: "alibaba-owner@example.test",
+        env: {
+          DASHSCOPE_API_KEY: "sk-sp-existing-token-plan-key",
+        },
+      }),
+      "utf8",
+    );
+    await storeAlibabaCredential(
+      "sk-sp-existing-token-plan-key",
+      undefined,
+      store,
+    );
+
+    try {
+      await expect(alibabaIdentity({ userHome: home, store })).resolves.toEqual(
+        {
+          authenticated: true,
+          accountLabel: "alibaba-owner@example.test",
+        },
+      );
+      const stored = await store.get(ALIBABA_SECRET_KEY);
+      expect(stored).toContain("alibaba-owner@example.test");
+      expect(redactAlibabaSecrets(stored ?? "")).not.toContain(
+        "sk-sp-existing-token-plan-key",
+      );
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("redacts token-plan secrets from logs and serialized config", () => {
     const leaked = [
       "Bearer sk-sp-super-secret-token-plan-key",
