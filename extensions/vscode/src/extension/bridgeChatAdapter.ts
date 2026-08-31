@@ -1016,6 +1016,8 @@ export type CukiiBridgeWait = {
 export type CukiiBridgeChatMessage = ChatMessage & {
   cukiiBridgeWait?: CukiiBridgeWait;
   cukiiTerminal?: true;
+  /** A definitive native error receipt, not model-authored transcript text. */
+  cukiiTerminalError?: true;
 };
 
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
@@ -1068,6 +1070,14 @@ export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
       ] as CukiiBridgeChatMessage[];
     case "error":
       return [{ role: "assistant", content: `\n\n⚠️ ${event.text}\n` }];
+    case "terminalError":
+      return [
+        {
+          role: "assistant",
+          content: `\n\n⚠️ ${event.text}\n`,
+          cukiiTerminalError: true,
+        },
+      ];
     case "complete":
       // Keep terminal state on the stream transport rather than in transcript
       // history. The GUI consumes this private marker and hides activity

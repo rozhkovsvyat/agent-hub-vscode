@@ -652,6 +652,17 @@ export const sessionSlice = createSlice({
     ) => {
       state.bridgeWait = action.payload;
     },
+    replaceTerminalErrorText: (
+      state,
+      action: PayloadAction<{ messageId: string; content: string }>,
+    ) => {
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      if (item?.message.role === "assistant") {
+        item.message.content = action.payload.content;
+      }
+    },
     streamUpdate: (state, action: PayloadAction<ChatMessage[]>) => {
       // Every actual bridge message proves the worker resumed. Silence is not
       // an event and must leave the animated loader alone.
@@ -1277,6 +1288,7 @@ export const {
   addPromptCompletionPair,
   setActive,
   setBridgeWait,
+  replaceTerminalErrorText,
   submitEditorAndInitAtIndex,
   truncateHistoryToMessage,
   updateHistoryItemAtIndex,

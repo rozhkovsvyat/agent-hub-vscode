@@ -262,6 +262,18 @@ describe("BridgeEventParser", () => {
     ).toEqual([{ kind: "complete" }]);
   });
 
+  it("marks an errored Claude result as a definitive terminal receipt", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    expect(
+      parser.push(
+        '{"type":"result","subtype":"error","is_error":true,"result":"Session limit reached"}\n',
+      ),
+    ).toEqual([
+      { kind: "terminalError", text: "Session limit reached" },
+      { kind: "complete" },
+    ]);
+  });
+
   it("не подавляет raw fallback от одного непонятного JSON-события", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(

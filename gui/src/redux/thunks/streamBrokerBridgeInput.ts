@@ -1,10 +1,12 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
+import { renderChatMessage } from "core/util/messageContent";
 import {
   acceptToolCall,
   addPromptCompletionPair,
   abortStream,
   errorToolCall,
+  replaceTerminalErrorText,
   setActive,
   setBridgeWait,
   setContextPercentage,
@@ -22,6 +24,7 @@ type CukiiBridgeMessage = ChatMessage & {
     condition: string;
     deadline?: string;
   };
+  cukiiTerminalError?: true;
 };
 
 type RaceResult<T> =
@@ -31,6 +34,49 @@ type RaceResult<T> =
 function isBridgeTerminalMessage(message: ChatMessage): boolean {
   return (
     (message as ChatMessage & { cukiiTerminal?: true }).cukiiTerminal === true
+  );
+}
+
+function isBridgeTerminalError(message: ChatMessage): boolean {
+  return (message as CukiiBridgeMessage).cukiiTerminalError === true;
+}
+
+/**
+ * Native CLIs can repeat a failed-turn receipt as assistant text, a decorated
+ * warning, or one concatenated frame.  Compare the message semantics rather
+ * than a vendor's wording or a particular quota error.
+ */
+export function normalizeTerminalError(message: ChatMessage): string {
+  return renderChatMessage(message)
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^(?:(?:⚠️|warning|error)\s*[:：\-–—]?\s*)+/iu, "")
+    .trim();
+}
+
+function isOneOrMoreCopies(value: string, unit: string): boolean {
+  if (!value || !unit) return false;
+
+  let remainder = value;
+  do {
+    if (!remainder.startsWith(unit)) return false;
+    remainder = remainder.slice(unit.length).trimStart();
+  } while (remainder);
+
+  return true;
+}
+
+export function isSameTerminalError(
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  const normalizedFirst = normalizeTerminalError(first);
+  const normalizedSecond = normalizeTerminalError(second);
+  return (
+    normalizedFirst === normalizedSecond ||
+    isOneOrMoreCopies(normalizedFirst, normalizedSecond) ||
+    isOneOrMoreCopies(normalizedSecond, normalizedFirst)
   );
 }
 
@@ -121,6 +167,31 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   const messages: ChatMessage[] = state.session.history
     .map((item) => item.message)
     .filter((message) => message.role !== "thinking");
+  const historyLengthAtRunStart = state.session.history.length;
+  const seenTerminalErrors = new Set<string>();
+  let terminalSettled = false;
+
+  const settleTerminal = () => {
+    if (!terminalSettled) {
+      terminalSettled = true;
+      dispatch(setInactive());
+    }
+  };
+
+  const duplicateTerminalError = (message: ChatMessage) => {
+    const normalized = normalizeTerminalError(message);
+    if (!normalized || seenTerminalErrors.has(normalized)) return undefined;
+
+    const priorMessage = getState()
+      .session.history.slice(historyLengthAtRunStart)
+      .find(
+        (item) =>
+          item.message.role === "assistant" &&
+          isSameTerminalError(item.message, message),
+      );
+    seenTerminalErrors.add(normalized);
+    return priorMessage?.message ?? null;
+  };
 
   dispatch(setActive());
   dispatch(setInlineErrorMessage(undefined));
@@ -169,7 +240,25 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         for (const message of result.value.value as CukiiBridgeMessage[]) {
           if (isBridgeTerminalMessage(message)) {
             hasTerminalReceipt = true;
-            continue;
+            break;
+          }
+          if (isBridgeTerminalError(message)) {
+            const duplicate = duplicateTerminalError(message);
+            if (duplicate?.id) {
+              dispatch(
+                replaceTerminalErrorText({
+                  messageId: duplicate.id,
+                  content: normalizeTerminalError(duplicate),
+                }),
+              );
+            } else if (duplicate === undefined) {
+              // Empty and already-observed terminal frames have no visible
+              // payload. Their receipt still settles the run below.
+            } else {
+              dispatch(streamUpdate([message]));
+            }
+            hasTerminalReceipt = true;
+            break;
           }
           if (message.cukiiBridgeWait) {
             // Positively identified native wait metadata, never a model string
@@ -184,7 +273,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           // Hide activity synchronously on the native terminal receipt. The
           // generator return still performs process cleanup, but a slow child
           // close must never leave the user looking at a false loader.
-          dispatch(setInactive());
+          settleTerminal();
           completed = true;
           await gen.return(undefined);
           break;
@@ -194,6 +283,6 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       if (!completed) await gen.return(undefined);
     }
   } finally {
-    dispatch(setInactive());
+    settleTerminal();
   }
 });

@@ -10,9 +10,30 @@ import {
   streamUpdate,
 } from "../slices/sessionSlice";
 import { setupStore } from "../store";
-import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
+import {
+  isSameTerminalError,
+  streamBrokerBridgeInput,
+} from "./streamBrokerBridgeInput";
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("normalizes terminal error decoration and repeated frames without merging distinct errors", () => {
+    expect(
+      isSameTerminalError(
+        { role: "assistant", content: "⚠️ Error: session limit reached" },
+        {
+          role: "assistant",
+          content: "session limit reachedsession limit reached",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      isSameTerminalError(
+        { role: "assistant", content: "session limit reached" },
+        { role: "assistant", content: "authentication expired" },
+      ),
+    ).toBe(false);
+  });
+
   it("merge contract: activity is not terminal; inactive, abort, and new session reset streaming", async () => {
     const store = setupStore({ ideMessenger: new MockIdeMessenger() });
     store.dispatch(
@@ -273,5 +294,112 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.isStreaming).toBe(false);
     expect(store.getState().session.history).toHaveLength(0);
     expect(returned).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a repeated native terminal error once and ignores late frames", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const limit =
+      "You've hit your session limit · resets 3:30am (Europe/Moscow)";
+    const returned = vi.fn(async () => ({ done: true, value: undefined }));
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: vi.fn(async () => ({
+        done: false,
+        value: [
+          { role: "assistant", content: `  ${limit}  ` },
+          {
+            role: "assistant",
+            content: `\n\n⚠️ Error: ${limit}\n`,
+            cukiiTerminalError: true,
+          },
+          {
+            role: "assistant",
+            content: `${limit}${limit}`,
+            cukiiTerminalError: true,
+          },
+          { role: "assistant", content: "", cukiiTerminal: true },
+          {
+            role: "assistant",
+            content: `Warning: ${limit}`,
+            cukiiTerminalError: true,
+          },
+        ],
+      })),
+      return: returned,
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "terminal-error-dedup",
+        title: "Terminal error dedup",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { role: "user", content: "Start native bridge" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+
+    await store.dispatch(streamBrokerBridgeInput());
+
+    const assistantText = store
+      .getState()
+      .session.history.filter((item) => item.message.role === "assistant")
+      .map((item) => String(item.message.content))
+      .join("");
+    expect(assistantText).toBe(limit);
+    expect(store.getState().session.isStreaming).toBe(false);
+    expect(returned).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows the same terminal error once in a subsequent run", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const terminalError = "Native broker stopped";
+    ideMessenger.streamRequest = vi.fn(() => ({
+      next: vi.fn(async () => ({
+        done: false,
+        value: [
+          {
+            role: "assistant",
+            content: `Warning: ${terminalError}`,
+            cukiiTerminalError: true,
+          },
+        ],
+      })),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+      throw: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    })) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "terminal-error-next-run",
+        title: "Terminal error next run",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { role: "user", content: "First run" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+
+    await store.dispatch(streamBrokerBridgeInput());
+    store.dispatch(streamUpdate([{ role: "user", content: "Second run" }]));
+    await store.dispatch(streamBrokerBridgeInput());
+
+    expect(
+      store
+        .getState()
+        .session.history.filter((item) => item.message.role === "assistant"),
+    ).toHaveLength(2);
   });
 });

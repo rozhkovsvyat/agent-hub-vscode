@@ -21,6 +21,8 @@ export type BridgeEvent =
   | { kind: "toolStart"; id: string; name: string; args: string }
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
   | { kind: "error"; text: string }
+  /** A vendor's explicit failed turn receipt; it settles the GUI run. */
+  | { kind: "terminalError"; text: string }
   /** A vendor's explicit turn-complete receipt, never a guessed quiet gap. */
   | { kind: "complete" }
   /** Explicit native command wait; never inferred from missing output. */
@@ -209,7 +211,7 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   if (event.type === "result") {
     if (event.is_error) {
       out.push({
-        kind: "error",
+        kind: "terminalError",
         text: asText(
           event.result ?? event.error ?? "worker завершился с ошибкой",
         ),
