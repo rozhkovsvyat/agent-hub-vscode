@@ -308,6 +308,114 @@ function qwenOauthSelected(metadata: unknown): boolean {
   );
 }
 
+function hasPresentSecret(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function safeQwenModelId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 64) return undefined;
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(trimmed)) return undefined;
+  if (/(?:api[-_]?key|token|secret|password|bearer)/i.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function qwenCodingPlanConfigured(metadata: unknown): boolean {
+  return (
+    isRecord(metadata) &&
+    isRecord(metadata.codingPlan) &&
+    metadata.codingPlan.configured === true
+  );
+}
+
+function qwenSessionConnected(metadata: unknown): boolean {
+  return qwenOauthSelected(metadata) || qwenCodingPlanConfigured(metadata);
+}
+
+function readSmallJson(file: string): unknown {
+  try {
+    if (!fs.existsSync(file)) return undefined;
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > 64 * 1024) return undefined;
+    return JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Local Qwen/Bailian files may contain provider tokens. Copy only safe form
+ * fields and a boolean credential presence flag; never the secret itself.
+ */
+export function sanitizeQwenLocalAuth(
+  settings: unknown,
+  bailian?: unknown,
+): {
+  security: { auth: { selectedType?: string } };
+  model?: { name?: string };
+  codingPlan?: { configured: boolean; model?: string };
+} {
+  const settingsRecord = isRecord(settings) ? settings : undefined;
+  const security = isRecord(settingsRecord?.security)
+    ? settingsRecord.security
+    : undefined;
+  const auth = isRecord(security?.auth) ? security.auth : undefined;
+  const model = isRecord(settingsRecord?.model)
+    ? settingsRecord.model
+    : undefined;
+  const env = isRecord(settingsRecord?.env) ? settingsRecord.env : undefined;
+  const providers = isRecord(settingsRecord?.modelProviders)
+    ? settingsRecord.modelProviders
+    : undefined;
+  const openaiProviders = Array.isArray(providers?.openai)
+    ? providers.openai
+    : [];
+
+  const selectedType = stringAt(auth, "selectedType");
+  const modelName =
+    safeQwenModelId(stringAt(model, "name")) ??
+    openaiProviders
+      .map((entry) => safeQwenModelId(stringAt(entry, "id")))
+      .find((id): id is string => Boolean(id));
+
+  const settingsCredential =
+    hasPresentSecret(auth?.apiKey) || hasPresentSecret(env?.DASHSCOPE_API_KEY);
+
+  const bailianRecord = isRecord(bailian) ? bailian : undefined;
+  const tokenPlan = isRecord(bailianRecord?.["token-plan"])
+    ? bailianRecord["token-plan"]
+    : undefined;
+  const activeConfig = stringAt(bailianRecord, "active_config");
+  const bailianCredential = hasPresentSecret(tokenPlan?.api_key);
+  const bailianModel = safeQwenModelId(
+    stringAt(tokenPlan, "default_text_model"),
+  );
+
+  const codingPlanForm =
+    selectedType === "openai" || activeConfig === "token-plan";
+  const configured =
+    Boolean(codingPlanForm) && (settingsCredential || bailianCredential);
+  const codingPlanModel = bailianModel ?? modelName;
+
+  return {
+    security: {
+      auth: { selectedType },
+    },
+    ...(modelName ? { model: { name: modelName } } : {}),
+    ...(codingPlanForm
+      ? {
+          codingPlan: {
+            configured,
+            ...(codingPlanModel ? { model: codingPlanModel } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -402,7 +510,7 @@ export function classifyVendorAuthOutput(
       ? connected(accountLabel, ["logout"])
       : unknown();
   }
-  return qwenOauthSelected(parseJson(text))
+  return qwenSessionConnected(parseJson(text))
     ? connected(accountLabel, [])
     : disconnected();
 }
@@ -1101,14 +1209,18 @@ export function localKimiCredentials(
 
 function localMetadata(vendor: VendorWithCli): unknown {
   const userHome = os.homedir();
+  if (vendor === "qwen") {
+    return sanitizeQwenLocalAuth(
+      readSmallJson(path.join(userHome, ".qwen", "settings.json")),
+      readSmallJson(path.join(userHome, ".bailian", "config.json")),
+    );
+  }
   const file =
     vendor === "codex"
       ? path.join(userHome, ".codex", "auth.json")
       : vendor === "grok"
         ? path.join(userHome, ".grok", "auth.json")
-        : vendor === "qwen"
-          ? path.join(userHome, ".qwen", "settings.json")
-          : undefined;
+        : undefined;
   try {
     if (vendor === "kimi") {
       const credentialsDirectory = path.join(
@@ -1141,13 +1253,7 @@ function localMetadata(vendor: VendorWithCli): unknown {
         ]),
       );
     }
-    const security = isRecord(raw) ? raw.security : undefined;
-    const auth = isRecord(security) ? security.auth : undefined;
-    return {
-      security: {
-        auth: { selectedType: stringAt(auth, "selectedType") },
-      },
-    };
+    return undefined;
   } catch {
     return undefined;
   }
@@ -1317,7 +1423,8 @@ export function vendorAuthTerminalCommand(
     },
     qwen: {
       install: "npm install -g @qwen-code/qwen-code@latest",
-      // Qwen Code 0.22 uses the interactive auth command in a live terminal.
+      // Interactive OAuth only. A configured Coding Plan is already connected,
+      // so Manage Accounts does not need this button in that case.
       login: "qwen /auth",
     },
   };

@@ -432,7 +432,7 @@ export function nativeDelegateHint(
     case "composer-2-5":
       return `${process.platform === "win32" ? "agent" : "cursor-agent"} -p --output-format text --model composer-2.5${suffix}`;
     case "qwen-3-8-max":
-      return `qwen --model qwen3.8-max-preview --prompt "<task>" --output-format stream-json${suffix}`;
+      return `qwen --model qwen3.8-max --prompt "<task>" --output-format stream-json${suffix}`;
     default:
       return `${displayBridgeModel(model)} bridge route`;
   }
@@ -992,7 +992,7 @@ export function routeForModel(
         program: "qwen",
         args: [
           "--model",
-          "qwen3.8-max-preview",
+          "qwen3.8-max",
           "--prompt",
           "Follow the Cukii broker instructions supplied on stdin.",
           "--output-format",

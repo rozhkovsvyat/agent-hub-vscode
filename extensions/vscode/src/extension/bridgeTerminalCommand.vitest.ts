@@ -48,7 +48,7 @@ describe("interactive bridge terminal command", () => {
     ["claude", [], "claude"],
     ["codex", ["--cd", "D:\\Brain\\repo"], "codex"],
     ["grok", ["--cwd", "D:\\Brain\\repo"], "grok"],
-    ["qwen", ["--model", "qwen3.8-max-preview"], "qwen"],
+    ["qwen", ["--model", "qwen3.8-max"], "qwen"],
   ])("preserves %s native terminal argv", (agent, args, program) => {
     const spec = bridgeTerminalLaunchSpec(
       agent,
@@ -60,6 +60,27 @@ describe("interactive bridge terminal command", () => {
     );
     expect(spec.program).toBe(program);
     expect(spec.args).toEqual(args);
+  });
+
+  it("does not ship the obsolete Qwen preview model id", () => {
+    for (const file of [
+      "bridgeChatAdapter.ts",
+      "bridgeTerminalCommand.ts",
+      "bridgeVendorAuth.ts",
+    ]) {
+      const source = fs.readFileSync(path.join(__dirname, file), "utf8");
+      expect(source).not.toContain("qwen3.8-max-preview");
+    }
+    expect(
+      bridgeTerminalLaunchSpec(
+        "qwen",
+        "D:\\Brain\\repo",
+        "bridge-session",
+        "subagent",
+        "module",
+        "win32",
+      ).args,
+    ).toEqual(["--model", "qwen3.8-max"]);
   });
 
   it("keeps the interactive UI route free of WSL launch machinery", () => {

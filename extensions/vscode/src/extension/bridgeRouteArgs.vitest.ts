@@ -565,6 +565,8 @@ describe("native bridge argv", () => {
     );
     expect(qwenPlan).toContain("--approval-mode plan");
     expect(qwenPlan).not.toContain("--approval-mode yolo");
+    expect(qwenPlan).toContain("qwen --model qwen3.8-max ");
+    expect(qwenPlan).not.toContain("qwen3.8-max-preview");
 
     expect(() =>
       nativeDelegateHint("codex-5-6-terra", "D:/Brain/vault", "manual"),
@@ -653,6 +655,20 @@ describe("native bridge argv", () => {
     expect(route.args[route.args.indexOf("-m") + 1]).toBe(
       "managed:kimi-code/k4",
     );
+  });
+
+  it("pins Qwen production argv to qwen3.8-max, not the obsolete preview id", () => {
+    const route = routeForModel(
+      "qwen-3-8-max",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("qwen-3-8-max", "high", "standard"),
+    );
+    if (route.promptFile) promptFiles.push(route.promptFile);
+    expect(route.args[route.args.indexOf("--model") + 1]).toBe("qwen3.8-max");
+    expect(route.args.join(" ")).not.toContain("qwen3.8-max-preview");
+    expect(route.args.join(" ")).not.toMatch(/preview/i);
   });
 
   it("pins legacy K2 to the exact managed subscription model", () => {
