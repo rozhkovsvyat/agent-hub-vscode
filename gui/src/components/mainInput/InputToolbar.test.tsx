@@ -261,6 +261,34 @@ describe("Cukii Claude-parity input toolbar", () => {
     );
   });
 
+  it("starts Qwen in Bypass instead of inheriting Plan from the previous model", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    const postSpy = vi.spyOn(mockIdeMessenger, "post");
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
+    store.dispatch(setBrokerPermissionMode("plan"));
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
+
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+    await user.click(await getElementByTestId("broker-menu-button"));
+    await user.click(await getElementByTestId("broker-switch-model"));
+    await user.click(await getElementByText("Qwen 3.8 Max"));
+
+    expect(store.getState().session.brokerModel).toBe("qwen-3-8-max");
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({
+        brokerModel: "qwen-3-8-max",
+        brokerPermissionMode: "bypass",
+      }),
+    );
+  });
+
   it("retains a blank-tab draft while the native capability probe is pending", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =

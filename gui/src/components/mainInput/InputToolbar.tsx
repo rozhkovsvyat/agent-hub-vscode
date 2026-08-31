@@ -826,7 +826,14 @@ function InputToolbar(props: InputToolbarProps) {
         <ModelPickerModal
           onClose={() => setModelPickerOpen(false)}
           onSelect={(model) =>
-            updateBrokerPreferences(model, brokerSubagent ?? "auto")
+            updateBrokerPreferences(
+              model,
+              brokerSubagent ?? "auto",
+              brokerEffort,
+              brokerSpeed,
+              hasReasoningEnabled,
+              "bypass",
+            )
           }
         />
       )}

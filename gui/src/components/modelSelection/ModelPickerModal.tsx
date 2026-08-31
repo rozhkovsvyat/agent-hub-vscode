@@ -4,6 +4,7 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import {
   switchBrokerModel,
+  setBrokerPermissionMode,
   setBrokerSubagent,
   type BrokerModel,
   type BrokerSubagent,
@@ -11,11 +12,6 @@ import {
 import { applyRuntimeVendorCatalog, VENDORS } from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
 import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
-import {
-  brokerVendorForModel,
-  defaultVendorPermissionCapabilities,
-  resolvePermissionModeForVendor,
-} from "core/cukiiPermissionModes";
 
 interface ModelPickerModalProps {
   onClose: () => void;
@@ -31,9 +27,6 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
   const thinkingEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
-  );
-  const brokerPermissionMode = useAppSelector(
-    (state) => state.session.brokerPermissionMode,
   );
   const [, setCatalogVersion] = useState(0);
 
@@ -58,16 +51,6 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
 
   const selectModel = (model: BrokerModel) => {
     const nextSubagent: BrokerSubagent = "auto";
-    const capabilities = defaultVendorPermissionCapabilities(
-      brokerVendorForModel(model),
-    );
-    const resolvedPermissionMode = capabilities.supportedModes.includes(
-      brokerPermissionMode,
-    )
-      ? brokerPermissionMode
-      : capabilities.supportedModes.includes("bypass")
-        ? "bypass"
-        : resolvePermissionModeForVendor(capabilities, brokerPermissionMode);
     if (onSelect) {
       onSelect(model);
     } else {
@@ -81,13 +64,14 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
         }),
       );
       dispatch(setBrokerSubagent(nextSubagent));
+      dispatch(setBrokerPermissionMode("bypass"));
       ideMessenger.post("cukii/setBrokerPreferences", {
         brokerModel: model,
         brokerSubagent: nextSubagent,
         brokerEffort,
         brokerSpeed,
         thinkingEnabled,
-        brokerPermissionMode: resolvedPermissionMode,
+        brokerPermissionMode: "bypass",
         mode: "broker",
       });
     }
