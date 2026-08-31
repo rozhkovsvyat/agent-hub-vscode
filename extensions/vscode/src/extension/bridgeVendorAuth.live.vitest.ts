@@ -18,6 +18,7 @@ describe("live broker vendor account probe", () => {
       const accounts = await listBrokerVendorAccounts();
       const codex = accounts.find((account) => account.id === "codex");
       const kimi = accounts.find((account) => account.id === "kimi");
+      const qwen = accounts.find((account) => account.id === "qwen");
 
       // Never log the local part, bearer material, raw native output, or claims.
       console.info(
@@ -32,6 +33,11 @@ describe("live broker vendor account probe", () => {
               state: kimi.state,
               authenticated: kimi.authenticated,
               accountLabel: redactedIdentity(kimi.accountLabel),
+            },
+            qwen: qwen && {
+              state: qwen.state,
+              authenticated: qwen.authenticated,
+              accountLabel: redactedIdentity(qwen.accountLabel),
             },
           }),
       );
@@ -49,6 +55,13 @@ describe("live broker vendor account probe", () => {
         kimi?.accountLabel === "Connected" ||
           EMAIL.test(kimi?.accountLabel ?? ""),
       ).toBe(true);
+
+      expect(qwen?.installed).toBe(true);
+      expect(qwen?.authenticated).toBe(true);
+      expect(qwen?.state).toBe("connected");
+      expect(EMAIL.test(qwen?.accountLabel ?? "")).toBe(true);
+      expect(qwen?.accountLabel).not.toBe("Connected");
+      expect(qwen?.actions).toEqual(["logout"]);
     },
     30_000,
   );
