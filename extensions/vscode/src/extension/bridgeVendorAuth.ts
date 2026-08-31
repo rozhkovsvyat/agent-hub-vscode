@@ -592,11 +592,17 @@ type KimiServerProbeOptions = {
 
 const KIMI_SERVER_TIMEOUT_MS = 800;
 const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 3_500;
-const KIMI_SERVER_POLL_MS = 100;
 const KIMI_MAX_INSTANCE_FILES = 8;
 const KIMI_MAX_INSTANCE_FILE_SIZE = 8 * 1024;
 const KIMI_MAX_TOKEN_FILE_SIZE = 4 * 1024;
+const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
+const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
 const kimiEmailCache = new Map<string, string>();
+
+type KimiWebStartup = {
+  endpoint: URL;
+  bearerToken: string;
+};
 
 function localLoopbackKimiServerEndpoints(
   instancesDirectory: string,
@@ -656,6 +662,9 @@ function kimiUserInfoRequest(
   bearerToken: string,
   timeoutMs: number,
 ): Promise<unknown> {
+  if (!isExactKimiLoopbackEndpoint(endpoint)) {
+    return Promise.resolve(undefined);
+  }
   return new Promise((resolve) => {
     let settled = false;
     const finish = (result: unknown) => {
@@ -743,38 +752,157 @@ function reserveLoopbackPort(): Promise<number | undefined> {
 }
 
 function launchKimiWeb(executable: string, port: number): ChildProcess {
-  return spawn(executable, ["web", "--no-open", "--port", String(port)], {
-    shell: false,
-    windowsHide: true,
-    stdio: "ignore",
-  });
+  return spawn(
+    executable,
+    ["web", "--no-open", "--port", String(port), "--log-level", "info"],
+    {
+      shell: false,
+      windowsHide: true,
+      // The startup URL carries a bearer. Keep it private, bounded and in-memory.
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }
 
-function waitForKimiEndpoint(
-  instancesDirectory: string,
+function isExactKimiLoopbackEndpoint(endpoint: URL, port?: number): boolean {
+  const endpointPort = Number(endpoint.port);
+  return (
+    endpoint.protocol === "http:" &&
+    endpoint.hostname === "127.0.0.1" &&
+    endpoint.pathname === "/" &&
+    endpoint.username === "" &&
+    endpoint.password === "" &&
+    endpoint.hash === "" &&
+    endpoint.port !== "" &&
+    Number.isInteger(endpointPort) &&
+    endpointPort > 0 &&
+    endpointPort <= 65535 &&
+    (port === undefined || endpointPort === port)
+  );
+}
+
+/**
+ * Kimi 0.38 writes a local startup URL with the ephemeral bearer in its hash.
+ * Older canaries used a sole `token` query member. Never generalize this into
+ * a banner scraper: only the exact 127.0.0.1 URL for our reserved port is
+ * accepted, and all output remains private to this bounded parser.
+ */
+function kimiStartupFromBanner(
+  output: Buffer,
   port: number,
-  fileSystem: KimiServerProbeFileSystem,
+): KimiWebStartup | undefined {
+  const prefixes = [
+    { prefix: `http://127.0.0.1:${port}/#token=`, kind: "hash" as const },
+    { prefix: `http://127.0.0.1:${port}/?token=`, kind: "query" as const },
+  ];
+  const text = output.toString("utf8");
+  for (const { prefix, kind } of prefixes) {
+    let offset = 0;
+    while (offset < text.length) {
+      const start = text.indexOf(prefix, offset);
+      if (start < 0) break;
+      const before = start === 0 ? "" : text[start - 1];
+      const tokenStart = start + prefix.length;
+      const tokenMatch = new RegExp(
+        `^[A-Za-z0-9._~+\\/=-]{1,${KIMI_MAX_BEARER_TOKEN_LENGTH}}`,
+      ).exec(text.slice(tokenStart));
+      const token = tokenMatch?.[0];
+      const after = token ? text[tokenStart + token.length] : undefined;
+      if (
+        (!before || /[\s\"'(]/.test(before)) &&
+        token &&
+        (!after || /[\s\"')\]\r\n]/.test(after))
+      ) {
+        try {
+          const endpoint = new URL(`${prefix}${token}`);
+          const query = [...endpoint.searchParams.entries()];
+          const validBearer =
+            kind === "hash"
+              ? endpoint.hash === `#token=${token}` && query.length === 0
+              : endpoint.hash === "" &&
+                query.length === 1 &&
+                query[0][0] === "token" &&
+                query[0][1] === token;
+          endpoint.hash = "";
+          endpoint.search = "";
+          if (validBearer && isExactKimiLoopbackEndpoint(endpoint, port)) {
+            return { endpoint, bearerToken: token };
+          }
+        } catch {
+          // Continue checking a later complete startup URL in the bounded banner.
+        }
+      }
+      offset = tokenStart;
+    }
+  }
+  return undefined;
+}
+
+function waitForKimiStartup(
+  child: ChildProcess,
+  port: number,
   signal: AbortSignal | undefined,
   timeoutMs: number,
-): Promise<URL | undefined> {
+): Promise<KimiWebStartup | undefined> {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
-    const poll = () => {
-      if (signal?.aborted || Date.now() >= deadline) {
-        resolve(undefined);
-        return;
-      }
-      const endpoint = localLoopbackKimiServerEndpoints(
-        instancesDirectory,
-        fileSystem,
-      ).find((candidate) => Number(candidate.port) === port);
-      if (endpoint) {
-        resolve(endpoint);
-        return;
-      }
-      setTimeout(poll, KIMI_SERVER_POLL_MS);
+    let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let settled = false;
+    const finish = (result: KimiWebStartup | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout?.removeListener("data", onStdout);
+      child.stderr?.removeListener("data", onStderr);
+      child.removeListener("error", onFailure);
+      child.removeListener("exit", onFailure);
+      signal?.removeEventListener("abort", onFailure);
+      // Best-effort zeroization: neither stream nor bearer is ever logged.
+      stdout.fill(0);
+      stderr.fill(0);
+      stdout = Buffer.alloc(0);
+      stderr = Buffer.alloc(0);
+      resolve(result);
     };
-    poll();
+    const accept = (
+      output: Buffer<ArrayBufferLike>,
+    ): KimiWebStartup | undefined => kimiStartupFromBanner(output, port);
+    const append = (
+      current: Buffer<ArrayBufferLike>,
+      chunk: unknown,
+    ): Buffer<ArrayBufferLike> | undefined => {
+      const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      if (current.length + next.length > KIMI_MAX_STARTUP_OUTPUT_SIZE) {
+        return undefined;
+      }
+      return Buffer.concat([current, next]);
+    };
+    const onStdout = (chunk: unknown) => {
+      const next = append(stdout, chunk);
+      if (!next) return finish(undefined);
+      stdout = next;
+      const startup = accept(stdout);
+      if (startup) finish(startup);
+    };
+    const onStderr = (chunk: unknown) => {
+      const next = append(stderr, chunk);
+      if (!next) return finish(undefined);
+      stderr = next;
+      const startup = accept(stderr);
+      if (startup) finish(startup);
+    };
+    const onFailure = () => finish(undefined);
+    const timer = setTimeout(
+      () => finish(undefined),
+      Math.max(0, deadline - Date.now()),
+    );
+    if (signal?.aborted) return finish(undefined);
+    child.stdout?.on("data", onStdout);
+    child.stderr?.on("data", onStderr);
+    child.once("error", onFailure);
+    child.once("exit", onFailure);
+    signal?.addEventListener("abort", onFailure, { once: true });
   });
 }
 
@@ -802,6 +930,7 @@ async function stopEphemeralKimiWeb(
   if (exited || child.killed) return;
   try {
     if (process.platform === "win32") {
+      // /T is intentionally scoped to this exact spawned PID and its children.
       await execFileAsync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
         timeout: 1_000,
         windowsHide: true,
@@ -837,9 +966,9 @@ function kimiCredentialFingerprint(userHome: string): string | undefined {
 }
 
 /**
- * Reuses a registered loopback Kimi server when available. Otherwise it
- * starts an exact, short-lived local process with all stdio ignored, reads no
- * banner, and shuts down only that child in finally.
+ * Reuses the documented Kimi server registry first. Kimi 0.38 no longer
+ * creates it reliably, so an unavailable registry has a narrow compatibility
+ * fallback: an exact local child whose private startup URL is consumed once.
  */
 export async function localKimiServerEmail(
   options: KimiServerProbeOptions = {},
@@ -855,7 +984,7 @@ export async function localKimiServerEmail(
     const cached = kimiEmailCache.get(options.cacheKey);
     if (cached) return cached;
   }
-  let endpoints = localLoopbackKimiServerEndpoints(
+  const endpoints = localLoopbackKimiServerEndpoints(
     instancesDirectory,
     fileSystem,
   );
@@ -864,35 +993,49 @@ export async function localKimiServerEmail(
   let bearerToken: string | undefined;
   try {
     if (options.signal?.aborted) return undefined;
-    if (endpoints.length === 0 && options.executable) {
+    if (endpoints.length > 0) {
+      const tokenStat = fileSystem.statSync(tokenFile);
+      if (tokenStat.isFile() && tokenStat.size <= KIMI_MAX_TOKEN_FILE_SIZE) {
+        const candidateBearer = fileSystem
+          .readFileSync(tokenFile, "utf8")
+          .trim();
+        if (candidateBearer && !/[\x00-\x1f\x7f]/.test(candidateBearer)) {
+          bearerToken = candidateBearer;
+          for (const endpoint of endpoints) {
+            if (options.signal?.aborted) return undefined;
+            const response = await (options.request ?? kimiUserInfoRequest)(
+              endpoint,
+              bearerToken,
+              options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
+            );
+            const data = isRecord(response) ? response.data : undefined;
+            const userInfo =
+              isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
+            const email = safeEmail(stringAt(userInfo, "email"));
+            if (email) {
+              if (options.cacheKey) kimiEmailCache.set(options.cacheKey, email);
+              return email;
+            }
+          }
+          return undefined;
+        }
+      }
+    }
+    if (options.executable) {
       const port = await (options.reservePort ?? reserveLoopbackPort)();
       if (!port || options.signal?.aborted) return undefined;
       ephemeral = (options.launch ?? launchKimiWeb)(options.executable, port);
-      ephemeral.once("error", () => undefined);
-      ephemeralEndpoint = await waitForKimiEndpoint(
-        instancesDirectory,
+      const startup = await waitForKimiStartup(
+        ephemeral,
         port,
-        fileSystem,
         options.signal,
         options.launchTimeoutMs ?? KIMI_SERVER_LAUNCH_TIMEOUT_MS,
       );
-      if (!ephemeralEndpoint) return undefined;
-      endpoints = [ephemeralEndpoint];
-    }
-    if (endpoints.length === 0) return undefined;
-    const tokenStat = fileSystem.statSync(tokenFile);
-    if (!tokenStat.isFile() || tokenStat.size > KIMI_MAX_TOKEN_FILE_SIZE) {
-      return undefined;
-    }
-    const candidateBearer = fileSystem.readFileSync(tokenFile, "utf8").trim();
-    if (!candidateBearer || /[\x00-\x1f\x7f]/.test(candidateBearer)) {
-      return undefined;
-    }
-    bearerToken = candidateBearer;
-    for (const endpoint of endpoints) {
-      if (options.signal?.aborted) return undefined;
+      if (!startup) return undefined;
+      ephemeralEndpoint = startup.endpoint;
+      bearerToken = startup.bearerToken;
       const response = await (options.request ?? kimiUserInfoRequest)(
-        endpoint,
+        ephemeralEndpoint,
         bearerToken,
         options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
       );
@@ -900,10 +1043,9 @@ export async function localKimiServerEmail(
       const userInfo =
         isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
       const email = safeEmail(stringAt(userInfo, "email"));
-      if (email) {
-        if (options.cacheKey) kimiEmailCache.set(options.cacheKey, email);
-        return email;
-      }
+      if (email && options.cacheKey)
+        kimiEmailCache.set(options.cacheKey, email);
+      return email;
     }
   } catch {
     // Token and endpoint failures deliberately remain non-diagnostic.
@@ -916,6 +1058,7 @@ export async function localKimiServerEmail(
         options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
       );
     }
+    bearerToken = undefined;
   }
   return undefined;
 }
