@@ -623,6 +623,8 @@ type KimiServerProbeOptions = {
   timeoutMs?: number;
   executable?: string;
   cacheKey?: string;
+  cacheTtlMs?: number;
+  now?: () => number;
   signal?: AbortSignal;
   launch?: (executable: string, port: number) => ChildProcess;
   reservePort?: () => Promise<number | undefined>;
@@ -639,9 +641,43 @@ const KIMI_SERVER_TIMEOUT_MS = 8_000;
 const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 20_000;
 const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
 const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
-const kimiIdentityCache = new Map<string, string>();
-const kimiProfileIdentityCache = new Map<string, string>();
+const KIMI_IDENTITY_CACHE_TTL_MS = 60_000;
+const KIMI_IDENTITY_CACHE_MAX_TTL_MS = 5 * 60_000;
+type KimiIdentityCacheEntry = { identity: string; expiresAt: number };
+const kimiIdentityCache = new Map<string, KimiIdentityCacheEntry>();
+const kimiProfileIdentityCache = new Map<string, KimiIdentityCacheEntry>();
 const KIMI_CODE_ME_URL = new URL("https://api.kimi.ai/coding/v1/me");
+
+function cachedKimiIdentity(
+  cache: Map<string, KimiIdentityCacheEntry>,
+  key: string | undefined,
+  now: number,
+): string | undefined {
+  if (!key) return undefined;
+  const cached = cache.get(key);
+  if (!cached) return undefined;
+  if (now < cached.expiresAt) return cached.identity;
+  cache.delete(key);
+  return undefined;
+}
+
+function rememberKimiIdentity(
+  cache: Map<string, KimiIdentityCacheEntry>,
+  key: string | undefined,
+  identity: string,
+  now: number,
+  requestedTtlMs: number | undefined,
+): void {
+  if (!key) return;
+  const ttlMs = Math.max(
+    0,
+    Math.min(
+      KIMI_IDENTITY_CACHE_MAX_TTL_MS,
+      requestedTtlMs ?? KIMI_IDENTITY_CACHE_TTL_MS,
+    ),
+  );
+  cache.set(key, { identity, expiresAt: now + ttlMs });
+}
 
 type KimiWebStartup = {
   endpoint: URL;
@@ -907,7 +943,29 @@ async function stopEphemeralKimiWeb(
       // Cleanup must continue even if an invalidated bearer rejects locally.
     }
   }
-  if (child.killed || !child.pid) return;
+  const rootPid = child.pid;
+  if (!rootPid) return;
+  if (process.platform === "win32") {
+    // Keep the launcher's numeric root as the durable ownership handle. Kimi's
+    // Windows launcher can exit after creating the native server; in that
+    // state `child.killed`/`exit` describe only the launcher. Always traverse
+    // the original process tree, even when its root has already exited.
+    try {
+      await terminateWindowsProcessTree(rootPid);
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The root already exited; the descendant-aware cleanup was attempted.
+      }
+    }
+    return;
+  }
+  if (
+    child.killed ||
+    (child.exitCode !== null && child.exitCode !== undefined)
+  )
+    return;
   const exited = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), 300);
     child.once("exit", () => {
@@ -917,11 +975,7 @@ async function stopEphemeralKimiWeb(
   });
   if (exited || child.killed) return;
   try {
-    if (process.platform === "win32") {
-      await terminateWindowsProcessTree(child.pid);
-    } else {
-      child.kill("SIGTERM");
-    }
+    child.kill("SIGTERM");
   } catch {
     try {
       child.kill("SIGKILL");
@@ -946,28 +1000,30 @@ export async function terminateWindowsProcessTree(
     await run("taskkill", ["/pid", String(pid), "/T", "/F"]);
     return;
   } catch {
-    const powershell = path.win32.join(
-      process.env.SystemRoot ?? "C:\\Windows",
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe",
-    );
-    await run(powershell, [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      [
-        "$root = [int]$args[0]",
-        "$all = @(Get-CimInstance Win32_Process)",
-        "$pending = @($root); $seen = @{}",
-        "while ($pending.Count) { $parent = [int]$pending[0]; $pending = @($pending | Select-Object -Skip 1); if ($seen.ContainsKey($parent)) { continue }; $seen[$parent] = $true; foreach ($process in $all) { if ($process.ParentProcessId -eq $parent) { $pending += [int]$process.ProcessId } } }",
-        "$seen.Keys | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
-      ].join("; "),
-      String(pid),
-    ]);
+    // A naturally exited launcher makes taskkill report failure. Descendants
+    // still retain its numeric ParentProcessId and are handled below.
   }
+  const powershell = path.win32.join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  await run(powershell, [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    [
+      "$root = [int]$args[0]",
+      "$all = @(Get-CimInstance Win32_Process)",
+      "$pending = @($root); $seen = @{}",
+      "while ($pending.Count) { $parent = [int]$pending[0]; $pending = @($pending | Select-Object -Skip 1); if ($seen.ContainsKey($parent)) { continue }; $seen[$parent] = $true; foreach ($process in $all) { if ($process.ParentProcessId -eq $parent) { $pending += [int]$process.ProcessId } } }",
+      "$seen.Keys | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+    ].join("; "),
+    String(pid),
+  ]);
 }
 
 export function kimiCredentialFingerprint(
@@ -1035,10 +1091,9 @@ export function kimiDisplayIdentityFromUserInfo(
 export async function localKimiServerIdentity(
   options: KimiServerProbeOptions = {},
 ): Promise<string | undefined> {
-  if (options.cacheKey) {
-    const cached = kimiIdentityCache.get(options.cacheKey);
-    if (cached) return cached;
-  }
+  const now = options.now?.() ?? Date.now();
+  const cached = cachedKimiIdentity(kimiIdentityCache, options.cacheKey, now);
+  if (cached) return cached;
   let ephemeral: ChildProcess | undefined;
   let ephemeralEndpoint: URL | undefined;
   let bearerToken: string | undefined;
@@ -1069,8 +1124,14 @@ export async function localKimiServerIdentity(
       const userInfo =
         isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
       const identity = kimiDisplayIdentityFromUserInfo(userInfo);
-      if (identity && options.cacheKey)
-        kimiIdentityCache.set(options.cacheKey, identity);
+      if (identity)
+        rememberKimiIdentity(
+          kimiIdentityCache,
+          options.cacheKey,
+          identity,
+          options.now?.() ?? Date.now(),
+          options.cacheTtlMs,
+        );
       return identity;
     }
   } catch {
@@ -1237,12 +1298,17 @@ export async function managedKimiProfileIdentity(
     request?: KimiManagedProfileRequest;
     timeoutMs?: number;
     cacheKey?: string;
+    cacheTtlMs?: number;
+    now?: () => number;
   } = {},
 ): Promise<string | undefined> {
-  if (options.cacheKey) {
-    const cached = kimiProfileIdentityCache.get(options.cacheKey);
-    if (cached) return cached;
-  }
+  const now = options.now?.() ?? Date.now();
+  const cached = cachedKimiIdentity(
+    kimiProfileIdentityCache,
+    options.cacheKey,
+    now,
+  );
+  if (cached) return cached;
   const fileSystem = options.fileSystem ?? fs;
   const credentialsDirectory = path.join(
     options.userHome ?? os.homedir(),
@@ -1259,9 +1325,14 @@ export async function managedKimiProfileIdentity(
     );
     if (profile.status !== 200) return undefined;
     const identity = kimiDisplayIdentityFromUserInfo(profile.payload);
-    if (identity && options.cacheKey) {
-      kimiProfileIdentityCache.set(options.cacheKey, identity);
-    }
+    if (identity)
+      rememberKimiIdentity(
+        kimiProfileIdentityCache,
+        options.cacheKey,
+        identity,
+        options.now?.() ?? Date.now(),
+        options.cacheTtlMs,
+      );
     return identity;
   } catch {
     return undefined;

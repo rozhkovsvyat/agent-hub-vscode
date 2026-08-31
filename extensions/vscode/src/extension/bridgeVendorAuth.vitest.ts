@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as http from "http";
 import * as path from "path";
 import { EventEmitter } from "events";
+import { spawn as spawnChild } from "child_process";
 import { PassThrough } from "stream";
 
 import {
@@ -19,6 +20,7 @@ import {
   localKimiServerEmail,
   managedKimiProfileIdentity,
   kimiCredentialFingerprint,
+  clearBrokerVendorAccountCache,
   terminateWindowsProcessTree,
   probeVendorExecutable,
   resolveKimiAccountIdentity,
@@ -595,6 +597,143 @@ describe("Cukii vendor CLI accounts", () => {
     );
     expect(launches).toBe(1);
   });
+
+  it("refreshes a cached Kimi identity after its bounded TTL even when credentials are unchanged", async () => {
+    let launches = 0;
+    let now = 1_000;
+    const options = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      cacheKey: "test-ephemeral-banner-fingerprint-ttl",
+      cacheTtlMs: 50,
+      now: () => now,
+      launchTimeoutMs: 100,
+      reservePort: async () => 58627,
+      launch: () => {
+        launches += 1;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = Object.assign(new EventEmitter(), {
+          pid: 4242,
+          killed: false,
+          stdout,
+          stderr,
+        }) as unknown as import("child_process").ChildProcess;
+        setImmediate(() =>
+          stdout.end(
+            "http://127.0.0.1:58627/#token=test-bearer-do-not-display\n",
+          ),
+        );
+        return child;
+      },
+      request: async () => ({
+        data: {
+          kind: "ok",
+          userInfo: { email: `cached-${launches}@example.test` },
+        },
+      }),
+      stopEphemeral: async () => undefined,
+    };
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "cached-1@example.test",
+    );
+    now += 49;
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "cached-1@example.test",
+    );
+    now += 1;
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "cached-2@example.test",
+    );
+    expect(launches).toBe(2);
+  });
+
+  it("invalidates the Kimi identity cache for login and logout refreshes", async () => {
+    let launches = 0;
+    const options = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      cacheKey: "test-ephemeral-banner-fingerprint-action",
+      launchTimeoutMs: 100,
+      reservePort: async () => 58627,
+      launch: () => {
+        launches += 1;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = Object.assign(new EventEmitter(), {
+          pid: 4242,
+          killed: false,
+          stdout,
+          stderr,
+        }) as unknown as import("child_process").ChildProcess;
+        setImmediate(() =>
+          stdout.end(
+            "http://127.0.0.1:58627/#token=test-bearer-do-not-display\n",
+          ),
+        );
+        return child;
+      },
+      request: async () => ({
+        data: {
+          kind: "ok",
+          userInfo: { email: `account-${launches}@example.test` },
+        },
+      }),
+      stopEphemeral: async () => undefined,
+    };
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "account-1@example.test",
+    );
+    clearBrokerVendorAccountCache();
+    await expect(localKimiServerEmail(options)).resolves.toBe(
+      "account-2@example.test",
+    );
+    expect(launches).toBe(2);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "kills a reparented Kimi server when its launcher exits during cleanup",
+    async () => {
+      const directory = fs.mkdtempSync(
+        "D:\\Scratch\\cukii-kimi-orphan-negative-control-",
+      );
+      const pidFile = path.join(directory, "worker.pid");
+      let workerPid: number | undefined;
+      try {
+        await expect(
+          localKimiServerIdentity({
+            executable: process.execPath,
+            launchTimeoutMs: 80,
+            launch: () =>
+              spawnChild(
+                process.execPath,
+                [
+                  "-e",
+                  [
+                    "const {spawn}=require('child_process')",
+                    `const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})`,
+                    `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(worker.pid))`,
+                    "worker.unref()",
+                    "setTimeout(()=>process.exit(0),120)",
+                  ].join(";"),
+                ],
+                { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+              ),
+          }),
+        ).resolves.toBeUndefined();
+        workerPid = Number(fs.readFileSync(pidFile, "utf8"));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(() => process.kill(workerPid!, 0)).toThrow();
+      } finally {
+        if (workerPid) {
+          try {
+            process.kill(workerPid, "SIGKILL");
+          } catch {
+            // Expected once production cleanup owns the descendant.
+          }
+        }
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("changes the Kimi cache fingerprint when credentials switch at identical metadata", () => {
     const directory = fs.mkdtempSync("D:\\Scratch\\cukii-kimi-fingerprint-");
