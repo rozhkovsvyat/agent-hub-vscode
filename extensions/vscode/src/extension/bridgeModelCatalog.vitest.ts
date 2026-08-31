@@ -42,7 +42,7 @@ describe("Cukii live subscription model catalog", () => {
       {
         value: "codex-5-6-terra",
         label: "GPT-5.6 Terra",
-        contextWindowLabel: "1M",
+        contextWindowLabel: "272K",
         description: "Balanced agentic coding model for everyday work",
       },
     ]);
@@ -58,13 +58,15 @@ describe("Cukii live subscription model catalog", () => {
         value: "grok-4-6",
         label: "Grok 4.6",
         contextWindowLabel: "500K",
-        description: "xAI model for coding and agentic tasks",
+        description:
+          "Most capable frontier model for coding, agentic tasks, and knowledge work",
       },
       {
         value: "grok-4-5",
         label: "Grok 4.5",
         contextWindowLabel: "500K",
-        description: "xAI model for coding and agentic tasks",
+        description:
+          "Engineering-focused model for coding and agentic software workflows",
       },
       {
         value: "grok:grok-4.7",

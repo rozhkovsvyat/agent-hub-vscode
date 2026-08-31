@@ -29,23 +29,27 @@ const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
     },
   ],
   codex: [
-    { value: "codex-5-6-sol", label: "GPT-5.6 Sol", contextWindowLabel: "1M" },
+    {
+      value: "codex-5-6-sol",
+      label: "GPT-5.6 Sol",
+      contextWindowLabel: "272K",
+    },
     {
       value: "codex-5-6-terra",
       label: "GPT-5.6 Terra",
-      contextWindowLabel: "1M",
+      contextWindowLabel: "272K",
     },
     {
       value: "codex-5-6-luna",
       label: "GPT-5.6 Luna",
-      contextWindowLabel: "1M",
+      contextWindowLabel: "272K",
     },
-    { value: "codex-5-5", label: "GPT-5.5", contextWindowLabel: "1M" },
-    { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "1M" },
+    { value: "codex-5-5", label: "GPT-5.5", contextWindowLabel: "272K" },
+    { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "272K" },
     {
       value: "codex-5-4-mini",
       label: "GPT-5.4 Mini",
-      contextWindowLabel: "400K",
+      contextWindowLabel: "272K",
     },
   ],
   grok: [
@@ -104,12 +108,14 @@ const CODEX_MODEL_IDS: Record<string, string> = {
 };
 
 const CODEX_CONTEXT: Record<string, string> = {
-  "gpt-5.6-sol": "1M",
-  "gpt-5.6-terra": "1M",
-  "gpt-5.6-luna": "1M",
-  "gpt-5.5": "1M",
-  "gpt-5.4": "1M",
-  "gpt-5.4-mini": "400K",
+  // The current Codex CLI route exposes the standard 272K window.  The 1M
+  // Codex capability is experimental opt-in and is not enabled by Cukii.
+  "gpt-5.6-sol": "272K",
+  "gpt-5.6-terra": "272K",
+  "gpt-5.6-luna": "272K",
+  "gpt-5.5": "272K",
+  "gpt-5.4": "272K",
+  "gpt-5.4-mini": "272K",
 };
 
 const KIMI_MODEL_IDS: Record<string, string> = {

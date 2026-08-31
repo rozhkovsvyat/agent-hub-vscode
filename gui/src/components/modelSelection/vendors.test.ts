@@ -54,6 +54,7 @@ describe("Cukii model context labels", () => {
       "codex-5-6-luna",
       "codex-5-5",
       "codex-5-4",
+      "codex-5-4-mini",
     ]) {
       expect(
         ALL_MODELS.find((model) => model.value === value)?.contextWindowLabel,
@@ -169,6 +170,7 @@ describe("Cukii model context labels", () => {
       expect(subtitle, model.value).not.toContain(
         `${model.contextWindowLabel} context • `,
       );
+      expect(subtitle, model.value).not.toMatch(/\bcontext\b/i);
     }
   });
 
@@ -206,6 +208,15 @@ describe("Cukii model context labels", () => {
       expect(cukiiCapabilityRating({ value, label })).toBe(expected);
     },
   );
+
+  it("keeps the requested GPT-5.5 and GPT-5.4 bottle tiers", () => {
+    expect(
+      cukiiCapabilityRating({ value: "codex-5-5", label: "GPT-5.5" }),
+    ).toBe(3);
+    expect(
+      cukiiCapabilityRating({ value: "codex-5-4", label: "GPT-5.4" }),
+    ).toBe(2);
+  });
 
   it("uses distinct Grok positioning and avoids tautological version tokens", () => {
     const modelsByValue = new Map(

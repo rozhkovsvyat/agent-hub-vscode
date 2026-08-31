@@ -79,7 +79,7 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
       {
         value: "codex-5-4-mini",
         label: "GPT-5.4 Mini",
-        contextWindowLabel: "400K",
+        contextWindowLabel: "272K",
       },
     ],
   },
