@@ -699,26 +699,27 @@ describe("sessionSlice mid-task steer messages", () => {
   });
 
   it("restores persisted receipts and never invents legacy receipt data", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "saved", role: "user", content: "saved" },
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "read",
+        steerSentAt: 1_700_000_000_000,
+      },
+      {
+        message: { id: "legacy", role: "user", content: "legacy" },
+        contextItems: [],
+        isSteer: true,
+      },
+    ];
     const restored = sessionSlice.reducer(
       sessionSlice.getInitialState(),
       newSession({
         sessionId: "receipt-history",
         title: "Receipt history",
         workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
-        history: [
-          {
-            message: { id: "saved", role: "user", content: "saved" },
-            contextItems: [],
-            isSteer: true,
-            steerStatus: "read",
-            steerSentAt: 1_700_000_000_000,
-          },
-          {
-            message: { id: "legacy", role: "user", content: "legacy" },
-            contextItems: [],
-            isSteer: true,
-          },
-        ],
+        history,
       }),
     );
     expect(restored.history[0]).toMatchObject({
@@ -730,27 +731,28 @@ describe("sessionSlice mid-task steer messages", () => {
   });
 
   it("restores persisted model switches and safely ignores malformed legacy receipts", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "switch", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: {
+          model: "codex-5-6-terra",
+          displayName: "GPT-5.6 Terra",
+        },
+      },
+      {
+        message: { id: "legacy", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: { model: "", displayName: "" },
+      },
+    ];
     const restored = sessionSlice.reducer(
       sessionSlice.getInitialState(),
       newSession({
         sessionId: "model-switch-history",
         title: "Model switch history",
         workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
-        history: [
-          {
-            message: { role: "system", content: "" },
-            contextItems: [],
-            modelSwitch: {
-              model: "codex-5-6-terra",
-              displayName: "GPT-5.6 Terra",
-            },
-          },
-          {
-            message: { role: "system", content: "" },
-            contextItems: [],
-            modelSwitch: { model: "", displayName: "" },
-          },
-        ],
+        history,
       }),
     );
 
