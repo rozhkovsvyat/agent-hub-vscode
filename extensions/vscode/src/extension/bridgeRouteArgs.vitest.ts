@@ -77,10 +77,10 @@ function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
 
 describe("native bridge argv", () => {
   it("emits a queued read receipt only for one exact vendor user echo", () => {
-    const messages = [
+    const messages: Array<ChatMessage & { id: string }> = [
       { role: "user", content: "original", id: "original" },
       { role: "user", content: "follow me", id: "follow-up" },
-    ] as ChatMessage[];
+    ];
     expect(
       queuedFollowUpEchoMessageId(messages, "follow-up", "follow me", false),
     ).toBe("follow-up");

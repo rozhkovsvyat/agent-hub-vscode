@@ -93,7 +93,9 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0].queuedFollowUpMessageId).toBe("follow-up-1");
     expect(
-      captured[0].messages.map((message: ChatMessage) => message.id),
+      captured[0].messages.map(
+        (message: ChatMessage & { id?: string }) => message.id,
+      ),
     ).toEqual(["original", "old-assistant", "follow-up-1"]);
     expect(
       store
