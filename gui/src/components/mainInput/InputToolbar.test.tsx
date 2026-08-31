@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
-import { setBrokerPermissionMode } from "../../redux/slices/sessionSlice";
+import {
+  newSession,
+  setBrokerPermissionMode,
+} from "../../redux/slices/sessionSlice";
 import { setupStore } from "../../redux/store";
 import { renderWithProviders } from "../../util/test/render";
 import { getElementByText, getElementByTestId } from "../../util/test/utils";
@@ -20,6 +23,63 @@ describe("Cukii Claude-parity input toolbar", () => {
     onEnter: vi.fn(),
     onAddContextItem: vi.fn(),
     onFilesSelected: vi.fn(),
+  };
+
+  const originalCukiiVscode = window.cukiiVscode;
+
+  afterEach(() => {
+    cleanup();
+    window.cukiiVscode = originalCukiiVscode;
+  });
+
+  const retainInitializedSession = (
+    mockIdeMessenger: MockIdeMessenger,
+    store: ReturnType<typeof setupStore>,
+  ) => {
+    mockIdeMessenger.responseHandlers["history/load"] = async () => {
+      const session = store.getState().session;
+      return {
+        sessionId: session.id,
+        title: session.title,
+        workspaceDirectory: "",
+        history: session.history,
+        mode: session.mode,
+        brokerModel: session.brokerModel,
+        brokerSubagent: session.brokerSubagent,
+        brokerEffort: session.brokerEffort,
+        brokerSpeed: session.brokerSpeed,
+        hasReasoningEnabled: session.hasReasoningEnabled,
+        brokerPermissionMode: session.brokerPermissionMode,
+      };
+    };
+  };
+
+  const seedSavedHistory = (store: ReturnType<typeof setupStore>) => {
+    const session = store.getState().session;
+    store.dispatch(
+      newSession({
+        sessionId: session.id,
+        title: session.title,
+        workspaceDirectory: "",
+        history: [
+          {
+            message: {
+              id: "saved-user-message",
+              role: "user",
+              content: "Persist the selected broker preferences",
+            },
+            contextItems: [],
+          },
+        ],
+        mode: session.mode,
+        brokerModel: session.brokerModel,
+        brokerSubagent: session.brokerSubagent,
+        brokerEffort: session.brokerEffort,
+        brokerSpeed: session.brokerSpeed,
+        hasReasoningEnabled: session.hasReasoningEnabled,
+        brokerPermissionMode: session.brokerPermissionMode,
+      }),
+    );
   };
 
   it("shows attach, slash, permission mode and submit controls", async () => {
@@ -70,7 +130,7 @@ describe("Cukii Claude-parity input toolbar", () => {
       ),
     ).toBeDefined();
 
-    await user.click(await getElementByText("Bypass permissions"));
+    await user.click(await getElementByTestId("cukii-permission-mode-bypass"));
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
     expect(await getElementByText("Bypass permissions")).toBeDefined();
 
@@ -147,10 +207,8 @@ describe("Cukii Claude-parity input toolbar", () => {
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch(setBrokerPermissionMode("manual"));
-    store.dispatch({
-      type: "session/streamUpdate",
-      payload: [{ role: "user", content: "Use the chosen mode" }],
-    });
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
     const { user } = await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
       store,
@@ -175,10 +233,8 @@ describe("Cukii Claude-parity input toolbar", () => {
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch(setBrokerPermissionMode("manual"));
-    store.dispatch({
-      type: "session/streamUpdate",
-      payload: [{ role: "user", content: "Persist this model switch" }],
-    });
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
     const { user } = await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
       store,
@@ -217,16 +273,21 @@ describe("Cukii Claude-parity input toolbar", () => {
   });
 
   it("uses the verified cold-cache Kimi fallback before storing its model switch", async () => {
+    let panelState: Record<string, unknown> = {};
+    window.cukiiVscode = {
+      getState: () => panelState,
+      setState: (nextState) => {
+        panelState = nextState;
+      },
+    };
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
       () => new Promise<never>(() => {});
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
     store.dispatch(setBrokerPermissionMode("manual"));
-    store.dispatch({
-      type: "session/streamUpdate",
-      payload: [{ role: "user", content: "Cold Kimi switch" }],
-    });
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
     const { user } = await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
       store,
