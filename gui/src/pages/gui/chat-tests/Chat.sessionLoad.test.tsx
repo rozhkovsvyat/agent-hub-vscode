@@ -19,6 +19,30 @@ vi.mock("../../../components/StepContainer", () => ({
   },
 }));
 
+// React may reconcile an unchanged mocked child more than once while providers
+// settle. The production child is memoized; this mock intentionally is not, so
+// assert the bounded visible IDs rather than a renderer-internal raw call count.
+const MAX_RECONCILIATION_PASSES_PER_PHASE = 3;
+
+function renderedStepIds() {
+  return stepRenderSpy.mock.calls.map(([id]) => id as string);
+}
+
+function expectOnlyWindowRows(start: number, endExclusive: number) {
+  const expectedIds = Array.from(
+    { length: endExclusive - start },
+    (_, index) => `assistant-${start + index}`,
+  );
+  const renderedIds = renderedStepIds();
+
+  // This is the negative control: rendering a stale pre-window row changes the
+  // set and fails even if the DOM happens to hide its text.
+  expect(new Set(renderedIds)).toEqual(new Set(expectedIds));
+  expect(renderedIds.length).toBeLessThanOrEqual(
+    expectedIds.length * MAX_RECONCILIATION_PASSES_PER_PHASE,
+  );
+}
+
 describe("Cukii saved-session loading", () => {
   it("shows only the centered Loading state while history is being restored", async () => {
     const { store, container } = await renderWithProviders(<Chat />);
@@ -72,16 +96,19 @@ describe("Cukii saved-session loading", () => {
     expect(store.getState().session.history).toHaveLength(
       INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
     );
-    expect(stepRenderSpy).toHaveBeenCalledTimes(INITIAL_TRANSCRIPT_WINDOW);
-    expect(stepRenderSpy).not.toHaveBeenCalledWith("assistant-0");
-    expect(stepRenderSpy).not.toHaveBeenCalledWith("assistant-1");
+    expectOnlyWindowRows(
+      INITIAL_TRANSCRIPT_WINDOW + 1,
+      INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
+    );
     expect(container.textContent).not.toContain("Answer 0");
     expect(container.textContent).toContain(
       `Answer ${INITIAL_TRANSCRIPT_WINDOW * 2}`,
     );
-
+    stepRenderSpy.mockClear();
     await user.click(container.querySelector(".cukii-load-earlier")!);
-    expect(stepRenderSpy).toHaveBeenCalledWith("assistant-1");
+    expectOnlyWindowRows(1, INITIAL_TRANSCRIPT_WINDOW * 2 + 1);
+    expect(container.textContent).not.toContain("Answer 0");
+    expect(container.textContent).toContain("Answer 1");
     expect(store.getState().session.history).toHaveLength(
       INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
     );
