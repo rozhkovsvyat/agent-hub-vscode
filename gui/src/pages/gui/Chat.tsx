@@ -380,6 +380,24 @@ export function Chat() {
         toolCallStates,
       } = item;
 
+      if (item.modelSwitch) {
+        const label = `Switched to ${item.modelSwitch.displayName}`;
+        return [
+          <div
+            key={message.id}
+            className="cukii-model-switch-divider shrink-0"
+            data-testid="cukii-model-switch"
+          >
+            <span aria-hidden="true" className="cukii-model-switch-wave" />
+            <span className="cukii-model-switch-label" title={label}>
+              <span className="cukii-model-switch-full">{label}</span>
+              <span className="cukii-model-switch-short">Switched model</span>
+            </span>
+            <span aria-hidden="true" className="cukii-model-switch-wave" />
+          </div>,
+        ];
+      }
+
       if (message.role === "system" || message.role === "tool") {
         return [];
       }

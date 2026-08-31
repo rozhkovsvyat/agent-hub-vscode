@@ -158,6 +158,33 @@ describe("constructMessages", () => {
     );
   });
 
+  test("keeps a persisted model-switch receipt out of the next vendor turn", () => {
+    mockHistory = [
+      {
+        message: { role: "system", content: "" } as ChatMessage,
+        contextItems: [],
+        modelSwitch: {
+          model: "codex-5-6-terra",
+          displayName: "GPT-5.6 Terra",
+        },
+      } as ChatHistoryItem,
+      {
+        message: { role: "user", content: "Continue" } as ChatMessage,
+        contextItems: [],
+      },
+    ];
+
+    const { messages } = constructMessages(
+      mockHistory,
+      "Base System Message",
+      mockRules,
+      {},
+    );
+
+    expect(messages.map((message) => message.role)).toEqual(["system", "user"]);
+    expect(JSON.stringify(messages)).not.toContain("GPT-5.6 Terra");
+  });
+
   test("should convert user messages to message parts arrays with context items", () => {
     const contextItems = [
       createContextItem("1", "Context content 1"),

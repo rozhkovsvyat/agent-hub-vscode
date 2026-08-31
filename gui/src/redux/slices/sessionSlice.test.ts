@@ -12,6 +12,7 @@ import {
   setActive,
   setBridgeWait,
   setBrokerModel,
+  switchBrokerModel,
   setBrokerPermissionMode,
   setInactive,
   markLatestUserReceiptDelivered,
@@ -145,6 +146,77 @@ describe("sessionSlice streamUpdate", () => {
     // Reducers have no native CLI facts. The bridge rejects this combination
     // until PermissionModeControl receives a real capability response.
     expect(codex.brokerPermissionMode).toBe("editAutomatically");
+  });
+
+  it("records only real model transitions in order, including rapid cross-vendor switches", () => {
+    const initial = sessionSlice.getInitialState();
+    const terra = sessionSlice.reducer(
+      initial,
+      switchBrokerModel({
+        model: "codex-5-6-terra",
+        displayName: "GPT-5.6 Terra",
+      }),
+    );
+    const sameModel = sessionSlice.reducer(
+      terra,
+      switchBrokerModel({
+        model: "codex-5-6-terra",
+        displayName: "GPT-5.6 Terra",
+      }),
+    );
+    const grok = sessionSlice.reducer(
+      sameModel,
+      switchBrokerModel({ model: "grok-4-6", displayName: "Grok 4.6" }),
+    );
+    const nextTurn = sessionSlice.reducer(
+      grok,
+      submitEditorAndInitAtIndex({ index: grok.history.length, editorState: { type: "doc" } }),
+    );
+
+    expect(grok.history.map((item) => item.modelSwitch?.displayName)).toEqual([
+      "GPT-5.6 Terra",
+      "Grok 4.6",
+    ]);
+    expect(grok.history.map((item) => item.message.role)).toEqual([
+      "system",
+      "system",
+    ]);
+    expect(nextTurn.history.map((item) => item.message.role)).toEqual([
+      "system",
+      "system",
+      "user",
+      "assistant",
+    ]);
+  });
+
+  it("reconciles an unsupported permission preference before a Kimi turn, but preserves a supported one", () => {
+    const manualClaude = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBrokerPermissionMode("manual"),
+    );
+    const kimi = sessionSlice.reducer(
+      manualClaude,
+      switchBrokerModel({ model: "kimi-k3", displayName: "Kimi K3" }),
+    );
+
+    expect(kimi.brokerModel).toBe("kimi-k3");
+    expect(kimi.brokerPermissionMode).toBe("bypass");
+    // The session serializer reads these exact reducer fields, so its next
+    // save persists the reconciled route instead of stale Manual.
+    expect(kimi).toMatchObject({
+      brokerModel: "kimi-k3",
+      brokerPermissionMode: "bypass",
+    });
+
+    const claudePlan = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBrokerPermissionMode("plan"),
+    );
+    const sonnet = sessionSlice.reducer(
+      claudePlan,
+      switchBrokerModel({ model: "sonnet-5", displayName: "Sonnet 5" }),
+    );
+    expect(sonnet.brokerPermissionMode).toBe("plan");
   });
 
   it("restores a manual title and clears its lock for a fresh tab", () => {
@@ -652,6 +724,38 @@ describe("sessionSlice mid-task steer messages", () => {
     });
     expect(restored.history[1]).toMatchObject({ steerStatus: "failed" });
     expect(restored.history[1].steerSentAt).toBeUndefined();
+  });
+
+  it("restores persisted model switches and safely ignores malformed legacy receipts", () => {
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "model-switch-history",
+        title: "Model switch history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { id: "switch", role: "system", content: "" },
+            contextItems: [],
+            modelSwitch: {
+              model: "codex-5-6-terra",
+              displayName: "GPT-5.6 Terra",
+            },
+          },
+          {
+            message: { id: "legacy", role: "system", content: "" },
+            contextItems: [],
+            modelSwitch: { model: "", displayName: "" },
+          },
+        ],
+      }),
+    );
+
+    expect(restored.history[0].modelSwitch).toEqual({
+      model: "codex-5-6-terra",
+      displayName: "GPT-5.6 Terra",
+    });
+    expect(restored.history[1].modelSwitch).toBeUndefined();
   });
 
   it("newSession drops in-flight steer messages with the rest of history", () => {

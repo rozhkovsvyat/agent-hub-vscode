@@ -14,6 +14,7 @@ import {
   setBridgeWait,
   setIsInEdit,
   setToolCallCalling,
+  switchBrokerModel,
 } from "../../../redux/slices/sessionSlice";
 
 test("should render input box", async () => {
@@ -305,6 +306,35 @@ test("assistant text and tool calls render as sibling timeline items", async () 
   expect(toolItem).not.toBeNull();
   expect(assistantTextItem?.contains(toolItem ?? null)).toBe(false);
   expect(toolItem?.contains(assistantTextItem ?? null)).toBe(false);
+});
+
+test("renders a persisted Claude-style model switch boundary before the next turn", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch(
+      switchBrokerModel({
+        model: "codex-5-6-terra",
+        displayName: "GPT-5.6 Terra",
+      }),
+    );
+    store.dispatch({
+      type: "session/submitEditorAndInitAtIndex",
+      payload: { index: 1, editorState: { type: "doc" } },
+    });
+  });
+
+  const boundary = container.querySelector('[data-testid="cukii-model-switch"]');
+  expect(boundary?.textContent).toContain("Switched to GPT-5.6 Terra");
+  expect(boundary?.querySelectorAll(".cukii-model-switch-wave")).toHaveLength(2);
+  expect(boundary?.nextElementSibling).toHaveClass("cukii-user-row");
+  expect(boundary?.closest(".cukii-timeline-item")).toBeNull();
+
+  const css = await import("../../../index.css?raw");
+  expect(css.default).toContain("gap: 10px");
+  expect(css.default).toContain("padding: 8px 0");
+  expect(css.default).toContain("width='14' height='7'");
+  expect(css.default).toContain("@media screen and (max-width: 330px)");
 });
 
 test("streaming toolbar follows the current transcript", async () => {

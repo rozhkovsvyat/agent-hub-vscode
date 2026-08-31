@@ -43,7 +43,12 @@ import type {
 } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
-import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
+import {
+  brokerVendorForModel,
+  coerceStoredPermissionMode,
+  defaultVendorPermissionCapabilities,
+  resolvePermissionModeForVendor,
+} from "core/cukiiPermissionModes";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
 import { toolCallCtxItemToCtxItemWithId } from "../../pages/gui/ToolCallDiv/utils";
 import { addToolCallDeltaToState, isEditTool } from "../../util/toolCallState";
@@ -208,6 +213,15 @@ export function handleStreamingToolCallUpdates(
 // The proper fix is adding a UUID to all chat messages, but this is the temp workaround.
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
+  /**
+   * A local transcript receipt for a real broker-model transition. It is a
+   * system message so it is retained with session history but never sent to a
+   * vendor as conversational context.
+   */
+  modelSwitch?: {
+    model: BrokerModel;
+    displayName: string;
+  };
   /** Messenger-style receipt persisted on every newly sent user message. */
   messageReceipt?: {
     sentAt: number;
@@ -236,14 +250,27 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
 export function normalizeRestoredHistory(
   history: ChatHistoryItemWithMessageId[],
 ): ChatHistoryItemWithMessageId[] {
-  return history.map((item) => {
+  return history.map(({ modelSwitch, ...item }) => {
+    const normalizedModelSwitch =
+      modelSwitch &&
+      typeof modelSwitch.model === "string" &&
+      typeof modelSwitch.displayName === "string" &&
+      modelSwitch.model.trim() &&
+      modelSwitch.displayName.trim()
+        ? {
+            model: modelSwitch.model,
+            displayName: modelSwitch.displayName.trim(),
+          }
+        : undefined;
     const receipt = item.messageReceipt;
     const sentAt = item.steerSentAt;
     if (receipt && Number.isFinite(receipt.sentAt)) {
-      return item;
+      return normalizedModelSwitch ? { ...item, modelSwitch: normalizedModelSwitch } : item;
     }
-    if (!item.isSteer) return item;
-    return {
+    if (!item.isSteer) {
+      return normalizedModelSwitch ? { ...item, modelSwitch: normalizedModelSwitch } : item;
+    }
+    const normalized = {
       ...item,
       messageReceipt: Number.isFinite(sentAt)
         ? { sentAt: sentAt!, status: item.steerStatus ?? "failed" }
@@ -251,6 +278,9 @@ export function normalizeRestoredHistory(
       steerSentAt: Number.isFinite(sentAt) ? sentAt : undefined,
       steerStatus: item.steerStatus ?? "failed",
     };
+    return normalizedModelSwitch
+      ? { ...normalized, modelSwitch: normalizedModelSwitch }
+      : normalized;
   });
 }
 
@@ -260,6 +290,24 @@ function finishActiveThinking(history: ChatHistoryItemWithMessageId[]): void {
     active.reasoning.active = false;
     active.reasoning.endAt = Date.now();
   }
+}
+
+/**
+ * A stored preference belongs to its former vendor. On a model switch retain
+ * it only where the target CLI verifies it; otherwise use that vendor's
+ * visible Bypass default when available (Kimi's `--auto` route), before any
+ * subsequent turn can read the state.
+ */
+function reconcilePermissionModeForBrokerModel(
+  model: BrokerModel,
+  current: CukiiPermissionMode,
+): CukiiPermissionMode {
+  const capabilities = defaultVendorPermissionCapabilities(
+    brokerVendorForModel(model),
+  );
+  if (capabilities.supportedModes.includes(current)) return current;
+  if (capabilities.supportedModes.includes("bypass")) return "bypass";
+  return resolvePermissionModeForVendor(capabilities, current);
 }
 
 /** An explicit native-worker pause, carried separately from chat text. */
@@ -1224,6 +1272,33 @@ export const sessionSlice = createSlice({
     setBrokerModel: (state, action: PayloadAction<BrokerModel>) => {
       state.brokerModel = action.payload;
     },
+    /**
+     * Model choice is a persistent transcript boundary. Keep it separate from
+     * setBrokerModel because restore/draft hydration must not manufacture an
+     * event, while every user-initiated transition must be visible.
+     */
+    switchBrokerModel: (
+      state,
+      action: PayloadAction<{ model: BrokerModel; displayName: string }>,
+    ) => {
+      const { model, displayName } = action.payload;
+      if ((state.brokerModel ?? "opus-5") === model) return;
+
+      state.brokerModel = model;
+      state.brokerPermissionMode = reconcilePermissionModeForBrokerModel(
+        model,
+        state.brokerPermissionMode,
+      );
+      state.history.push({
+        message: {
+          id: uuidv4(),
+          role: "system",
+          content: "",
+        },
+        contextItems: [],
+        modelSwitch: { model, displayName: displayName.trim() || model },
+      });
+    },
     setBrokerSubagent: (state, action: PayloadAction<BrokerSubagent>) => {
       state.brokerSubagent = action.payload;
     },
@@ -1385,6 +1460,7 @@ export const {
   setProcessedToolCallArgs,
   setMode,
   setBrokerModel,
+  switchBrokerModel,
   setBrokerSubagent,
   setBrokerEffort,
   setBrokerSpeed,
