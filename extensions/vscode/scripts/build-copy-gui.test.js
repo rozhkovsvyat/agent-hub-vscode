@@ -87,3 +87,106 @@ test("fails closed instead of copying an incomplete GUI build", () => {
     assert.equal(fs.existsSync(vscodeGuiDir), false);
   });
 });
+
+function createCurrentBuild(guiDir) {
+  const distAssets = path.join(guiDir, "dist", "assets");
+  fs.mkdirSync(distAssets, { recursive: true });
+  fs.writeFileSync(path.join(distAssets, "index.js"), "current js");
+  fs.writeFileSync(path.join(distAssets, "index.css"), "current css");
+}
+
+function createOldStaging(vscodeGuiDir, intellijWebviewDir) {
+  fs.mkdirSync(path.join(vscodeGuiDir, "assets"), { recursive: true });
+  fs.writeFileSync(path.join(vscodeGuiDir, "assets", "index.js"), "old vscode");
+  fs.writeFileSync(path.join(vscodeGuiDir, "assets", "index.css"), "old css");
+  fs.mkdirSync(path.join(intellijWebviewDir, "assets"), { recursive: true });
+  fs.writeFileSync(
+    path.join(intellijWebviewDir, "assets", "index.js"),
+    "old intellij",
+  );
+  fs.writeFileSync(
+    path.join(intellijWebviewDir, "assets", "index.css"),
+    "old css",
+  );
+  fs.writeFileSync(path.join(intellijWebviewDir, "index.html"), "old shell");
+}
+
+function assertOldStaging(vscodeGuiDir, intellijWebviewDir) {
+  assert.equal(
+    fs.readFileSync(path.join(vscodeGuiDir, "assets", "index.js"), "utf8"),
+    "old vscode",
+  );
+  assert.equal(
+    fs.readFileSync(
+      path.join(intellijWebviewDir, "assets", "index.js"),
+      "utf8",
+    ),
+    "old intellij",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(intellijWebviewDir, "index.html"), "utf8"),
+    "old shell",
+  );
+}
+
+test("keeps both prior stagings when preparing the second copy fails", () => {
+  withFixture(({ guiDir, vscodeGuiDir, intellijWebviewDir }) => {
+    createCurrentBuild(guiDir);
+    createOldStaging(vscodeGuiDir, intellijWebviewDir);
+    let copyCount = 0;
+    const failingFs = {
+      ...fs,
+      cpSync(...args) {
+        copyCount += 1;
+        if (copyCount === 2) {
+          throw new Error("second copy failed");
+        }
+        return fs.cpSync(...args);
+      },
+    };
+
+    assert.throws(
+      () =>
+        buildAndCopyGui({
+          guiDir,
+          vscodeGuiDir,
+          intellijWebviewDir,
+          runBuild() {},
+          fileSystem: failingFs,
+        }),
+      /second copy failed/,
+    );
+    assertOldStaging(vscodeGuiDir, intellijWebviewDir);
+  });
+});
+
+test("rolls back both stagings when the second replacement rename fails", () => {
+  withFixture(({ guiDir, vscodeGuiDir, intellijWebviewDir }) => {
+    createCurrentBuild(guiDir);
+    createOldStaging(vscodeGuiDir, intellijWebviewDir);
+    let renameCount = 0;
+    const failingFs = {
+      ...fs,
+      renameSync(...args) {
+        renameCount += 1;
+        if (renameCount === 4) {
+          throw new Error("second replacement rename failed");
+        }
+        return fs.renameSync(...args);
+      },
+    };
+
+    assert.throws(
+      () =>
+        buildAndCopyGui({
+          guiDir,
+          vscodeGuiDir,
+          intellijWebviewDir,
+          runBuild() {},
+          fileSystem: failingFs,
+        }),
+      /second replacement rename failed/,
+    );
+    assertOldStaging(vscodeGuiDir, intellijWebviewDir);
+  });
+});

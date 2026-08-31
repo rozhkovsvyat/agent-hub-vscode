@@ -17,7 +17,6 @@ const {
 const { generateAndCopyConfigYamlSchema } = require("./generate-copy-config");
 const { npmInstall } = require("./npm-install");
 const {
-  buildGui,
   copyOnnxRuntimeFromNodeModules,
   copyTreeSitterWasms,
   copyNodeModules,
@@ -28,6 +27,7 @@ const {
   copyTokenizers,
   copyScripts,
 } = require("./utils");
+const { buildAndCopyGui } = require("./build-copy-gui");
 
 // Clear folders that will be packaged to ensure clean slate
 rimrafSync(path.join(__dirname, "..", "bin"));
@@ -46,6 +46,7 @@ const args = process.argv;
 if (args[2] === "--target") {
   target = args[3];
 }
+const guiAlreadyPrepared = args.includes("--gui-prepared");
 
 let os;
 let arch;
@@ -68,10 +69,6 @@ const exe = os === "win32" ? ".exe" : "";
 
 console.log("[info] Using target: ", target);
 
-function ghAction() {
-  return !!process.env.GITHUB_ACTIONS;
-}
-
 async function package(target, os, arch, exe) {
   console.log("[info] Packaging extension for target ", target);
 
@@ -81,8 +78,11 @@ async function package(target, os, arch, exe) {
   // Install node_modules
   await npmInstall();
 
-  // Build gui and copy to extensions
-  await buildGui(ghAction());
+  // Direct cross-platform packaging must never consume a stale gui/dist.
+  // package-all prepares it once before iterating targets.
+  if (!guiAlreadyPrepared) {
+    buildAndCopyGui();
+  }
 
   // Assets
   // Copy tree-sitter-wasm files
