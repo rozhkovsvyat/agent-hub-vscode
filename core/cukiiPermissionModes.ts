@@ -23,26 +23,26 @@ export const CUKII_PERMISSION_MODE_COPY: Record<
 > = {
   manual: {
     title: "Manual",
-    description: "Claude will ask for approval before making each edit",
+    description: "Cukii will ask for approval before making each edit",
   },
   editAutomatically: {
     title: "Edit automatically",
-    description: "Claude will edit your selected text or the whole file",
+    description: "Cukii will edit your selected text or the whole file",
   },
   plan: {
     title: "Plan",
     description:
-      "Claude will explore the code and present a plan before editing",
+      "Cukii will explore the code and present a plan before editing",
   },
   auto: {
     title: "Auto",
     description:
-      "Claude will approve actions that pass a safety check and pause for anything risky",
+      "Cukii will approve actions that pass a safety check and pause for anything risky",
   },
   bypass: {
     title: "Bypass permissions",
     description:
-      "Claude will not ask for approval before running potentially dangerous commands",
+      "Cukii will not ask for approval before running potentially dangerous commands",
   },
 };
 

@@ -48,7 +48,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByText("Add context")).toBeDefined();
   });
 
-  it("opens the Claude-style permission popover with exact copy and cycles with Shift+Tab", async () => {
+  it("opens the Cukii permission popover with exact copy and cycles with Shift+Tab", async () => {
     const { store, user } = await renderWithProviders(
       <InputToolbar {...props} />,
     );
@@ -61,12 +61,12 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(document.querySelector('[aria-label="Shift+Tab"]')).not.toBeNull();
     expect(
       await getElementByText(
-        "Claude will explore the code and present a plan before editing",
+        "Cukii will explore the code and present a plan before editing",
       ),
     ).toBeDefined();
     expect(
       await getElementByText(
-        "Claude will not ask for approval before running potentially dangerous commands",
+        "Cukii will not ask for approval before running potentially dangerous commands",
       ),
     ).toBeDefined();
 

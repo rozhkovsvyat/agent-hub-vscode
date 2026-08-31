@@ -14,7 +14,7 @@ import {
 } from "./cukiiPermissionModes";
 
 describe("Cukii permission modes", () => {
-  it("keeps exact Claude copy and order", () => {
+  it("keeps exact Cukii copy and order", () => {
     expect(CUKII_PERMISSION_MODE_ORDER).toEqual([
       "manual",
       "editAutomatically",
@@ -24,11 +24,11 @@ describe("Cukii permission modes", () => {
     ]);
     expect(CUKII_PERMISSION_MODE_COPY.manual.title).toBe("Manual");
     expect(CUKII_PERMISSION_MODE_COPY.manual.description).toBe(
-      "Claude will ask for approval before making each edit",
+      "Cukii will ask for approval before making each edit",
     );
     expect(CUKII_PERMISSION_MODE_COPY.bypass.title).toBe("Bypass permissions");
     expect(CUKII_PERMISSION_MODE_COPY.bypass.description).toBe(
-      "Claude will not ask for approval before running potentially dangerous commands",
+      "Cukii will not ask for approval before running potentially dangerous commands",
     );
   });
 
