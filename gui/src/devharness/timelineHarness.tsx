@@ -90,9 +90,14 @@ function Harness() {
         history: HISTORY,
       },
     });
-    // Keep the real transcript loader visible for CDP geometry checks.
-    store.dispatch({ type: "session/setActive" });
+    // Chat's own effects settle immediately after mount. Schedule the fixture
+    // state after them so CDP measures a real live loader, not an idle shell.
+    const activate = window.setTimeout(
+      () => store.dispatch({ type: "session/setActive" }),
+      0,
+    );
     setReady(true);
+    return () => window.clearTimeout(activate);
   }, []);
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: 16 }}>
