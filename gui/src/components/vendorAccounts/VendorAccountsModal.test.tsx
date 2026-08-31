@@ -42,7 +42,7 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Anthropic");
     await getElementByText("DeepSeek");
     await getElementByText("owner@example.com");
-    await getElementByText("Not configured / not yet supported");
+    await getElementByText("Coming soon");
     expect(document.querySelectorAll("h3, h4")).toHaveLength(1);
     expect(getElementByText("Accounts")).toBeDefined();
     await user.click(await getElementByText("Log out"));
@@ -290,7 +290,7 @@ describe("VendorAccountsModal", () => {
         installed: true,
         authenticated: false,
         state: "disconnected",
-        accountLabel: "Not signed in",
+        accountLabel: "Not logged in",
         actions: ["login"],
       },
       {
@@ -306,8 +306,8 @@ describe("VendorAccountsModal", () => {
     await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
       mockIdeMessenger: ideMessenger,
     });
-    await getElementByText("Sign in");
-    await getElementByText("Not signed in");
+    await getElementByText("Log in");
+    await getElementByText("Not logged in");
     await getElementByText("Not installed");
   });
 

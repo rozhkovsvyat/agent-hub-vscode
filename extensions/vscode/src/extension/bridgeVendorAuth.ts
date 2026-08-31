@@ -185,7 +185,7 @@ export function accountLabelFromAuthMetadata(
 }
 
 function unknownIdentityLabel(): string {
-  return "Email unavailable — sign in again";
+  return "Not logged in";
 }
 
 /**
@@ -304,7 +304,7 @@ export function classifyVendorAuthOutput(
   const emailUnavailable = (): AuthClassification => ({
     state: "unknown",
     authenticated: false,
-    accountLabel: "Email unavailable — sign in again",
+    accountLabel: "Not logged in",
     actions: ["login"],
   });
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => {
@@ -321,7 +321,7 @@ export function classifyVendorAuthOutput(
   const disconnected = (): AuthClassification => ({
     state: "disconnected",
     authenticated: false,
-    accountLabel: "Not signed in",
+    accountLabel: "Not logged in",
     actions: ["login"],
   });
   const unknown = (): AuthClassification => ({
@@ -1152,7 +1152,7 @@ export function notSupportedVendorStatus(): BrokerVendorAuthStatus {
     installed: false,
     authenticated: false,
     state: "postponed",
-    accountLabel: "Not configured / not yet supported",
+    accountLabel: "Coming soon",
     actions: [],
   };
 }

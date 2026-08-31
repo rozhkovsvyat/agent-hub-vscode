@@ -89,7 +89,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       installed: false,
       authenticated: false,
       state: "postponed",
-      accountLabel: "Not configured / not yet supported",
+      accountLabel: "Coming soon",
       actions: [],
     },
   ],

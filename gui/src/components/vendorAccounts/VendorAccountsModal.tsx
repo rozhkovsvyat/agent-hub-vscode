@@ -14,7 +14,7 @@ type RefreshReason = "initial" | "user" | "action" | "poll";
 
 const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   install: "Install",
-  login: "Sign in",
+  login: "Log in",
   logout: "Log out",
 };
 
