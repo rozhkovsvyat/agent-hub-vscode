@@ -682,6 +682,7 @@
     "lint": "eslint src --ext ts",
     "lint:fix": "eslint . --ext ts --fix",
     "test": "vitest run",
+    "test:build-graph": "node --test scripts/build-copy-gui.test.js",
     "test:voice-runtime": "node scripts/test-copy-voice-runtime.js",
     "probe:voice-package": "node scripts/probe-voice-package.js",
     "vitest": "vitest run",
