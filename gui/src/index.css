@@ -303,14 +303,14 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   transform: none;
 }
 
-/* A queued message uses this exact node after it enters history.  Let a
-   one-line draft remain a compact bubble, then grow only up to the transcript
-   cap; the editor itself owns overflow so it never jumps on queued -> sent. */
+/* A sent user message is transcript prose, not an editor viewport. Let it
+   grow to its full wrapped height at every width; a nested scrollbar hides
+   part of the user's own message and breaks the bubble's natural height. */
 .cukii-user-bubble .scroll-container {
-  max-height: 9rem;
+  height: auto !important;
+  max-height: none !important;
   max-width: 100%;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
+  overflow: visible !important;
 }
 
 .cukii-user-bubble .ProseMirror {
@@ -1481,6 +1481,16 @@ button.cukii-submit-button--stop:active {
 .cukii-thinking-summary-completed {
   color: rgba(204, 204, 204, 0.7);
   font-weight: 400;
+}
+
+/* The active Claude thought is a quiet status checkpoint, not a spinner.
+   The dot and chevron are intentionally part of the focusable disclosure. */
+.cukii-thinking-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #979797);
 }
 
 .cukii-crumbs {

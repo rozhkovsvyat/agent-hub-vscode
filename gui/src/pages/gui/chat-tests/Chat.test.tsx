@@ -1,4 +1,6 @@
 import { act } from "@testing-library/react";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { vi } from "vitest";
 import { addAndSelectMockLlm } from "../../../util/test/config";
 import { renderWithProviders } from "../../../util/test/render";
@@ -16,6 +18,10 @@ import {
   setToolCallCalling,
   switchBrokerModel,
 } from "../../../redux/slices/sessionSlice";
+import { setCodeToEdit } from "../../../redux/slices/editState";
+
+const canonicalCss = () =>
+  readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
 
 test("should render input box", async () => {
   await renderWithProviders(<Chat />);
@@ -324,17 +330,21 @@ test("renders a persisted Claude-style model switch boundary before the next tur
     });
   });
 
-  const boundary = container.querySelector('[data-testid="cukii-model-switch"]');
+  const boundary = container.querySelector(
+    '[data-testid="cukii-model-switch"]',
+  );
   expect(boundary?.textContent).toContain("Switched to GPT-5.6 Terra");
-  expect(boundary?.querySelectorAll(".cukii-model-switch-wave")).toHaveLength(2);
+  expect(boundary?.querySelectorAll(".cukii-model-switch-wave")).toHaveLength(
+    2,
+  );
   expect(boundary?.nextElementSibling).toHaveClass("cukii-user-row");
   expect(boundary?.closest(".cukii-timeline-item")).toBeNull();
 
-  const css = await import("../../../index.css?raw");
-  expect(css.default).toContain("gap: 10px");
-  expect(css.default).toContain("padding: 8px 0");
-  expect(css.default).toContain("width='14' height='7'");
-  expect(css.default).toContain("@media screen and (max-width: 330px)");
+  const css = canonicalCss();
+  expect(css).toContain("gap: 10px");
+  expect(css).toContain("padding: 8px 0");
+  expect(css).toContain("width='14' height='7'");
+  expect(css).toContain("@media screen and (max-width: 330px)");
 });
 
 test("streaming toolbar follows the current transcript", async () => {
@@ -578,11 +588,11 @@ test("loader renders and cycles for an active tool, but yields to bridge wait an
     vi.advanceTimersByTime(4_000);
   });
   expect(toolbar?.textContent).toContain("Combulating..");
-  const css = await import("../../../index.css?raw");
-  expect(css.default).toMatch(
+  const css = canonicalCss();
+  expect(css).toMatch(
     /\.cukii-crumbs-active circle\s*\{[^}]*animation:\s*cukiiCrumbVertex\s+1\.26s[^}]*infinite/s,
   );
-  expect(css.default).not.toMatch(
+  expect(css).not.toMatch(
     /\.cukii-crumbs-active circle\s*\{[^}]*animation-fill-mode/s,
   );
 
@@ -598,6 +608,11 @@ test("loader renders and cycles for an active tool, but yields to bridge wait an
 
   await act(async () => {
     store.dispatch(setBridgeWait(undefined));
+    store.dispatch(
+      setCodeToEdit({
+        codeToEdit: { filepath: "D:/Scratch/example.ts", contents: "" },
+      }),
+    );
     store.dispatch(setIsInEdit(true));
   });
   expect(

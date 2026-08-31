@@ -93,6 +93,9 @@ function ThinkingBlockPeek({
             aria-controls={`thinking-block-content-${index}`}
             onClick={() => setOpen(!open)}
           >
+            {inProgress && (
+              <span className="cukii-thinking-status-dot" aria-hidden="true" />
+            )}
             {inProgress
               ? redactedThinking
                 ? "Redacted thinking"

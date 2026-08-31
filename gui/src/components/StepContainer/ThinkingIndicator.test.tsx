@@ -10,8 +10,8 @@ const emptyAssistant: ChatHistoryItem = {
 };
 
 describe("ThinkingIndicator", () => {
-  it("shows a Thinking label without the live loader glyph", async () => {
-    const { store } = await renderWithProviders(
+  it("shows a single grey-dot Thinking disclosure without the live loader", async () => {
+    const { store, user } = await renderWithProviders(
       <ThinkingIndicator historyItem={emptyAssistant} />,
     );
 
@@ -20,9 +20,16 @@ describe("ThinkingIndicator", () => {
     });
 
     const label = screen.getByTestId("cukii-thinking-label");
-    expect(label.textContent).toBe("Thinking...");
+    expect(label.textContent).toBe("Thinking");
+    expect(label).toHaveAttribute("aria-expanded", "false");
+    expect(label.querySelector(".cukii-thinking-status-dot")).not.toBeNull();
     expect(label.querySelector(".cukii-thinking-glyph")).toBeNull();
     expect(label.querySelector(".cukii-thinking-row")).toBeNull();
+    await user.click(label);
+    expect(label).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Thinking in progress")).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(label).toHaveAttribute("aria-expanded", "false");
   });
 
   it("hides the label once the assistant has content", async () => {

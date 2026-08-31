@@ -84,14 +84,21 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
-  it("uses the queued/history sizing matrix: compact line, wrapping growth, then inner scroll", () => {
+  it("lets queued and sent bubbles grow to their full wrapped height", () => {
     const css = source("index.css");
+    const bubbleStart = css.indexOf(".cukii-user-bubble .scroll-container");
+    const bubbleContract = css.slice(
+      bubbleStart,
+      css.indexOf(".cukii-user-bubble .ProseMirror", bubbleStart),
+    );
     expect(css).toContain(".cukii-user-bubble .cukii-input-box");
     expect(css).toContain("width: fit-content;");
     expect(css).toContain("max-width: min(100%, 640px);");
-    expect(css).toContain(".cukii-user-bubble .scroll-container");
-    expect(css).toContain("max-height: 9rem;");
-    expect(css).toContain("overflow-y: auto !important;");
+    expect(bubbleContract).toContain("height: auto !important;");
+    expect(bubbleContract).toContain("max-height: none !important;");
+    expect(bubbleContract).toContain("overflow: visible !important;");
+    expect(bubbleContract).not.toContain("max-height: 9rem;");
+    expect(bubbleContract).not.toContain("overflow-y: auto !important;");
     expect(css).toContain("overflow-wrap: anywhere;");
   });
 

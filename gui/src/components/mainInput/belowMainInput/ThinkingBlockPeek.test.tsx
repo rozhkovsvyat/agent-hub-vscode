@@ -81,6 +81,7 @@ describe("ThinkingBlockPeek", () => {
 
     const peek = screen.getByTestId("thinking-block-peek");
     expect(peek.textContent).toMatch(/Thinking/);
+    expect(peek.querySelector(".cukii-thinking-status-dot")).not.toBeNull();
     expect(peek.querySelector(".cukii-thinking-glyph")).toBeNull();
     expect(peek.querySelector(".cukii-thinking-inline")).toBeNull();
   });
@@ -97,6 +98,7 @@ describe("ThinkingBlockPeek", () => {
 
     const peek = screen.getByTestId("thinking-block-peek");
     expect(peek.textContent).toContain("Thought for 2s");
+    expect(peek.querySelector(".cukii-thinking-status-dot")).toBeNull();
     expect(peek).toHaveAttribute("aria-expanded", "false");
     await user.click(peek);
     expect(peek).toHaveAttribute("aria-expanded", "true");

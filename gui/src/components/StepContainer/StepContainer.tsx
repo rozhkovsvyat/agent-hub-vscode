@@ -101,7 +101,9 @@ function StepContainer(props: StepContainerProps) {
             />
           </>
         )}
-        {props.isLast && <ThinkingIndicator historyItem={props.item} />}
+        {props.isLast && !props.item.reasoning?.text?.trim() && (
+          <ThinkingIndicator historyItem={props.item} />
+        )}
       </div>
 
       {showResponseActions && (
