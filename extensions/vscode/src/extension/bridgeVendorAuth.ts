@@ -256,20 +256,40 @@ function nativeCliJsonIndicatesAuthenticated(
     : status.source === "oauth";
 }
 
+/**
+ * Native CLI stdout is untrusted. Permit terminal CR/LF framing only, then
+ * reject every other control character before attempting strict identity
+ * parsing. The probe's stdout/stderr separator can make a CLI's CRLF appear as
+ * CRLF + LF. In particular, do not use String#trim here: it would erase
+ * framing such as vertical tabs before the guard can inspect it.
+ */
+function withoutTerminalLineEnding(text: string): string | undefined {
+  const terminalLineEndings = text.match(/(?:\r\n|\n)*$/)?.[0] ?? "";
+  const body = text.slice(0, text.length - terminalLineEndings.length);
+  return /[\x00-\x1f\x7f]/.test(body) ? undefined : body;
+}
+
 function identityFromNativeCliOutput(
   vendor: VendorWithCli,
   text: string,
 ): string | undefined {
   if (vendor !== "grok" && vendor !== "kimi") return undefined;
-  const jsonIdentity = identityFromNativeCliJson(vendor, text);
+  const terminalFramedText = withoutTerminalLineEnding(text);
+  if (terminalFramedText === undefined) return undefined;
+
+  const jsonIdentity = identityFromNativeCliJson(vendor, terminalFramedText);
   if (jsonIdentity) return jsonIdentity;
 
   // Anchor each vendor's documented human-readable status line. In
   // particular, never infer an identity from arbitrary diagnostics/stdout.
   const match =
     vendor === "grok"
-      ? text.match(/^You are logged in with grok\.com as ([^\s\r\n]+)$/i)
-      : text.match(/^managed:kimi-code source=oauth account=([^\s\r\n]+)$/i);
+      ? terminalFramedText.match(
+          /^You are logged in with grok\.com as ([^\s\r\n]+)$/i,
+        )
+      : terminalFramedText.match(
+          /^managed:kimi-code source=oauth account=([^\s\r\n]+)$/i,
+        );
   const candidate =
     vendor === "grok" ? match?.[1]?.replace(/\.$/, "") : match?.[1];
   return sanitizedNativeCliIdentity(candidate);
@@ -299,7 +319,7 @@ export function classifyVendorAuthOutput(
   const text = stdout.trim();
   const accountLabel =
     identityLabel ??
-    identityFromNativeCliOutput(vendor, text) ??
+    identityFromNativeCliOutput(vendor, stdout) ??
     unknownIdentityLabel();
   const connected = (label: string, actions: BrokerVendorAuthAction[]) => ({
     state: "connected" as const,

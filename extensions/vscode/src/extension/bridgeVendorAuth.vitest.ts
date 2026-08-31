@@ -179,6 +179,37 @@ describe("Cukii vendor CLI accounts", () => {
     ).toBe("stdout-leak@example.test");
   });
 
+  it("allows terminal CRLF framing for exact Grok and Kimi status lines", () => {
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com as owner@example.test\r\n",
+      ).accountLabel,
+    ).toBe("owner@example.test");
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code source=oauth account=owner@example.test\r\n",
+      ).accountLabel,
+    ).toBe("owner@example.test");
+  });
+
+  it("rejects vertical-tab framing before strict Grok and Kimi identity checks", () => {
+    const unavailable = "Logged in • Identity unavailable";
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "\u000BYou are logged in with grok.com as owner@example.test\u000B",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "\u000Bmanaged:kimi-code source=oauth account=owner@example.test\u000B",
+      ).accountLabel,
+    ).toBe(unavailable);
+  });
+
   it("accepts only allowlisted JSON identity fields from Grok and Kimi", () => {
     expect(
       classifyVendorAuthOutput(
