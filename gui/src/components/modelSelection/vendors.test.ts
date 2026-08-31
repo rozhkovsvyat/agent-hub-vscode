@@ -216,11 +216,11 @@ describe("Cukii model context labels", () => {
     );
 
     expect(new Set(grokDescriptions).size).toBe(grokDescriptions.length);
-    expect(modelsByValue.get("grok-4-6")?.description).toContain(
-      "long-running agents",
+    expect(modelsByValue.get("grok-4-6")?.description).toBe(
+      "Most capable frontier model for coding, agentic tasks, and knowledge work",
     );
-    expect(modelsByValue.get("grok-4-5")?.description).toContain(
-      "knowledge work",
+    expect(modelsByValue.get("grok-4-5")?.description).toBe(
+      "Engineering-focused model for coding and agentic software workflows",
     );
 
     for (const [value, forbiddenToken] of [

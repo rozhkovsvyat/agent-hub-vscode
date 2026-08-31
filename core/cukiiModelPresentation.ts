@@ -31,9 +31,9 @@ export function canonicalCukiiModelDescription(
     return "Fast, cost-efficient model for simpler coding tasks";
   if (matches(/gpt[-\s]?5[.-]4/)) return "Strong model for everyday coding";
   if (matches(/grok[-\s]?4[.-]6/))
-    return "Flagship for long-running agents and interactive work";
+    return "Most capable frontier model for coding, agentic tasks, and knowledge work";
   if (matches(/grok[-\s]?4[.-]5/))
-    return "Smartest for coding, agentic tasks, and knowledge work";
+    return "Engineering-focused model for coding and agentic software workflows";
   if (matches(/(?:^|[-\s])grok(?:[-\s]|$)/))
     return "xAI model for coding and agentic tasks";
   if (matches(/composer[-\s]?2[.-]5/))
