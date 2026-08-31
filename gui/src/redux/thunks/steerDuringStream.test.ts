@@ -2,6 +2,7 @@ import { JSONContent } from "@tiptap/core";
 import { InputModifiers } from "core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
+import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
 import { createMockStore } from "../../util/test/mockStore";
 import { setActive } from "../slices/sessionSlice";
 import { RootState } from "../store";
@@ -63,8 +64,45 @@ describe("steerDuringStream", () => {
       expect.objectContaining({
         messageId: expect.any(String),
         sessionId: sessionOf(store).id,
-        text: "do it this way instead",
+        content: "do it this way instead",
       }),
+    );
+  });
+
+  it("keeps image attachments in an active-run steering payload", async () => {
+    vi.mocked(resolveEditorContent).mockResolvedValueOnce({
+      selectedContextItems: [],
+      selectedCode: [],
+      content: [
+        { type: "text", text: "inspect this" },
+        {
+          type: "imageUrl",
+          imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+        },
+      ],
+      legacyCommandWithInput: undefined,
+    });
+    const mockIdeMessenger = new MockIdeMessenger();
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    expect(request).toHaveBeenCalledWith(
+      "cukii/steerDuringStream",
+      expect.objectContaining({
+        content: [
+          { type: "text", text: "inspect this" },
+          {
+            type: "imageUrl",
+            imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+          },
+        ],
+      }),
+    );
+    expect(sessionOf(store).history.at(-1)?.message.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "imageUrl" })]),
     );
   });
 });

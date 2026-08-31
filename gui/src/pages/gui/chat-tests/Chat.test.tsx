@@ -259,6 +259,48 @@ test("follow-up receipt is compact, persisted, and never renders Delivered text"
   expect(receipt?.closest(".cukii-user-message")).not.toBeNull();
 });
 
+test("deferred image follow-up visibly reports that it will run next turn", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "deferred-image-receipt",
+        title: "Deferred image receipt",
+        history: [
+          {
+            message: {
+              id: "image-follow-up",
+              role: "user",
+              content: [
+                { type: "text", text: "Inspect this" },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+                },
+              ],
+            },
+            contextItems: [],
+            isSteer: true,
+            steerStatus: "deferred",
+            steerSentAt: 1_700_000_000_000,
+          },
+        ],
+      },
+    });
+  });
+
+  const receipt = container.querySelector(
+    '[data-testid="cukii-message-receipt-image-follow-up"]',
+  );
+  expect(receipt?.textContent).toMatch(/↷$/);
+  expect(receipt).toHaveAttribute(
+    "aria-label",
+    expect.stringContaining("queued for the next turn"),
+  );
+});
+
 test("assistant text and tool calls render as sibling timeline items", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 

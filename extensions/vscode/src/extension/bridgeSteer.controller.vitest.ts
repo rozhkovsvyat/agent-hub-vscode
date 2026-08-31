@@ -9,10 +9,10 @@ describe("BridgeSteeringController", () => {
     const receipt = controller.deliver({
       messageId: "message-1",
       sessionId: "session-1",
-      text: "change direction",
+      content: "change direction",
     });
-    controller.attachWriter(async (text) => {
-      order.push(`stdin:${text}`);
+    controller.attachWriter(async (message) => {
+      order.push(`stdin:${message.content}`);
       return true;
     });
     expect(await receipt).toMatchObject({ status: "delivered" });
@@ -31,7 +31,7 @@ describe("BridgeSteeringController", () => {
     const message = {
       messageId: "message-1",
       sessionId: "session-1",
-      text: "only once",
+      content: "only once",
     };
     const [first, duplicate] = await Promise.all([
       controller.deliver(message),
@@ -47,9 +47,31 @@ describe("BridgeSteeringController", () => {
       controller.deliver({
         messageId: "message-1",
         sessionId: "session-1",
-        text: "follow up",
+        content: "follow up",
       }),
     ).resolves.toMatchObject({ status: "deferred" });
+  });
+
+  it("delivers an image steering payload whole instead of reducing it to text", async () => {
+    const writer = vi.fn(async () => true);
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(writer);
+    const content = [
+      { type: "text" as const, text: "inspect this" },
+      {
+        type: "imageUrl" as const,
+        imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+      },
+    ];
+
+    await expect(
+      controller.deliver({
+        messageId: "image-1",
+        sessionId: "session-1",
+        content,
+      }),
+    ).resolves.toMatchObject({ status: "delivered" });
+    expect(writer).toHaveBeenCalledWith(expect.objectContaining({ content }));
   });
 
   it("never writes a follow-up for a different session", async () => {
@@ -60,7 +82,7 @@ describe("BridgeSteeringController", () => {
       controller.deliver({
         messageId: "message-1",
         sessionId: "session-2",
-        text: "do not cross sessions",
+        content: "do not cross sessions",
       }),
     ).resolves.toMatchObject({ status: "deferred", sessionId: "session-2" });
     expect(writer).not.toHaveBeenCalled();
@@ -69,21 +91,21 @@ describe("BridgeSteeringController", () => {
   it("serializes concurrent follow-ups in arrival order", async () => {
     const writes: string[] = [];
     const controller = new BridgeSteeringController("session-1", true);
-    controller.attachWriter(async (text) => {
+    controller.attachWriter(async (message) => {
       await Promise.resolve();
-      writes.push(text);
+      writes.push(String(message.content));
       return true;
     });
     await Promise.all([
       controller.deliver({
         messageId: "one",
         sessionId: "session-1",
-        text: "one",
+        content: "one",
       }),
       controller.deliver({
         messageId: "two",
         sessionId: "session-1",
-        text: "two",
+        content: "two",
       }),
     ]);
     expect(writes).toEqual(["one", "two"]);
@@ -96,12 +118,12 @@ describe("BridgeSteeringController", () => {
       controller.deliver({
         messageId: "one",
         sessionId: "session-1",
-        text: "one",
+        content: "one",
       }),
       controller.deliver({
         messageId: "two",
         sessionId: "session-1",
-        text: "two",
+        content: "two",
       }),
     ]);
 
@@ -114,20 +136,20 @@ describe("BridgeSteeringController", () => {
   it("serializes equal follow-ups until each exact echo retires its ID", async () => {
     const writes: string[] = [];
     const controller = new BridgeSteeringController("session-1", true);
-    controller.attachWriter(async (text) => {
-      writes.push(text);
+    controller.attachWriter(async (message) => {
+      writes.push(String(message.content));
       return true;
     });
 
     const first = controller.deliver({
       messageId: "first",
       sessionId: "session-1",
-      text: "repeat this",
+      content: "repeat this",
     });
     const second = controller.deliver({
       messageId: "second",
       sessionId: "session-1",
-      text: "repeat this",
+      content: "repeat this",
     });
 
     await expect(first).resolves.toMatchObject({ status: "delivered" });
@@ -154,7 +176,7 @@ describe("BridgeSteeringController", () => {
     const receipt = controller.deliver({
       messageId: "message-1",
       sessionId: "session-1",
-      text: "cancel this write",
+      content: "cancel this write",
     });
     await writerStarted;
     controller.close();

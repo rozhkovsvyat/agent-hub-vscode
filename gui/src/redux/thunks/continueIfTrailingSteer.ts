@@ -1,5 +1,5 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
-import { stripImages } from "core/util/messageContent";
+import { hasImageAttachments, stripImages } from "core/util/messageContent";
 import type { ChatHistoryItemWithMessageId } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 import { streamThunkWrapper } from "./streamThunkWrapper";
@@ -24,7 +24,10 @@ export function hasTrailingSteerMessage(session: {
   ) {
     return false;
   }
-  return stripImages(last.message.content).trim().length > 0;
+  return (
+    stripImages(last.message.content).trim().length > 0 ||
+    hasImageAttachments(last.message.content)
+  );
 }
 
 export const continueIfTrailingSteer = createAsyncThunk<

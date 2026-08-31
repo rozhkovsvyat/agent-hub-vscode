@@ -106,4 +106,22 @@ describe("hasTrailingSteerMessage", () => {
       }),
     ).toBe(true);
   });
+
+  it("runs an image-only deferred follow-up after the current response", () => {
+    const deferred = item("user", "image", true);
+    deferred.message.content = [
+      {
+        type: "imageUrl",
+        imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+      },
+    ];
+    deferred.steerStatus = "deferred";
+    expect(
+      hasTrailingSteerMessage({
+        history: [deferred],
+        isStreaming: false,
+        isInEdit: false,
+      }),
+    ).toBe(true);
+  });
 });

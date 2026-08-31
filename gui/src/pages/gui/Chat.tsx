@@ -401,7 +401,9 @@ export function Chat() {
             ? "✓✓"
             : item.messageReceipt?.status === "delivered"
               ? "✓"
-              : "";
+              : item.messageReceipt?.status === "deferred"
+                ? "↷"
+                : "";
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
             <div className="cukii-user-message">
@@ -426,7 +428,9 @@ export function Chat() {
                     receipt === "✓✓"
                       ? `Sent ${sentTime}, read`
                       : receipt
-                        ? `Sent ${sentTime}, delivered`
+                        ? item.messageReceipt?.status === "deferred"
+                          ? `Sent ${sentTime}, queued for the next turn`
+                          : `Sent ${sentTime}, delivered`
                         : `Sent ${sentTime}`
                   }
                 >

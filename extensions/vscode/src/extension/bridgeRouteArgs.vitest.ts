@@ -337,6 +337,43 @@ describe("native bridge argv", () => {
     });
   });
 
+  it("serializes a Claude live steer with its image attachment in the same envelope", () => {
+    const frame = claudeStreamingInput([
+      { type: "text", text: "inspect this" },
+      {
+        type: "imageUrl",
+        imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+      },
+    ]);
+
+    expect(JSON.parse(frame)).toMatchObject({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "inspect this" },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "aW1hZ2U=",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects an unsupported live image before a text-only envelope can be written", () => {
+    expect(() =>
+      claudeStreamingInput([
+        { type: "text", text: "inspect this" },
+        { type: "imageUrl", imageUrl: { url: "file:///D:/image.png" } },
+      ]),
+    ).toThrow(/only data-URL image attachments/i);
+  });
+
   it("adds the real Claude MCP permission transport without leaking its token", async () => {
     const route = routeForModel(
       "opus-5",

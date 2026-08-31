@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ChatMessage, PromptLog } from "core";
+import { ChatMessage, MessageContent, PromptLog } from "core";
 import type {
   BrokerEffort,
   BrokerModel,
@@ -449,12 +449,40 @@ export function nativePromptCacheArgs(model: BrokerModel): string[] {
 // (Claude Code SDK, "Streaming JSON input"). Keeping stdin open is required
 // for its realtime multi-turn transport; it is closed only on CLI completion
 // or cancellation below.
-export function claudeStreamingInput(prompt: string): string {
+const CLAUDE_DATA_IMAGE_URL =
+  /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
+
+/**
+ * Claude's streaming input accepts the same text/image blocks that the GUI
+ * stores. Reject an unsupported image before writing any part of its follow-up
+ * so a live steer is always delivered whole or deferred whole.
+ */
+export function claudeStreamingInput(content: MessageContent): string {
+  const parts =
+    typeof content === "string"
+      ? [{ type: "text" as const, text: content }]
+      : content;
   return `${JSON.stringify({
     type: "user",
     message: {
       role: "user",
-      content: [{ type: "text", text: prompt }],
+      content: parts.map((part) => {
+        if (part.type === "text") return part;
+        const match = part.imageUrl.url.match(CLAUDE_DATA_IMAGE_URL);
+        if (!match) {
+          throw new Error(
+            "Live steering supports only data-URL image attachments for Claude.",
+          );
+        }
+        return {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: match[1].toLowerCase(),
+            data: match[2].replace(/\s/g, ""),
+          },
+        };
+      }),
     },
   })}\n`;
 }
@@ -1276,7 +1304,7 @@ async function* streamBridgeChatWithSteer(
     );
     if (!route.stdinFormat) child.stdin.end();
     if (route.stdinFormat === "claude-stream-json") {
-      permissionTransport?.steering?.attachWriter(async (text) => {
+      permissionTransport?.steering?.attachWriter(async (message) => {
         if (
           child.exitCode !== null ||
           child.signalCode !== null ||
@@ -1285,7 +1313,7 @@ async function* streamBridgeChatWithSteer(
           return false;
         }
         return new Promise<boolean>((resolve) => {
-          child.stdin.write(claudeStreamingInput(text), (error) =>
+          child.stdin.write(claudeStreamingInput(message.content), (error) =>
             resolve(!error),
           );
         });

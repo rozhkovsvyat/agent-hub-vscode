@@ -1,12 +1,14 @@
+import type { MessageContent } from "core";
 import type { CukiiSteerReceipt } from "core/protocol/ideWebview";
+import { hasImageAttachments, stripImages } from "core/util/messageContent";
 
 export type SteerMessage = {
   messageId: string;
   sessionId: string;
-  text: string;
+  content: MessageContent;
 };
 
-export type SteerWriter = (text: string) => Promise<boolean>;
+export type SteerWriter = (message: SteerMessage) => Promise<boolean>;
 
 type PendingSteer = {
   message: SteerMessage;
@@ -37,7 +39,8 @@ export class BridgeSteeringController {
         this.closed ||
         !this.supportsLiveSteering ||
         message.sessionId !== this.sessionId ||
-        !message.text.trim()
+        (!stripImages(message.content).trim() &&
+          !hasImageAttachments(message.content))
       ) {
         resolve(this.deferred(message));
         return;
@@ -76,7 +79,7 @@ export class BridgeSteeringController {
    */
   consumeVendorEcho(text: string): string | undefined {
     const index = this.awaitingVendorEcho.findIndex(
-      (message) => message.text === text,
+      (message) => stripImages(message.content) === text,
     );
     if (index < 0) return undefined;
     const messageId = this.awaitingVendorEcho.splice(index, 1)[0].messageId;
@@ -99,7 +102,9 @@ export class BridgeSteeringController {
         // equal follow-ups serialized until their predecessor is observed.
         if (
           this.awaitingVendorEcho.some(
-            (awaiting) => awaiting.text === next.message.text,
+            (awaiting) =>
+              stripImages(awaiting.content) ===
+              stripImages(next.message.content),
           )
         ) {
           break;
@@ -108,7 +113,7 @@ export class BridgeSteeringController {
         this.inFlight = pending;
         let delivered = false;
         try {
-          delivered = await writer(pending.message.text);
+          delivered = await writer(pending.message);
         } catch {
           delivered = false;
         }
@@ -132,7 +137,8 @@ export class BridgeSteeringController {
         this.writer &&
         !this.closed &&
         !this.awaitingVendorEcho.some(
-          (awaiting) => awaiting.text === next.message.text,
+          (awaiting) =>
+            stripImages(awaiting.content) === stripImages(next.message.content),
         )
       ) {
         void this.flush();

@@ -17,6 +17,14 @@ export function stripImages(messageContent: MessageContent): string {
     .join("\n");
 }
 
+/** A visual attachment is content even when the user supplies no text. */
+export function hasImageAttachments(messageContent: MessageContent): boolean {
+  return (
+    Array.isArray(messageContent) &&
+    messageContent.some((part) => part.type === "imageUrl")
+  );
+}
+
 export function renderChatMessage(message: ChatMessage): string {
   switch (message?.role) {
     case "user":

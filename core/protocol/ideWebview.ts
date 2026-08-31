@@ -199,7 +199,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     AsyncGenerator<ChatMessage, PromptLog>,
   ];
   "cukii/steerDuringStream": [
-    { messageId: string; sessionId: string; text: string },
+    { messageId: string; sessionId: string; content: ChatMessage["content"] },
     CukiiSteerReceipt,
   ];
   "cukii/cancelBridgeRun": [

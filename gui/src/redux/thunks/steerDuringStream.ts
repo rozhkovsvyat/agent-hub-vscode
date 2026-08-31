@@ -1,7 +1,6 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { JSONContent } from "@tiptap/core";
 import { InputModifiers } from "core";
-import { stripImages } from "core/util/messageContent";
 import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
 import { appendUserSteerMessage, setSteerStatus } from "../slices/sessionSlice";
@@ -54,7 +53,7 @@ export const steerDuringStream = createAsyncThunk<
         {
           messageId,
           sessionId,
-          text: stripImages(content),
+          content,
         },
       );
       dispatch(
