@@ -16,15 +16,95 @@ import "../index.css";
 
 const ideMessenger = new MockIdeMessenger();
 const store = setupStore({ ideMessenger });
+const RECEIPT_SENT_AT = 1_700_000_000_000;
+const HARNESS_IMAGE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='96'%3E%3Crect width='180' height='96' fill='%235a6b7c'/%3E%3C/svg%3E";
 
 const HISTORY = [
   {
     message: {
-      id: "user-1",
+      id: "receipt-short-sent",
       role: "user",
-      content: "Search the repo and run the checks",
+      content: "Ship it",
     },
     contextItems: [],
+    isSteer: true,
+    steerStatus: "delivered",
+    steerSentAt: RECEIPT_SENT_AT,
+  },
+  {
+    message: {
+      id: "receipt-long-read",
+      role: "user",
+      content:
+        "A long one-line follow-up keeps every word visible at the narrow 320px viewport without the time or read state covering its final word.",
+    },
+    contextItems: [],
+    isSteer: true,
+    steerStatus: "read",
+    steerSentAt: RECEIPT_SENT_AT,
+  },
+  {
+    message: {
+      id: "receipt-multiline-read",
+      role: "user",
+      content:
+        "First deliberate line\nSecond deliberate line\nFinal deliberate line",
+    },
+    contextItems: [],
+    isSteer: true,
+    steerStatus: "read",
+    steerSentAt: RECEIPT_SENT_AT,
+  },
+  {
+    message: {
+      id: "receipt-image-sent",
+      role: "user",
+      content: "Image attachment",
+    },
+    contextItems: [],
+    editorState: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Image attachment" }],
+        },
+        { type: "image", attrs: { src: HARNESS_IMAGE } },
+      ],
+    },
+    isSteer: true,
+    steerStatus: "delivered",
+    steerSentAt: RECEIPT_SENT_AT,
+  },
+  {
+    message: {
+      id: "receipt-call-style-read",
+      role: "user",
+      content: "run_live_harness()",
+    },
+    contextItems: [],
+    editorState: {
+      type: "doc",
+      content: [
+        {
+          type: "code-block",
+          attrs: {
+            inputId: "receipt-call-style-read",
+            item: {
+              id: { providerTitle: "code", itemId: "receipt-call-style" },
+              name: "receipt-call.ts",
+              description: "1-1",
+              content: "run_live_harness()",
+              uri: { type: "file", value: "file:///receipt-call.ts" },
+            },
+          },
+        },
+      ],
+    },
+    isSteer: true,
+    steerStatus: "read",
+    steerSentAt: RECEIPT_SENT_AT,
   },
   {
     message: {

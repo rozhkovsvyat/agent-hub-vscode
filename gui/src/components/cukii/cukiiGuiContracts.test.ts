@@ -158,17 +158,26 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
-  it("keeps messenger receipts inside a single-line user bubble", () => {
+  it("lays receipt metadata below every bubble instead of overlaying its content", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-message {");
-    const receipt = css.indexOf(".cukii-user-receipt {");
+    const metadata = css.indexOf(".cukii-user-metadata {");
     expect(start).toBeGreaterThanOrEqual(0);
-    expect(receipt).toBeGreaterThan(start);
-    const contract = css.slice(start, receipt + 500);
-    expect(contract).toContain("display: inline-block");
-    expect(contract).toContain("position: absolute");
-    expect(contract).toContain("padding-right: 52px");
-    expect(contract).not.toContain("padding-bottom");
+    expect(metadata).toBeGreaterThan(start);
+    const bubbleContract = css.slice(start, metadata);
+    const metadataContract = css.slice(metadata, metadata + 600);
+    expect(bubbleContract).toContain("display: inline-flex;");
+    expect(bubbleContract).toContain("flex-direction: column;");
+    expect(bubbleContract).toContain("align-items: flex-start;");
+    expect(bubbleContract).toContain(
+      ".cukii-user-message > .cukii-user-bubble",
+    );
+    expect(bubbleContract).not.toContain("position: absolute");
+    expect(bubbleContract).not.toContain("padding-right: 52px");
+    expect(metadataContract).toContain("align-self: stretch;");
+    expect(metadataContract).toContain("margin-top: 2px;");
+    expect(metadataContract).toContain("font-size: 10px;");
+    expect(metadataContract).toContain("line-height: 12px;");
   });
 
   it("uses the exact shared Claude toggle accent and transition", () => {

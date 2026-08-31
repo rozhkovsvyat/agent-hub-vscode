@@ -1120,31 +1120,54 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
-/* Messenger receipt: compact overlay in the bubble's lower-right corner.
-   It consumes horizontal inset rather than adding a separate footer row, so a
-   one-line follow-up remains a one-line bubble. */
+/* Messenger metadata is ordinary layout below the completed bubble. The old
+   absolute overlay could land on its final text/image line at narrow widths. */
 .cukii-user-message {
-  position: relative;
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
   max-width: min(100%, 640px);
 }
 
-.cukii-user-message:has(.cukii-user-receipt) .cukii-input-box {
-  padding-right: 52px;
+.cukii-user-message > .cukii-user-bubble {
+  min-width: 0;
+  max-width: 100%;
 }
 
-.cukii-user-receipt {
-  position: absolute;
-  right: 7px;
-  bottom: 5px;
+.cukii-user-metadata {
+  display: inline-flex;
+  align-items: baseline;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 12px;
+  margin-top: 2px;
+  padding: 0 4px;
   color: var(--vscode-descriptionForeground, #a0a0a0);
-  font-size: 11px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
-  line-height: 14px;
+  line-height: 12px;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
+}
+
+.cukii-receipt-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  vertical-align: -1px;
+}
+
+.cukii-receipt-check {
+  overflow: visible;
+  stroke-width: 1.5px;
+}
+
+.cukii-receipt-check--read .cukii-receipt-check-front {
+  /* This path is painted last, so it deliberately covers the crossing of the
+     rear check and reads as one compact messenger double-check. */
+  paint-order: stroke;
 }
 
 .cukii-user-bubble .ProseMirror img,

@@ -65,6 +65,7 @@ import {
   CukiiWaitingReceipt,
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
+import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
@@ -396,14 +397,13 @@ export function Chat() {
 
       if (message.role === "user") {
         const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
-        const receipt =
-          item.messageReceipt?.status === "read"
-            ? "✓✓"
-            : item.messageReceipt?.status === "delivered"
-              ? "✓"
-              : item.messageReceipt?.status === "deferred"
-                ? "↷"
-                : "";
+        const receiptStatus = item.messageReceipt?.status;
+        const visualReceiptStatus =
+          receiptStatus === "read" ||
+          receiptStatus === "delivered" ||
+          receiptStatus === "deferred"
+            ? receiptStatus
+            : undefined;
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
             <div className="cukii-user-message">
@@ -422,20 +422,22 @@ export function Chat() {
               )}
               {sentTime && (
                 <span
-                  className="cukii-user-receipt"
+                  className="cukii-user-metadata"
                   data-testid={`cukii-message-receipt-${message.id}`}
                   aria-label={
-                    receipt === "✓✓"
+                    visualReceiptStatus === "read"
                       ? `Sent ${sentTime}, read`
-                      : receipt
-                        ? item.messageReceipt?.status === "deferred"
+                      : visualReceiptStatus
+                        ? visualReceiptStatus === "deferred"
                           ? `Sent ${sentTime}, queued for the next turn`
                           : `Sent ${sentTime}, delivered`
                         : `Sent ${sentTime}`
                   }
                 >
-                  {sentTime}
-                  {receipt ? ` ${receipt}` : ""}
+                  <time>{sentTime}</time>
+                  {visualReceiptStatus && (
+                    <CukiiMessageReceiptStatus status={visualReceiptStatus} />
+                  )}
                 </span>
               )}
             </div>

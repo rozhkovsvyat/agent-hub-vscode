@@ -228,7 +228,7 @@ test("user bubbles are not timeline items", async () => {
   expect(userBox?.closest(".cukii-timeline-checkpoint")).toBeNull();
 });
 
-test("follow-up receipt is compact, persisted, and never renders Delivered text", async () => {
+test("follow-up metadata follows its bubble and renders a single sent SVG check", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -253,10 +253,52 @@ test("follow-up receipt is compact, persisted, and never renders Delivered text"
   const receipt = container.querySelector(
     '[data-testid="cukii-message-receipt-follow-up"]',
   );
-  expect(receipt?.textContent).toMatch(/✓$/);
-  expect(receipt?.textContent).not.toMatch(/✓✓$/);
+  expect(receipt?.textContent).toMatch(/^01:13$/);
+  expect(
+    receipt?.querySelector(
+      '[data-testid="cukii-message-receipt-status-delivered"]',
+    ),
+  ).not.toBeNull();
   expect(container.textContent).not.toContain("Delivered");
-  expect(receipt?.closest(".cukii-user-message")).not.toBeNull();
+  const bubble = receipt?.previousElementSibling;
+  expect(bubble).toHaveClass("cukii-user-bubble");
+  expect(receipt?.parentElement).toHaveClass("cukii-user-message");
+});
+
+test("read follow-up uses the compact overlapping double-check SVG", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "read-message-receipt",
+        title: "Read message receipt",
+        history: [
+          {
+            message: { id: "read-follow-up", role: "user", content: "Seen" },
+            contextItems: [],
+            isSteer: true,
+            steerStatus: "read",
+            steerSentAt: 1_700_000_000_000,
+          },
+        ],
+      },
+    });
+  });
+
+  const receipt = container.querySelector(
+    '[data-testid="cukii-message-receipt-read-follow-up"]',
+  );
+  const readStatus = receipt?.querySelector(
+    '[data-testid="cukii-message-receipt-status-read"]',
+  );
+  expect(receipt).toHaveAttribute(
+    "aria-label",
+    expect.stringContaining("read"),
+  );
+  expect(readStatus?.querySelectorAll("path")).toHaveLength(2);
+  expect(receipt?.textContent).toBe("01:13");
 });
 
 test("deferred image follow-up visibly reports that it will run next turn", async () => {
