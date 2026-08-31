@@ -199,6 +199,9 @@ function InputToolbar(props: InputToolbarProps) {
           };
         }
         setPermissionCapabilities(capabilities);
+      })
+      .catch(() => {
+        // The selector retains its static verified vendor contract on error.
       });
     return () => {
       cancelled = true;

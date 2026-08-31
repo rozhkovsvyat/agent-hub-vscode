@@ -3,6 +3,7 @@ import {
   CUKII_PERMISSION_MODE_COPY,
   brokerVendorForModel,
   cyclePermissionMode,
+  defaultVendorPermissionCapabilities,
   resolvePermissionModeForVendor,
   visiblePermissionModes,
   type CukiiPermissionMode,
@@ -42,6 +43,12 @@ type CapabilityMap = Partial<
   Record<BrokerVendorId, { supportedModes: CukiiPermissionMode[] }>
 >;
 
+function staticCapabilities(vendor: BrokerVendorId) {
+  return ["claude", "codex", "kimi"].includes(vendor)
+    ? defaultVendorPermissionCapabilities(vendor)
+    : undefined;
+}
+
 export function PermissionModeControl({
   brokerModel,
   permissionMode,
@@ -65,6 +72,9 @@ export function PermissionModeControl({
           next[entry.vendor] = { supportedModes: entry.supportedModes };
         }
         setCapabilities(next);
+      })
+      .catch(() => {
+        // The static contracts below are deliberately retained on probe error.
       });
     return () => {
       cancelled = true;
@@ -72,28 +82,30 @@ export function PermissionModeControl({
   }, [ideMessenger]);
 
   const vendor = brokerVendorForModel(brokerModel);
+  const fallback = useMemo(() => staticCapabilities(vendor), [vendor]);
   const visibleModes = useMemo(() => {
     const live = capabilities[vendor];
-    return live
-      ? visiblePermissionModes({
-          vendor,
-          supportedModes: live.supportedModes,
-          helpSource: "live",
-        })
-      : [];
-  }, [capabilities, vendor]);
+    const supportedModes = [
+      ...(fallback?.supportedModes ?? []),
+      ...(live?.supportedModes ?? []),
+    ];
+    return visiblePermissionModes({
+      vendor,
+      supportedModes: [...new Set(supportedModes)],
+      helpSource: live ? "live+static" : "static",
+    });
+  }, [capabilities, fallback, vendor]);
 
   const resolvedPermissionMode = useMemo(() => {
-    const live = capabilities[vendor];
-    // Keep an empty-tab draft intact while the asynchronous route probe is in
-    // flight. Sending before it completes still fails closed in the bridge;
-    // replacing the choice with Manual here would lose it before first send.
-    if (!live) return permissionMode;
+    if (visibleModes.includes(permissionMode)) return permissionMode;
+    if (visibleModes.length === 1 && visibleModes[0] === "bypass") {
+      return "bypass";
+    }
     return resolvePermissionModeForVendor(
-      { vendor, supportedModes: live.supportedModes, helpSource: "live" },
+      { vendor, supportedModes: visibleModes, helpSource: "displayed" },
       permissionMode,
     );
-  }, [capabilities, permissionMode, vendor]);
+  }, [permissionMode, vendor, visibleModes]);
 
   // A model can be changed while the capability request is still in flight.
   // Once the actual native CLI has answered, never leave the session pointing

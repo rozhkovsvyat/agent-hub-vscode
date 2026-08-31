@@ -156,7 +156,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(document.querySelector(".cukii-permission-keycap")).not.toBeNull();
   });
 
-  it("does not optimistically expose a permission mode without a verified route", async () => {
+  it("keeps the static verified Claude route visible when live capabilities are empty", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [];
 
@@ -164,10 +164,10 @@ describe("Cukii Claude-parity input toolbar", () => {
       mockIdeMessenger,
     });
 
-    expect(document.querySelector(".cukii-permission-button")).toBeNull();
+    expect(await getElementByText("Bypass permissions")).toBeDefined();
   });
 
-  it("shows only permission modes supported by the current model vendor", async () => {
+  it("lets live capabilities refine but not erase the static Claude routes", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
       { vendor: "claude", supportedModes: ["plan", "bypass"] },
@@ -190,15 +190,15 @@ describe("Cukii Claude-parity input toolbar", () => {
     ).not.toBeNull();
     expect(
       document.querySelector('[data-testid="cukii-permission-mode-manual"]'),
-    ).toBeNull();
+    ).not.toBeNull();
     expect(
       document.querySelector(
         '[data-testid="cukii-permission-mode-editAutomatically"]',
       ),
-    ).toBeNull();
+    ).not.toBeNull();
     expect(
       document.querySelector('[data-testid="cukii-permission-mode-auto"]'),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
   it("switches Manual to a supported mode in session state and persists the bridge preference", async () => {
@@ -242,7 +242,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     await getElementByText("Manual");
     await user.click(await getElementByTestId("broker-menu-button"));
     await user.click(await getElementByTestId("broker-switch-model"));
-    await user.click(await getElementByText("K3"));
+    await user.click(await getElementByText("Kimi K3"));
 
     expect(store.getState().session.brokerModel).toBe("kimi-k3");
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
@@ -268,7 +268,47 @@ describe("Cukii Claude-parity input toolbar", () => {
     });
 
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
-    expect(document.querySelector(".cukii-permission-button")).toBeNull();
+    expect(await getElementByText("Bypass permissions")).toBeDefined();
+  });
+
+  it.each(["codex-5-6-sol", "kimi-k3"] as const)(
+    "shows and reconciles Bypass for %s while capability discovery is unavailable",
+    async (model) => {
+      const mockIdeMessenger = new MockIdeMessenger();
+      mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
+        () => new Promise<never>(() => {});
+      const store = setupStore({ ideMessenger: mockIdeMessenger });
+      store.dispatch({ type: "session/setBrokerModel", payload: model });
+      store.dispatch(setBrokerPermissionMode("manual"));
+
+      await renderWithProviders(<InputToolbar {...props} />, {
+        mockIdeMessenger,
+        store,
+      });
+
+      expect(await getElementByText("Bypass permissions")).toBeDefined();
+      expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    },
+  );
+
+  it("keeps the static Codex selector visible after a capability probe error", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
+      async () => {
+        throw new Error("capability probe failed");
+      };
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({
+      type: "session/setBrokerModel",
+      payload: "codex-5-6-sol",
+    });
+
+    await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    expect(await getElementByText("Bypass permissions")).toBeDefined();
   });
 
   it("uses the verified cold-cache Kimi fallback before storing its model switch", async () => {
@@ -294,7 +334,7 @@ describe("Cukii Claude-parity input toolbar", () => {
 
     await user.click(await getElementByTestId("broker-menu-button"));
     await user.click(await getElementByTestId("broker-switch-model"));
-    await user.click(await getElementByText("K3"));
+    await user.click(await getElementByText("Kimi K3"));
 
     expect(store.getState().session.brokerModel).toBe("kimi-k3");
     expect(store.getState().session.brokerPermissionMode).toBe("bypass");
