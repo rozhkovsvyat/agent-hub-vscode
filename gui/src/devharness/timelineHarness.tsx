@@ -10,7 +10,6 @@ import { MainEditorProvider } from "../components/mainInput/TipTapEditor";
 import { AuthProvider } from "../context/Auth";
 import { IdeMessengerProvider } from "../context/IdeMessenger";
 import { MockIdeMessenger } from "../context/MockIdeMessenger";
-import ParallelListeners from "../hooks/ParallelListeners";
 import { Chat } from "../pages/gui/Chat";
 import { setupStore } from "../redux/store";
 import "../index.css";
@@ -91,6 +90,8 @@ function Harness() {
         history: HISTORY,
       },
     });
+    // Keep the real transcript loader visible for CDP geometry checks.
+    store.dispatch({ type: "session/setActive" });
     setReady(true);
   }, []);
   return (
@@ -107,7 +108,6 @@ createRoot(document.getElementById("root")!).render(
         <AuthProvider>
           <MainEditorProvider>
             <Harness />
-            <ParallelListeners />
           </MainEditorProvider>
         </AuthProvider>
       </Provider>
