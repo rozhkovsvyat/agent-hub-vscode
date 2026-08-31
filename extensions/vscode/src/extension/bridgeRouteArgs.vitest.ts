@@ -571,6 +571,18 @@ describe("native bridge argv", () => {
     ).toThrow("no verified permission mode");
   });
 
+  it("accepts the exact restored Codex Bypass route without a permission error", () => {
+    expect(() =>
+      nativeDelegateHint("codex-5-6-terra", "D:/Brain/vault", "bypass"),
+    ).not.toThrow();
+    expect(
+      nativeDelegateHint("codex-5-6-terra", "D:/Brain/vault", "bypass"),
+    ).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(() =>
+      nativeDelegateHint("codex-5-6-terra", "D:/Brain/vault", "manual"),
+    ).toThrow("no verified permission mode");
+  });
+
   it("wires Grok reasoning effort and reports no fake fast tier", () => {
     const controls = resolveBridgeControls("grok-4-6", "max", "fast");
     const route = routeForModel(

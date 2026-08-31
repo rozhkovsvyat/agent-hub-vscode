@@ -121,7 +121,7 @@ describe("sessionSlice streamUpdate", () => {
     );
     expect(restored.brokerEffort).toBe("medium");
     expect(restored.brokerSpeed).toBe("fast");
-    expect(restored.brokerPermissionMode).toBe("auto");
+    expect(restored.brokerPermissionMode).toBe("bypass");
     expect(restored.hasReasoningEnabled).toBe(false);
     expect(restored.titleManuallySet).toBe(false);
 
@@ -222,7 +222,7 @@ describe("sessionSlice streamUpdate", () => {
     expect(sonnet.brokerPermissionMode).toBe("plan");
   });
 
-  it("restores stale Kimi Manual as its verified prompt-mode bypass route", () => {
+  it("reconciles restored bypass-only vendor drafts without weakening Claude Manual", () => {
     const restoredKimi = sessionSlice.reducer(
       undefined,
       newSession({
@@ -259,7 +259,27 @@ describe("sessionSlice streamUpdate", () => {
         hasReasoningEnabled: true,
       }),
     );
-    expect(restoredCodex.brokerPermissionMode).toBe("manual");
+    expect(restoredCodex).toMatchObject({
+      brokerModel: "codex-5-6-terra",
+      brokerPermissionMode: "bypass",
+    });
+
+    const restoredClaude = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-claude-manual",
+        title: "Restored Claude session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "sonnet-5",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+    expect(restoredClaude.brokerPermissionMode).toBe("manual");
   });
 
   it("restores a manual title and clears its lock for a fresh tab", () => {

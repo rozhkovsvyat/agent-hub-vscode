@@ -319,21 +319,22 @@ function reconcilePermissionModeForBrokerModel(
 }
 
 /**
- * A saved Kimi session can predate prompt-mode routing and retain Manual.
- * Unlike a fresh model switch, restore must not rewrite other vendors' saved
- * policy while their live capability probe is still pending. Kimi's bounded
- * cold-start contract has one verified noninteractive route, so repair only
- * that stale pair before a first restored turn reaches bridgeControls.
+ * Restore has one intentionally narrow repair: a vendor with exactly one
+ * verified visible noninteractive mode, Bypass. A persisted Manual from a
+ * former route would otherwise reach bridgeControls before async discovery.
+ * Claude Manual and unknown/empty capability routes stay fail-closed.
  */
-function reconcileRestoredPermissionMode(
+export function reconcileRestoredPermissionMode(
   model: BrokerModel,
   current: CukiiPermissionMode,
 ): CukiiPermissionMode {
   const capabilities = defaultVendorPermissionCapabilities(
     brokerVendorForModel(model),
   );
-  if (capabilities.nonInteractiveRoute !== "prompt-mode") return current;
-  return capabilities.supportedModes.includes(current) ? current : "bypass";
+  const bypassOnly =
+    capabilities.supportedModes.length === 1 &&
+    capabilities.supportedModes[0] === "bypass";
+  return bypassOnly && current !== "bypass" ? "bypass" : current;
 }
 
 /** An explicit native-worker pause, carried separately from chat text. */

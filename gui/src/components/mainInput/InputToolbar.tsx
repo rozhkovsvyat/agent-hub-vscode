@@ -26,6 +26,7 @@ import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
 import {
   newSession,
+  reconcileRestoredPermissionMode,
   setBrokerEffort,
   setBrokerModel,
   switchBrokerModel,
@@ -227,7 +228,10 @@ function InputToolbar(props: InputToolbarProps) {
       ? nextPermissionMode
       : targetCapabilities.supportedModes.includes("bypass")
         ? "bypass"
-        : resolvePermissionModeForVendor(targetCapabilities, nextPermissionMode);
+        : resolvePermissionModeForVendor(
+            targetCapabilities,
+            nextPermissionMode,
+          );
     dispatch(
       switchBrokerModel({
         model: nextModel,
@@ -283,6 +287,7 @@ function InputToolbar(props: InputToolbarProps) {
         }>
       | undefined;
     if (!draft) return;
+    const restoredModel = draft.brokerModel ?? brokerModel ?? "opus-5";
     if (draft.brokerModel) dispatch(setBrokerModel(draft.brokerModel));
     if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
     if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
@@ -291,9 +296,19 @@ function InputToolbar(props: InputToolbarProps) {
       dispatch(setHasReasoningEnabled(draft.thinkingEnabled));
     }
     if (draft.brokerPermissionMode) {
-      dispatch(setBrokerPermissionMode(draft.brokerPermissionMode));
+      const reconciled = reconcileRestoredPermissionMode(
+        restoredModel,
+        draft.brokerPermissionMode,
+      );
+      dispatch(setBrokerPermissionMode(reconciled));
+      if (reconciled !== draft.brokerPermissionMode) {
+        window.cukiiVscode?.setState({
+          ...(window.cukiiVscode?.getState() ?? {}),
+          cukiiBrokerDraft: { ...draft, brokerPermissionMode: reconciled },
+        });
+      }
     }
-  }, [dispatch, historyLength]);
+  }, [brokerModel, dispatch, historyLength]);
 
   const isEnterDisabled =
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
