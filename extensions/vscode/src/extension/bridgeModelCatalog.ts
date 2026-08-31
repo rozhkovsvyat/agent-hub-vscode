@@ -3,7 +3,10 @@ import {
   CUKII_VENDOR_REGISTRY,
   cukiiVendorLabel,
 } from "core/cukiiVendorRegistry";
-import { canonicalCukiiModelDescription } from "core/cukiiModelPresentation";
+import {
+  canonicalCukiiModelDescription,
+  canonicalCukiiModelLabel,
+} from "core/cukiiModelPresentation";
 import type {
   BrokerModelCatalogEntry,
   BrokerVendorId,
@@ -66,18 +69,18 @@ const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
   kimi: [
     {
       value: "kimi-k2",
-      label: "K2.7 Coding",
+      label: "Kimi K2.7 Coding",
       contextWindowLabel: "256K",
     },
     {
       value: "kimi-k2-highspeed",
-      label: "K2.7 Coding Highspeed",
+      label: "Kimi K2.7 Coding Highspeed",
       contextWindowLabel: "256K",
     },
-    { value: "kimi-k3", label: "K3", contextWindowLabel: "1M" },
+    { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
     {
       value: "kimi-k3-256k",
-      label: "K3-256K",
+      label: "Kimi K3-256K",
       contextWindowLabel: "256K",
     },
   ],
@@ -174,12 +177,14 @@ function withDescription(
     description?: string;
   },
 ): BrokerModelCatalogEntry {
+  const label = canonicalCukiiModelLabel(model.value, model.label);
   return {
     ...model,
+    label,
     contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
     description:
       model.description?.trim() ||
-      canonicalCukiiModelDescription(model.value, model.label),
+      canonicalCukiiModelDescription(model.value, label),
   };
 }
 

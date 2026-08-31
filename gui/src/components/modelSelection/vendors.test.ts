@@ -31,10 +31,10 @@ describe("Cukii model context labels", () => {
       "grok-4-6": "Grok 4.6",
       "grok-4-5": "Grok 4.5",
       "composer-2-5": "Composer 2.5",
-      "kimi-k2": "K2.7 Coding",
-      "kimi-k2-highspeed": "K2.7 Coding Highspeed",
-      "kimi-k3": "K3",
-      "kimi-k3-256k": "K3-256K",
+      "kimi-k2": "Kimi K2.7 Coding",
+      "kimi-k2-highspeed": "Kimi K2.7 Coding Highspeed",
+      "kimi-k3": "Kimi K3",
+      "kimi-k3-256k": "Kimi K3-256K",
       "deepseek-v4-pro": "V4 Pro",
       "qwen-3-8-max": "Qwen 3.8 Max",
     });
@@ -244,6 +244,27 @@ describe("Cukii model context labels", () => {
         modelsByValue.get(value)?.description.toLowerCase(),
         value,
       ).not.toContain(forbiddenToken);
+    }
+  });
+
+  it("brands every live Kimi label without repeating the model name in its subtitle", () => {
+    const kimiModels = presentVendorModels([
+      { value: "kimi-k3", label: "K3", contextWindowLabel: "1M" },
+      {
+        value: "kimi:managed:kimi-code/k4",
+        label: "K4 Preview",
+        contextWindowLabel: "1M",
+      },
+    ]);
+
+    expect(kimiModels.map((model) => model.label)).toEqual([
+      "Kimi K3",
+      "Kimi K4 Preview",
+    ]);
+    for (const model of kimiModels) {
+      expect(model.description.toLowerCase()).not.toContain(
+        model.label.toLowerCase(),
+      );
     }
   });
 

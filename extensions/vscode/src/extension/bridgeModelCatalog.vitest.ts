@@ -94,11 +94,13 @@ describe("Cukii live subscription model catalog", () => {
         },
       }),
     );
-    expect(
-      models.map((model) => [model.value, model.contextWindowLabel]),
-    ).toEqual([
-      ["kimi-k3", "1M"],
-      ["kimi-k3-256k", "256K"],
+    expect(models).toMatchObject([
+      { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
+      {
+        value: "kimi-k3-256k",
+        label: "Kimi K3-256K",
+        contextWindowLabel: "256K",
+      },
     ]);
     expect(models.every((model) => Boolean(model.description))).toBe(true);
   });

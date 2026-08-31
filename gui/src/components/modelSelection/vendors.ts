@@ -7,6 +7,7 @@ import type {
 import { CUKII_VENDOR_REGISTRY } from "core/cukiiVendorRegistry";
 import {
   canonicalCukiiModelDescription,
+  canonicalCukiiModelLabel,
   cukiiCapabilityRating,
 } from "core/cukiiModelPresentation";
 
@@ -106,16 +107,20 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "kimi",
     label: "Moonshot AI",
     models: [
-      { value: "kimi-k2", label: "K2.7 Coding", contextWindowLabel: "256K" },
       {
-        value: "kimi-k2-highspeed",
-        label: "K2.7 Coding Highspeed",
+        value: "kimi-k2",
+        label: "Kimi K2.7 Coding",
         contextWindowLabel: "256K",
       },
-      { value: "kimi-k3", label: "K3", contextWindowLabel: "1M" },
+      {
+        value: "kimi-k2-highspeed",
+        label: "Kimi K2.7 Coding Highspeed",
+        contextWindowLabel: "256K",
+      },
+      { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
       {
         value: "kimi-k3-256k",
-        label: "K3-256K",
+        label: "Kimi K3-256K",
         contextWindowLabel: "256K",
       },
     ],
@@ -222,13 +227,17 @@ export function presentVendorModels(
   models: BootstrapVendorInfo["models"],
 ): ModelInfo[] {
   return models
-    .map((model) => ({
-      ...model,
-      contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
-      description:
-        model.description?.trim() ||
-        canonicalCukiiModelDescription(model.value, model.label),
-    }))
+    .map((model) => {
+      const label = canonicalCukiiModelLabel(model.value, model.label);
+      return {
+        ...model,
+        label,
+        contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
+        description:
+          model.description?.trim() ||
+          canonicalCukiiModelDescription(model.value, label),
+      };
+    })
     .map((model, canonicalIndex) => ({ model, canonicalIndex }))
     .sort(
       (left, right) =>

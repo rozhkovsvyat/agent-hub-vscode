@@ -26,6 +26,7 @@ import {
   ToolCallState,
 } from "core";
 import { mergeReasoningDetails } from "core/llm/openaiTypeConverters";
+import { canonicalCukiiModelLabel } from "core/cukiiModelPresentation";
 import { NEW_SESSION_TITLE } from "core/util/constants";
 import {
   renderChatMessage,
@@ -259,7 +260,10 @@ export function normalizeRestoredHistory(
       modelSwitch.displayName.trim()
         ? {
             model: modelSwitch.model,
-            displayName: modelSwitch.displayName.trim(),
+            displayName: canonicalCukiiModelLabel(
+              modelSwitch.model,
+              modelSwitch.displayName,
+            ),
           }
         : undefined;
     const receipt = item.messageReceipt;
@@ -1300,7 +1304,10 @@ export const sessionSlice = createSlice({
           content: "",
         },
         contextItems: [],
-        modelSwitch: { model, displayName: displayName.trim() || model },
+        modelSwitch: {
+          model,
+          displayName: canonicalCukiiModelLabel(model, displayName || model),
+        },
       });
     },
     setBrokerSubagent: (state, action: PayloadAction<BrokerSubagent>) => {

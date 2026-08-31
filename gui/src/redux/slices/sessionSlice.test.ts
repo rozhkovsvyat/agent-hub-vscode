@@ -763,6 +763,29 @@ describe("sessionSlice mid-task steer messages", () => {
     expect(restored.history[1].modelSwitch).toBeUndefined();
   });
 
+  it("brands a legacy Kimi model-switch receipt when restoring history", () => {
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "kimi-model-switch-history",
+        title: "Kimi history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { id: "kimi-switch", role: "system", content: "" },
+            contextItems: [],
+            modelSwitch: { model: "kimi-k3", displayName: "K3" },
+          },
+        ],
+      }),
+    );
+
+    expect(restored.history[0].modelSwitch).toEqual({
+      model: "kimi-k3",
+      displayName: "Kimi K3",
+    });
+  });
+
   it("newSession drops in-flight steer messages with the rest of history", () => {
     const streaming = sessionSlice.reducer(
       sessionSlice.getInitialState(),

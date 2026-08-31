@@ -1,3 +1,29 @@
+const CANONICAL_KIMI_MODEL_LABELS: Record<string, string> = {
+  "kimi-k2": "Kimi K2.7 Coding",
+  "kimi-k2-highspeed": "Kimi K2.7 Coding Highspeed",
+  "kimi-k3": "Kimi K3",
+  "kimi-k3-256k": "Kimi K3-256K",
+};
+
+/** Canonical product name for every Moonshot/Kimi model shown by Cukii. */
+export function canonicalCukiiModelLabel(value: string, label: string): string {
+  const normalizedLabel = label.trim();
+  const normalizedValue = value.toLowerCase();
+  if (
+    !normalizedValue.startsWith("kimi-") &&
+    !normalizedValue.startsWith("kimi:")
+  )
+    return normalizedLabel;
+
+  const knownLabel = CANONICAL_KIMI_MODEL_LABELS[normalizedValue];
+  if (knownLabel) return knownLabel;
+
+  const unbrandedLabel = normalizedLabel
+    .replace(/^kimi(?:[\s:_-]+)?/i, "")
+    .trim();
+  return `Kimi ${unbrandedLabel || value.slice(value.indexOf(":") + 1)}`;
+}
+
 /**
  * Short, factual model-family positioning for the compact Cukii picker.
  * Live CLI metadata takes precedence; this catalog covers static models and
