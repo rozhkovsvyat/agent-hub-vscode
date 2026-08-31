@@ -214,16 +214,20 @@ function InputToolbar(props: InputToolbarProps) {
   ) => {
     const vendor = brokerVendorForModel(nextModel);
     const capability = permissionCapabilities[vendor];
-    const resolvedPermissionMode = resolvePermissionModeForVendor(
-      capability
-        ? {
-            vendor,
-            supportedModes: capability.supportedModes,
-            helpSource: "live",
-          }
-        : defaultVendorPermissionCapabilities(vendor),
+    const targetCapabilities = capability
+      ? {
+          vendor,
+          supportedModes: capability.supportedModes,
+          helpSource: "live" as const,
+        }
+      : defaultVendorPermissionCapabilities(vendor);
+    const resolvedPermissionMode = targetCapabilities.supportedModes.includes(
       nextPermissionMode,
-    );
+    )
+      ? nextPermissionMode
+      : targetCapabilities.supportedModes.includes("bypass")
+        ? "bypass"
+        : resolvePermissionModeForVendor(targetCapabilities, nextPermissionMode);
     dispatch(
       switchBrokerModel({
         model: nextModel,

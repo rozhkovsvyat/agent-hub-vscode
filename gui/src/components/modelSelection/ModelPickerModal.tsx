@@ -11,6 +11,11 @@ import {
 import { applyRuntimeVendorCatalog, VENDORS } from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
 import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
+import {
+  brokerVendorForModel,
+  defaultVendorPermissionCapabilities,
+  resolvePermissionModeForVendor,
+} from "core/cukiiPermissionModes";
 
 interface ModelPickerModalProps {
   onClose: () => void;
@@ -53,6 +58,16 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
 
   const selectModel = (model: BrokerModel) => {
     const nextSubagent: BrokerSubagent = "auto";
+    const capabilities = defaultVendorPermissionCapabilities(
+      brokerVendorForModel(model),
+    );
+    const resolvedPermissionMode = capabilities.supportedModes.includes(
+      brokerPermissionMode,
+    )
+      ? brokerPermissionMode
+      : capabilities.supportedModes.includes("bypass")
+        ? "bypass"
+        : resolvePermissionModeForVendor(capabilities, brokerPermissionMode);
     if (onSelect) {
       onSelect(model);
     } else {
@@ -72,7 +87,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
         brokerEffort,
         brokerSpeed,
         thinkingEnabled,
-        brokerPermissionMode,
+        brokerPermissionMode: resolvedPermissionMode,
         mode: "broker",
       });
     }

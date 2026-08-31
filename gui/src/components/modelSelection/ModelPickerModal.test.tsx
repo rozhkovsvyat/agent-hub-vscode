@@ -4,6 +4,7 @@ import { renderWithProviders } from "../../util/test/render";
 import { ModelPickerModal } from "./ModelPickerModal";
 import { getElementByText } from "../../util/test/utils";
 import { setMode } from "../../redux/slices/sessionSlice";
+import { setBrokerPermissionMode } from "../../redux/slices/sessionSlice";
 
 describe("ModelPickerModal", () => {
   it("renders vendors and models, selects a model and persists it", async () => {
@@ -22,7 +23,7 @@ describe("ModelPickerModal", () => {
     await getElementByText("GPT-5.6 Terra");
 
     await getElementByText("Opus 5");
-    await getElementByText("1M context • Best for everyday, complex tasks");
+    await getElementByText("1M • Best for everyday, complex tasks");
 
     // Select a model.
     await user.click(await getElementByText("Sonnet 5"));
@@ -35,9 +36,30 @@ describe("ModelPickerModal", () => {
       brokerEffort: "high",
       brokerSpeed: "standard",
       thinkingEnabled: true,
-      brokerPermissionMode: "manual",
+      brokerPermissionMode: "bypass",
       mode: "broker",
     });
+  });
+
+  it("reconciles stale Manual to Kimi Bypass before persisting", async () => {
+    const { store, ideMessenger, user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+    const postSpy = vi.spyOn(ideMessenger, "post");
+    await act(async () => {
+      store.dispatch(setMode("broker"));
+      store.dispatch(setBrokerPermissionMode("manual"));
+    });
+
+    await user.click(await getElementByText("K3"));
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({
+        brokerModel: "kimi-k3",
+        brokerPermissionMode: "bypass",
+      }),
+    );
   });
 
   it("does not select disabled models", async () => {
