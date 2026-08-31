@@ -205,15 +205,74 @@ function unknownIdentityLabel(): string {
   return "Logged in • Identity unavailable";
 }
 
+const SAFE_CLI_EMAIL =
+  /^[a-z0-9.!#$%&'*+/^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+/**
+ * Native CLI output is untrusted process output. Keep this deliberately
+ * narrower than RFC email: account labels must never be token-shaped or carry
+ * shell/control syntax, even when a CLI happened to print it next to an email.
+ */
+function sanitizedNativeCliIdentity(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 254) return undefined;
+  if (
+    /[=\x00-\x1f\x7f]/.test(value) ||
+    /(?:api[-_]?key|access[-_]?token|id[-_]?token|refresh[-_]?token|token|secret|password|bearer|(?:^|[-_])sk[-_])/i.test(
+      value,
+    ) ||
+    !SAFE_CLI_EMAIL.test(value)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function identityFromNativeCliJson(
+  vendor: "grok" | "kimi",
+  text: string,
+): string | undefined {
+  const status = parseJson(text);
+  if (!isRecord(status)) return undefined;
+
+  // These are the only JSON status schemas accepted from the respective
+  // native CLIs. Do not fall back to a recursive/email-shaped value search.
+  if (vendor === "grok" && status.authenticated === true) {
+    return sanitizedNativeCliIdentity(stringAt(status.user, "email"));
+  }
+  if (vendor === "kimi" && status.source === "oauth") {
+    return sanitizedNativeCliIdentity(stringAt(status.account, "email"));
+  }
+  return undefined;
+}
+
+function nativeCliJsonIndicatesAuthenticated(
+  vendor: "grok" | "kimi",
+  text: string,
+): boolean {
+  const status = parseJson(text);
+  if (!isRecord(status)) return false;
+  return vendor === "grok"
+    ? status.authenticated === true
+    : status.source === "oauth";
+}
+
 function identityFromNativeCliOutput(
   vendor: VendorWithCli,
   text: string,
 ): string | undefined {
   if (vendor !== "grok" && vendor !== "kimi") return undefined;
-  const match = text.match(
-    /\b(?:as|email|account|user)\s*(?:=|:)?\s*([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)/i,
-  );
-  return match?.[1];
+  const jsonIdentity = identityFromNativeCliJson(vendor, text);
+  if (jsonIdentity) return jsonIdentity;
+
+  // Anchor each vendor's documented human-readable status line. In
+  // particular, never infer an identity from arbitrary diagnostics/stdout.
+  const match =
+    vendor === "grok"
+      ? text.match(/^You are logged in with grok\.com as ([^\s\r\n]+)$/i)
+      : text.match(/^managed:kimi-code source=oauth account=([^\s\r\n]+)$/i);
+  const candidate =
+    vendor === "grok" ? match?.[1]?.replace(/\.$/, "") : match?.[1];
+  return sanitizedNativeCliIdentity(candidate);
 }
 
 function qwenOauthSelected(metadata: unknown): boolean {
@@ -285,7 +344,8 @@ export function classifyVendorAuthOutput(
       : unknown();
   }
   if (vendor === "grok") {
-    return /logged in with/i.test(text)
+    return /logged in with/i.test(text) ||
+      nativeCliJsonIndicatesAuthenticated("grok", text)
       ? connected(accountLabel, ["logout"])
       : unknown();
   }
@@ -304,7 +364,8 @@ export function classifyVendorAuthOutput(
     }
   }
   if (vendor === "kimi") {
-    return /source=oauth/i.test(text)
+    return /source=oauth/i.test(text) ||
+      nativeCliJsonIndicatesAuthenticated("kimi", text)
       ? connected(accountLabel, ["logout"])
       : unknown();
   }

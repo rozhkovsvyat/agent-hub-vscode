@@ -164,7 +164,7 @@ describe("Cukii vendor CLI accounts", () => {
     );
   });
 
-  it("uses an identity explicitly reported by the Grok or Kimi CLI", () => {
+  it("uses identities from exact Grok and Kimi CLI status formats", () => {
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -177,6 +177,70 @@ describe("Cukii vendor CLI accounts", () => {
         "managed:kimi-code source=oauth account=stdout-leak@example.test",
       ).accountLabel,
     ).toBe("stdout-leak@example.test");
+  });
+
+  it("accepts only allowlisted JSON identity fields from Grok and Kimi", () => {
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        JSON.stringify({
+          authenticated: true,
+          user: { email: "grok-json@example.test" },
+        }),
+      ).accountLabel,
+    ).toBe("grok-json@example.test");
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        JSON.stringify({
+          source: "oauth",
+          account: { email: "kimi-json@example.test" },
+        }),
+      ).accountLabel,
+    ).toBe("kimi-json@example.test");
+  });
+
+  it("never derives a native CLI identity from arbitrary or secret-like output", () => {
+    const unavailable = "Logged in • Identity unavailable";
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com as api_key=sk-live-secret@example.test",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code source=oauth account=api_key=sk-live-secret@example.test",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com. Contact arbitrary@example.test",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code source=oauth diagnostics=user=arbitrary@example.test",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com as owner@example.test\naccess_token=secret",
+      ).accountLabel,
+    ).toBe(unavailable);
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        JSON.stringify({
+          source: "oauth",
+          account: { email: "token-owner@example.test" },
+        }),
+      ).accountLabel,
+    ).toBe(unavailable);
   });
 
   it("discovers Cursor from native Windows product locations before PATH", () => {
