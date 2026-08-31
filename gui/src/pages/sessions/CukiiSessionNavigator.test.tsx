@@ -2,7 +2,9 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { renderWithProviders } from "../../util/test/render";
-import CukiiSessionNavigator from "./CukiiSessionNavigator";
+import CukiiSessionNavigator, {
+  formatSessionAge,
+} from "./CukiiSessionNavigator";
 
 describe("CukiiSessionNavigator Claude parity", () => {
   beforeEach(() => {
@@ -65,6 +67,78 @@ describe("CukiiSessionNavigator Claude parity", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("uses the exact Claude group-menu order and persists rename/delete actions", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "Grouped session",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "plugin", name: "Плагин" }],
+        assignments: { session: "plugin" },
+      }),
+    );
+
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+    const header = await screen.findByRole("button", { name: "Плагин 1" });
+    fireEvent.contextMenu(header, { clientX: 120, clientY: 160 });
+    const menu = await screen.findByRole("menu", {
+      name: "Group actions for Плагин",
+    });
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]')).map(
+        (item) => item.textContent,
+      ),
+    ).toEqual(["New group", "Rename group", "Delete group"]);
+    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
+    const newGroupInput = await screen.findByLabelText("Group name");
+    expect(newGroupInput).toBeInTheDocument();
+    fireEvent.keyDown(newGroupInput, { key: "Escape" });
+
+    fireEvent.contextMenu(header, { clientX: 120, clientY: 160 });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Rename group" }),
+    );
+    const input = await screen.findByLabelText("Rename group Плагин");
+    fireEvent.change(input, { target: { value: "Extensions" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(
+      await screen.findByRole("button", { name: "Extensions 1" }),
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(localStorage.getItem("cukii.session-groups.v1") ?? "{}"),
+    ).toEqual(
+      expect.objectContaining({
+        groups: [{ id: "plugin", name: "Extensions" }],
+        assignments: { session: "plugin" },
+      }),
+    );
+
+    fireEvent.contextMenu(
+      screen.getByRole("button", { name: "Extensions 1" }),
+      { clientX: 120, clientY: 160 },
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Delete group" }),
+    );
+    expect(screen.queryByRole("button", { name: "Extensions 1" })).toBeNull();
+    expect(screen.getByTitle("Grouped session")).toBeInTheDocument();
+    expect(
+      JSON.parse(localStorage.getItem("cukii.session-groups.v1") ?? "{}"),
+    ).toEqual(expect.objectContaining({ groups: [], assignments: {} }));
+  });
+
   it("renders no sidebar rows for blank open panels", async () => {
     const messenger = new MockIdeMessenger();
     messenger.responses["history/list"] = [];
@@ -122,7 +196,9 @@ describe("CukiiSessionNavigator Claude parity", () => {
     expect(getComputedStyle(sessionTitle!).minWidth).toBe("0");
     expect(getComputedStyle(sessionTitle!).textOverflow).toBe("ellipsis");
     expect(getComputedStyle(actions!).width).toBe("56px");
-    expect(screen.getByText("3d")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatSessionAge("2026-08-27T12:00:00Z")),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Плагин 1" }),
     ).toBeInTheDocument();
@@ -222,6 +298,52 @@ describe("CukiiSessionNavigator Claude parity", () => {
       title: "Manual title",
     });
     expect(renameSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts repeated session renames A→B→C→D without retaining a stale draft", async () => {
+    const messenger = new MockIdeMessenger();
+    const renameSpy = vi.fn().mockResolvedValue({ ok: true });
+    messenger.responseHandlers["cukii/renameSession"] = renameSpy;
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "A",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [
+      { panelId: "panel", sessionId: "session", title: "A" },
+    ];
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    for (const [from, to] of [
+      ["A", "B"],
+      ["B", "C"],
+      ["C", "D"],
+    ] as const) {
+      fireEvent.click(await screen.findByLabelText(`Rename ${from}`));
+      const input = await screen.findByLabelText(`Rename ${from}`);
+      fireEvent.change(input, { target: { value: to } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(await screen.findByTitle(to)).toBeInTheDocument();
+    }
+
+    expect(renameSpy).toHaveBeenNthCalledWith(1, {
+      sessionId: "session",
+      title: "B",
+    });
+    expect(renameSpy).toHaveBeenNthCalledWith(2, {
+      sessionId: "session",
+      title: "C",
+    });
+    expect(renameSpy).toHaveBeenNthCalledWith(3, {
+      sessionId: "session",
+      title: "D",
+    });
+    expect(renameSpy).toHaveBeenCalledTimes(3);
   });
 
   it("saves a non-empty rename on blur", async () => {

@@ -282,11 +282,15 @@ export function formatSessionAge(date: string) {
 export type { CukiiNavigatorSession } from "./cukiiSessionMerge";
 export { mergeSessionsWithOpenPanels } from "./cukiiSessionMerge";
 
-type ContextState = {
-  session: CukiiNavigatorSession;
+type ContextPosition = {
   x: number;
   y: number;
-} | null;
+};
+
+type ContextState =
+  | ({ kind: "session"; session: CukiiNavigatorSession } & ContextPosition)
+  | ({ kind: "group"; groupId: string; groupName: string } & ContextPosition)
+  | null;
 
 export default function CukiiSessionNavigator() {
   const messenger = useContext(IdeMessengerContext);
@@ -300,6 +304,8 @@ export default function CukiiSessionNavigator() {
   const [context, setContext] = useState<ContextState>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupRenameDraft, setGroupRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
@@ -420,6 +426,47 @@ export default function CukiiSessionNavigator() {
   const cancelRename = () => {
     setEditingSessionId(null);
     setRenameDraft("");
+  };
+  const beginGroupRename = (group: { id: string; name: string }) => {
+    setGroupRenameDraft(group.name);
+    setEditingGroupId(group.id);
+  };
+  const cancelGroupRename = () => {
+    setEditingGroupId(null);
+    setGroupRenameDraft("");
+  };
+  const renameGroup = (group: { id: string; name: string }) => {
+    const name = groupRenameDraft.trim();
+    if (!name || name === group.name) {
+      cancelGroupRename();
+      return;
+    }
+    setGroups((state) => ({
+      ...state,
+      groups: state.groups.map((item) =>
+        item.id === group.id ? { ...item, name } : item,
+      ),
+    }));
+    cancelGroupRename();
+  };
+  const deleteGroup = (groupId: string) => {
+    setGroups((state) => {
+      const assignments = { ...state.assignments };
+      for (const [sessionId, assignedGroupId] of Object.entries(assignments)) {
+        if (assignedGroupId === groupId) delete assignments[sessionId];
+      }
+      return {
+        groups: state.groups.filter((group) => group.id !== groupId),
+        assignments,
+      };
+    });
+    setCollapsed((state) => {
+      const next = { ...state };
+      delete next[groupId];
+      return next;
+    });
+    if (editingGroupId === groupId) cancelGroupRename();
+    setContext(null);
   };
   const renameSession = async (session: CukiiNavigatorSession) => {
     if (renameSavingRef.current) return;
@@ -548,7 +595,31 @@ export default function CukiiSessionNavigator() {
       8,
       Math.min(event.clientY, window.innerHeight - estimatedHeight - 8),
     );
-    setContext({ session, x, y });
+    setContext({ kind: "session", session, x, y });
+  };
+  const openGroupContext = (
+    event: React.MouseEvent,
+    group: { id: string; name: string },
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = Math.min(240, window.innerWidth - 16);
+    const x = Math.max(
+      8,
+      Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+    );
+    const estimatedHeight = 31 * 3 + 1 + 8;
+    const y = Math.max(
+      8,
+      Math.min(event.clientY, window.innerHeight - estimatedHeight - 8),
+    );
+    setContext({
+      kind: "group",
+      groupId: group.id,
+      groupName: group.name,
+      x,
+      y,
+    });
   };
 
   return (
@@ -600,28 +671,54 @@ export default function CukiiSessionNavigator() {
         const isCollapsed = Boolean(collapsed[bucket.id]);
         return (
           <div key={bucket.id || "ungrouped"}>
-            {bucket.name && (
-              <GroupHeader
-                className="cukii-session-action"
-                aria-expanded={!isCollapsed}
-                onClick={() =>
-                  setCollapsed((state) => ({
-                    ...state,
-                    [bucket.id]: !state[bucket.id],
-                  }))
-                }
-              >
-                <ChevronDownIcon
-                  width={13}
-                  height={13}
-                  style={{
-                    transform: isCollapsed ? "rotate(-90deg)" : undefined,
-                  }}
-                />
-                <span>{bucket.name}</span>
-                <Count>{bucket.sessions.length}</Count>
-              </GroupHeader>
-            )}
+            {bucket.name &&
+              (editingGroupId === bucket.id ? (
+                <GroupHeader as="div">
+                  <ChevronDownIcon width={13} height={13} />
+                  <RenameInput
+                    aria-label={`Rename group ${bucket.name}`}
+                    autoFocus
+                    value={groupRenameDraft}
+                    onChange={(event) =>
+                      setGroupRenameDraft(event.target.value)
+                    }
+                    onBlur={() => renameGroup(bucket)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        renameGroup(bucket);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelGroupRename();
+                      }
+                    }}
+                  />
+                  <Count>{bucket.sessions.length}</Count>
+                </GroupHeader>
+              ) : (
+                <GroupHeader
+                  className="cukii-session-action"
+                  aria-expanded={!isCollapsed}
+                  onClick={() =>
+                    setCollapsed((state) => ({
+                      ...state,
+                      [bucket.id]: !state[bucket.id],
+                    }))
+                  }
+                  onContextMenu={(event) => openGroupContext(event, bucket)}
+                >
+                  <ChevronDownIcon
+                    width={13}
+                    height={13}
+                    style={{
+                      transform: isCollapsed ? "rotate(-90deg)" : undefined,
+                    }}
+                  />
+                  <span>{bucket.name}</span>
+                  <Count>{bucket.sessions.length}</Count>
+                </GroupHeader>
+              ))}
             {!isCollapsed &&
               bucket.sessions.map((session) => (
                 <Row
@@ -698,7 +795,7 @@ export default function CukiiSessionNavigator() {
           No sessions found
         </div>
       )}
-      {context && (
+      {context?.kind === "session" && (
         <ContextMenu
           ref={contextRef}
           role="menu"
@@ -759,6 +856,46 @@ export default function CukiiSessionNavigator() {
             onClick={() => assignSession(context.session.sessionId, "")}
           >
             Remove from group
+          </MenuItem>
+        </ContextMenu>
+      )}
+      {context?.kind === "group" && (
+        <ContextMenu
+          ref={contextRef}
+          role="menu"
+          aria-label={`Group actions for ${context.groupName}`}
+          style={{ left: context.x, top: context.y }}
+        >
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              setAddingGroup(true);
+              setContext(null);
+            }}
+          >
+            New group
+          </MenuItem>
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              beginGroupRename({
+                id: context.groupId,
+                name: context.groupName,
+              });
+              setContext(null);
+            }}
+          >
+            Rename group
+          </MenuItem>
+          <MenuSeparator role="separator" />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => deleteGroup(context.groupId)}
+          >
+            Delete group
           </MenuItem>
         </ContextMenu>
       )}
