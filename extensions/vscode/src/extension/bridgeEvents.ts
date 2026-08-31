@@ -17,6 +17,10 @@
 
 export type BridgeEvent =
   | { kind: "text"; text: string }
+  /** A native `user` envelope, used only as an exact input-read receipt. */
+  | { kind: "userEcho"; text: string }
+  /** Private bridge transport event; never rendered as transcript text. */
+  | { kind: "steerRead"; messageId: string }
   | { kind: "thinking"; text: string }
   | { kind: "toolStart"; id: string; name: string; args: string }
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
@@ -184,6 +188,15 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
       : typeof content === "string"
         ? [{ type: "text", text: content }]
         : [];
+    if (
+      event.type === "user" &&
+      event.isMeta !== true &&
+      blocks.length > 0 &&
+      blocks.every((block) => block?.type === "text")
+    ) {
+      const text = blocks.map((block) => asText(block.text)).join("");
+      return text ? [{ kind: "userEcho", text }] : [];
+    }
     for (const block of blocks) {
       switch (block?.type) {
         case "thinking": {

@@ -19,6 +19,8 @@ export class BridgeSteeringController {
   private readonly pending: PendingSteer[] = [];
   private writer: SteerWriter | undefined;
   private inFlight: PendingSteer | undefined;
+  /** Inputs accepted by stdin but not yet explicitly echoed by the vendor. */
+  private readonly awaitingVendorEcho: SteerMessage[] = [];
   private closed = false;
   private flushing = false;
 
@@ -57,12 +59,27 @@ export class BridgeSteeringController {
     if (this.closed) return;
     this.closed = true;
     this.writer = undefined;
+    this.awaitingVendorEcho.length = 0;
     if (this.inFlight) {
       this.inFlight.resolve(this.deferred(this.inFlight.message));
     }
     for (const pending of this.pending.splice(0)) {
       pending.resolve(this.deferred(pending.message));
     }
+  }
+
+  /**
+   * Returns one receipt only when the vendor echoes the exact user envelope
+   * it received. This is intentionally stricter than "some stdout arrived":
+   * adjacent queued follow-ups can therefore never get a premature second
+   * checkmark from another turn's tool/text output.
+   */
+  consumeVendorEcho(text: string): string | undefined {
+    const index = this.awaitingVendorEcho.findIndex(
+      (message) => message.text === text,
+    );
+    if (index < 0) return undefined;
+    return this.awaitingVendorEcho.splice(index, 1)[0].messageId;
   }
 
   private async flush(): Promise<void> {
@@ -80,15 +97,16 @@ export class BridgeSteeringController {
         } catch {
           delivered = false;
         }
-        pending.resolve(
-          delivered && !this.closed
-            ? {
-                messageId: pending.message.messageId,
-                sessionId: this.sessionId,
-                status: "delivered",
-              }
-            : this.deferred(pending.message),
-        );
+        if (delivered && !this.closed) {
+          this.awaitingVendorEcho.push(pending.message);
+          pending.resolve({
+            messageId: pending.message.messageId,
+            sessionId: this.sessionId,
+            status: "delivered",
+          });
+        } else {
+          pending.resolve(this.deferred(pending.message));
+        }
         if (this.inFlight === pending) this.inFlight = undefined;
       }
     } finally {

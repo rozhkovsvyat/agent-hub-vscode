@@ -6,6 +6,7 @@ import { addToolCallDeltaToState } from "../../util/toolCallState";
 import {
   ChatHistoryItemWithMessageId,
   appendUserSteerMessage,
+  markSteerRead,
   newSession,
   sessionSlice,
   setActive,
@@ -13,8 +14,11 @@ import {
   setBrokerModel,
   setBrokerPermissionMode,
   setInactive,
+  markLatestUserReceiptDelivered,
+  setSteerStatus,
   abortStream,
   streamUpdate,
+  submitEditorAndInitAtIndex,
 } from "./sessionSlice";
 
 // Mock dependencies
@@ -538,6 +542,24 @@ describe("sessionSlice streamUpdate", () => {
 });
 
 describe("sessionSlice mid-task steer messages", () => {
+  it("adds one-check receipt to a normal initial user turn before it can be read", () => {
+    const submitted = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      submitEditorAndInitAtIndex({ index: 0, editorState: { type: "doc" } }),
+    );
+    const delivered = sessionSlice.reducer(
+      submitted,
+      markLatestUserReceiptDelivered(),
+    );
+    expect(delivered.history[0].messageReceipt).toMatchObject({
+      status: "delivered",
+    });
+    const read = sessionSlice.reducer(
+      delivered,
+      markSteerRead({ messageId: delivered.history[0].message.id }),
+    );
+    expect(read.history[0].messageReceipt?.status).toBe("read");
+  });
   it("ignores steer while idle", () => {
     const next = sessionSlice.reducer(
       sessionSlice.getInitialState(),
@@ -567,6 +589,69 @@ describe("sessionSlice mid-task steer messages", () => {
       true,
     );
     expect(second.history.every((item) => item.isSteer)).toBe(true);
+    expect(
+      second.history.every((item) => Number.isFinite(item.steerSentAt)),
+    ).toBe(true);
+  });
+
+  it("upgrades exactly an accepted follow-up from one check to two", () => {
+    const streaming = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    const queued = sessionSlice.reducer(
+      streaming,
+      appendUserSteerMessage({ content: "read me", messageId: "receipt-1" }),
+    );
+    const accepted = sessionSlice.reducer(
+      queued,
+      setSteerStatus({ messageId: "receipt-1", status: "delivered" }),
+    );
+    const read = sessionSlice.reducer(
+      accepted,
+      markSteerRead({ messageId: "receipt-1" }),
+    );
+    expect(read.history[0].steerStatus).toBe("read");
+
+    const failed = sessionSlice.reducer(
+      queued,
+      setSteerStatus({ messageId: "receipt-1", status: "failed" }),
+    );
+    expect(
+      sessionSlice.reducer(failed, markSteerRead({ messageId: "receipt-1" }))
+        .history[0].steerStatus,
+    ).toBe("failed");
+  });
+
+  it("restores persisted receipts and never invents legacy receipt data", () => {
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "receipt-history",
+        title: "Receipt history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: [
+          {
+            message: { id: "saved", role: "user", content: "saved" },
+            contextItems: [],
+            isSteer: true,
+            steerStatus: "read",
+            steerSentAt: 1_700_000_000_000,
+          },
+          {
+            message: { id: "legacy", role: "user", content: "legacy" },
+            contextItems: [],
+            isSteer: true,
+          },
+        ],
+      }),
+    );
+    expect(restored.history[0]).toMatchObject({
+      steerStatus: "read",
+      steerSentAt: 1_700_000_000_000,
+    });
+    expect(restored.history[1]).toMatchObject({ steerStatus: "failed" });
+    expect(restored.history[1].steerSentAt).toBeUndefined();
   });
 
   it("newSession drops in-flight steer messages with the rest of history", () => {

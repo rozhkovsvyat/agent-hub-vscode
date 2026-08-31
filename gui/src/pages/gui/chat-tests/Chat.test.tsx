@@ -221,6 +221,37 @@ test("user bubbles are not timeline items", async () => {
   expect(userBox?.closest(".cukii-timeline-checkpoint")).toBeNull();
 });
 
+test("follow-up receipt is compact, persisted, and never renders Delivered text", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "message-receipt",
+        title: "Message receipt",
+        history: [
+          {
+            message: { id: "follow-up", role: "user", content: "Short text" },
+            contextItems: [],
+            isSteer: true,
+            steerStatus: "delivered",
+            steerSentAt: 1_700_000_000_000,
+          },
+        ],
+      },
+    });
+  });
+
+  const receipt = container.querySelector(
+    '[data-testid="cukii-message-receipt-follow-up"]',
+  );
+  expect(receipt?.textContent).toMatch(/✓$/);
+  expect(receipt?.textContent).not.toMatch(/✓✓$/);
+  expect(container.textContent).not.toContain("Delivered");
+  expect(receipt?.closest(".cukii-user-message")).not.toBeNull();
+});
+
 test("assistant text and tool calls render as sibling timeline items", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 

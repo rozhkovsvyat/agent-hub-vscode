@@ -84,4 +84,23 @@ describe("ThinkingBlockPeek", () => {
     expect(peek.querySelector(".cukii-thinking-glyph")).toBeNull();
     expect(peek.querySelector(".cukii-thinking-inline")).toBeNull();
   });
+
+  it("shows completed duration and toggles with button keyboard semantics", async () => {
+    const { user } = await renderWithProviders(
+      <ThinkingBlockPeek
+        content="Completed reasoning"
+        index={0}
+        prevItem={null}
+        durationMs={2_200}
+      />,
+    );
+
+    const peek = screen.getByTestId("thinking-block-peek");
+    expect(peek.textContent).toContain("Thought for 2s");
+    expect(peek).toHaveAttribute("aria-expanded", "false");
+    await user.click(peek);
+    expect(peek).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Enter}");
+    expect(peek).toHaveAttribute("aria-expanded", "false");
+  });
 });

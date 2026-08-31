@@ -338,10 +338,10 @@ describe("BridgeEventParser", () => {
     ]);
 
     expect(events).toEqual([
-      { kind: "text", text: feedback },
-      { kind: "text", text: feedback },
-      { kind: "text", text: feedback },
-      { kind: "text", text: feedback },
+      { kind: "userEcho", text: feedback },
+      { kind: "userEcho", text: feedback },
+      { kind: "userEcho", text: feedback },
+      { kind: "userEcho", text: feedback },
     ]);
   });
 

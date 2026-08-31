@@ -1018,12 +1018,24 @@ export type CukiiBridgeChatMessage = ChatMessage & {
   cukiiTerminal?: true;
   /** A definitive native error receipt, not model-authored transcript text. */
   cukiiTerminalError?: true;
+  /** Exact follow-up that the native vendor echoed as input. */
+  cukiiSteerReadMessageId?: string;
 };
 
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
   switch (event.kind) {
     case "text":
       return [{ role: "assistant", content: event.text }];
+    case "userEcho":
+      return [];
+    case "steerRead":
+      return [
+        {
+          role: "thinking",
+          content: "",
+          cukiiSteerReadMessageId: event.messageId,
+        },
+      ];
     case "thinking":
       return [{ role: "thinking", content: event.text }];
     case "toolStart":
@@ -1207,6 +1219,20 @@ async function* streamBridgeChatWithSteer(
   const queue: BridgeEvent[] = [];
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
+      if (event.kind === "userEcho") {
+        const messageId = permissionTransport?.steering?.consumeVendorEcho(
+          event.text,
+        );
+        if (messageId) {
+          queue.push({ kind: "steerRead", messageId });
+        } else {
+          // Existing non-meta `user` frames (for example human hook text)
+          // stay visible exactly as before; only an exact pending follow-up
+          // becomes private receipt transport.
+          queue.push({ kind: "text", text: event.text });
+        }
+        continue;
+      }
       if (event.kind === "toolStart") {
         permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
       }

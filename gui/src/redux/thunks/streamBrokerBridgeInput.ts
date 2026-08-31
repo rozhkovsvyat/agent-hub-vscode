@@ -6,6 +6,8 @@ import {
   addPromptCompletionPair,
   abortStream,
   errorToolCall,
+  markSteerRead,
+  markLatestUserReceiptDelivered,
   setActive,
   setBridgeWait,
   setContextPercentage,
@@ -24,6 +26,8 @@ type CukiiBridgeMessage = ChatMessage & {
     deadline?: string;
   };
   cukiiTerminalError?: true;
+  /** Private transport receipt emitted only for a matching vendor user echo. */
+  cukiiSteerReadMessageId?: string;
 };
 
 type RaceResult<T> =
@@ -162,6 +166,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   const brokerSpeed = state.session.brokerSpeed;
   const thinkingEnabled = state.session.hasReasoningEnabled;
   const streamAborter = state.session.streamAborter;
+  const initialUserReceiptId = state.session.history.findLast(
+    (item) => item.message.role === "user" && !item.isSteer,
+  )?.message.id;
 
   const messages: ChatMessage[] = state.session.history
     .map((item) => item.message)
@@ -193,6 +200,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   };
 
   dispatch(setActive());
+  dispatch(markLatestUserReceiptDelivered());
   dispatch(setInlineErrorMessage(undefined));
   dispatch(setIsPruned(false));
   dispatch(setContextPercentage(0));
@@ -241,6 +249,12 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             hasTerminalReceipt = true;
             break;
           }
+          if (message.cukiiSteerReadMessageId) {
+            dispatch(
+              markSteerRead({ messageId: message.cukiiSteerReadMessageId }),
+            );
+            continue;
+          }
           if (isBridgeTerminalError(message)) {
             if (!isDuplicateTerminalError(message)) {
               dispatch(streamUpdate([message]));
@@ -253,6 +267,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             // and never an inference from quiet stdout.
             dispatch(setBridgeWait(message.cukiiBridgeWait));
             continue;
+          }
+          if (initialUserReceiptId) {
+            dispatch(markSteerRead({ messageId: initialUserReceiptId }));
           }
           dispatch(streamUpdate([message]));
           settleObservedToolCalls([message], dispatch);

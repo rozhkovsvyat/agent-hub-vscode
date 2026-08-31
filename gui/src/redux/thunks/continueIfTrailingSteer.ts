@@ -18,7 +18,9 @@ export function hasTrailingSteerMessage(session: {
   if (
     !last?.isSteer ||
     last.message.role !== "user" ||
-    last.steerStatus === "delivered"
+    last.steerStatus === "delivered" ||
+    last.steerStatus === "read" ||
+    last.steerStatus === "failed"
   ) {
     return false;
   }

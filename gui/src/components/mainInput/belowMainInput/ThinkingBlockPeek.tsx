@@ -23,6 +23,7 @@ interface ThinkingBlockPeekProps {
   inProgress?: boolean;
   signature?: string;
   tokens?: number;
+  durationMs?: number;
 }
 
 function ThinkingBlockPeek({
@@ -32,6 +33,7 @@ function ThinkingBlockPeek({
   prevItem,
   inProgress,
   tokens,
+  durationMs,
 }: ThinkingBlockPeekProps) {
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -60,13 +62,18 @@ function ThinkingBlockPeek({
     if (inProgress) {
       setStartTime(Date.now());
       setElapsedTime("");
-    } else if (startTime) {
+    } else if (durationMs === undefined && startTime) {
       const endTime = Date.now();
       const diff = endTime - startTime;
-      const diffString = `${(diff / 1000).toFixed(1)}s`;
+      const diffString = `${Math.max(1, Math.round(diff / 1000))}s`;
       setElapsedTime(diffString);
     }
-  }, [inProgress]);
+  }, [durationMs, inProgress]);
+
+  const durationLabel =
+    durationMs === undefined
+      ? elapsedTime
+      : `${Math.max(1, Math.round(durationMs / 1000))}s`;
 
   return duplicateRedactedThinkingBlock ? null : (
     <div className="thread-message">
@@ -93,7 +100,7 @@ function ThinkingBlockPeek({
               : redactedThinking
                 ? "Redacted Thinking"
                 : "Thought" +
-                  (elapsedTime ? ` for ${elapsedTime}` : "") +
+                  (durationLabel ? ` for ${durationLabel}` : "") +
                   (tokens ? ` (${tokens} tokens)` : "")}
             {open ? (
               <ChevronUpIcon className="h-3 w-3" />

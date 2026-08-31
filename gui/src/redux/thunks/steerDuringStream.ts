@@ -48,20 +48,26 @@ export const steerDuringStream = createAsyncThunk<
         editorState,
       }),
     );
-    const response = await extra.ideMessenger.request(
-      "cukii/steerDuringStream",
-      {
-        messageId,
-        sessionId,
-        text: stripImages(content),
-      },
-    );
-    dispatch(
-      setSteerStatus({
-        messageId,
-        status:
-          response.status === "success" ? response.content.status : "failed",
-      }),
-    );
+    try {
+      const response = await extra.ideMessenger.request(
+        "cukii/steerDuringStream",
+        {
+          messageId,
+          sessionId,
+          text: stripImages(content),
+        },
+      );
+      dispatch(
+        setSteerStatus({
+          messageId,
+          status:
+            response.status === "success" ? response.content.status : "failed",
+        }),
+      );
+    } catch {
+      // The optimistic bubble remains in history, but one checkmark would be
+      // dishonest when the request was not accepted by the native bridge.
+      dispatch(setSteerStatus({ messageId, status: "failed" }));
+    }
   },
 );

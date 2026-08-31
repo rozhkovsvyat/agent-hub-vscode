@@ -1033,6 +1033,33 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
+/* Messenger receipt: compact overlay in the bubble's lower-right corner.
+   It consumes horizontal inset rather than adding a separate footer row, so a
+   one-line follow-up remains a one-line bubble. */
+.cukii-user-message {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  max-width: min(100%, 640px);
+}
+
+.cukii-user-message:has(.cukii-user-receipt) .cukii-input-box {
+  padding-right: 52px;
+}
+
+.cukii-user-receipt {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
 .cukii-user-bubble .ProseMirror img,
 .cukii-user-bubble img {
   display: block;
@@ -1227,6 +1254,18 @@ button.cukii-submit-button--stop:active {
 
 .cukii-timeline-event::before {
   background: var(--vscode-descriptionForeground, #55524c);
+}
+
+/* Claude's reasoning is a collapsed timeline checkpoint, not a tool card.
+   Keep its dot neutral grey; only the currently-streaming thought receives
+   the subtle contrast lift. The text itself stays in the common prose inset. */
+.cukii-timeline-thinking::before {
+  top: 6px;
+  background: var(--vscode-descriptionForeground, #6f6f6f);
+}
+
+.cukii-timeline-thinking-active::before {
+  background: var(--vscode-foreground, #b7b7b7);
 }
 
 .cukii-timeline-failed::before {

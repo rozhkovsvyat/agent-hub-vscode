@@ -151,6 +151,19 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
+  it("keeps messenger receipts inside a single-line user bubble", () => {
+    const css = source("index.css");
+    const start = css.indexOf(".cukii-user-message {");
+    const receipt = css.indexOf(".cukii-user-receipt {");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(receipt).toBeGreaterThan(start);
+    const contract = css.slice(start, receipt + 500);
+    expect(contract).toContain("display: inline-block");
+    expect(contract).toContain("position: absolute");
+    expect(contract).toContain("padding-right: 52px");
+    expect(contract).not.toContain("padding-bottom");
+  });
+
   it("uses the exact shared Claude toggle accent and transition", () => {
     mountContractRules(/\.cukii-toggle-(?:track|thumb)[^{}]*\{[^{}]*\}/g);
     const toggle = document.createElement("span");

@@ -208,13 +208,59 @@ export function handleStreamingToolCallUpdates(
 // The proper fix is adding a UUID to all chat messages, but this is the temp workaround.
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
+  /** Messenger-style receipt persisted on every newly sent user message. */
+  messageReceipt?: {
+    sentAt: number;
+    status: "queued" | "delivered" | "read" | "deferred" | "failed";
+  };
   isSteer?: boolean;
-  steerStatus?: "queued" | "delivered" | "deferred" | "failed";
+  /**
+   * `delivered` means the native bridge accepted the follow-up. `read` is
+   * reserved for an explicit vendor echo of this exact input, never for an
+   * arbitrary later assistant/tool event.
+   */
+  steerStatus?: "queued" | "delivered" | "read" | "deferred" | "failed";
+  /** Epoch milliseconds captured at send time and persisted with history. */
+  steerSentAt?: number;
   // Set on the last kept assistant turn when the user cancels (Esc). Drives the
   // turn-level "Interrupted" marker for text/thinking streams that have no
   // in-flight tool call to carry the label.
   interrupted?: boolean;
 };
+
+/**
+ * History predates message receipts. Never manufacture a timestamp from
+ * reload time: it would make an old message look newly sent. A legacy steer
+ * with no explicit status is conservatively failed/unconfirmed.
+ */
+export function normalizeRestoredHistory(
+  history: ChatHistoryItemWithMessageId[],
+): ChatHistoryItemWithMessageId[] {
+  return history.map((item) => {
+    const receipt = item.messageReceipt;
+    const sentAt = item.steerSentAt;
+    if (receipt && Number.isFinite(receipt.sentAt)) {
+      return item;
+    }
+    if (!item.isSteer) return item;
+    return {
+      ...item,
+      messageReceipt: Number.isFinite(sentAt)
+        ? { sentAt: sentAt!, status: item.steerStatus ?? "failed" }
+        : undefined,
+      steerSentAt: Number.isFinite(sentAt) ? sentAt : undefined,
+      steerStatus: item.steerStatus ?? "failed",
+    };
+  });
+}
+
+function finishActiveThinking(history: ChatHistoryItemWithMessageId[]): void {
+  const active = history.findLast((item) => item.reasoning?.active);
+  if (active?.reasoning?.active) {
+    active.reasoning.active = false;
+    active.reasoning.endAt = Date.now();
+  }
+}
 
 /** An explicit native-worker pause, carried separately from chat text. */
 export type CukiiBridgeWait = {
@@ -475,6 +521,7 @@ export const sessionSlice = createSlice({
             },
             contextItems: [],
             editorState,
+            messageReceipt: { sentAt: Date.now(), status: "queued" },
           },
           {
             message: {
@@ -593,6 +640,7 @@ export const sessionSlice = createSlice({
         curMessage.isGatheringContext = false;
       }
 
+      finishActiveThinking(state.history);
       state.isStreaming = false;
       state.isCancelling = false;
       state.bridgeWait = undefined;
@@ -622,6 +670,8 @@ export const sessionSlice = createSlice({
         editorState: action.payload.editorState,
         isSteer: true,
         steerStatus: "queued",
+        steerSentAt: Date.now(),
+        messageReceipt: { sentAt: Date.now(), status: "queued" },
       });
     },
     setSteerStatus: (
@@ -635,6 +685,29 @@ export const sessionSlice = createSlice({
         (entry) => entry.message.id === action.payload.messageId,
       );
       if (item?.isSteer) item.steerStatus = action.payload.status;
+      if (item?.messageReceipt)
+        item.messageReceipt.status = action.payload.status;
+    },
+    markSteerRead: (state, action: PayloadAction<{ messageId: string }>) => {
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      // A delayed/duplicate transport frame must not upgrade a message which
+      // was never accepted by the bridge in the first place.
+      if (item?.isSteer && item.steerStatus === "delivered") {
+        item.steerStatus = "read";
+      }
+      if (item?.messageReceipt?.status === "delivered") {
+        item.messageReceipt.status = "read";
+      }
+    },
+    markLatestUserReceiptDelivered: (state) => {
+      const item = state.history.findLast(
+        (entry) => entry.message.role === "user" && !entry.isSteer,
+      );
+      if (item?.messageReceipt?.status === "queued") {
+        item.messageReceipt.status = "delivered";
+      }
     },
     abortStream: (state) => {
       state.streamAborter.abort();
@@ -642,6 +715,7 @@ export const sessionSlice = createSlice({
       // Safety: any path that aborts the stream must also clear the streaming
       // flag. This prevents the bottom loader from staying visible if a race
       // or bridge error leaves isStreaming stuck to true.
+      finishActiveThinking(state.history);
       state.isStreaming = false;
       state.isCancelling = false;
       state.bridgeWait = undefined;
@@ -725,6 +799,10 @@ export const sessionSlice = createSlice({
             lastMessage.role !== message.role ||
             message.role === "tool" // Tool messages should always create new messages
           ) {
+            if (lastMessage.role === "thinking" && lastItem.reasoning?.active) {
+              lastItem.reasoning.active = false;
+              lastItem.reasoning.endAt = Date.now();
+            }
             // Create a new message
             const historyItem: ChatHistoryItemWithMessageId = {
               message: {
@@ -734,6 +812,13 @@ export const sessionSlice = createSlice({
               },
               contextItems: [],
             };
+            if (message.role === "thinking") {
+              historyItem.reasoning = {
+                text: "",
+                startAt: Date.now(),
+                active: true,
+              };
+            }
             state.history.push(historyItem);
             lastItem = state.history[state.history.length - 1];
             lastMessage = lastItem.message;
@@ -836,7 +921,7 @@ export const sessionSlice = createSlice({
       state.contextPercentage = undefined;
 
       if (payload) {
-        state.history = payload.history as any;
+        state.history = normalizeRestoredHistory(payload.history as any);
         state.title = payload.title;
         state.titleManuallySet = Boolean(payload.titleManuallySet);
         state.revision = payload.revision ?? 0;
@@ -1268,6 +1353,8 @@ export const {
   setInactive,
   setCancelling,
   appendUserSteerMessage,
+  markSteerRead,
+  markLatestUserReceiptDelivered,
   setSteerStatus,
   streamUpdate,
   newSession,

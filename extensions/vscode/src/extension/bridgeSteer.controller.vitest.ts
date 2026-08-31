@@ -89,6 +89,28 @@ describe("BridgeSteeringController", () => {
     expect(writes).toEqual(["one", "two"]);
   });
 
+  it("marks only the first exact vendor echo as read and isolates queued follow-ups", async () => {
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(async () => true);
+    await Promise.all([
+      controller.deliver({
+        messageId: "one",
+        sessionId: "session-1",
+        text: "one",
+      }),
+      controller.deliver({
+        messageId: "two",
+        sessionId: "session-1",
+        text: "two",
+      }),
+    ]);
+
+    expect(controller.consumeVendorEcho("not a follow-up")).toBeUndefined();
+    expect(controller.consumeVendorEcho("one")).toBe("one");
+    expect(controller.consumeVendorEcho("one")).toBeUndefined();
+    expect(controller.consumeVendorEcho("two")).toBe("two");
+  });
+
   it("never reports delivered when close wins an in-flight stdin write", async () => {
     let started!: () => void;
     let finish!: (delivered: boolean) => void;

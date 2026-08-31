@@ -88,6 +88,15 @@ function assistantHasVisibleText(item: ChatHistoryItemWithMessageId): boolean {
   );
 }
 
+function formatSteerSentTime(sentAt: number | undefined): string | undefined {
+  if (!Number.isFinite(sentAt)) return undefined;
+  return new Date(sentAt!).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 const StepsDiv = styled.div`
   position: relative;
   background-color: transparent;
@@ -389,34 +398,46 @@ export function Chat() {
       );
 
       if (message.role === "user") {
-        const steerLabel = item.isSteer
-          ? {
-              queued: "Queued",
-              delivered: "Delivered",
-              deferred: "Will send after current response",
-              failed: "Delivery failed",
-            }[item.steerStatus ?? "queued"]
-          : undefined;
+        const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
+        const receipt =
+          item.messageReceipt?.status === "read"
+            ? "✓✓"
+            : item.messageReceipt?.status === "delivered"
+              ? "✓"
+              : "";
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
-            {errorBoundary(
-              <ContinueInputBox
-                onEnter={(nextEditorState, modifiers) =>
-                  sendInput(nextEditorState, modifiers, historyIndex)
-                }
-                isLastUserInput={isLastUserInput(historyIndex)}
-                isMainInput={false}
-                editorState={editorState ?? message.content}
-                contextItems={contextItems}
-                appliedRules={appliedRules}
-                inputId={message.id}
-              />,
-            )}
-            {steerLabel && (
-              <div className="mt-1 text-right text-[11px] text-[var(--vscode-descriptionForeground)]">
-                {steerLabel}
-              </div>
-            )}
+            <div className="cukii-user-message">
+              {errorBoundary(
+                <ContinueInputBox
+                  onEnter={(nextEditorState, modifiers) =>
+                    sendInput(nextEditorState, modifiers, historyIndex)
+                  }
+                  isLastUserInput={isLastUserInput(historyIndex)}
+                  isMainInput={false}
+                  editorState={editorState ?? message.content}
+                  contextItems={contextItems}
+                  appliedRules={appliedRules}
+                  inputId={message.id}
+                />,
+              )}
+              {sentTime && (
+                <span
+                  className="cukii-user-receipt"
+                  data-testid={`cukii-message-receipt-${message.id}`}
+                  aria-label={
+                    receipt === "✓✓"
+                      ? `Sent ${sentTime}, read`
+                      : receipt
+                        ? `Sent ${sentTime}, delivered`
+                        : `Sent ${sentTime}`
+                  }
+                >
+                  {sentTime}
+                  {receipt ? ` ${receipt}` : ""}
+                </span>
+              )}
+            </div>
           </div>,
         ];
       }
@@ -427,7 +448,9 @@ export function Chat() {
           return [];
         }
 
-        const inProgress = historyIndex === history.length - 1 && isStreaming;
+        const inProgress =
+          isStreaming &&
+          (item.reasoning?.active ?? historyIndex === history.length - 1);
         const nestedWorker = parseNestedWorkerThinking(
           thinkingContent,
           inProgress,
@@ -442,13 +465,20 @@ export function Chat() {
             prevItem={historyIndex > 0 ? history[historyIndex - 1] : null}
             inProgress={inProgress}
             signature={message.signature}
+            durationMs={
+              item.reasoning?.startAt && item.reasoning.endAt
+                ? item.reasoning.endAt - item.reasoning.startAt
+                : undefined
+            }
           />
         );
 
         const thinkingRows: JSX.Element[] = [
           <div
             key={message.id}
-            className={`cukii-timeline-item cukii-timeline-event shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+            className={`cukii-timeline-item cukii-timeline-event cukii-timeline-thinking ${
+              inProgress ? "cukii-timeline-thinking-active" : ""
+            } shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
           >
             {errorBoundary(thinkingBody)}
           </div>,

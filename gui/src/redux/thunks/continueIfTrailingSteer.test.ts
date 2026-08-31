@@ -79,6 +79,22 @@ describe("hasTrailingSteerMessage", () => {
     ).toBe(false);
   });
 
+  it("does not replay a follow-up already read or failed by the live bridge", () => {
+    const read = item("user", "already read", true);
+    read.steerStatus = "read";
+    const failed = item("user", "not accepted", true);
+    failed.steerStatus = "failed";
+    for (const followUp of [read, failed]) {
+      expect(
+        hasTrailingSteerMessage({
+          history: [followUp],
+          isStreaming: false,
+          isInEdit: false,
+        }),
+      ).toBe(false);
+    }
+  });
+
   it("runs an unsupported-vendor follow-up after the current response", () => {
     const deferred = item("user", "send after current", true);
     deferred.steerStatus = "deferred";
