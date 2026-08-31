@@ -1,10 +1,90 @@
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const { rimrafSync } = require("rimraf");
 
 const continueDir = path.join(__dirname, "..", "..", "..");
+const npmCliExtensions = new Set([".js", ".cjs", ".mjs"]);
+
+function expectedNpmRoots(nodeExecutable, platform) {
+  const nodeDirectory = path.dirname(path.resolve(nodeExecutable));
+  if (platform === "win32") {
+    return [path.join(nodeDirectory, "node_modules", "npm")];
+  }
+
+  const prefix = path.dirname(nodeDirectory);
+  return [
+    path.join(nodeDirectory, "node_modules", "npm"),
+    path.join(prefix, "lib", "node_modules", "npm"),
+    path.join(prefix, "share", "nodejs", "npm"),
+  ];
+}
+
+function isPathWithin(filePath, directory) {
+  const relative = path.relative(directory, filePath);
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== ".." &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function realExistingNpmCli(candidate, npmRoots, fileSystem) {
+  if (
+    typeof candidate !== "string" ||
+    !npmCliExtensions.has(path.extname(candidate))
+  ) {
+    return undefined;
+  }
+
+  try {
+    const cliPath = fileSystem.realpathSync(candidate);
+    if (!fileSystem.statSync(cliPath).isFile()) {
+      return undefined;
+    }
+    return npmRoots.some((npmRoot) => {
+      try {
+        return isPathWithin(cliPath, fileSystem.realpathSync(npmRoot));
+      } catch {
+        return false;
+      }
+    })
+      ? cliPath
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * npm.cmd cannot reliably be invoked with execFileSync on Windows. Execute the
+ * npm CLI script with this Node executable instead, after proving the script
+ * belongs to this Node installation rather than trusting npm_execpath.
+ */
+function resolveNpmCliPath({
+  npmExecPath = process.env.npm_execpath,
+  nodeExecutable = process.execPath,
+  platform = process.platform,
+  fileSystem = fs,
+  npmRoots = expectedNpmRoots(nodeExecutable, platform),
+} = {}) {
+  const candidates = [
+    npmExecPath,
+    ...npmRoots.map((npmRoot) => path.join(npmRoot, "bin", "npm-cli.js")),
+  ];
+  for (const candidate of candidates) {
+    const cliPath = realExistingNpmCli(candidate, npmRoots, fileSystem);
+    if (cliPath) {
+      return cliPath;
+    }
+  }
+
+  throw new Error(
+    "Unable to find a trusted npm CLI script for the current Node installation",
+  );
+}
 
 function validateGuiBuild(guiDist) {
   const requiredAssets = [
@@ -22,11 +102,30 @@ function validateGuiBuild(guiDist) {
   }
 }
 
-function buildGui(guiDir) {
+function buildGui(
+  guiDir,
+  {
+    runCommand = execFileSync,
+    resolveNpmCli = resolveNpmCliPath,
+    nodeExecutable = process.execPath,
+    platform = process.platform,
+    npmExecPath = process.env.npm_execpath,
+    fileSystem = fs,
+    npmRoots,
+  } = {},
+) {
   try {
-    execSync("npm run build", {
+    const npmCliPath = resolveNpmCli({
+      npmExecPath,
+      nodeExecutable,
+      platform,
+      fileSystem,
+      ...(npmRoots === undefined ? {} : { npmRoots }),
+    });
+    runCommand(nodeExecutable, [npmCliPath, "run", "build"], {
       cwd: guiDir,
       stdio: "inherit",
+      shell: false,
     });
   } catch (error) {
     throw new Error(`GUI build failed: ${error.message}`);
@@ -147,9 +246,10 @@ function buildAndCopyGui({
     "webview",
   ),
   runBuild = buildGui,
+  buildOptions,
   fileSystem = fs,
 } = {}) {
-  runBuild(guiDir);
+  runBuild(guiDir, buildOptions);
 
   const guiDist = path.join(guiDir, "dist");
   validateGuiBuild(guiDist);
@@ -167,6 +267,9 @@ function buildAndCopyGui({
 
 module.exports = {
   buildAndCopyGui,
+  buildGui,
+  expectedNpmRoots,
+  resolveNpmCliPath,
   validateGuiBuild,
   replaceDirectoriesTransactionally,
 };

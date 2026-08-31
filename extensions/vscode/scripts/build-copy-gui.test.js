@@ -4,7 +4,11 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { buildAndCopyGui } = require("./build-copy-gui");
+const {
+  buildAndCopyGui,
+  buildGui,
+  expectedNpmRoots,
+} = require("./build-copy-gui");
 
 function withFixture(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-gui-package-"));
@@ -18,6 +22,122 @@ function withFixture(run) {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
+
+function withBuildFixture(run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-npm-cli-"));
+  try {
+    return run(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("runs npm through Node with argv on Windows and POSIX", () => {
+  for (const platform of ["win32", "linux"]) {
+    withBuildFixture((root) => {
+      const nodeExecutable =
+        platform === "win32"
+          ? path.join(root, "node.exe")
+          : path.join(root, "bin", "node");
+      const npmRoot = expectedNpmRoots(nodeExecutable, platform)[
+        platform === "win32" ? 0 : 1
+      ];
+      const npmCliPath = path.join(npmRoot, "bin", "npm-cli.js");
+      fs.mkdirSync(path.dirname(npmCliPath), { recursive: true });
+      fs.writeFileSync(npmCliPath, "// trusted npm cli");
+
+      let invocation;
+      buildGui(path.join(root, "gui"), {
+        platform,
+        nodeExecutable,
+        // Exercise the deterministic current-Node fallback on both platforms.
+        npmExecPath: "",
+        runCommand(...args) {
+          invocation = args;
+        },
+      });
+
+      assert.deepEqual(invocation, [
+        nodeExecutable,
+        [fs.realpathSync(npmCliPath), "run", "build"],
+        { cwd: path.join(root, "gui"), stdio: "inherit", shell: false },
+      ]);
+    });
+  }
+});
+
+test("accepts npm_execpath only when it is inside the expected npm root", () => {
+  withBuildFixture((root) => {
+    const nodeExecutable = path.join(root, "node");
+    const npmRoot = path.join(root, "node_modules", "npm");
+    const npmCliPath = path.join(npmRoot, "bin", "custom-cli.cjs");
+    fs.mkdirSync(path.dirname(npmCliPath), { recursive: true });
+    fs.writeFileSync(npmCliPath, "// trusted npm cli");
+
+    let invocation;
+    buildGui(path.join(root, "gui"), {
+      nodeExecutable,
+      npmExecPath: npmCliPath,
+      npmRoots: [npmRoot],
+      runCommand(...args) {
+        invocation = args;
+      },
+    });
+
+    assert.deepEqual(invocation.slice(0, 2), [
+      nodeExecutable,
+      [fs.realpathSync(npmCliPath), "run", "build"],
+    ]);
+  });
+});
+
+test("refuses a hostile npm_execpath without executing its marker", () => {
+  withBuildFixture((root) => {
+    const marker = path.join(root, "executed-marker");
+    const hostileCli = path.join(root, "hostile", "npm-cli.js");
+    fs.mkdirSync(path.dirname(hostileCli), { recursive: true });
+    fs.writeFileSync(
+      hostileCli,
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed")`,
+    );
+    let runnerCalls = 0;
+
+    assert.throws(
+      () =>
+        buildGui(path.join(root, "gui"), {
+          npmExecPath: hostileCli,
+          nodeExecutable: path.join(root, "node"),
+          npmRoots: [],
+          runCommand() {
+            runnerCalls += 1;
+          },
+        }),
+      /GUI build failed: Unable to find a trusted npm CLI script/,
+    );
+    assert.equal(runnerCalls, 0);
+    assert.equal(fs.existsSync(marker), false);
+  });
+});
+
+test("fails closed when no trusted npm CLI path exists", () => {
+  withBuildFixture((root) => {
+    let runnerCalls = 0;
+
+    assert.throws(
+      () =>
+        buildGui(path.join(root, "gui"), {
+          npmExecPath: path.join(root, "missing", "npm-cli.js"),
+          nodeExecutable: path.join(root, "node"),
+          npmRoots: [path.join(root, "node_modules", "npm")],
+          runCommand() {
+            runnerCalls += 1;
+          },
+        }),
+      /GUI build failed: Unable to find a trusted npm CLI script/,
+    );
+    assert.equal(runnerCalls, 0);
+  });
+});
 
 test("builds the current GUI source before replacing package inputs", () => {
   withFixture(({ guiDir, vscodeGuiDir, intellijWebviewDir }) => {
