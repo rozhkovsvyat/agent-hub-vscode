@@ -8,6 +8,7 @@ import {
 import {
   InputModifiers,
   brokerVendorForModel,
+  defaultVendorPermissionCapabilities,
   resolvePermissionModeForVendor,
 } from "core";
 import {
@@ -213,16 +214,16 @@ function InputToolbar(props: InputToolbarProps) {
   ) => {
     const vendor = brokerVendorForModel(nextModel);
     const capability = permissionCapabilities[vendor];
-    const resolvedPermissionMode = capability
-      ? resolvePermissionModeForVendor(
-          {
+    const resolvedPermissionMode = resolvePermissionModeForVendor(
+      capability
+        ? {
             vendor,
             supportedModes: capability.supportedModes,
             helpSource: "live",
-          },
-          nextPermissionMode,
-        )
-      : nextPermissionMode;
+          }
+        : defaultVendorPermissionCapabilities(vendor),
+      nextPermissionMode,
+    );
     dispatch(
       switchBrokerModel({
         model: nextModel,

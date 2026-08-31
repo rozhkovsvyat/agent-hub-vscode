@@ -216,6 +216,41 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(document.querySelector(".cukii-permission-button")).toBeNull();
   });
 
+  it("uses the verified cold-cache Kimi fallback before storing its model switch", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["cukii/listPermissionCapabilities"] =
+      () => new Promise<never>(() => {});
+    const postSpy = vi.spyOn(mockIdeMessenger, "post");
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch(setBrokerPermissionMode("manual"));
+    store.dispatch({
+      type: "session/streamUpdate",
+      payload: [{ role: "user", content: "Cold Kimi switch" }],
+    });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    await user.click(await getElementByTestId("broker-switch-model"));
+    await user.click(await getElementByText("K3"));
+
+    expect(store.getState().session.brokerModel).toBe("kimi-k3");
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    expect(window.cukiiVscode?.getState()?.cukiiBrokerDraft).toMatchObject({
+      brokerModel: "kimi-k3",
+      brokerPermissionMode: "bypass",
+    });
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({
+        brokerModel: "kimi-k3",
+        brokerPermissionMode: "bypass",
+      }),
+    );
+  });
+
   it("opens the Claude-style command menu and keeps broker controls", async () => {
     const { store, user } = await renderWithProviders(
       <InputToolbar {...props} />,
