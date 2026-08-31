@@ -4,28 +4,34 @@ import { renderWithProviders } from "../../../util/test/render";
 import { Chat, INITIAL_TRANSCRIPT_WINDOW } from "../Chat";
 import {
   newSession,
+  setActive,
+  setBridgeWait,
+  setInactive,
   setIsSessionLoading,
+  updateHistoryItemAtIndex,
 } from "../../../redux/slices/sessionSlice";
+import { EMPTY_CONFIG, updateConfig } from "../../../redux/slices/configSlice";
 
-const stepRenderSpy = vi.hoisted(() => vi.fn());
-vi.mock("../../../components/StepContainer", () => ({
-  default: ({
-    item,
-  }: {
-    item: { message: { id: string; content: string } };
-  }) => {
-    stepRenderSpy(item.message.id);
-    return <div>{item.message.content}</div>;
+// Keep the production memoized StepContainer in this integration test. These
+// light leaf doubles let us observe work that happens only *after* its memo
+// boundary, without making the component under test a plain function mock.
+const markdownRenderSpy = vi.hoisted(() => vi.fn());
+const responseActionsSpy = vi.hoisted(() => vi.fn());
+vi.mock("../../../components/StyledMarkdownPreview", () => ({
+  default: ({ source, itemIndex }: { source: string; itemIndex: number }) => {
+    markdownRenderSpy(source, itemIndex);
+    return <div data-testid={`saved-row-${itemIndex}`}>{source}</div>;
+  },
+}));
+vi.mock("../../../components/StepContainer/ResponseActions", () => ({
+  default: ({ index }: { index: number }) => {
+    responseActionsSpy(index);
+    return <div data-testid={`response-actions-${index}`} />;
   },
 }));
 
-// React may reconcile an unchanged mocked child more than once while providers
-// settle. The production child is memoized; this mock intentionally is not, so
-// assert the bounded visible IDs rather than a renderer-internal raw call count.
-const MAX_RECONCILIATION_PASSES_PER_PHASE = 3;
-
 function renderedStepIds() {
-  return stepRenderSpy.mock.calls.map(([id]) => id as string);
+  return markdownRenderSpy.mock.calls.map(([source]) => source as string);
 }
 
 function expectOnlyWindowRows(start: number, endExclusive: number) {
@@ -35,12 +41,27 @@ function expectOnlyWindowRows(start: number, endExclusive: number) {
   );
   const renderedIds = renderedStepIds();
 
-  // This is the negative control: rendering a stale pre-window row changes the
-  // set and fails even if the DOM happens to hide its text.
+  // The fixture deliberately makes markdown source equal its immutable message
+  // ID. A stale pre-window item therefore changes this exact ID set only after
+  // the real memoized StepContainer has rendered its markdown child.
   expect(new Set(renderedIds)).toEqual(new Set(expectedIds));
-  expect(renderedIds.length).toBeLessThanOrEqual(
-    expectedIds.length * MAX_RECONCILIATION_PASSES_PER_PHASE,
+}
+
+function expectVisibleWindowRows(
+  container: HTMLElement,
+  start: number,
+  endExclusive: number,
+) {
+  const expectedIds = Array.from(
+    { length: endExclusive - start },
+    (_, index) => `assistant-${start + index}`,
   );
+  const visibleIds = Array.from(
+    container.querySelectorAll('[data-testid^="saved-row-"]'),
+    (row) => row.textContent,
+  );
+
+  expect(new Set(visibleIds)).toEqual(new Set(expectedIds));
 }
 
 describe("Cukii saved-session loading", () => {
@@ -75,12 +96,12 @@ describe("Cukii saved-session loading", () => {
         message: {
           id: `assistant-${index}`,
           role: "assistant" as const,
-          content: `Answer ${index}`,
+          content: `assistant-${index}`,
         },
         contextItems: [],
       }),
     );
-    stepRenderSpy.mockClear();
+    markdownRenderSpy.mockClear();
     await act(async () => {
       store.dispatch(
         newSession({
@@ -100,17 +121,134 @@ describe("Cukii saved-session loading", () => {
       INITIAL_TRANSCRIPT_WINDOW + 1,
       INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
     );
-    expect(container.textContent).not.toContain("Answer 0");
+    expect(container.textContent).not.toContain("assistant-0");
     expect(container.textContent).toContain(
-      `Answer ${INITIAL_TRANSCRIPT_WINDOW * 2}`,
+      `assistant-${INITIAL_TRANSCRIPT_WINDOW * 2}`,
     );
-    stepRenderSpy.mockClear();
+    markdownRenderSpy.mockClear();
     await user.click(container.querySelector(".cukii-load-earlier")!);
-    expectOnlyWindowRows(1, INITIAL_TRANSCRIPT_WINDOW * 2 + 1);
-    expect(container.textContent).not.toContain("Answer 0");
-    expect(container.textContent).toContain("Answer 1");
+    // Existing rows are real React.memo instances, so only the newly inserted
+    // earlier batch reaches the markdown leaf during window expansion.
+    expectOnlyWindowRows(1, INITIAL_TRANSCRIPT_WINDOW + 1);
+    expectVisibleWindowRows(container, 1, INITIAL_TRANSCRIPT_WINDOW * 2 + 1);
+    expect(container.textContent).not.toContain("assistant-0");
+    expect(container.textContent).toContain("assistant-1");
     expect(store.getState().session.history).toHaveLength(
       INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
     );
+  });
+
+  it("keeps saved rows memoized for parent updates but reacts to live row inputs", async () => {
+    const { store, container } = await renderWithProviders(<Chat />);
+    const history = Array.from(
+      { length: INITIAL_TRANSCRIPT_WINDOW * 2 + 1 },
+      (_, index) => ({
+        message: {
+          id: `assistant-${index}`,
+          role: "assistant" as const,
+          // This makes the real markdown leaf report the immutable message ID.
+          content: `assistant-${index}`,
+        },
+        contextItems: [],
+      }),
+    );
+    const firstVisibleIndex = INITIAL_TRANSCRIPT_WINDOW + 1;
+    const lastVisibleIndex = INITIAL_TRANSCRIPT_WINDOW * 2;
+
+    await act(async () => {
+      store.dispatch(
+        newSession({
+          sessionId: "memoized-saved-session",
+          title: "Memoized saved session",
+          workspaceDirectory: "D:/Brain/vault",
+          history,
+        }),
+      );
+    });
+    expectOnlyWindowRows(firstVisibleIndex, lastVisibleIndex + 1);
+
+    // Bridge receipt changes Chat itself, but no StepContainer selector or prop.
+    // If the default export loses React.memo, every visible markdown leaf runs.
+    markdownRenderSpy.mockClear();
+    await act(async () => {
+      store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
+    });
+    expect(
+      container.querySelector('[data-testid="cukii-waiting-receipt"]'),
+    ).toBeNull();
+    expect(markdownRenderSpy).not.toHaveBeenCalled();
+
+    // Streaming is a StepContainer selector: rows must still refresh, while the
+    // last completed response hides its actions during the live stream.
+    await act(async () => {
+      store.dispatch(setActive());
+      store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
+    });
+    expect(
+      container.querySelector('[data-testid="cukii-waiting-receipt"]'),
+    ).toHaveTextContent("Waiting for bridge");
+    expect(new Set(renderedStepIds())).toEqual(
+      new Set(
+        Array.from(
+          { length: INITIAL_TRANSCRIPT_WINDOW },
+          (_, index) => `assistant-${firstVisibleIndex + index}`,
+        ),
+      ),
+    );
+    expect(
+      container.querySelector(
+        `[data-testid="response-actions-${lastVisibleIndex}"]`,
+      ),
+    ).toBeNull();
+
+    markdownRenderSpy.mockClear();
+    await act(async () => {
+      store.dispatch(setInactive());
+      store.dispatch(
+        updateConfig({
+          ...EMPTY_CONFIG,
+          ui: { displayRawMarkdown: true },
+        }),
+      );
+    });
+    expect(markdownRenderSpy).not.toHaveBeenCalled();
+    expect(
+      container.querySelector(`[data-testid="saved-row-${firstVisibleIndex}"]`),
+    ).toBeNull();
+    expect(container.querySelectorAll("pre")).toHaveLength(
+      INITIAL_TRANSCRIPT_WINDOW,
+    );
+    expect(container.textContent).toContain(`assistant-${firstVisibleIndex}`);
+
+    await act(async () => {
+      store.dispatch(updateConfig(EMPTY_CONFIG));
+    });
+    expectOnlyWindowRows(firstVisibleIndex, lastVisibleIndex + 1);
+
+    // A row's successor is a selector used for response-action eligibility.
+    // Updating that neighbour must re-render just the affected saved row.
+    markdownRenderSpy.mockClear();
+    responseActionsSpy.mockClear();
+    await act(async () => {
+      store.dispatch(
+        updateHistoryItemAtIndex({
+          index: firstVisibleIndex + 1,
+          updates: {
+            message: {
+              id: `user-after-${firstVisibleIndex}`,
+              role: "user",
+              content: "Follow-up",
+            },
+          },
+        }),
+      );
+    });
+    expect(renderedStepIds()).toEqual([`assistant-${firstVisibleIndex}`]);
+    expect(responseActionsSpy).toHaveBeenCalledWith(firstVisibleIndex);
+    expect(
+      container.querySelector(
+        `[data-testid="response-actions-${firstVisibleIndex}"]`,
+      ),
+    ).not.toBeNull();
   });
 });
