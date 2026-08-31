@@ -804,19 +804,20 @@ describe("sessionSlice mid-task steer messages", () => {
   });
 
   it("brands a legacy Kimi model-switch receipt when restoring history", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "kimi-switch", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: { model: "kimi-k3", displayName: "K3" },
+      },
+    ];
     const restored = sessionSlice.reducer(
       sessionSlice.getInitialState(),
       newSession({
         sessionId: "kimi-model-switch-history",
         title: "Kimi history",
         workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
-        history: [
-          {
-            message: { id: "kimi-switch", role: "system", content: "" },
-            contextItems: [],
-            modelSwitch: { model: "kimi-k3", displayName: "K3" },
-          },
-        ],
+        history,
       }),
     );
 
