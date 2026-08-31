@@ -13,11 +13,11 @@ import * as fs from "fs";
 import * as http from "http";
 import * as os from "os";
 import * as path from "path";
+import { performance } from "perf_hooks";
 import { promisify } from "util";
 import { alibabaIdentity } from "./alibabaTokenPlan";
 
 const execFileAsync = promisify(execFile);
-type ProcessTreeRunner = (program: string, args: string[]) => Promise<unknown>;
 // A short allowance avoids hiding a valid local session when the workstation
 // clock is only slightly behind the identity provider.
 const JWT_CLOCK_SKEW_SECONDS = 60;
@@ -626,7 +626,12 @@ type KimiServerProbeOptions = {
   cacheTtlMs?: number;
   now?: () => number;
   signal?: AbortSignal;
-  launch?: (executable: string, port: number) => ChildProcess;
+  launch?: (
+    executable: string,
+    port: number,
+    workingDirectory?: string,
+  ) => ChildProcess;
+  launchWorkingDirectory?: string;
   reservePort?: () => Promise<number | undefined>;
   launchTimeoutMs?: number;
   stopEphemeral?: (
@@ -643,9 +648,15 @@ const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
 const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
 const KIMI_IDENTITY_CACHE_TTL_MS = 60_000;
 const KIMI_IDENTITY_CACHE_MAX_TTL_MS = 5 * 60_000;
+const KIMI_IDENTITY_CACHE_MAX_ENTRIES = 32;
 type KimiIdentityCacheEntry = { identity: string; expiresAt: number };
 const kimiIdentityCache = new Map<string, KimiIdentityCacheEntry>();
 const kimiProfileIdentityCache = new Map<string, KimiIdentityCacheEntry>();
+const kimiIdentityInFlight = new Map<
+  string,
+  Promise<string | undefined>
+>();
+let kimiIdentityCacheGeneration = 0;
 const KIMI_CODE_ME_URL = new URL("https://api.kimi.ai/coding/v1/me");
 
 function cachedKimiIdentity(
@@ -676,6 +687,15 @@ function rememberKimiIdentity(
       requestedTtlMs ?? KIMI_IDENTITY_CACHE_TTL_MS,
     ),
   );
+  for (const [cachedKey, cached] of cache) {
+    if (now >= cached.expiresAt) cache.delete(cachedKey);
+  }
+  cache.delete(key);
+  while (cache.size >= KIMI_IDENTITY_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
   cache.set(key, { identity, expiresAt: now + ttlMs });
 }
 
@@ -765,13 +785,164 @@ function kimiShutdownRequest(
   });
 }
 
-function launchKimiWeb(executable: string, port: number): ChildProcess {
+const KIMI_WINDOWS_JOB_WRAPPER = String.raw`
+$ErrorActionPreference = 'Stop'
+if ($env:CUKII_KIMI_FORCE_JOB_FAILURE -eq '1') {
+  [Console]::Error.WriteLine('Cukii Kimi process ownership unavailable.')
+  exit 73
+}
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class CukiiKimiJob {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+    public long PerProcessUserTimeLimit;
+    public long PerJobUserTimeLimit;
+    public uint LimitFlags;
+    public UIntPtr MinimumWorkingSetSize;
+    public UIntPtr MaximumWorkingSetSize;
+    public uint ActiveProcessLimit;
+    public UIntPtr Affinity;
+    public uint PriorityClass;
+    public uint SchedulingClass;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct IO_COUNTERS {
+    public ulong ReadOperationCount;
+    public ulong WriteOperationCount;
+    public ulong OtherOperationCount;
+    public ulong ReadTransferCount;
+    public ulong WriteTransferCount;
+    public ulong OtherTransferCount;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+    public IO_COUNTERS IoInfo;
+    public UIntPtr ProcessMemoryLimit;
+    public UIntPtr JobMemoryLimit;
+    public UIntPtr PeakProcessMemoryUsed;
+    public UIntPtr PeakJobMemoryUsed;
+  }
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool SetInformationJobObject(
+    IntPtr job,
+    int informationClass,
+    ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION information,
+    uint informationLength);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+  [DllImport("kernel32.dll")]
+  private static extern bool CloseHandle(IntPtr handle);
+
+  public static IntPtr OwnCurrentProcess() {
+    const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    const int JobObjectExtendedLimitInformation = 9;
+    IntPtr job = CreateJobObject(IntPtr.Zero, null);
+    if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+    var information = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+    information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    uint size = (uint)Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref information, size)) {
+      int error = Marshal.GetLastWin32Error();
+      CloseHandle(job);
+      throw new Win32Exception(error);
+    }
+    if (!AssignProcessToJobObject(job, Process.GetCurrentProcess().Handle)) {
+      int error = Marshal.GetLastWin32Error();
+      CloseHandle(job);
+      throw new Win32Exception(error);
+    }
+    return job;
+  }
+
+  public static void Close(IntPtr job) {
+    if (job != IntPtr.Zero) CloseHandle(job);
+  }
+}
+'@
+
+$job = [IntPtr]::Zero
+try {
+  $job = [CukiiKimiJob]::OwnCurrentProcess()
+} catch {
+  [Console]::Error.WriteLine('Cukii Kimi process ownership unavailable.')
+  exit 73
+}
+
+try {
+  $executable = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($env:CUKII_KIMI_EXECUTABLE_B64))
+  $port = [int]$env:CUKII_KIMI_PORT
+  & $executable web --no-open --port $port --log-level info
+  while ($true) { [Threading.Thread]::Sleep(500) }
+} finally {
+  [CukiiKimiJob]::Close($job)
+}
+`;
+
+function windowsPowerShell(): string {
+  return path.win32.join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+}
+
+export function launchKimiWeb(
+  executable: string,
+  port: number,
+  workingDirectory?: string,
+  forceJobFailure = false,
+): ChildProcess {
+  if (process.platform === "win32") {
+    return spawn(
+      windowsPowerShell(),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        Buffer.from(KIMI_WINDOWS_JOB_WRAPPER, "utf16le").toString("base64"),
+      ],
+      {
+        shell: false,
+        windowsHide: true,
+        cwd: workingDirectory,
+        env: {
+          ...process.env,
+          CUKII_KIMI_EXECUTABLE_B64:
+            Buffer.from(executable, "utf8").toString("base64"),
+          CUKII_KIMI_PORT: String(port),
+          CUKII_KIMI_FORCE_JOB_FAILURE: forceJobFailure ? "1" : "0",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+  }
   return spawn(
     executable,
     ["web", "--no-open", "--port", String(port), "--log-level", "info"],
     {
       shell: false,
       windowsHide: true,
+      cwd: workingDirectory,
       // The startup URL carries a bearer. Keep it private, bounded and in-memory.
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -930,7 +1101,7 @@ function waitForKimiStartup(
   });
 }
 
-async function stopEphemeralKimiWeb(
+export async function stopEphemeralKimiWeb(
   child: ChildProcess,
   endpoint: URL | undefined,
   bearerToken: string | undefined,
@@ -945,22 +1116,6 @@ async function stopEphemeralKimiWeb(
   }
   const rootPid = child.pid;
   if (!rootPid) return;
-  if (process.platform === "win32") {
-    // Keep the launcher's numeric root as the durable ownership handle. Kimi's
-    // Windows launcher can exit after creating the native server; in that
-    // state `child.killed`/`exit` describe only the launcher. Always traverse
-    // the original process tree, even when its root has already exited.
-    try {
-      await terminateWindowsProcessTree(rootPid);
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // The root already exited; the descendant-aware cleanup was attempted.
-      }
-    }
-    return;
-  }
   if (
     child.killed ||
     (child.exitCode !== null && child.exitCode !== undefined)
@@ -975,6 +1130,9 @@ async function stopEphemeralKimiWeb(
   });
   if (exited || child.killed) return;
   try {
+    // ChildProcess.kill targets the still-owned wrapper handle. On Windows the
+    // wrapper owns a KILL_ON_JOB_CLOSE job, so its launcher and all descendants
+    // die without resolving or trusting a reusable numeric PID.
     child.kill("SIGTERM");
   } catch {
     try {
@@ -983,47 +1141,6 @@ async function stopEphemeralKimiWeb(
       // The exact child already exited or could not be signalled.
     }
   }
-}
-
-/**
- * `taskkill /T` is the normal, atomic tree cleanup.  If it is unavailable or
- * races with a just-exited root process, retain the original parent PID and
- * explicitly terminate every remaining descendant.  The PID is numeric and
- * passed as an argv member, never interpolated into the PowerShell program.
- */
-export async function terminateWindowsProcessTree(
-  pid: number,
-  run: ProcessTreeRunner = (program, args) =>
-    execFileAsync(program, args, { timeout: 1_000, windowsHide: true }),
-): Promise<void> {
-  try {
-    await run("taskkill", ["/pid", String(pid), "/T", "/F"]);
-    return;
-  } catch {
-    // A naturally exited launcher makes taskkill report failure. Descendants
-    // still retain its numeric ParentProcessId and are handled below.
-  }
-  const powershell = path.win32.join(
-    process.env.SystemRoot ?? "C:\\Windows",
-    "System32",
-    "WindowsPowerShell",
-    "v1.0",
-    "powershell.exe",
-  );
-  await run(powershell, [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    [
-      "$root = [int]$args[0]",
-      "$all = @(Get-CimInstance Win32_Process)",
-      "$pending = @($root); $seen = @{}",
-      "while ($pending.Count) { $parent = [int]$pending[0]; $pending = @($pending | Select-Object -Skip 1); if ($seen.ContainsKey($parent)) { continue }; $seen[$parent] = $true; foreach ($process in $all) { if ($process.ParentProcessId -eq $parent) { $pending += [int]$process.ProcessId } } }",
-      "$seen.Keys | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
-    ].join("; "),
-    String(pid),
-  ]);
 }
 
 export function kimiCredentialFingerprint(
@@ -1088,12 +1205,10 @@ export function kimiDisplayIdentityFromUserInfo(
   return safeKimiNickname(stringAt(userInfo, "nickname"));
 }
 
-export async function localKimiServerIdentity(
+async function probeLocalKimiServerIdentity(
   options: KimiServerProbeOptions = {},
+  generation = kimiIdentityCacheGeneration,
 ): Promise<string | undefined> {
-  const now = options.now?.() ?? Date.now();
-  const cached = cachedKimiIdentity(kimiIdentityCache, options.cacheKey, now);
-  if (cached) return cached;
   let ephemeral: ChildProcess | undefined;
   let ephemeralEndpoint: URL | undefined;
   let bearerToken: string | undefined;
@@ -1105,7 +1220,11 @@ export async function localKimiServerIdentity(
       // Tests may still inject a fixed port to exercise exact-origin controls.
       const port = options.reservePort ? await options.reservePort() : 0;
       if (port === undefined || options.signal?.aborted) return undefined;
-      ephemeral = (options.launch ?? launchKimiWeb)(options.executable, port);
+      ephemeral = (options.launch ?? launchKimiWeb)(
+        options.executable,
+        port,
+        options.launchWorkingDirectory,
+      );
       const startup = await waitForKimiStartup(
         ephemeral,
         port,
@@ -1124,12 +1243,12 @@ export async function localKimiServerIdentity(
       const userInfo =
         isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
       const identity = kimiDisplayIdentityFromUserInfo(userInfo);
-      if (identity)
+      if (identity && generation === kimiIdentityCacheGeneration)
         rememberKimiIdentity(
           kimiIdentityCache,
           options.cacheKey,
           identity,
-          options.now?.() ?? Date.now(),
+          options.now?.() ?? performance.now(),
           options.cacheTtlMs,
         );
       return identity;
@@ -1152,6 +1271,29 @@ export async function localKimiServerIdentity(
     bearerToken = undefined;
   }
   return undefined;
+}
+
+export function localKimiServerIdentity(
+  options: KimiServerProbeOptions = {},
+): Promise<string | undefined> {
+  const now = options.now?.() ?? performance.now();
+  const cached = cachedKimiIdentity(kimiIdentityCache, options.cacheKey, now);
+  if (cached) return Promise.resolve(cached);
+  const cacheKey = options.signal ? undefined : options.cacheKey;
+  if (cacheKey) {
+    const existing = kimiIdentityInFlight.get(cacheKey);
+    if (existing) return existing;
+    const generation = kimiIdentityCacheGeneration;
+    const pending = probeLocalKimiServerIdentity(options, generation);
+    kimiIdentityInFlight.set(cacheKey, pending);
+    void pending.finally(() => {
+      if (kimiIdentityInFlight.get(cacheKey) === pending) {
+        kimiIdentityInFlight.delete(cacheKey);
+      }
+    });
+    return pending;
+  }
+  return probeLocalKimiServerIdentity(options);
 }
 
 /** Compatibility wrapper for callers that specifically require an email. */
@@ -1302,7 +1444,8 @@ export async function managedKimiProfileIdentity(
     now?: () => number;
   } = {},
 ): Promise<string | undefined> {
-  const now = options.now?.() ?? Date.now();
+  const generation = kimiIdentityCacheGeneration;
+  const now = options.now?.() ?? performance.now();
   const cached = cachedKimiIdentity(
     kimiProfileIdentityCache,
     options.cacheKey,
@@ -1325,12 +1468,12 @@ export async function managedKimiProfileIdentity(
     );
     if (profile.status !== 200) return undefined;
     const identity = kimiDisplayIdentityFromUserInfo(profile.payload);
-    if (identity)
+    if (identity && generation === kimiIdentityCacheGeneration)
       rememberKimiIdentity(
         kimiProfileIdentityCache,
         options.cacheKey,
         identity,
-        options.now?.() ?? Date.now(),
+        options.now?.() ?? performance.now(),
         options.cacheTtlMs,
       );
     return identity;
@@ -1549,8 +1692,10 @@ async function probeVendor(
 // No state is retained between requests: after a terminal login/logout every
 // modal refresh launches fresh native probes. Kept explicit for the action path.
 export function clearBrokerVendorAccountCache(): void {
+  kimiIdentityCacheGeneration += 1;
   kimiIdentityCache.clear();
   kimiProfileIdentityCache.clear();
+  kimiIdentityInFlight.clear();
 }
 
 export async function listBrokerVendorAccounts(): Promise<

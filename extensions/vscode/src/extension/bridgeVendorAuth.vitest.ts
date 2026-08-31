@@ -21,7 +21,8 @@ import {
   managedKimiProfileIdentity,
   kimiCredentialFingerprint,
   clearBrokerVendorAccountCache,
-  terminateWindowsProcessTree,
+  launchKimiWeb,
+  stopEphemeralKimiWeb,
   probeVendorExecutable,
   resolveKimiAccountIdentity,
   storedCodexAccountLabel,
@@ -689,50 +690,358 @@ describe("Cukii vendor CLI accounts", () => {
     expect(launches).toBe(2);
   });
 
+  it("coalesces concurrent empty-cache Kimi identity probes for one credential fingerprint", async () => {
+    clearBrokerVendorAccountCache();
+    let launches = 0;
+    let finishRequest!: (value: unknown) => void;
+    const request = new Promise<unknown>((resolve) => {
+      finishRequest = resolve;
+    });
+    const options = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      cacheKey: "same-credential-fingerprint",
+      launchTimeoutMs: 100,
+      reservePort: async () => 58627,
+      launch: () => {
+        launches += 1;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = Object.assign(new EventEmitter(), {
+          pid: 4242,
+          killed: false,
+          stdout,
+          stderr,
+        }) as unknown as import("child_process").ChildProcess;
+        setImmediate(() =>
+          stdout.end(
+            "http://127.0.0.1:58627/#token=test-bearer-do-not-display\n",
+          ),
+        );
+        return child;
+      },
+      request: async () => request,
+      stopEphemeral: async () => undefined,
+    };
+    const first = localKimiServerIdentity(options);
+    const second = localKimiServerIdentity(options);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(launches).toBe(1);
+    finishRequest({
+      data: { kind: "ok", userInfo: { email: "single@example.test" } },
+    });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "single@example.test",
+      "single@example.test",
+    ]);
+  });
+
+  it("does not repopulate a cleared Kimi cache from an older in-flight probe", async () => {
+    clearBrokerVendorAccountCache();
+    let launches = 0;
+    let finishFirst!: (value: unknown) => void;
+    const firstRequest = new Promise<unknown>((resolve) => {
+      finishFirst = resolve;
+    });
+    const options = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      cacheKey: "login-logout-generation",
+      launchTimeoutMs: 100,
+      reservePort: async () => 58627,
+      launch: () => {
+        launches += 1;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = Object.assign(new EventEmitter(), {
+          pid: 4242,
+          killed: false,
+          stdout,
+          stderr,
+        }) as unknown as import("child_process").ChildProcess;
+        setImmediate(() =>
+          stdout.end(
+            "http://127.0.0.1:58627/#token=test-bearer-do-not-display\n",
+          ),
+        );
+        return child;
+      },
+      request: async () =>
+        launches === 1
+          ? firstRequest
+          : {
+              data: {
+                kind: "ok",
+                userInfo: { email: "fresh@example.test" },
+              },
+            },
+      stopEphemeral: async () => undefined,
+    };
+    const stale = localKimiServerIdentity(options);
+    await new Promise((resolve) => setImmediate(resolve));
+    clearBrokerVendorAccountCache();
+    finishFirst({
+      data: { kind: "ok", userInfo: { email: "stale@example.test" } },
+    });
+    await expect(stale).resolves.toBe("stale@example.test");
+    await expect(localKimiServerIdentity(options)).resolves.toBe(
+      "fresh@example.test",
+    );
+    expect(launches).toBe(2);
+  });
+
+  it("bounds lazy Kimi cache entries across rotating credential fingerprints", async () => {
+    clearBrokerVendorAccountCache();
+    let launches = 0;
+    const base = {
+      executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+      launchTimeoutMs: 100,
+      reservePort: async () => 58627,
+      launch: () => {
+        launches += 1;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const child = Object.assign(new EventEmitter(), {
+          pid: 4242,
+          killed: false,
+          stdout,
+          stderr,
+        }) as unknown as import("child_process").ChildProcess;
+        setImmediate(() =>
+          stdout.end(
+            "http://127.0.0.1:58627/#token=test-bearer-do-not-display\n",
+          ),
+        );
+        return child;
+      },
+      request: async () => ({
+        data: {
+          kind: "ok",
+          userInfo: { email: `rotating-${launches}@example.test` },
+        },
+      }),
+      stopEphemeral: async () => undefined,
+    };
+    for (let index = 0; index < 33; index += 1) {
+      await localKimiServerIdentity({
+        ...base,
+        cacheKey: `rotating-fingerprint-${index}`,
+      });
+    }
+    expect(launches).toBe(33);
+    await localKimiServerIdentity({
+      ...base,
+      cacheKey: "rotating-fingerprint-0",
+    });
+    expect(launches).toBe(34);
+  });
+
   it.runIf(process.platform === "win32")(
-    "kills a reparented Kimi server when its launcher exits during cleanup",
+    "keeps a live owner after the launcher exits and kills only its orphaned server",
     async () => {
       const directory = fs.mkdtempSync(
-        "D:\\Scratch\\cukii-kimi-orphan-negative-control-",
+        "D:\\Scratch\\cukii-kimi-job-owner-negative-control-",
       );
-      const pidFile = path.join(directory, "worker.pid");
+      const pidFile = path.join(directory, "owned-pids.json");
+      const webScript = path.join(directory, "web");
+      const unicodeExecutable = path.join(directory, "куки агент.exe");
+      const neighbor = spawnChild(
+        process.execPath,
+        ["-e", "setInterval(()=>{},1000)"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      let workerPid: number | undefined;
+      let launcherPid: number | undefined;
+      let owner: import("child_process").ChildProcess | undefined;
+      let ownerError = "";
+      try {
+        fs.writeFileSync(
+          webScript,
+          [
+            "const {spawn}=require('child_process')",
+            "const fs=require('fs')",
+            "const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
+            `fs.writeFileSync(${JSON.stringify(pidFile)},JSON.stringify({launcher:process.pid,worker:worker.pid}))`,
+            "worker.unref()",
+            "setTimeout(()=>process.exit(0),25)",
+          ].join(";"),
+          "utf8",
+        );
+        fs.copyFileSync(process.execPath, unicodeExecutable);
+        owner = launchKimiWeb(unicodeExecutable, 0, directory);
+        owner.stderr?.on("data", (chunk) => {
+          ownerError += String(chunk);
+        });
+        const deadline = Date.now() + 25_000;
+        while (!fs.existsSync(pidFile) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(fs.existsSync(pidFile), ownerError).toBe(true);
+        const pids = JSON.parse(fs.readFileSync(pidFile, "utf8"));
+        launcherPid = Number(pids.launcher);
+        workerPid = Number(pids.worker);
+        while (Date.now() < deadline) {
+          try {
+            process.kill(launcherPid, 0);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          } catch {
+            break;
+          }
+        }
+        expect(() => process.kill(launcherPid!, 0)).toThrow();
+        expect(owner.pid).not.toBe(launcherPid);
+        expect(owner.exitCode).toBeNull();
+        await stopEphemeralKimiWeb(owner, undefined, undefined, 100);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(() => process.kill(workerPid!, 0)).toThrow();
+        expect(() => process.kill(neighbor.pid!, 0)).not.toThrow();
+      } finally {
+        if (owner && owner.exitCode === null) {
+          const closed = new Promise<void>((resolve) =>
+            owner!.once("close", () => resolve()),
+          );
+          try {
+            owner.kill("SIGKILL");
+          } catch {}
+          await Promise.race([
+            closed,
+            new Promise((resolve) => setTimeout(resolve, 1_000)),
+          ]);
+        }
+        for (const pid of [workerPid, launcherPid, neighbor.pid]) {
+          if (!pid) continue;
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            fs.rmSync(directory, { recursive: true, force: true });
+            break;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+      }
+    },
+    35_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "fails closed before launching Kimi when Job Object ownership is unavailable",
+    async () => {
+      const directory = fs.mkdtempSync(
+        "D:\\Scratch\\cukii-kimi-job-fail-closed-",
+      );
+      const marker = path.join(directory, "launched.txt");
+      fs.writeFileSync(
+        path.join(directory, "web"),
+        `require('fs').writeFileSync(${JSON.stringify(marker)},'launched')`,
+        "utf8",
+      );
+      const owner = launchKimiWeb(process.execPath, 0, directory, true);
+      let stderr = "";
+      owner.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => owner.once("close", () => resolve())),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("owner setup did not stop")), 5_000),
+          ),
+        ]);
+        expect(owner.exitCode).toBe(73);
+        expect(stderr).toContain("process ownership unavailable");
+        expect(fs.existsSync(marker)).toBe(false);
+      } finally {
+        try {
+          owner.kill("SIGKILL");
+        } catch {}
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "bounds executable malformed-banner timeout and abort cleanup inside the owned job",
+    async () => {
+      const directory = fs.mkdtempSync(
+        "D:\\Scratch\\cukii-kimi-job-terminal-paths-",
+      );
+      const executable = path.join(directory, "owned kimi.exe");
+      const webScript = path.join(directory, "web");
       let workerPid: number | undefined;
       try {
+        fs.copyFileSync(process.execPath, executable);
+        const writeWeb = (pidFile: string, output: string) => {
+          fs.writeFileSync(
+            webScript,
+            [
+              "const {spawn}=require('child_process')",
+              "const fs=require('fs')",
+              "const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
+              `fs.writeFileSync(${JSON.stringify(pidFile)},String(worker.pid))`,
+              output,
+              "worker.unref()",
+              "setTimeout(()=>process.exit(0),25)",
+            ].join(";"),
+            "utf8",
+          );
+        };
+
+        const timeoutPidFile = path.join(directory, "timeout-worker.pid");
+        writeWeb(
+          timeoutPidFile,
+          "console.log('http://localhost:1234/#token=malformed-banner')",
+        );
+        const startedAt = Date.now();
         await expect(
           localKimiServerIdentity({
-            executable: process.execPath,
-            launchTimeoutMs: 80,
-            launch: () =>
-              spawnChild(
-                process.execPath,
-                [
-                  "-e",
-                  [
-                    "const {spawn}=require('child_process')",
-                    `const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})`,
-                    `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(worker.pid))`,
-                    "worker.unref()",
-                    "setTimeout(()=>process.exit(0),120)",
-                  ].join(";"),
-                ],
-                { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-              ),
+            executable,
+            launchWorkingDirectory: directory,
+            launchTimeoutMs: 15_000,
           }),
         ).resolves.toBeUndefined();
-        workerPid = Number(fs.readFileSync(pidFile, "utf8"));
+        expect(Date.now() - startedAt).toBeLessThan(19_000);
+        workerPid = Number(fs.readFileSync(timeoutPidFile, "utf8"));
+        expect(() => process.kill(workerPid!, 0)).toThrow();
+
+        const abortPidFile = path.join(directory, "abort-worker.pid");
+        writeWeb(abortPidFile, "");
+        const controller = new AbortController();
+        const abortedProbe = localKimiServerIdentity({
+          executable,
+          launchWorkingDirectory: directory,
+          launchTimeoutMs: 10_000,
+          signal: controller.signal,
+        });
+        const deadline = Date.now() + 15_000;
+        while (!fs.existsSync(abortPidFile) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(fs.existsSync(abortPidFile)).toBe(true);
+        controller.abort();
+        await expect(abortedProbe).resolves.toBeUndefined();
+        workerPid = Number(fs.readFileSync(abortPidFile, "utf8"));
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(() => process.kill(workerPid!, 0)).toThrow();
       } finally {
         if (workerPid) {
           try {
             process.kill(workerPid, "SIGKILL");
+          } catch {}
+        }
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            fs.rmSync(directory, { recursive: true, force: true });
+            break;
           } catch {
-            // Expected once production cleanup owns the descendant.
+            await new Promise((resolve) => setTimeout(resolve, 100));
           }
         }
-        fs.rmSync(directory, { recursive: true, force: true });
       }
     },
+    45_000,
   );
 
   it("changes the Kimi cache fingerprint when credentials switch at identical metadata", () => {
@@ -839,24 +1148,6 @@ describe("Cukii vendor CLI accounts", () => {
     ).resolves.toBeUndefined();
     expect(requests).toBe(0);
     expect(stops).toBe(1);
-  });
-
-  it("falls back to a descendant-aware Windows cleanup when taskkill /T fails", async () => {
-    const calls: Array<{ program: string; args: string[] }> = [];
-    await expect(
-      terminateWindowsProcessTree(4242, async (program, args) => {
-        calls.push({ program, args });
-        if (program === "taskkill") throw new Error("taskkill unavailable");
-      }),
-    ).resolves.toBeUndefined();
-    expect(calls[0]).toEqual({
-      program: "taskkill",
-      args: ["/pid", "4242", "/T", "/F"],
-    });
-    expect(calls[1]?.program).toMatch(/powershell\.exe$/i);
-    expect(calls[1]?.args).toContain("4242");
-    expect(calls[1]?.args.join(" ")).toContain("ParentProcessId");
-    expect(calls[1]?.args.join(" ")).toContain("Stop-Process");
   });
 
   it("bounds the private userinfo response at 64 KiB", async () => {
