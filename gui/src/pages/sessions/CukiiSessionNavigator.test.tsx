@@ -252,8 +252,142 @@ describe("CukiiSessionNavigator Claude parity", () => {
     const input = await screen.findByLabelText("Rename Old title");
     fireEvent.change(input, { target: { value: "New title" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not rename session");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not rename session",
+    );
     expect(screen.queryByDisplayValue("New title")).toBeNull();
     expect(screen.getByTitle("Old title")).toBeInTheDocument();
+  });
+
+  it("removes a session immediately while its disk deletion is still pending", async () => {
+    const messenger = new MockIdeMessenger();
+    let resolveDelete: (() => void) | undefined;
+    const deleteSpy = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = () => {
+            messenger.responses["history/list"] = [
+              {
+                sessionId: "before",
+                title: "Before",
+                dateCreated: "2026-08-27T12:00:00Z",
+                workspaceDirectory: "D:/Brain/vault",
+              },
+              {
+                sessionId: "after",
+                title: "After",
+                dateCreated: "2026-08-27T12:00:00Z",
+                workspaceDirectory: "D:/Brain/vault",
+              },
+            ];
+            resolve();
+          };
+        }),
+    );
+    messenger.responseHandlers["history/delete"] = deleteSpy;
+    const openSpy = vi.fn().mockResolvedValue(undefined);
+    messenger.responseHandlers["cukii/openChatPanel"] = openSpy;
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "before",
+        title: "Before",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+      {
+        sessionId: "delete-me",
+        title: "Delete me",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+      {
+        sessionId: "after",
+        title: "After",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [
+      { panelId: "active-panel", sessionId: "delete-me", title: "Delete me" },
+    ];
+
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    const deleteButton = await screen.findByLabelText("Delete Delete me");
+    fireEvent.click(deleteButton);
+    fireEvent.click(deleteButton);
+
+    await waitFor(() =>
+      expect(deleteSpy).toHaveBeenCalledWith({ id: "delete-me" }),
+    );
+    expect(screen.queryByTitle("Delete me")).toBeNull();
+    // Deletion must not re-open the row's already-active panel or create a
+    // duplicate editor; its existing session lifecycle remains authoritative.
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByTitle(/Before|After/).map((node) => node.title),
+    ).toEqual(["Before", "After"]);
+    expect(resolveDelete).toBeDefined();
+    resolveDelete?.();
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTitle("Delete me")).toBeNull());
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("restores the deleted row, order, group, and one error if deletion fails", async () => {
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "plugin", name: "Плагин" }],
+        assignments: { "delete-me": "plugin" },
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    const deleteSpy = vi.fn().mockRejectedValue(new Error("disk unavailable"));
+    messenger.responseHandlers["history/delete"] = deleteSpy;
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "before",
+        title: "Before",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+      {
+        sessionId: "delete-me",
+        title: "Delete me",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+      {
+        sessionId: "after",
+        title: "After",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [
+      { panelId: "active-panel", sessionId: "delete-me", title: "Delete me" },
+    ];
+
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    fireEvent.click(await screen.findByLabelText("Delete Delete me"));
+
+    expect(screen.queryByTitle("Delete me")).toBeNull();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not delete session",
+    );
+    expect(
+      screen.getAllByTitle(/Before|After|Delete me/).map((node) => node.title),
+    ).toEqual(["Before", "After", "Delete me"]);
+    expect(
+      screen.getByRole("button", { name: "Плагин 1" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -303,8 +303,10 @@ export default function CukiiSessionNavigator() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
   const renameSavingRef = useRef(false);
+  const deletingSessionIdsRef = useRef(new Set<string>());
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
   );
@@ -314,8 +316,20 @@ export default function CukiiSessionNavigator() {
       messenger.request("history/list", {}),
       messenger.request("cukii/listOpenChatPanels", undefined),
     ]);
-    if (historyResult.status === "success") setSessions(historyResult.content);
-    if (panelResult.status === "success") setOpenPanels(panelResult.content);
+    if (historyResult.status === "success") {
+      setSessions(
+        historyResult.content.filter(
+          (session) => !deletingSessionIdsRef.current.has(session.sessionId),
+        ),
+      );
+    }
+    if (panelResult.status === "success") {
+      setOpenPanels(
+        panelResult.content.filter(
+          (panel) => !deletingSessionIdsRef.current.has(panel.sessionId ?? ""),
+        ),
+      );
+    }
   }, [messenger]);
 
   useEffect(() => {
@@ -448,13 +462,77 @@ export default function CukiiSessionNavigator() {
     }
   };
   const deleteSession = async (session: CukiiNavigatorSession) => {
-    await messenger.request("history/delete", { id: session.sessionId });
+    const sessionId = session.sessionId;
+    if (deletingSessionIdsRef.current.has(sessionId)) return;
+
+    // Capture the exact local placement before hiding the row. A failed disk
+    // delete must restore this row rather than waiting for a later history poll.
+    const snapshot = {
+      sessions,
+      openPanels,
+      groupId: groups.assignments[sessionId],
+    };
+    deletingSessionIdsRef.current.add(sessionId);
+    setDeleteError(null);
+    setContext(null);
+    if (editingSessionId === sessionId) cancelRename();
+    setSessions((items) =>
+      items.filter((item) => item.sessionId !== sessionId),
+    );
+    setOpenPanels((panels) =>
+      panels.filter((panel) => panel.sessionId !== sessionId),
+    );
     setGroups((state) => {
       const assignments = { ...state.assignments };
-      delete assignments[session.sessionId];
+      delete assignments[sessionId];
       return { ...state, assignments };
     });
-    await load();
+
+    try {
+      const result = await messenger.request("history/delete", {
+        id: sessionId,
+      });
+      if (result.status !== "success") throw new Error(result.error);
+      // Reconcile with the durable source only after it has acknowledged the
+      // delete. Until then, load() suppresses the tombstoned id above.
+      await load();
+    } catch {
+      const restoreAtOriginalIndex = <T,>(
+        items: T[],
+        originalItems: T[],
+        matches: (item: T) => boolean,
+      ) => {
+        const originalIndex = originalItems.findIndex(matches);
+        const original = originalItems[originalIndex];
+        if (!original) return items;
+        const restored = items.filter((item) => !matches(item));
+        restored.splice(Math.min(originalIndex, restored.length), 0, original);
+        return restored;
+      };
+      setSessions((items) =>
+        restoreAtOriginalIndex(
+          items,
+          snapshot.sessions,
+          (item) => item.sessionId === sessionId,
+        ),
+      );
+      setOpenPanels((panels) =>
+        restoreAtOriginalIndex(
+          panels,
+          snapshot.openPanels,
+          (panel) => panel.sessionId === sessionId,
+        ),
+      );
+      setGroups((state) => {
+        const assignments = { ...state.assignments };
+        if (snapshot.groupId) assignments[sessionId] = snapshot.groupId;
+        else delete assignments[sessionId];
+        return { ...state, assignments };
+      });
+      setDeleteError("Could not delete session. Try again.");
+    } finally {
+      deletingSessionIdsRef.current.delete(sessionId);
+    }
   };
   const openContext = (
     event: React.MouseEvent,
@@ -577,34 +655,38 @@ export default function CukiiSessionNavigator() {
                       title={session.title}
                       onClick={() => void openSession(session)}
                     >
-                      <SessionTitle>{session.title || "New session"}</SessionTitle>
+                      <SessionTitle>
+                        {session.title || "New session"}
+                      </SessionTitle>
                       <Age>{formatSessionAge(session.dateCreated)}</Age>
                     </SessionButton>
                   )}
-                  {editingSessionId !== session.sessionId && <RowActions>
-                    <RowAction
-                      className="cukii-session-menu-button"
-                      aria-label={`Rename ${session.title}`}
-                      title="Rename session"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        beginRename(session);
-                      }}
-                    >
-                      <PencilIcon width={15} height={15} />
-                    </RowAction>
-                    <RowAction
-                      className="cukii-session-menu-button"
-                      aria-label={`Delete ${session.title}`}
-                      title="Delete session"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void deleteSession(session);
-                      }}
-                    >
-                      <TrashIcon width={16} height={16} />
-                    </RowAction>
-                  </RowActions>}
+                  {editingSessionId !== session.sessionId && (
+                    <RowActions>
+                      <RowAction
+                        className="cukii-session-menu-button"
+                        aria-label={`Rename ${session.title}`}
+                        title="Rename session"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          beginRename(session);
+                        }}
+                      >
+                        <PencilIcon width={15} height={15} />
+                      </RowAction>
+                      <RowAction
+                        className="cukii-session-menu-button"
+                        aria-label={`Delete ${session.title}`}
+                        title="Delete session"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteSession(session);
+                        }}
+                      >
+                        <TrashIcon width={16} height={16} />
+                      </RowAction>
+                    </RowActions>
+                  )}
                 </Row>
               ))}
           </div>
@@ -682,8 +764,19 @@ export default function CukiiSessionNavigator() {
         </ContextMenu>
       )}
       {renameError && (
-        <div role="alert" className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]">
+        <div
+          role="alert"
+          className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]"
+        >
           {renameError}
+        </div>
+      )}
+      {deleteError && (
+        <div
+          role="alert"
+          className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]"
+        >
+          {deleteError}
         </div>
       )}
     </Shell>

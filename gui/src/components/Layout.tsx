@@ -47,6 +47,19 @@ export function redirectLegacyHistoryNavigation(
   return true;
 }
 
+/** Cukii chat owns its first-run state through the broker Accounts flow. */
+export function shouldOpenLegacyOnboarding({
+  surface,
+  isHome,
+  isNewUser,
+}: {
+  surface?: "sidebar" | "chat";
+  isHome: boolean;
+  isNewUser: boolean;
+}): boolean {
+  return surface !== "chat" && isHome && isNewUser;
+}
+
 const Layout = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -137,6 +150,7 @@ const Layout = () => {
   useWebviewListener(
     "setupLocalConfig",
     async () => {
+      if (window.cukiiSurface === "chat") return;
       onboardingCard.open(OnboardingModes.LOCAL);
     },
     [],
@@ -145,6 +159,7 @@ const Layout = () => {
   useWebviewListener(
     "setupApiKey",
     async () => {
+      if (window.cukiiSurface === "chat") return;
       onboardingCard.open(OnboardingModes.API_KEY);
     },
     [],
@@ -200,7 +215,14 @@ const Layout = () => {
   }, []);
 
   useEffect(() => {
-    if (isNewUserOnboarding() && isHome) {
+    if (
+      shouldOpenLegacyOnboarding({
+        surface: window.cukiiSurface,
+        isHome,
+        isNewUser:
+          window.cukiiSurface === "chat" ? false : isNewUserOnboarding(),
+      })
+    ) {
       onboardingCard.open();
     }
   }, [isHome]);

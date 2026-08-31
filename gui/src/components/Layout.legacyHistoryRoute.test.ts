@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { redirectLegacyHistoryNavigation } from "./Layout";
+import {
+  redirectLegacyHistoryNavigation,
+  shouldOpenLegacyOnboarding,
+} from "./Layout";
 
 describe("Layout legacy history navigation", () => {
   it.each([
@@ -23,5 +26,31 @@ describe("Layout legacy history navigation", () => {
       false,
     );
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["cold Cukii chat", "chat"],
+    ["restored Cukii chat", "chat"],
+  ] as const)(
+    "keeps %s out of the retired API-key onboarding path",
+    (_scenario, surface) => {
+      expect(
+        shouldOpenLegacyOnboarding({
+          surface,
+          isHome: true,
+          isNewUser: true,
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it("retains legacy onboarding only for a non-Cukii home surface", () => {
+    expect(
+      shouldOpenLegacyOnboarding({
+        surface: undefined,
+        isHome: true,
+        isNewUser: true,
+      }),
+    ).toBe(true);
   });
 });
