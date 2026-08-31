@@ -758,6 +758,27 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
 }
 
+/* The command launcher lives in the composer toolbar, so its panel must not
+ * borrow the viewport width or participate in sizing that toolbar.  The
+ * negative offset aligns it with the composer edge; this bound leaves an
+ * eight-pixel viewport gutter even at the 320px remote/narrow breakpoint. */
+.cukii-command-menu {
+  width: min(360px, calc(100vw - 16px)) !important;
+  max-width: calc(100vw - 16px) !important;
+  min-width: 0 !important;
+}
+
+.cukii-command-menu .cukii-menu-item > :first-child {
+  min-width: 0;
+}
+
+@media (max-width: 420px) {
+  .cukii-command-menu {
+    /* Keep the popup's left gutter visible when the toolbar itself narrows. */
+    left: calc(-1px - 18.2vw) !important;
+  }
+}
+
 .cukii-menu-item {
   min-height: 28px;
   padding: 6px 12px !important;

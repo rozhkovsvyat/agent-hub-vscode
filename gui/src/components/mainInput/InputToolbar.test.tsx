@@ -332,6 +332,31 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByText("(Medium)")).toBeDefined();
   });
 
+  it("keeps the slash panel as a bounded overlay for narrow and long-label layouts", async () => {
+    const { user } = await renderWithProviders(<InputToolbar {...props} />);
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    const menu = await getElementByTestId("cukii-slash-menu");
+    const panel = menu.parentElement;
+    expect(panel).toHaveClass("cukii-command-menu");
+    expect(panel?.className).toContain("absolute");
+    expect(panel?.className).not.toContain("w-[calc(100vw-38px)]");
+    expect(
+      menu.querySelector('[data-testid="broker-switch-model"] span'),
+    ).toHaveClass("truncate");
+
+    // Application CSS is not mounted by this jsdom harness.  Keep the
+    // viewport contract explicit: the panel is capped at Claude-like 360px,
+    // leaves gutters at 320px, and cannot force a horizontal document scroll.
+    const css = canonicalCss();
+    expect(css).toContain(".cukii-command-menu {");
+    expect(css).toContain("width: min(360px, calc(100vw - 16px)) !important;");
+    expect(css).toContain("max-width: calc(100vw - 16px) !important;");
+    expect(css).toContain("min-width: 0 !important;");
+    expect(css).toContain("@media (max-width: 420px)");
+    expect(css).toContain("left: calc(-1px - 18.2vw) !important;");
+  });
+
   it("has shared ordered command sections and removes unsupported Rewind", async () => {
     const { user } = await renderWithProviders(<InputToolbar {...props} />);
     await user.click(await getElementByTestId("broker-menu-button"));
