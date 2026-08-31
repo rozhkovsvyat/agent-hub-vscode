@@ -208,6 +208,34 @@ describe("saved Cukii sidebar session opening", () => {
     expect(authoritative.title).toBe("Session B");
   });
 
+  it("creates independent blank Cukii tabs for repeated forceNew requests", async () => {
+    const first = panel();
+    const second = panel();
+    state.createWebviewPanel
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const invoke = vi.fn();
+    register({ invoke });
+    const open = state.commands.get("continue.openInNewWindow")!;
+
+    await open({ forceNew: true });
+    await open({ forceNew: true });
+
+    // No history/workspace lookup is needed, so this route is also valid in a
+    // Remote-SSH extension host without a local workspace URI.
+    expect(invoke).not.toHaveBeenCalled();
+    expect(state.createWebviewPanel).toHaveBeenCalledTimes(2);
+    expect(first.title).toBe("Cukii");
+    expect(second.title).toBe("Cukii");
+    const entries = cukiiPanelRegistry.values();
+    expect(entries).toHaveLength(2);
+    expect(new Set(entries.map((entry) => entry.id)).size).toBe(2);
+    expect(entries.map((entry) => entry.sessionId)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("does not create a blank panel when history/load is missing", async () => {
     const invoke = vi.fn().mockResolvedValue({ history: [], title: "" });
     register({ invoke });
