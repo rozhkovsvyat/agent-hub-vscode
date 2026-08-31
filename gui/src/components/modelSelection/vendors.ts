@@ -50,23 +50,32 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "codex",
     label: "OpenAI",
     models: [
+      // Match the currently usable Codex CLI route; live metadata can raise it.
       {
         value: "codex-5-6-sol",
         label: "GPT-5.6 Sol",
-        contextWindowLabel: "1M",
+        contextWindowLabel: "272K",
       },
       {
         value: "codex-5-6-terra",
         label: "GPT-5.6 Terra",
-        contextWindowLabel: "1M",
+        contextWindowLabel: "272K",
       },
       {
         value: "codex-5-6-luna",
         label: "GPT-5.6 Luna",
-        contextWindowLabel: "1M",
+        contextWindowLabel: "272K",
       },
-      { value: "codex-5-5", label: "GPT-5.5", contextWindowLabel: "1M" },
-      { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "1M" },
+      {
+        value: "codex-5-5",
+        label: "GPT-5.5",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-4",
+        label: "GPT-5.4",
+        contextWindowLabel: "272K",
+      },
       {
         value: "codex-5-4-mini",
         label: "GPT-5.4 Mini",
@@ -223,7 +232,8 @@ export function presentVendorModels(
     .map((model, canonicalIndex) => ({ model, canonicalIndex }))
     .sort(
       (left, right) =>
-        cukiiCapabilityRating(right.model) - cukiiCapabilityRating(left.model) ||
+        cukiiCapabilityRating(right.model) -
+          cukiiCapabilityRating(left.model) ||
         left.canonicalIndex - right.canonicalIndex,
     )
     .map(({ model }) => model);

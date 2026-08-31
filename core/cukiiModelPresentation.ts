@@ -30,17 +30,21 @@ export function canonicalCukiiModelDescription(
   if (matches(/gpt[-\s]?5[.-]4[-\s]mini/))
     return "Fast, cost-efficient model for simpler coding tasks";
   if (matches(/gpt[-\s]?5[.-]4/)) return "Strong model for everyday coding";
+  if (matches(/grok[-\s]?4[.-]6/))
+    return "Flagship for long-running agents and interactive work";
+  if (matches(/grok[-\s]?4[.-]5/))
+    return "Smartest for coding, agentic tasks, and knowledge work";
   if (matches(/(?:^|[-\s])grok(?:[-\s]|$)/))
     return "xAI model for coding and agentic tasks";
   if (matches(/composer[-\s]?2[.-]5/))
     return "Fast agentic model for long-running coding tasks";
   if (matches(/kimi[-\s]?k3|(?:^|[-\s])k3(?:[-\s]|$)/))
     return /256k/.test(id) || /256k/.test(name)
-      ? "Quota-efficient K3 for routine development"
+      ? "Quota-efficient option for routine development"
       : "Flagship for long-horizon coding and knowledge work";
   if (matches(/kimi[-\s]?k2|k2[.-]7/))
     return /highspeed/.test(id) || /highspeed/.test(name)
-      ? "High-speed K2.7 for routine development"
+      ? "High-speed option for routine development"
       : "Coding model for completion and routine development";
   if (matches(/qwen[-\s]?3[.-]8[-\s]max/))
     return "Max model for tool use and agent workflows";
@@ -60,9 +64,11 @@ export function cukiiCapabilityRating(
     pattern.test(stableId) || pattern.test(fallbackLabel);
 
   if (matches(/(?:^|[-\s])fable(?:[-\s]|$)/)) return 4;
+  if (matches(/gpt[-\s]?5[.-]4[-\s]mini/)) return 1;
   if (
     matches(/(?:^|[-\s])opus(?:[-\s]|$)/) ||
     matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
+    matches(/gpt[-\s]?5[.-]5/) ||
     matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
     matches(/qwen[-\s]?3[.-]8[-\s]max/)
   ) {
@@ -71,6 +77,7 @@ export function cukiiCapabilityRating(
   if (
     matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
     matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
+    matches(/gpt[-\s]?5[.-]4/) ||
     matches(/(?:^|[-\s])grok(?:[-\s]|$)/)
   ) {
     return 2;
@@ -83,7 +90,7 @@ export function formatCukiiModelSubtitle(
   contextWindowLabel: string,
   description: string,
 ): string {
-  return `${contextWindowLabel} context • ${description}`;
+  return `${contextWindowLabel} • ${description}`;
 }
 
 interface CukiiModelPresentation {

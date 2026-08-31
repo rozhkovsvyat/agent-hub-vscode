@@ -47,6 +47,21 @@ describe("Cukii model context labels", () => {
     }
   });
 
+  it("uses the known Codex CLI route capacity as the static fallback", () => {
+    for (const value of [
+      "codex-5-6-sol",
+      "codex-5-6-terra",
+      "codex-5-6-luna",
+      "codex-5-5",
+      "codex-5-4",
+    ]) {
+      expect(
+        ALL_MODELS.find((model) => model.value === value)?.contextWindowLabel,
+        value,
+      ).toBe("272K");
+    }
+  });
+
   it("uses one canonical vendor list in the picker", () => {
     expect(VENDORS.map((vendor) => vendor.label)).toEqual([
       "Anthropic",
@@ -64,10 +79,10 @@ describe("Cukii model context labels", () => {
       claude: ["fable-5", "opus-5", "sonnet-5", "haiku-4-5"],
       codex: [
         "codex-5-6-sol",
-        "codex-5-6-terra",
-        "codex-5-6-luna",
         "codex-5-5",
+        "codex-5-6-terra",
         "codex-5-4",
+        "codex-5-6-luna",
         "codex-5-4-mini",
       ],
       grok: ["grok-4-6", "grok-4-5"],
@@ -79,15 +94,13 @@ describe("Cukii model context labels", () => {
 
     for (const vendor of VENDORS) {
       const models = vendor.models;
-      expect(models.map((model) => model.value), vendor.id).toEqual(
-        expectedModelOrderByVendor[vendor.id],
-      );
       expect(
-        models.map(cukiiCapabilityRating),
-        `${vendor.id} ratings`,
-      ).toEqual(
-        [...models.map(cukiiCapabilityRating)].sort((left, right) =>
-          right - left,
+        models.map((model) => model.value),
+        vendor.id,
+      ).toEqual(expectedModelOrderByVendor[vendor.id]);
+      expect(models.map(cukiiCapabilityRating), `${vendor.id} ratings`).toEqual(
+        [...models.map(cukiiCapabilityRating)].sort(
+          (left, right) => right - left,
         ),
       );
     }
@@ -123,18 +136,19 @@ describe("Cukii model context labels", () => {
 
     expect(presented.map((model) => model.value)).toEqual([
       "codex-5-6-sol",
-      "codex-5-6-terra",
-      "codex-5-4",
       "codex-5-5",
+      "codex-5-4",
+      "codex-5-6-terra",
     ]);
     expect(isNonIncreasing(presented)).toBe(true);
     expect(
       isNonIncreasing([...presented].reverse()),
       "ascending mutation",
     ).toBe(false);
-    expect(isNonIncreasing(canonical as unknown as typeof presented), "unsorted mutation").toBe(
-      false,
-    );
+    expect(
+      isNonIncreasing(canonical as unknown as typeof presented),
+      "unsorted mutation",
+    ).toBe(false);
   });
 
   it("formats every model subline with the exact bullet separator", () => {
@@ -144,13 +158,16 @@ describe("Cukii model context labels", () => {
         model.description,
       );
       expect(subtitle, model.value).toBe(
-        `${model.contextWindowLabel} context • ${model.description}`,
+        `${model.contextWindowLabel} • ${model.description}`,
       );
       expect(subtitle, model.value).not.toContain(
         `${model.contextWindowLabel} context — `,
       );
       expect(subtitle, model.value).not.toContain(
         `${model.contextWindowLabel} context - `,
+      );
+      expect(subtitle, model.value).not.toContain(
+        `${model.contextWindowLabel} context • `,
       );
     }
   });
@@ -172,13 +189,16 @@ describe("Cukii model context labels", () => {
     ["cursor:claude-opus-4-8", "Dynamic Cursor model", 3],
     ["codex-5-6-sol", "GPT-5.6 Sol", 3],
     ["cursor:gpt-5.6-sol", "Dynamic Cursor model", 3],
+    ["codex-5-5", "GPT-5.5", 3],
     ["kimi-k3-256k", "K3-256K", 3],
     ["qwen-3-8-max", "Qwen 3.8 Max", 3],
     ["sonnet-5", "Sonnet 5", 2],
     ["cursor:claude-4.6-sonnet", "Dynamic Cursor model", 2],
     ["codex-5-6-terra", "GPT-5.6 Terra", 2],
+    ["codex-5-4", "GPT-5.4", 2],
     ["cursor:cursor-grok-4.7", "Dynamic Cursor model", 2],
     ["codex-5-6-luna", "GPT-5.6 Luna", 1],
+    ["codex-5-4-mini", "GPT-5.4 Mini", 1],
     ["cursor:gemini-3.7-flash", "Gemini 3.7 Flash", 1],
   ] as const)(
     "rates %s with its canonical capability tier",
@@ -187,30 +207,53 @@ describe("Cukii model context labels", () => {
     },
   );
 
+  it("uses distinct Grok positioning and avoids tautological version tokens", () => {
+    const modelsByValue = new Map(
+      ALL_MODELS.map((model) => [model.value, model]),
+    );
+    const grokDescriptions = ["grok-4-6", "grok-4-5"].map(
+      (value) => modelsByValue.get(value)?.description,
+    );
+
+    expect(new Set(grokDescriptions).size).toBe(grokDescriptions.length);
+    expect(modelsByValue.get("grok-4-6")?.description).toContain(
+      "long-running agents",
+    );
+    expect(modelsByValue.get("grok-4-5")?.description).toContain(
+      "knowledge work",
+    );
+
+    for (const [value, forbiddenToken] of [
+      ["kimi-k2", "2.7"],
+      ["kimi-k2-highspeed", "2.7"],
+      ["kimi-k3", "k3"],
+      ["kimi-k3-256k", "k3"],
+    ] as const) {
+      expect(
+        modelsByValue.get(value)?.description.toLowerCase(),
+        value,
+      ).not.toContain(forbiddenToken);
+    }
+  });
+
   it("normalizes and sorts the live catalog without changing equal-tier order", () => {
     applyRuntimeVendorCatalog([
       {
         id: "codex",
         label: "OpenAI",
         models: [
-          {
-            value: "codex-5-6-luna",
-            label: "GPT-5.6 Luna",
+          ...[
+            ["codex-5-6-luna", "GPT-5.6 Luna", "   "],
+            ["codex-5-6-sol", "GPT-5.6 Sol", "Live Sol description"],
+            ["codex-5-6-terra", "GPT-5.6 Terra", "Live Terra description"],
+            ["codex-5-5", "GPT-5.5", "Live GPT-5.5 description"],
+            ["codex-5-4", "GPT-5.4", "Live GPT-5.4 description"],
+          ].map(([value, label, description]) => ({
+            value,
+            label,
             contextWindowLabel: "272K",
-            description: "   ",
-          },
-          {
-            value: "codex-5-6-sol",
-            label: "GPT-5.6 Sol",
-            contextWindowLabel: "272K",
-            description: "Live Sol description",
-          },
-          {
-            value: "codex-5-6-terra",
-            label: "GPT-5.6 Terra",
-            contextWindowLabel: "272K",
-            description: "Live Terra description",
-          },
+            description,
+          })),
           {
             value: "codex:custom",
             label: "Custom",
@@ -232,13 +275,27 @@ describe("Cukii model context labels", () => {
       ALL_MODELS.find((model) => model.value === "codex:custom")
         ?.contextWindowLabel,
     ).toBe("Unavailable");
+    for (const value of [
+      "codex-5-6-sol",
+      "codex-5-6-terra",
+      "codex-5-6-luna",
+      "codex-5-5",
+      "codex-5-4",
+    ]) {
+      expect(
+        ALL_MODELS.find((model) => model.value === value)?.contextWindowLabel,
+        value,
+      ).toBe("272K");
+    }
     expect(
       VENDORS.find((vendor) => vendor.id === "codex")?.models.map(
         (model) => model.value,
       ),
     ).toEqual([
       "codex-5-6-sol",
+      "codex-5-5",
       "codex-5-6-terra",
+      "codex-5-4",
       "codex-5-6-luna",
       "codex:custom",
     ]);
