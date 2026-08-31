@@ -170,7 +170,10 @@ describe("sessionSlice streamUpdate", () => {
     );
     const nextTurn = sessionSlice.reducer(
       grok,
-      submitEditorAndInitAtIndex({ index: grok.history.length, editorState: { type: "doc" } }),
+      submitEditorAndInitAtIndex({
+        index: grok.history.length,
+        editorState: { type: "doc" },
+      }),
     );
 
     expect(grok.history.map((item) => item.modelSwitch?.displayName)).toEqual([
@@ -735,7 +738,7 @@ describe("sessionSlice mid-task steer messages", () => {
         workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
         history: [
           {
-            message: { id: "switch", role: "system", content: "" },
+            message: { role: "system", content: "" },
             contextItems: [],
             modelSwitch: {
               model: "codex-5-6-terra",
@@ -743,7 +746,7 @@ describe("sessionSlice mid-task steer messages", () => {
             },
           },
           {
-            message: { id: "legacy", role: "system", content: "" },
+            message: { role: "system", content: "" },
             contextItems: [],
             modelSwitch: { model: "", displayName: "" },
           },

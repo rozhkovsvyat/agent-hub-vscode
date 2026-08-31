@@ -265,10 +265,14 @@ export function normalizeRestoredHistory(
     const receipt = item.messageReceipt;
     const sentAt = item.steerSentAt;
     if (receipt && Number.isFinite(receipt.sentAt)) {
-      return normalizedModelSwitch ? { ...item, modelSwitch: normalizedModelSwitch } : item;
+      return normalizedModelSwitch
+        ? { ...item, modelSwitch: normalizedModelSwitch }
+        : item;
     }
     if (!item.isSteer) {
-      return normalizedModelSwitch ? { ...item, modelSwitch: normalizedModelSwitch } : item;
+      return normalizedModelSwitch
+        ? { ...item, modelSwitch: normalizedModelSwitch }
+        : item;
     }
     const normalized = {
       ...item,
@@ -726,7 +730,7 @@ export const sessionSlice = createSlice({
       state,
       action: PayloadAction<{
         messageId: string;
-        status: ChatHistoryItemWithMessageId["steerStatus"];
+        status: NonNullable<ChatHistoryItemWithMessageId["steerStatus"]>;
       }>,
     ) => {
       const item = state.history.find(

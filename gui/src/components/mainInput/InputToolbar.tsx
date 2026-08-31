@@ -5,12 +5,12 @@ import {
   DocumentPlusIcon,
   PencilIcon,
 } from "@heroicons/react/24/outline";
+import { InputModifiers } from "core";
 import {
-  InputModifiers,
   brokerVendorForModel,
   defaultVendorPermissionCapabilities,
   resolvePermissionModeForVendor,
-} from "core";
+} from "core/cukiiPermissionModes";
 import {
   memo,
   useContext,
