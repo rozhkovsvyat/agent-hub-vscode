@@ -153,10 +153,9 @@ const Count = styled.span`
   font-weight: 500;
 `;
 const Row = styled.div`
-  position: relative;
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 56px;
   align-items: center;
   margin: 1px 8px;
   border-radius: 5px;
@@ -167,6 +166,7 @@ const Row = styled.div`
 `;
 const SessionButton = styled.button`
   display: grid;
+  width: 100%;
   min-width: 0;
   height: 29px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -182,6 +182,8 @@ const SessionButton = styled.button`
   text-align: left;
 `;
 const SessionTitle = styled.span`
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -200,30 +202,26 @@ const RenameInput = styled.input`
   font: inherit;
 `;
 const Age = styled.span`
+  min-width: max-content;
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
   white-space: nowrap;
 `;
 const RowActions = styled.div`
-  position: absolute;
-  top: 0;
-  right: 4px;
-  display: none;
+  display: flex;
+  width: 56px;
+  min-width: 56px;
   height: 29px;
+  box-sizing: border-box;
   align-items: center;
+  justify-content: flex-end;
   gap: 1px;
-  padding-left: 12px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--vscode-list-hoverBackground) 18%
-  );
-  ${Row}:hover &, ${Row}:focus-within & {
-    display: flex;
-  }
+  padding-right: 4px;
 `;
 const RowAction = styled.button`
   display: inline-flex;
+  flex: 0 0 25px;
+  min-width: 25px;
   width: 25px;
   height: 25px;
   align-items: center;
@@ -628,6 +626,7 @@ export default function CukiiSessionNavigator() {
               bucket.sessions.map((session) => (
                 <Row
                   key={session.sessionId}
+                  className="cukii-session-row"
                   onContextMenu={(event) => openContext(event, session)}
                 >
                   {editingSessionId === session.sessionId ? (
@@ -655,14 +654,14 @@ export default function CukiiSessionNavigator() {
                       title={session.title}
                       onClick={() => void openSession(session)}
                     >
-                      <SessionTitle>
+                      <SessionTitle className="cukii-session-title">
                         {session.title || "New session"}
                       </SessionTitle>
                       <Age>{formatSessionAge(session.dateCreated)}</Age>
                     </SessionButton>
                   )}
                   {editingSessionId !== session.sessionId && (
-                    <RowActions>
+                    <RowActions className="cukii-session-actions">
                       <RowAction
                         className="cukii-session-menu-button"
                         aria-label={`Rename ${session.title}`}

@@ -84,6 +84,59 @@ describe("CukiiSessionNavigator Claude parity", () => {
     expect(screen.getByText("No sessions found")).toBeInTheDocument();
   });
 
+  it("reserves an accessible action rail so a long title truncates before the icons", async () => {
+    const title =
+      "A very long saved Cukii session title that must never cover its actions";
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "plugin", name: "Плагин" }],
+        assignments: { long: "plugin" },
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "long",
+        title,
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+
+    const { container } = await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+    const navigator = screen.getByTestId("cukii-session-navigator");
+    navigator.style.width = "160px";
+    const trigger = await screen.findByTitle(title);
+    const row = trigger.closest(".cukii-session-row");
+    const sessionTitle = trigger.querySelector(".cukii-session-title");
+    const actions = row?.querySelector(".cukii-session-actions");
+
+    expect(container.querySelectorAll(".cukii-session-row")).toHaveLength(1);
+    expect(row).toHaveClass("cukii-session-row");
+    expect(sessionTitle).toHaveClass("cukii-session-title");
+    expect(actions).toHaveClass("cukii-session-actions");
+    expect(getComputedStyle(sessionTitle!).minWidth).toBe("0");
+    expect(getComputedStyle(sessionTitle!).textOverflow).toBe("ellipsis");
+    expect(getComputedStyle(actions!).width).toBe("56px");
+    expect(screen.getByText("3d")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Плагин 1" }),
+    ).toBeInTheDocument();
+
+    const rename = screen.getByLabelText(`Rename ${title}`);
+    const remove = screen.getByLabelText(`Delete ${title}`);
+    expect(rename).toBeVisible();
+    expect(remove).toBeVisible();
+    fireEvent.click(rename);
+    expect(await screen.findByLabelText(`Rename ${title}`)).toHaveValue(title);
+    expect(screen.queryByTitle("Rename session")).toBeNull();
+    expect(screen.queryByTitle("Delete session")).toBeNull();
+  });
+
   it("opens the clicked saved session by its exact sessionId and existing panel id", async () => {
     const messenger = new MockIdeMessenger();
     const openSpy = vi.fn().mockResolvedValue(undefined);
