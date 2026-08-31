@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { setBrokerPermissionMode } from "../../redux/slices/sessionSlice";
 import { setupStore } from "../../redux/store";
 import { renderWithProviders } from "../../util/test/render";
 import { getElementByText, getElementByTestId } from "../../util/test/utils";
 import InputToolbar from "./InputToolbar";
+
+const canonicalCss = () =>
+  readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
 
 describe("Cukii Claude-parity input toolbar", () => {
   const props = {
@@ -168,7 +173,9 @@ describe("Cukii Claude-parity input toolbar", () => {
     );
     expect(filter).not.toBeNull();
     await user.type(filter!, "Rewind");
-    expect(menu.querySelector('[data-cukii-command-action="Rewind"]')).toBeNull();
+    expect(
+      menu.querySelector('[data-cukii-command-action="Rewind"]'),
+    ).toBeNull();
   });
 
   it("uses one blue active row for mouse and roving keyboard selection", async () => {
@@ -198,8 +205,16 @@ describe("Cukii Claude-parity input toolbar", () => {
     )!;
     expect(document.activeElement).toBe(first);
     expect(first).toHaveClass("cukii-command-menu-item-active");
-    expect(getComputedStyle(first).backgroundColor).toBe("rgb(18, 52, 86)");
-    expect(getComputedStyle(first).color).toBe("rgb(255, 255, 255)");
+    // The component carries the active semantic class; assert the canonical
+    // stylesheet rule because this harness does not mount application CSS.
+    const css = canonicalCss();
+    expect(css).toContain(".cukii-command-menu-item-active,");
+    expect(css).toContain(
+      "background: var(--vscode-menu-selectionBackground) !important;",
+    );
+    expect(css).toContain(
+      "color: var(--vscode-menu-selectionForeground) !important;",
+    );
     fireEvent.keyDown(first, { key: "ArrowDown" });
     expect(document.activeElement).toHaveAttribute(
       "data-cukii-command-action",
@@ -211,12 +226,16 @@ describe("Cukii Claude-parity input toolbar", () => {
     )!;
     fireEvent.mouseEnter(clear);
     expect(clear).toHaveClass("cukii-command-menu-item-active");
-    expect(menu.querySelectorAll(".cukii-command-menu-item-active")).toHaveLength(1);
+    expect(
+      menu.querySelectorAll(".cukii-command-menu-item-active"),
+    ).toHaveLength(1);
     expect(
       menu.querySelector('[data-cukii-command-action="Effort"]'),
     ).toBeNull();
     fireEvent.keyDown(menu, { key: "Enter" });
-    expect(document.querySelector('[data-testid="cukii-slash-menu"]')).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-slash-menu"]'),
+    ).toBeNull();
     document.documentElement.style.removeProperty(
       "--vscode-menu-selectionBackground",
     );

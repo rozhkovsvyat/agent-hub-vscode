@@ -4,11 +4,14 @@ import * as os from "os";
 import * as path from "path";
 import { EventEmitter } from "events";
 import { PassThrough } from "stream";
+import { createHash } from "crypto";
 import type { ChildProcess } from "child_process";
 import {
   cancelVoiceRecording,
   assertVoiceTranscriptIsUsable,
   MAX_VOICE_RECORDING_MS,
+  PACKAGED_WHISPER_FILES,
+  PACKAGED_WHISPER_REVISION,
   parseDirectShowAudioDevices,
   requestRecorderQuit,
   selectDirectShowAudioDevice,
@@ -165,16 +168,51 @@ describe("voice dictation runtime", () => {
     }
   });
 
-  it("ships the complete pinned Whisper model source for packaging", () => {
+  it("ships the exact licensed pinned Whisper bytes used by runtime verification", () => {
     const modelDir = path.join(
       __dirname,
-      "../../models/whisper-base/64da57285918e20ea79ea5c88eed7197933abaa8",
+      "../../models/whisper-base",
+      PACKAGED_WHISPER_REVISION,
     );
+    const modelRoot = path.dirname(modelDir);
+    expect(PACKAGED_WHISPER_FILES).toEqual({
+      "config.json":
+        "9d3d599f186a7bca5524326c4164a11a4327d5dce2a47f1e33a8494a0d55cc69",
+      "generation_config.json":
+        "6f3c718280313752065a69861408eb248e1af08d66c0ca0e214ea571499fc0ea",
+      "preprocessor_config.json":
+        "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d",
+      "tokenizer_config.json":
+        "2a4c4281cf9f51ac6ccc406fdc711a087afe6530f671fa7b80953edc498275ce",
+      "tokenizer.json":
+        "27fc476bfe7f17299480be2273fc0608e4d5a99aba2ab5dec5374b4482d1a566",
+      "onnx/decoder_model_merged_quantized.onnx":
+        "a6beb6baabb66f00b6a686d828c95ffca6146d51900cbad0266cad38f64cf861",
+      "onnx/encoder_model_quantized.onnx":
+        "3e345e977b55620a37c0c2b2af0644e019afdfad562dcf71eb929bb7274285f9",
+    });
+    for (const [relativePath, expectedHash] of Object.entries(
+      PACKAGED_WHISPER_FILES,
+    )) {
+      expect(
+        createHash("sha256")
+          .update(fs.readFileSync(path.join(modelDir, relativePath)))
+          .digest("hex"),
+      ).toBe(expectedHash);
+    }
     expect(verifyPackagedWhisperModel(modelDir)).toEqual({ valid: true });
     expect(
       fs.statSync(path.join(modelDir, "onnx/encoder_model_quantized.onnx"))
         .size,
     ).toBeGreaterThan(20_000_000);
+    expect(
+      fs.readFileSync(path.join(modelRoot, "README.md"), "utf8"),
+    ).toContain(
+      `Xenova/whisper-base\`\nrevision used by Cukii's offline voice input`,
+    );
+    expect(fs.readFileSync(path.join(modelRoot, "LICENSE"), "utf8")).toContain(
+      "MIT License",
+    );
   });
 
   it("treats recorder EPIPE during stop as an already-closed microphone", async () => {
