@@ -1137,17 +1137,18 @@ button.cukii-submit-button--stop:active {
   position: relative;
   display: block;
   min-width: 0;
-  /* Transcript x=20, prose x=64. Glyph consumes 18px + 8px gap, so this
-     aligns loader text itself with the prose column. */
-  padding-left: 26px;
+  /* Claude keeps every timeline body (prose, a tool row, a thought and an
+     interruption) on one axis. Keep this as a token: component-local margin
+     resets must never move just one kind of timeline row. */
+  --cukii-timeline-content-inset: 26px;
+  padding-inline-start: var(--cukii-timeline-content-inset);
 }
 
-/* The rail is independent from the content column. Dot center is x=12.5px;
-   x=26px outer padding + 12px inset + 1px card border makes the command
-   header/card x-offset 26.5px (Claude pixel audit: 26px ±1).  Prose, Read,
-   Edit and Bash deliberately share this same column. */
+/* The rail is independent from the content column. Do not add a second
+   per-child inset here: it made tool rows and Interrupted 12px later than
+   prose/Thought when their local styles did not reset the margin. */
 .cukii-timeline-item > * {
-  margin-left: 12px;
+  margin-inline-start: 0;
 }
 
 /* A timeline event is a discrete checkpoint, not a line of a paragraph.

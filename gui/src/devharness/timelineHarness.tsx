@@ -41,12 +41,26 @@ const HISTORY = [
         toolCall: {
           id: "tool-1",
           type: "function",
-          function: { name: "grep", arguments: '{"pattern":"foo"}' },
+          function: {
+            name: "run_terminal_command",
+            arguments:
+              '{"command":"Get-Content C:/workspace/a/very/long/path/to/a/file.ts"}',
+          },
         },
         status: "done",
-        parsedArgs: { pattern: "foo" },
+        parsedArgs: {
+          command: "Get-Content C:/workspace/a/very/long/path/to/a/file.ts",
+        },
+        output: [
+          {
+            name: "Terminal",
+            description: "stdout",
+            content: "file contents",
+          },
+        ],
       },
     ],
+    interrupted: true,
   },
   {
     message: {

@@ -3,16 +3,27 @@ import { join } from "path";
 import { describe, expect, it } from "vitest";
 
 describe("Cukii timeline content axis", () => {
-  it("keeps prose and command cards 26px ±1 from the independent rail center", () => {
+  it("keeps prose, tool cards, Thought and Interrupted on one tokenized axis", () => {
     const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
-    const railCenter = 9 + 7 / 2;
-    const contentLeft = 26 + 12;
-    const cardBorder = 1;
-    expect(contentLeft - railCenter).toBeGreaterThanOrEqual(25);
-    expect(contentLeft - railCenter).toBeLessThanOrEqual(27);
-    expect(contentLeft + cardBorder - railCenter).toBeGreaterThanOrEqual(25);
-    expect(css).toContain(".cukii-timeline-item > *");
-    expect(css).toContain("margin-left: 12px;");
-    expect(css).toContain("padding: 6px 8px 6px 0;");
+    // A direct child is the unit shared by prose, a tool card, Thought and
+    // Interrupted. Its only horizontal axis is the item's common token.
+    expect(css).toContain("--cukii-timeline-content-inset: 26px;");
+    expect(css).toContain(
+      "padding-inline-start: var(--cukii-timeline-content-inset);",
+    );
+    expect(css).toMatch(
+      /\.cukii-timeline-item > \*\s*\{\s*margin-inline-start: 0;/,
+    );
+    expect(css).not.toContain("margin-left: 12px;");
+  });
+
+  it("keeps command cards responsive with long paths in both expansion states", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    expect(css).toContain(".cukii-command-card {");
+    expect(css).toContain("min-width: 0;");
+    expect(css).toContain("overflow: hidden;");
+    expect(css).toContain(".cukii-command-code {");
+    expect(css).toContain("overflow-wrap: anywhere;");
+    expect(css).toContain("overflow-x: auto;");
   });
 });
