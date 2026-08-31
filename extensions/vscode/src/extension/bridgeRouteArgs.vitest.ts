@@ -449,7 +449,9 @@ describe("native bridge argv", () => {
         "prompt",
         [],
         resolveBridgeControls(model, "high", "standard"),
-        model.startsWith("codex") ? "bypass" : "manual",
+        model.startsWith("codex") || model.startsWith("qwen")
+          ? "bypass"
+          : "manual",
       );
       if (route.promptFile) promptFiles.push(route.promptFile);
       expect(nativePromptCacheArgs(model)).toEqual(

@@ -155,6 +155,21 @@ describe("Cukii bridge controls", () => {
     );
   });
 
+  it("keeps Qwen bypass usable from a cold capability cache", () => {
+    clearPermissionCapabilityCacheForTests();
+    expect(permissionControlArgs("qwen-3-8-max", "bypass")).toEqual([
+      "--approval-mode",
+      "yolo",
+    ]);
+  });
+
+  it("fails closed for an unsupported Qwen permission mode on a cold cache", () => {
+    clearPermissionCapabilityCacheForTests();
+    expect(() => permissionControlArgs("qwen-3-8-max", "manual")).toThrow(
+      "qwen has no verified permission mode",
+    );
+  });
+
   it("uses Grok's native reasoning knob and clamps unsupported Max", () => {
     expect(resolveBridgeControls("grok-4-6", "max", "fast")).toMatchObject({
       nativeEffort: "xhigh",

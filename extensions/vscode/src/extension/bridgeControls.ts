@@ -235,6 +235,21 @@ export function permissionControlArgs(
     }
     return permissionArgvForVendor("kimi", mode).args;
   }
+  if (vendor === "qwen") {
+    // Qwen's noninteractive bridge route is synchronously assembled as
+    // `--safe-mode --prompt ... --approval-mode <mode>`. Its captured native
+    // approval-mode contract keeps the first routed turn from racing the
+    // asynchronous capability probe, while a completed probe still wins.
+    const capabilities =
+      cachedVendorPermissionCapabilities("qwen") ??
+      defaultVendorPermissionCapabilities("qwen");
+    if (!capabilities.supportedModes.includes(mode)) {
+      throw new Error(
+        "qwen has no verified permission mode for this noninteractive bridge route.",
+      );
+    }
+    return permissionArgvForVendor("qwen", mode).args;
+  }
   const capabilities = cachedVendorPermissionCapabilities(vendor) ?? {
     vendor,
     supportedModes: [],
