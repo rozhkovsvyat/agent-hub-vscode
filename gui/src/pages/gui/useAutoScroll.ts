@@ -1,64 +1,113 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { ChatHistoryItemWithMessageId } from "../../redux/slices/sessionSlice";
 
-/**
- * Only reset scroll state when a new user message is added to the chat.
- * We don't want to auto-scroll on new tool response messages.
- */
-function getNumUserMsgs(history: ChatHistoryItemWithMessageId[]) {
-  return history.filter((msg) => msg.message.role === "user").length;
+// Claude Code webview uses this exact strict (<) distance to keep the transcript
+// latched to its bottom. Keeping it here avoids a fractional scroll position
+// accidentally detaching an otherwise-following conversation.
+export const CLAUDE_FOLLOW_SCROLL_THRESHOLD_PX = 50;
+
+function isNearBottom(element: HTMLDivElement) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <
+    CLAUDE_FOLLOW_SCROLL_THRESHOLD_PX
+  );
+}
+
+function getUserMessageCount(history: ChatHistoryItemWithMessageId[]) {
+  return history.filter((item) => item.message.role === "user").length;
 }
 
 export const useAutoScroll = (
   ref: React.RefObject<HTMLDivElement>,
   history: ChatHistoryItemWithMessageId[],
   isStreaming: boolean,
+  sessionId: string,
 ) => {
-  const [userHasScrolled, setUserHasScrolled] = useState(false);
-  const numUserMsgs = useMemo(() => getNumUserMsgs(history), [history.length]);
+  const followsBottomRef = useRef(true);
+  const previousSessionIdRef = useRef<string>();
+  const previousUserMessageCountRef = useRef(0);
+
+  const scrollToBottom = () => {
+    const element = ref.current;
+    if (!element || !followsBottomRef.current) {
+      return;
+    }
+
+    if (!isNearBottom(element)) {
+      element.scrollTop = element.scrollHeight;
+    }
+  };
+
+  // This is a layout effect so a newly inserted user/assistant/tool block is
+  // already visible in the same paint, rather than waiting for ResizeObserver.
+  useLayoutEffect(() => {
+    const userMessageCount = getUserMessageCount(history);
+    const hasNewUserMessage =
+      userMessageCount > previousUserMessageCountRef.current;
+    const hasNewSession =
+      previousSessionIdRef.current !== undefined &&
+      previousSessionIdRef.current !== sessionId;
+
+    if (hasNewUserMessage || hasNewSession) {
+      followsBottomRef.current = true;
+    }
+
+    previousSessionIdRef.current = sessionId;
+    previousUserMessageCountRef.current = userMessageCount;
+    scrollToBottom();
+  }, [history, isStreaming, sessionId]);
 
   useEffect(() => {
-    setUserHasScrolled(false);
-  }, [numUserMsgs]);
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
 
-  useEffect(() => {
-    if (!ref.current || history.length === 0) return;
+    let animationFrame: number | undefined;
+    const scheduleFollow = () => {
+      if (!followsBottomRef.current || animationFrame !== undefined) {
+        return;
+      }
 
-    const handleScroll = () => {
-      const elem = ref.current;
-      if (!elem) return;
-
-      // Порог с запасом: при зуме scrollTop дробный, и строгий «<1px»
-      // молча отклеивал транскрипт от низа.
-      const isAtBottom =
-        Math.abs(elem.scrollHeight - elem.scrollTop - elem.clientHeight) < 24;
-
-      /**
-       * We stop auto scrolling if a user manually scrolled up.
-       * We resume auto scrolling if a user manually scrolled to the bottom.
-       */
-      setUserHasScrolled(!isAtBottom);
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = undefined;
+        scrollToBottom();
+      });
     };
 
-    const resizeObserver = new ResizeObserver(() => {
-      const elem = ref.current;
-      if (!elem || userHasScrolled) return;
-      elem.scrollTop = elem.scrollHeight;
+    const handleScroll = () => {
+      followsBottomRef.current = isNearBottom(element);
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleFollow);
+    const observeChild = (child: Element) => resizeObserver.observe(child);
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof Element) {
+            observeChild(node);
+          }
+        });
+      }
+      scheduleFollow();
     });
 
-    ref.current.addEventListener("scroll", handleScroll);
-
-    // Observe the container
-    resizeObserver.observe(ref.current);
-
-    // Observe all immediate children
-    Array.from(ref.current.children).forEach((child) => {
-      resizeObserver.observe(child);
+    element.addEventListener("scroll", handleScroll, { passive: true });
+    resizeObserver.observe(element);
+    Array.from(element.children).forEach(observeChild);
+    mutationObserver.observe(element, {
+      childList: true,
+      characterData: true,
+      subtree: true,
     });
 
     return () => {
+      if (animationFrame !== undefined) {
+        cancelAnimationFrame(animationFrame);
+      }
+      mutationObserver.disconnect();
       resizeObserver.disconnect();
-      ref.current?.removeEventListener("scroll", handleScroll);
+      element.removeEventListener("scroll", handleScroll);
     };
-  }, [ref, history.length, isStreaming, userHasScrolled]);
+  }, [ref]);
 };

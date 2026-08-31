@@ -195,7 +195,7 @@ export function Chat() {
     (state) => state.ui.hasDismissedExploreDialog,
   );
 
-  useAutoScroll(stepsDivRef, history, isStreaming);
+  useAutoScroll(stepsDivRef, history, isStreaming, sessionId);
 
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
