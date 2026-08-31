@@ -50,6 +50,11 @@ export const cancelStream = createAsyncThunk<void, undefined, ThunkApiType>(
       }
     } finally {
       dispatch(setCancelling(false));
+      if (getState().session.id === session.id) {
+        const { continueIfTrailingSteer } =
+          await import("./continueIfTrailingSteer");
+        void dispatch(continueIfTrailingSteer());
+      }
     }
   },
 );

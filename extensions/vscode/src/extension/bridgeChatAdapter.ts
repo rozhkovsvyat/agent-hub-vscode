@@ -80,6 +80,32 @@ export type BridgeRoute = {
   stdinFormat?: "claude-stream-json";
 };
 
+export function queuedFollowUpEchoMessageId(
+  messages: ChatMessage[],
+  queuedFollowUpMessageId: string | undefined,
+  vendorEcho: string,
+  alreadyRead: boolean,
+): string | undefined {
+  if (!queuedFollowUpMessageId || alreadyRead) return undefined;
+  const content = messages.find(
+    (message) =>
+      (message as ChatMessage & { id?: string }).id === queuedFollowUpMessageId,
+  )?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : content
+          ?.filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+  const expected = text?.trim();
+  const echoed = vendorEcho.trim();
+  return expected &&
+    (echoed === expected || echoed.endsWith(`USER:\n${expected}`))
+    ? queuedFollowUpMessageId
+    : undefined;
+}
+
 export type ClaudePermissionTransport = {
   panelId: string;
   sessionId: string;
@@ -1175,6 +1201,7 @@ export async function* streamBridgeChat(
     brokerSpeed: BrokerSpeed;
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
+    queuedFollowUpMessageId?: string;
   },
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
@@ -1193,6 +1220,7 @@ async function* streamBridgeChatWithSteer(
     brokerSpeed: BrokerSpeed;
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
+    queuedFollowUpMessageId?: string;
   },
   cwd: string,
   permissionTransport?: ClaudePermissionTransport,
@@ -1317,13 +1345,21 @@ async function* streamBridgeChatWithSteer(
   let done = false;
   const queue: BridgeEvent[] = [];
   let canaryResponse = "";
+  let queuedFollowUpRead = false;
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "userEcho") {
-        const messageId = permissionTransport?.steering?.consumeVendorEcho(
+        const queuedMessageId = queuedFollowUpEchoMessageId(
+          args.messages,
+          args.queuedFollowUpMessageId,
           event.text,
+          queuedFollowUpRead,
         );
+        const messageId = queuedMessageId
+          ? queuedMessageId
+          : permissionTransport?.steering?.consumeVendorEcho(event.text);
         if (messageId) {
+          if (queuedMessageId) queuedFollowUpRead = true;
           queue.push({ kind: "steerRead", messageId });
         } else {
           // Existing non-meta `user` frames (for example human hook text)

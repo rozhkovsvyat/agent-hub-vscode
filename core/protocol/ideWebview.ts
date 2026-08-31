@@ -198,6 +198,8 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerSpeed: BrokerSpeed;
       thinkingEnabled: boolean;
       brokerPermissionMode: CukiiPermissionMode;
+      /** Durable user follow-up being dispatched as this fresh vendor turn. */
+      queuedFollowUpMessageId?: string;
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];

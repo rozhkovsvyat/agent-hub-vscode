@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { ChatMessage } from "core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
@@ -38,6 +39,7 @@ import {
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
   nativePromptCacheArgs,
+  queuedFollowUpEchoMessageId,
   routeForModel,
   toChatMessages,
   windowsCommandLineUtf16Length,
@@ -74,6 +76,29 @@ function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
 }
 
 describe("native bridge argv", () => {
+  it("emits a queued read receipt only for one exact vendor user echo", () => {
+    const messages = [
+      { role: "user", content: "original", id: "original" },
+      { role: "user", content: "follow me", id: "follow-up" },
+    ] as ChatMessage[];
+    expect(
+      queuedFollowUpEchoMessageId(messages, "follow-up", "follow me", false),
+    ).toBe("follow-up");
+    expect(
+      queuedFollowUpEchoMessageId(
+        messages,
+        "follow-up",
+        "bridge instructions\n\nUSER:\nfollow me",
+        false,
+      ),
+    ).toBe("follow-up");
+    expect(
+      queuedFollowUpEchoMessageId(messages, "follow-up", "original", false),
+    ).toBeUndefined();
+    expect(
+      queuedFollowUpEchoMessageId(messages, "follow-up", "follow me", true),
+    ).toBeUndefined();
+  });
   it("marks only factual vendor stdout as receipt activity", () => {
     expect(
       toChatMessages({

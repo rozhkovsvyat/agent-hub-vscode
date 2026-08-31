@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { ChatHistoryItemWithMessageId } from "../slices/sessionSlice";
-import { hasTrailingSteerMessage } from "./continueIfTrailingSteer";
+import { describe, expect, it, vi } from "vitest";
+import { MockIdeMessenger } from "../../context/MockIdeMessenger";
+import {
+  ChatHistoryItemWithMessageId,
+  newSession,
+} from "../slices/sessionSlice";
+import { setupStore } from "../store";
+import {
+  continueIfTrailingSteer,
+  hasTrailingSteerMessage,
+  nextQueuedSteerMessage,
+} from "./continueIfTrailingSteer";
 
 function item(
   role: "user" | "assistant",
@@ -15,6 +24,160 @@ function item(
 }
 
 describe("hasTrailingSteerMessage", () => {
+  it("drains two messages FIFO exactly once when terminal triggers race", async () => {
+    const messenger = new MockIdeMessenger();
+    const dispatched: string[] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof messenger.streamRequest;
+    const first = item("user", "first", true);
+    first.steerStatus = "deferred";
+    const second = item("user", "second", true);
+    second.steerStatus = "queued";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "fifo-drain",
+        title: "FIFO drain",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [first, item("assistant", "old output"), second],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await Promise.all([
+      store.dispatch(continueIfTrailingSteer()),
+      store.dispatch(continueIfTrailingSteer()),
+    ]);
+
+    expect(dispatched).toEqual([first.message.id, second.message.id]);
+    expect(
+      store
+        .getState()
+        .session.history.filter((entry) => entry.isSteer)
+        .map((entry) => entry.steerStatus),
+    ).toEqual(["read", "read"]);
+  });
+
+  it("leaves a bridge-error follow-up deferred without spinning", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.streamRequest = vi.fn(async function* () {
+      throw new Error("bridge disconnected");
+    }) as typeof messenger.streamRequest;
+    const pending = item("user", "retry after reconnect", true);
+    pending.steerStatus = "deferred";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "bridge-error",
+        title: "Bridge error",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [pending],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(messenger.streamRequest).toHaveBeenCalledTimes(1);
+    expect(store.getState().session.history[0].steerStatus).toBe("deferred");
+  });
+
+  it("stops FIFO after a terminal bridge error instead of dispatching the next item", async () => {
+    const messenger = new MockIdeMessenger();
+    const dispatched: string[] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "assistant",
+          content: "vendor authentication failed",
+          cukiiTerminalError: true,
+        },
+      ];
+    }) as typeof messenger.streamRequest;
+    const first = item("user", "first", true);
+    first.steerStatus = "deferred";
+    const second = item("user", "second", true);
+    second.steerStatus = "deferred";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "terminal-error",
+        title: "Terminal error",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [first, second],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(dispatched).toEqual([first.message.id]);
+    expect(
+      store
+        .getState()
+        .session.history.find((entry) => entry.message.id === second.message.id)
+        ?.steerStatus,
+    ).toBe("deferred");
+  });
+
+  it("never dispatches the next old-session item after a session switch", async () => {
+    const messenger = new MockIdeMessenger();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    const dispatched: string[] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(data.queuedFollowUpMessageId);
+      await blocked;
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof messenger.streamRequest;
+    const first = item("user", "first old-session item", true);
+    first.steerStatus = "deferred";
+    const second = item("user", "second old-session item", true);
+    second.steerStatus = "deferred";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "old-session",
+        title: "Old",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [first, second],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+    const drain = store.dispatch(continueIfTrailingSteer());
+    await vi.waitFor(() => expect(dispatched).toEqual([first.message.id]));
+
+    store.dispatch(
+      newSession({
+        sessionId: "new-session",
+        title: "New",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+    release();
+    await drain;
+
+    expect(dispatched).toEqual([first.message.id]);
+    expect(store.getState().session.id).toBe("new-session");
+  });
+
   it("is false for an ordinary user prompt", () => {
     expect(
       hasTrailingSteerMessage({
@@ -54,13 +217,11 @@ describe("hasTrailingSteerMessage", () => {
   });
 
   it("is true for a trailing non-empty user message", () => {
+    const queued = item("user", "do it like Claude", true);
+    queued.steerStatus = "queued";
     expect(
       hasTrailingSteerMessage({
-        history: [
-          item("user", "hello"),
-          item("assistant", "working"),
-          item("user", "do it like Claude", true),
-        ],
+        history: [item("user", "hello"), item("assistant", "working"), queued],
         isStreaming: false,
         isInEdit: false,
       }),
@@ -105,6 +266,51 @@ describe("hasTrailingSteerMessage", () => {
         isInEdit: false,
       }),
     ).toBe(true);
+  });
+
+  it("finds a deferred follow-up even when later assistant output is last", () => {
+    const deferred = item("user", "react to this", true);
+    deferred.steerStatus = "deferred";
+    const session = {
+      history: [
+        item("user", "original"),
+        deferred,
+        item("assistant", "finished original turn"),
+      ],
+      isStreaming: false,
+      isInEdit: false,
+    };
+    expect(nextQueuedSteerMessage(session)?.message.id).toBe(
+      deferred.message.id,
+    );
+  });
+
+  it("selects two queued follow-ups in FIFO order and ignores claimed ones", () => {
+    const first = item("user", "first", true);
+    first.steerStatus = "deferred";
+    const second = item("user", "second", true);
+    second.steerStatus = "queued";
+    const session = {
+      history: [first, item("assistant", "noise"), second],
+      isStreaming: false,
+      isInEdit: false,
+    };
+    expect(nextQueuedSteerMessage(session)?.message.id).toBe(first.message.id);
+    first.steerStatus = "delivered";
+    expect(nextQueuedSteerMessage(session)?.message.id).toBe(second.message.id);
+  });
+
+  it("does not drain during cancellation", () => {
+    const queued = item("user", "after stop", true);
+    queued.steerStatus = "queued";
+    expect(
+      nextQueuedSteerMessage({
+        history: [queued],
+        isStreaming: false,
+        isInEdit: false,
+        isCancelling: true,
+      }),
+    ).toBeUndefined();
   });
 
   it("runs an image-only deferred follow-up after the current response", () => {

@@ -67,6 +67,14 @@ describe("steerDuringStream", () => {
         content: "do it this way instead",
       }),
     );
+    const saves = request.mock.calls.filter(
+      ([type]) => type === "history/save",
+    );
+    expect(saves).toHaveLength(2);
+    expect((saves[0]?.[1] as any).history.at(-1)).toMatchObject({
+      isSteer: true,
+      steerStatus: "queued",
+    });
   });
 
   it("keeps image attachments in an active-run steering payload", async () => {

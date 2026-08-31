@@ -158,141 +158,167 @@ function settleObservedToolCalls(
 
 export const streamBrokerBridgeInput = createAsyncThunk<
   void,
-  void,
+  { queuedFollowUpMessageId?: string } | undefined,
   ThunkApiType
->("chat/streamBrokerBridgeInput", async (_, { dispatch, extra, getState }) => {
-  const state = getState();
-  const brokerModel = state.session.brokerModel ?? "fable-5";
-  const brokerSubagent = state.session.brokerSubagent ?? "auto";
-  const brokerEffort = state.session.brokerEffort;
-  const brokerSpeed = state.session.brokerSpeed;
-  const thinkingEnabled = state.session.hasReasoningEnabled;
-  const streamAborter = state.session.streamAborter;
-  const initialUserReceiptId = state.session.history.findLast(
-    (item) => item.message.role === "user" && !item.isSteer,
-  )?.message.id;
+>(
+  "chat/streamBrokerBridgeInput",
+  async (options, { dispatch, extra, getState }) => {
+    const state = getState();
+    const queuedFollowUpMessageId = options?.queuedFollowUpMessageId;
+    const brokerModel = state.session.brokerModel ?? "fable-5";
+    const brokerSubagent = state.session.brokerSubagent ?? "auto";
+    const brokerEffort = state.session.brokerEffort;
+    const brokerSpeed = state.session.brokerSpeed;
+    const thinkingEnabled = state.session.hasReasoningEnabled;
+    const streamAborter = state.session.streamAborter;
+    const initialUserReceiptId = queuedFollowUpMessageId
+      ? undefined
+      : state.session.history.findLast(
+          (item) => item.message.role === "user" && !item.isSteer,
+        )?.message.id;
 
-  const messages: ChatMessage[] = state.session.history
-    // A model switch is a local timeline receipt. It must not become a
-    // system turn in the next vendor request, even on the direct bridge path.
-    .filter((item) => !item.modelSwitch)
-    .map((item) => item.message)
-    .filter((message) => message.role !== "thinking");
-  const historyLengthAtRunStart = state.session.history.length;
-  const seenTerminalErrors = new Set<string>();
-  let terminalSettled = false;
-
-  const settleTerminal = () => {
-    if (!terminalSettled) {
-      terminalSettled = true;
-      dispatch(setInactive());
-    }
-  };
-
-  const isDuplicateTerminalError = (message: ChatMessage) => {
-    const normalized = normalizeTerminalError(message);
-    if (!normalized || seenTerminalErrors.has(normalized)) return true;
-
-    const appearedThisRun = getState()
-      .session.history.slice(historyLengthAtRunStart)
-      .some(
-        (item) =>
-          item.message.role === "assistant" &&
-          isSameTerminalError(item.message, message),
+    const queuedFollowUp = queuedFollowUpMessageId
+      ? state.session.history.find(
+          (item) => item.isSteer && item.message.id === queuedFollowUpMessageId,
+        )
+      : undefined;
+    if (queuedFollowUpMessageId && !queuedFollowUp) {
+      throw new Error(
+        `Queued follow-up ${queuedFollowUpMessageId} is absent from session ${state.session.id}.`,
       );
-    seenTerminalErrors.add(normalized);
-    return appearedThisRun;
-  };
+    }
+    const messages: ChatMessage[] = state.session.history
+      // A model switch is a local timeline receipt. It must not become a
+      // system turn in the next vendor request, even on the direct bridge path.
+      .filter(
+        (item) =>
+          !item.modelSwitch &&
+          item.message.id !== queuedFollowUpMessageId &&
+          !(
+            item.isSteer &&
+            (item.steerStatus === "queued" || item.steerStatus === "deferred")
+          ),
+      )
+      .map((item) => item.message)
+      .filter((message) => message.role !== "thinking");
+    if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    const historyLengthAtRunStart = state.session.history.length;
+    const seenTerminalErrors = new Set<string>();
+    let terminalSettled = false;
 
-  dispatch(setActive());
-  dispatch(markLatestUserReceiptDelivered());
-  dispatch(setInlineErrorMessage(undefined));
-  dispatch(setIsPruned(false));
-  dispatch(setContextPercentage(0));
+    const settleTerminal = () => {
+      if (!terminalSettled) {
+        terminalSettled = true;
+        dispatch(setInactive());
+      }
+    };
 
-  try {
-    const gen = extra.ideMessenger.streamRequest(
-      "cukii/streamBridgeChat",
-      {
-        sessionId: state.session.id,
-        messages,
-        brokerModel,
-        brokerSubagent,
-        brokerEffort,
-        brokerSpeed,
-        thinkingEnabled,
-        brokerPermissionMode: state.session.brokerPermissionMode,
-      },
-      streamAborter.signal,
-    );
+    const isDuplicateTerminalError = (message: ChatMessage) => {
+      const normalized = normalizeTerminalError(message);
+      if (!normalized || seenTerminalErrors.has(normalized)) return true;
 
-    let completed = false;
+      const appearedThisRun = getState()
+        .session.history.slice(historyLengthAtRunStart)
+        .some(
+          (item) =>
+            item.message.role === "assistant" &&
+            isSameTerminalError(item.message, message),
+        );
+      seenTerminalErrors.add(normalized);
+      return appearedThisRun;
+    };
+
+    dispatch(setActive());
+    dispatch(markLatestUserReceiptDelivered());
+    dispatch(setInlineErrorMessage(undefined));
+    dispatch(setIsPruned(false));
+    dispatch(setContextPercentage(0));
+
     try {
-      while (true) {
-        const result = await raceNextOrCancellation(gen.next(), getState);
-        if (result.kind === "cancelled") {
-          dispatch(abortStream());
-          await gen.return(undefined);
-          break;
-        }
-        if (result.value.done) {
-          completed = true;
-          if (result.value.value) {
-            dispatch(addPromptCompletionPair([result.value.value]));
-          }
-          break;
-        }
-        if (!getState().session.isStreaming) {
-          dispatch(abortStream());
-          await gen.return(undefined);
-          break;
-        }
+      const gen = extra.ideMessenger.streamRequest(
+        "cukii/streamBridgeChat",
+        {
+          sessionId: state.session.id,
+          messages,
+          brokerModel,
+          brokerSubagent,
+          brokerEffort,
+          brokerSpeed,
+          thinkingEnabled,
+          brokerPermissionMode: state.session.brokerPermissionMode,
+          queuedFollowUpMessageId,
+        },
+        streamAborter.signal,
+      );
 
-        let hasTerminalReceipt = false;
-        for (const message of result.value.value as CukiiBridgeMessage[]) {
-          if (isBridgeTerminalMessage(message)) {
-            hasTerminalReceipt = true;
+      let completed = false;
+      try {
+        while (true) {
+          const result = await raceNextOrCancellation(gen.next(), getState);
+          if (result.kind === "cancelled") {
+            dispatch(abortStream());
+            await gen.return(undefined);
             break;
           }
-          if (message.cukiiSteerReadMessageId) {
-            dispatch(
-              markSteerRead({ messageId: message.cukiiSteerReadMessageId }),
-            );
-            continue;
-          }
-          if (isBridgeTerminalError(message)) {
-            if (!isDuplicateTerminalError(message)) {
-              dispatch(streamUpdate([message]));
+          if (result.value.done) {
+            completed = true;
+            if (result.value.value) {
+              dispatch(addPromptCompletionPair([result.value.value]));
             }
-            hasTerminalReceipt = true;
             break;
           }
-          if (message.cukiiBridgeWait) {
-            // Positively identified native wait metadata, never a model string
-            // and never an inference from quiet stdout.
-            dispatch(setBridgeWait(message.cukiiBridgeWait));
-            continue;
+          if (!getState().session.isStreaming) {
+            dispatch(abortStream());
+            await gen.return(undefined);
+            break;
           }
-          if (message.cukiiVendorActivity && initialUserReceiptId) {
-            dispatch(markSteerRead({ messageId: initialUserReceiptId }));
+
+          let hasTerminalReceipt = false;
+          for (const message of result.value.value as CukiiBridgeMessage[]) {
+            if (isBridgeTerminalMessage(message)) {
+              hasTerminalReceipt = true;
+              break;
+            }
+            if (message.cukiiSteerReadMessageId) {
+              dispatch(
+                markSteerRead({ messageId: message.cukiiSteerReadMessageId }),
+              );
+              continue;
+            }
+            if (isBridgeTerminalError(message)) {
+              if (!isDuplicateTerminalError(message)) {
+                dispatch(streamUpdate([message]));
+              }
+              hasTerminalReceipt = true;
+              break;
+            }
+            if (message.cukiiBridgeWait) {
+              // Positively identified native wait metadata, never a model string
+              // and never an inference from quiet stdout.
+              dispatch(setBridgeWait(message.cukiiBridgeWait));
+              continue;
+            }
+            if (message.cukiiVendorActivity && initialUserReceiptId) {
+              dispatch(markSteerRead({ messageId: initialUserReceiptId }));
+            }
+            dispatch(streamUpdate([message]));
+            settleObservedToolCalls([message], dispatch);
           }
-          dispatch(streamUpdate([message]));
-          settleObservedToolCalls([message], dispatch);
+          if (hasTerminalReceipt) {
+            // Hide activity synchronously on the native terminal receipt. The
+            // generator return still performs process cleanup, but a slow child
+            // close must never leave the user looking at a false loader.
+            settleTerminal();
+            completed = true;
+            await gen.return(undefined);
+            break;
+          }
         }
-        if (hasTerminalReceipt) {
-          // Hide activity synchronously on the native terminal receipt. The
-          // generator return still performs process cleanup, but a slow child
-          // close must never leave the user looking at a false loader.
-          settleTerminal();
-          completed = true;
-          await gen.return(undefined);
-          break;
-        }
+      } finally {
+        if (!completed) await gen.return(undefined);
       }
     } finally {
-      if (!completed) await gen.return(undefined);
+      settleTerminal();
     }
-  } finally {
-    settleTerminal();
-  }
-});
+  },
+);

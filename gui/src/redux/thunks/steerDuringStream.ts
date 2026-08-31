@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
 import { appendUserSteerMessage, setSteerStatus } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
+import { saveCurrentSession } from "./session";
 
 export const steerDuringStream = createAsyncThunk<
   void,
@@ -47,6 +48,12 @@ export const steerDuringStream = createAsyncThunk<
         editorState,
       }),
     );
+    // This is a durable outbox item, not transient composer state. Save it
+    // before asking the live bridge so reload/Remote-SSH reconnect cannot
+    // erase a bubble that already carries its sent checkmark.
+    await dispatch(
+      saveCurrentSession({ openNewSession: false, generateTitle: false }),
+    );
     try {
       const response = await extra.ideMessenger.request(
         "cukii/steerDuringStream",
@@ -64,9 +71,11 @@ export const steerDuringStream = createAsyncThunk<
         }),
       );
     } catch {
-      // The optimistic bubble remains in history, but one checkmark would be
-      // dishonest when the request was not accepted by the native bridge.
-      dispatch(setSteerStatus({ messageId, status: "failed" }));
+      // The persisted bubble stays retryable if the live bridge disappeared.
+      dispatch(setSteerStatus({ messageId, status: "deferred" }));
     }
+    await dispatch(
+      saveCurrentSession({ openNewSession: false, generateTitle: false }),
+    );
   },
 );

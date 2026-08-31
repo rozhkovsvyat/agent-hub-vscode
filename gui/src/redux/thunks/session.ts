@@ -131,6 +131,9 @@ export const loadSession = createAsyncThunk<
     if (session.chatModelTitle) {
       void dispatch(selectChatModelForProfile(session.chatModelTitle));
     }
+    const { continueIfTrailingSteer } =
+      await import("./continueIfTrailingSteer");
+    void dispatch(continueIfTrailingSteer());
   },
 );
 
@@ -187,6 +190,9 @@ export const loadLastSession = createAsyncThunk<void, void, ThunkApiType>(
     if (session.chatModelTitle) {
       dispatch(selectChatModelForProfile(session.chatModelTitle));
     }
+    const { continueIfTrailingSteer } =
+      await import("./continueIfTrailingSteer");
+    void dispatch(continueIfTrailingSteer());
   },
 );
 

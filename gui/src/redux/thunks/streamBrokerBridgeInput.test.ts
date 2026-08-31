@@ -25,6 +25,84 @@ function messageWithId<T extends ChatMessage>(
 }
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("dispatches exactly one claimed queued follow-up as the final FIFO user turn", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: any[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: "follow-up-1",
+        },
+      ];
+      yield [{ role: "assistant", content: "accepted", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "original" },
+          "original",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "first queued" },
+          "follow-up-1",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "delivered",
+        steerSentAt: 1,
+      },
+      {
+        message: messageWithId(
+          { role: "assistant", content: "old turn ended" },
+          "old-assistant",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "second queued" },
+          "follow-up-2",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 2,
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "fifo",
+        title: "FIFO",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(
+      streamBrokerBridgeInput({ queuedFollowUpMessageId: "follow-up-1" }),
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].queuedFollowUpMessageId).toBe("follow-up-1");
+    expect(
+      captured[0].messages.map((message: ChatMessage) => message.id),
+    ).toEqual(["original", "old-assistant", "follow-up-1"]);
+    expect(
+      store
+        .getState()
+        .session.history.find((item) => item.message.id === "follow-up-1")
+        ?.steerStatus,
+    ).toBe("read");
+  });
+
   it("normalizes terminal error decoration and repeated frames without merging distinct errors", () => {
     expect(
       isSameTerminalError(
