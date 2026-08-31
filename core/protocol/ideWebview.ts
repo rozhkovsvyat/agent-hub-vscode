@@ -222,7 +222,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/initialSessionLoadFailed": [{ sessionId: string }, void];
   "cukii/renameSession": [
     { sessionId: string; title: string },
-    { ok: boolean },
+    { ok: boolean; title?: string; titleManuallySet?: boolean },
   ];
   "jetbrains/isOSREnabled": [undefined, boolean];
   "jetbrains/onLoad": [

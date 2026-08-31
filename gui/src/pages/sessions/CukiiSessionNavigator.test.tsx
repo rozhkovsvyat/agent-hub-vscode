@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { renderWithProviders } from "../../util/test/render";
@@ -302,20 +302,26 @@ describe("CukiiSessionNavigator Claude parity", () => {
 
   it("accepts repeated session renames A→B→C→D without retaining a stale draft", async () => {
     const messenger = new MockIdeMessenger();
-    const renameSpy = vi.fn().mockResolvedValue({ ok: true });
+    let persistedTitle = "A";
+    const renameSpy = vi.fn(async ({ title }: { title: string }) => {
+      persistedTitle = title;
+      return { ok: true, title };
+    });
     messenger.responseHandlers["cukii/renameSession"] = renameSpy;
-    messenger.responses["history/list"] = [
+    messenger.responseHandlers["history/list"] = vi.fn(async () => [
       {
         sessionId: "session",
-        title: "A",
+        title: persistedTitle,
         dateCreated: "2026-08-27T12:00:00Z",
         workspaceDirectory: "D:/Brain/vault",
       },
-    ];
-    messenger.responses["cukii/listOpenChatPanels"] = [
-      { panelId: "panel", sessionId: "session", title: "A" },
-    ];
-    await renderWithProviders(<CukiiSessionNavigator />, {
+    ]);
+    messenger.responseHandlers["cukii/listOpenChatPanels"] = vi.fn(async () => [
+      { panelId: "panel", sessionId: "session", title: persistedTitle },
+    ]);
+    const openSpy = vi.fn().mockResolvedValue(undefined);
+    messenger.responseHandlers["cukii/openChatPanel"] = openSpy;
+    const firstRender = await renderWithProviders(<CukiiSessionNavigator />, {
       mockIdeMessenger: messenger,
     });
 
@@ -344,6 +350,58 @@ describe("CukiiSessionNavigator Claude parity", () => {
       title: "D",
     });
     expect(renameSpy).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByTitle("D"));
+    expect(openSpy).toHaveBeenCalledWith({
+      panelId: "panel",
+      sessionId: "session",
+      title: "D",
+    });
+
+    firstRender.unmount();
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+    expect(await screen.findByTitle("D")).toBeInTheDocument();
+  });
+
+  it("updates the sidebar row and reopen payload from the authoritative title broadcast", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "A",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [
+      { panelId: "panel", sessionId: "session", title: "A" },
+    ];
+    const openSpy = vi.fn().mockResolvedValue(undefined);
+    messenger.responseHandlers["cukii/openChatPanel"] = openSpy;
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            messageType: "cukii/sessionTitleChanged",
+            messageId: "title-broadcast",
+            data: { sessionId: "session", title: "B" },
+          },
+        }),
+      );
+    });
+
+    const renamed = await screen.findByTitle("B");
+    fireEvent.click(renamed);
+    expect(openSpy).toHaveBeenCalledWith({
+      panelId: "panel",
+      sessionId: "session",
+      title: "B",
+    });
   });
 
   it("saves a non-empty rename on blur", async () => {

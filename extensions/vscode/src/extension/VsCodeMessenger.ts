@@ -271,7 +271,11 @@ export class VsCodeMessenger {
         "cukii/openChatPanelsChanged",
         listOpenCukiiPanels(),
       );
-      return { ok: true };
+      return {
+        ok: true,
+        title: effectiveTitle,
+        titleManuallySet: Boolean(saved.titleManuallySet),
+      };
     });
 
     this.onWebview("acceptDiff", async ({ data: { filepath, streamId } }) => {

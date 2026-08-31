@@ -353,6 +353,28 @@ export default function CukiiSessionNavigator() {
     },
     [load],
   );
+  useWebviewListener(
+    "cukii/sessionTitleChanged",
+    async ({ sessionId, title }) => {
+      const effectiveTitle = title.trim();
+      if (!effectiveTitle) return;
+      setSessions((items) =>
+        items.map((item) =>
+          item.sessionId === sessionId
+            ? { ...item, title: effectiveTitle }
+            : item,
+        ),
+      );
+      setOpenPanels((panels) =>
+        panels.map((panel) =>
+          panel.sessionId === sessionId
+            ? { ...panel, title: effectiveTitle }
+            : panel,
+        ),
+      );
+    },
+    [],
+  );
   useEffect(
     () => localStorage.setItem(STORAGE_KEY, JSON.stringify(groups)),
     [groups],
@@ -486,16 +508,21 @@ export default function CukiiSessionNavigator() {
         cancelRename();
         return;
       }
+      const effectiveTitle = result.content.title?.trim() || title;
       // Update both sources immediately. The extension also broadcasts the same
       // title to an already-open chat panel, so neither side needs a reload.
       setSessions((items) =>
         items.map((item) =>
-          item.sessionId === session.sessionId ? { ...item, title } : item,
+          item.sessionId === session.sessionId
+            ? { ...item, title: effectiveTitle }
+            : item,
         ),
       );
       setOpenPanels((panels) =>
         panels.map((panel) =>
-          panel.sessionId === session.sessionId ? { ...panel, title } : panel,
+          panel.sessionId === session.sessionId
+            ? { ...panel, title: effectiveTitle }
+            : panel,
         ),
       );
       cancelRename();

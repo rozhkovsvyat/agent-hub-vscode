@@ -85,17 +85,18 @@ describe("CukiiPanelRegistry", () => {
     ]);
   });
 
-  it("propagates renamed titles to the matching panel host", () => {
+  it("propagates repeated renamed titles to the matching panel host", () => {
     const registry = new CukiiPanelRegistry<{ panel: { title: string } }>();
     registry.add("saved", { panel: { title: "Old title" } }, "session-1");
     registry.updateTitle("saved", "Old title");
 
-    syncCukiiPanelTitleForSession("session-1", "Manual title", registry);
+    syncCukiiPanelTitleForSession("session-1", "Manual title A", registry);
+    syncCukiiPanelTitleForSession("session-1", "Manual title B", registry);
 
     const entry = registry.forSession("session-1");
-    expect(entry?.displayTitle).toBe("Manual title");
-    expect(entry?.panel.panel.title).toBe("Manual title");
-    expect(listOpenCukiiPanels(registry)[0]?.title).toBe("Manual title");
+    expect(entry?.displayTitle).toBe("Manual title B");
+    expect(entry?.panel.panel.title).toBe("Manual title B");
+    expect(listOpenCukiiPanels(registry)[0]?.title).toBe("Manual title B");
   });
 
   it("keeps native-rename targets panel-specific and excludes blank tabs", () => {
