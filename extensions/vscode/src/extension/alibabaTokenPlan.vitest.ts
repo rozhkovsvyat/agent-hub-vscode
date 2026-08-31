@@ -192,6 +192,41 @@ describe("Alibaba Token Plan credentials", () => {
     }
   });
 
+  it("rebinds protected identity when the native Alibaba account changes", async () => {
+    const home = tempHome();
+    const store = memoryStore();
+    const settingsFile = alibabaSettingsPath(home);
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    await storeAlibabaCredential(
+      "sk-sp-previous-account-credential",
+      "previous@example.test",
+      store,
+    );
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify({
+        email: "current@example.test",
+        env: { DASHSCOPE_API_KEY: "sk-sp-current-account-credential" },
+        security: { auth: { selectedType: "openai" } },
+      }),
+      "utf8",
+    );
+
+    await migratePlaintextAlibabaSettings({ userHome: home, store });
+
+    expect(await alibabaIdentity({ userHome: home, store })).toEqual({
+      authenticated: true,
+      accountLabel: "current@example.test",
+    });
+    expect(await store.get(ALIBABA_SECRET_KEY)).toContain(
+      "sk-sp-current-account-credential",
+    );
+    expect(await store.get(ALIBABA_SECRET_KEY)).not.toContain(
+      "previous@example.test",
+    );
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
   it("imports from the official console clipboard and logs out only Alibaba config", async () => {
     const home = tempHome();
     const store = memoryStore();

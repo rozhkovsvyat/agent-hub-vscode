@@ -312,12 +312,11 @@ export async function migratePlaintextAlibabaSettings(
   if (!plaintext || !store) return false;
   const existing = await readAlibabaCredential(store);
   const email = settingsEmail(settings);
-  if (!existing || (!existing.accountLabel && email)) {
-    await storeAlibabaCredential(
-      existing?.credential ?? plaintext,
-      existing?.accountLabel ?? email,
-      store,
-    );
+  const sameCredential = existing?.credential === plaintext;
+  const accountLabel =
+    email ?? (sameCredential ? existing?.accountLabel : undefined);
+  if (!existing || !sameCredential || existing.accountLabel !== accountLabel) {
+    await storeAlibabaCredential(plaintext, accountLabel, store);
   }
   // Import into VS Code SecretStorage without mutating Qwen Code's own
   // working configuration. Manage Accounts is an observer here: opening it
