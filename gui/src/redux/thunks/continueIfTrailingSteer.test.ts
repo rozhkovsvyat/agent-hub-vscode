@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import {
   ChatHistoryItemWithMessageId,
+  clearDanglingMessages,
   newSession,
   normalizeRestoredHistory,
 } from "../slices/sessionSlice";
@@ -25,6 +26,64 @@ function item(
 }
 
 describe("hasTrailingSteerMessage", () => {
+  it.each([
+    ["turn", "turn"],
+    ["tool", "tool"],
+    ["lifecycle", undefined],
+    ["error", undefined],
+  ] as const)(
+    "preserves and drains queued steer FIFO after %s cancellation cleanup",
+    async (_source, interrupted) => {
+      const messenger = new MockIdeMessenger();
+      const dispatched: string[] = [];
+      messenger.streamRequest = vi.fn(async function* (
+        _messageType,
+        data: any,
+      ) {
+        dispatched.push(data.queuedFollowUpMessageId);
+        yield [
+          {
+            role: "assistant",
+            content: "",
+            cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
+          },
+        ];
+        yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+      }) as typeof messenger.streamRequest;
+      const first = item("user", "first after cancel", true);
+      first.steerStatus = "deferred";
+      const second = item("user", "second after cancel", true);
+      second.steerStatus = "queued";
+      const store = setupStore({ ideMessenger: messenger });
+      store.dispatch(
+        newSession({
+          sessionId: `cancel-${_source}`,
+          title: "Cancel then drain",
+          workspaceDirectory: "D:/Brain/vault",
+          history: [
+            item("user", "active prompt"),
+            item("assistant", "partial output"),
+            first,
+            second,
+          ],
+          mode: "broker",
+          brokerModel: "qwen-3-8-max",
+        }),
+      );
+
+      store.dispatch(clearDanglingMessages(interrupted));
+      await store.dispatch(continueIfTrailingSteer());
+
+      expect(dispatched).toEqual([first.message.id, second.message.id]);
+      expect(
+        store
+          .getState()
+          .session.history.filter((entry) => entry.isSteer)
+          .map((entry) => entry.steerStatus),
+      ).toEqual(["read", "read"]);
+    },
+  );
+
   it("drains two messages FIFO once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[] = [];

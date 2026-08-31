@@ -38,6 +38,15 @@ function assistantWithTool(
   };
 }
 
+function queuedSteer(id: string): ChatHistoryItemWithMessageId {
+  return {
+    message: { role: "user", content: id, id },
+    contextItems: [],
+    isSteer: true,
+    steerStatus: "queued",
+  };
+}
+
 describe("sessionSlice clearDanglingMessages", () => {
   it("cancels calling tools and writes Tool interrupted", () => {
     const initial = sessionSlice.getInitialState();
@@ -82,6 +91,94 @@ describe("sessionSlice clearDanglingMessages", () => {
     );
     expect(
       lateLifecycle.history.filter((item) => item.interrupted),
+    ).toHaveLength(1);
+  });
+
+  it.each([undefined, "turn", "tool"] as const)(
+    "preserves queued/deferred steer outbox during %s cleanup",
+    (interrupted) => {
+      const initial = sessionSlice.getInitialState();
+      const deferred = queuedSteer("deferred");
+      deferred.steerStatus = "deferred";
+      const queued = queuedSteer("queued");
+      const withHistory = {
+        ...initial,
+        history: [
+          userItem(),
+          {
+            message: {
+              role: "assistant" as const,
+              content: "working",
+              id: "a1",
+            },
+            contextItems: [],
+          },
+          deferred,
+          queued,
+        ],
+        isStreaming: true,
+      };
+
+      const next = sessionSlice.reducer(
+        withHistory,
+        clearDanglingMessages(interrupted),
+      );
+
+      expect(
+        next.history
+          .filter((item) => item.isSteer)
+          .map((item) => [item.message.id, item.steerStatus]),
+      ).toEqual([
+        ["deferred", "deferred"],
+        ["queued", "queued"],
+      ]);
+    },
+  );
+
+  it("keeps turn Interrupted when a late tool receipt has no GUI tool card", () => {
+    const initial = sessionSlice.getInitialState();
+    const withHistory = {
+      ...initial,
+      history: [
+        userItem(),
+        {
+          message: { role: "assistant" as const, content: "working", id: "a1" },
+          contextItems: [],
+        },
+      ],
+    };
+
+    const stopped = sessionSlice.reducer(
+      withHistory,
+      clearDanglingMessages("turn"),
+    );
+    const lateToolReceipt = sessionSlice.reducer(
+      stopped,
+      clearDanglingMessages("tool"),
+    );
+
+    expect(
+      lateToolReceipt.history.filter((item) => item.interrupted),
+    ).toHaveLength(1);
+  });
+
+  it("uses exactly one tool marker when a real GUI tool card exists", () => {
+    const initial = sessionSlice.getInitialState();
+    const withHistory = {
+      ...initial,
+      history: [userItem(), assistantWithTool("calling")],
+    };
+
+    const next = sessionSlice.reducer(
+      withHistory,
+      clearDanglingMessages("tool"),
+    );
+
+    expect(next.history.filter((item) => item.interrupted)).toHaveLength(0);
+    expect(
+      next.history[1].toolCallStates?.filter(
+        (tool) => tool.output?.[0]?.content === TOOL_INTERRUPTED_MESSAGE,
+      ),
     ).toHaveLength(1);
   });
 

@@ -439,14 +439,23 @@ export const sessionSlice = createSlice({
         return;
       }
 
+      const isPendingSteer = (item: ChatHistoryItemWithMessageId) =>
+        item.isSteer &&
+        (item.steerStatus === "queued" || item.steerStatus === "deferred");
       const lastUserOrToolIdx = findLastIndex(
         state.history,
-        (item) => item.message.role === "tool" || item.message.role === "user",
+        (item) =>
+          !isPendingSteer(item) &&
+          (item.message.role === "tool" || item.message.role === "user"),
       );
 
       let validAssistantMessageIdx = -1;
       for (let i = state.history.length - 1; i > lastUserOrToolIdx; i--) {
         const message = state.history[i];
+        // Queued/deferred steer messages are a durable outbox. Cancellation
+        // cleanup may settle the active turn, but must leave these entries for
+        // continueIfTrailingSteer to drain after the native receipt arrives.
+        if (isPendingSteer(message)) continue;
         // Any in-flight tool call (even still "generating") makes this message
         // worth keeping: we mark it canceled below so the transcript shows
         // "Tool interrupted", instead of silently deleting the turn on Esc.
@@ -462,7 +471,9 @@ export const sessionSlice = createSlice({
           // a real user cancellation. A tool receipt suppresses the general
           // marker because the tool card carries its own interruption state.
           if (action.payload === "turn") message.interrupted = true;
-          if (action.payload === "tool") message.interrupted = false;
+          if (action.payload === "tool" && hasToolCalls) {
+            message.interrupted = false;
+          }
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {
@@ -490,15 +501,23 @@ export const sessionSlice = createSlice({
 
       if (validAssistantMessageIdx === -1) {
         const lastMsg = state.history[lastUserOrToolIdx];
+        if (!lastMsg) return;
         const lastRole = lastMsg.message.role as "user" | "tool";
         if (lastRole === "user") {
           state.mainEditorContentTrigger = lastMsg.editorState;
-          state.history = state.history.slice(0, lastUserOrToolIdx);
+          state.history = state.history.filter(
+            (item, index) => index < lastUserOrToolIdx || isPendingSteer(item),
+          );
         } else {
-          state.history = state.history.slice(0, lastUserOrToolIdx + 1);
+          state.history = state.history.filter(
+            (item, index) => index <= lastUserOrToolIdx || isPendingSteer(item),
+          );
         }
       } else {
-        state.history = state.history.slice(0, validAssistantMessageIdx + 1);
+        state.history = state.history.filter(
+          (item, index) =>
+            index <= validAssistantMessageIdx || isPendingSteer(item),
+        );
       }
     },
     // Trigger value picked up by editor with isMainInput to set its content
