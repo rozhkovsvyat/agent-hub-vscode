@@ -205,6 +205,34 @@ describe("Cukii Claude-parity input toolbar", () => {
     ).not.toBeNull();
   });
 
+  it("keeps a static Qwen Bypass selection when the live probe reports only Plan", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responses["cukii/listPermissionCapabilities"] = [
+      { vendor: "qwen", supportedModes: ["plan"] },
+    ];
+    const postSpy = vi.spyOn(mockIdeMessenger, "post");
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "qwen-3-8-max" });
+    store.dispatch(setBrokerPermissionMode("plan"));
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
+
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await user.click(await getElementByText("Plan"));
+    await user.click(await getElementByTestId("cukii-permission-mode-bypass"));
+
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({ brokerPermissionMode: "bypass" }),
+    );
+    expect(await getElementByText("Bypass permissions")).toBeDefined();
+  });
+
   it("switches Manual to a supported mode in session state and persists the bridge preference", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     const postSpy = vi.spyOn(mockIdeMessenger, "post");

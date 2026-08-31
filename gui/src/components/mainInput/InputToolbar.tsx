@@ -212,13 +212,21 @@ function InputToolbar(props: InputToolbarProps) {
     const resolvedEffort = normalizeEffortForModel(nextModel, nextEffort);
     const vendor = brokerVendorForModel(nextModel);
     const capability = permissionCapabilities[vendor];
-    const targetCapabilities = capability
-      ? {
-          vendor,
-          supportedModes: capability.supportedModes,
-          helpSource: "live" as const,
-        }
-      : defaultVendorPermissionCapabilities(vendor);
+    const staticCapability = ["claude", "codex", "kimi", "qwen"].includes(
+      vendor,
+    )
+      ? defaultVendorPermissionCapabilities(vendor)
+      : undefined;
+    const targetCapabilities = {
+      vendor,
+      supportedModes: [
+        ...new Set([
+          ...(staticCapability?.supportedModes ?? []),
+          ...(capability?.supportedModes ?? []),
+        ]),
+      ],
+      helpSource: capability ? "live+static" : "static",
+    };
     const resolvedPermissionMode = targetCapabilities.supportedModes.includes(
       nextPermissionMode,
     )
