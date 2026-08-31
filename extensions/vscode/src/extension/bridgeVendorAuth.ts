@@ -6,6 +6,7 @@ import type {
   BrokerVendorId,
 } from "core/protocol/ideWebview";
 import * as fs from "fs";
+import * as http from "http";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
@@ -130,50 +131,14 @@ function safeEmail(value: unknown): string | undefined {
   return email.length <= 254 && SAFE_EMAIL.test(email) ? email : undefined;
 }
 
-/**
- * Names are display-only fallbacks. In particular, opaque ids must not become
- * an account label merely because a provider puts one in a friendly-looking
- * claim. Keep this stricter than a general username validator.
- */
-function safeDisplayName(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const name = value.trim();
-  if (
-    !name ||
-    name.length > 100 ||
-    /[=\x00-\x1f\x7f]/.test(name) ||
-    (name.includes("@") && !/^@[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(name)) ||
-    /(?:api[-_]?key|access[-_]?token|id[-_]?token|refresh[-_]?token|token|secret|password|bearer)/i.test(
-      name,
-    ) ||
-    /^(?:account|acct|user|usr|org|uuid|guid|id|sub|sha(?:1|256|512)?|md5)(?:\b|[_:-])/i.test(
-      name,
-    ) ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      name,
-    ) ||
-    /^[0-9a-f]{24,}$/i.test(name) ||
-    /^[A-Za-z0-9_-]{20,}$/.test(name) ||
-    /^eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){1,2}$/.test(name)
-  ) {
-    return undefined;
-  }
-  return name;
-}
-
-function safeIdentityFromRecord(record: unknown): string | undefined {
-  const email = safeEmail(stringAt(record, "email"));
-  if (email) return email;
-  return safeDisplayName(
-    stringAt(record, "name", "preferred_username", "nickname", "username"),
-  );
-}
-
 function jwtAccountLabel(token: unknown): string | undefined {
   const claims = decodeJwtPayload(token);
   if (!claims) return undefined;
   const profile = isRecord(claims.profile) ? claims.profile : undefined;
-  return safeIdentityFromRecord(claims) ?? safeIdentityFromRecord(profile);
+  return (
+    safeEmail(stringAt(claims, "email")) ??
+    safeEmail(stringAt(profile, "email"))
+  );
 }
 
 /** Local CLI auth metadata only; no browser sessions, token text, or guessed email. */
@@ -184,23 +149,23 @@ export function accountLabelFromAuthMetadata(
   if (vendor === "codex") {
     const tokens = isRecord(metadata) ? metadata.tokens : undefined;
     return (
-      safeIdentityFromRecord(tokens) ??
+      safeEmail(stringAt(tokens, "email")) ??
       jwtAccountLabel(stringAt(tokens, "id_token"))
     );
   }
   if (vendor === "grok") {
     if (!isRecord(metadata)) return undefined;
     for (const entry of Object.values(metadata)) {
-      const identity = safeIdentityFromRecord(entry);
+      const identity = safeEmail(stringAt(entry, "email"));
       if (identity) return identity;
     }
     return undefined;
   }
   if (vendor === "cursor") {
     return (
-      safeIdentityFromRecord(
-        isRecord(metadata) ? metadata.userInfo : undefined,
-      ) ?? safeIdentityFromRecord(metadata)
+      safeEmail(
+        stringAt(isRecord(metadata) ? metadata.userInfo : undefined, "email"),
+      ) ?? safeEmail(stringAt(metadata, "email"))
     );
   }
   if (vendor === "kimi") {
@@ -208,7 +173,7 @@ export function accountLabelFromAuthMetadata(
     if (!Array.isArray(credentials)) return undefined;
     for (const credential of credentials) {
       const label =
-        safeIdentityFromRecord(credential) ??
+        safeEmail(stringAt(credential, "email")) ??
         jwtAccountLabel(stringAt(credential, "access_token", "id_token"));
       if (label) return label;
     }
@@ -217,7 +182,7 @@ export function accountLabelFromAuthMetadata(
 }
 
 function unknownIdentityLabel(): string {
-  return "Account connected";
+  return "Email unavailable — sign in again";
 }
 
 /**
@@ -232,11 +197,11 @@ function sanitizedNativeCliIdentity(value: unknown): string | undefined {
     /(?:api[-_]?key|access[-_]?token|id[-_]?token|refresh[-_]?token|token|secret|password|bearer|(?:^|[-_])sk[-_])/i.test(
       value,
     ) ||
-    !(safeEmail(value) ?? safeDisplayName(value))
+    !safeEmail(value)
   ) {
     return undefined;
   }
-  return safeEmail(value) ?? safeDisplayName(value);
+  return safeEmail(value);
 }
 
 function identityFromNativeCliJson(
@@ -331,15 +296,25 @@ export function classifyVendorAuthOutput(
   const text = stdout.trim();
   const accountLabel =
     safeEmail(identityLabel) ??
-    safeDisplayName(identityLabel) ??
     identityFromNativeCliOutput(vendor, stdout) ??
     unknownIdentityLabel();
-  const connected = (label: string, actions: BrokerVendorAuthAction[]) => ({
-    state: "connected" as const,
-    authenticated: true,
-    accountLabel: label,
-    actions,
+  const emailUnavailable = (): AuthClassification => ({
+    state: "unknown",
+    authenticated: false,
+    accountLabel: "Email unavailable — sign in again",
+    actions: ["login"],
   });
+  const connected = (label: string, actions: BrokerVendorAuthAction[]) => {
+    const email = safeEmail(label);
+    return email
+      ? {
+          state: "connected" as const,
+          authenticated: true,
+          accountLabel: email,
+          actions,
+        }
+      : emailUnavailable();
+  };
   const disconnected = (): AuthClassification => ({
     state: "disconnected",
     authenticated: false,
@@ -573,10 +548,6 @@ export function probeSpec(
 
 type KimiCredential = {
   email?: string;
-  name?: string;
-  preferred_username?: string;
-  nickname?: string;
-  username?: string;
 };
 type KimiCredentialFileSystem = {
   readdirSync(directory: string): string[];
@@ -587,6 +558,179 @@ type KimiCredentialFileSystem = {
   };
   readFileSync(file: string, encoding: BufferEncoding): string;
 };
+
+type KimiServerProbeFileSystem = {
+  readdirSync(directory: string): string[];
+  statSync(file: string): { isFile(): boolean; size: number };
+  readFileSync(file: string, encoding: BufferEncoding): string;
+};
+type KimiServerRequest = (
+  endpoint: URL,
+  bearerToken: string,
+  timeoutMs: number,
+) => Promise<unknown>;
+type KimiServerProbeOptions = {
+  instancesDirectory?: string;
+  tokenFile?: string;
+  fileSystem?: KimiServerProbeFileSystem;
+  request?: KimiServerRequest;
+  timeoutMs?: number;
+};
+
+const KIMI_SERVER_TIMEOUT_MS = 800;
+const KIMI_MAX_INSTANCE_FILES = 8;
+const KIMI_MAX_INSTANCE_FILE_SIZE = 8 * 1024;
+const KIMI_MAX_TOKEN_FILE_SIZE = 4 * 1024;
+
+function localLoopbackKimiServerEndpoints(
+  instancesDirectory: string,
+  fileSystem: KimiServerProbeFileSystem,
+): URL[] {
+  try {
+    return fileSystem
+      .readdirSync(instancesDirectory)
+      .filter((entry) => entry.endsWith(".json"))
+      .sort()
+      .slice(0, KIMI_MAX_INSTANCE_FILES)
+      .flatMap((entry) => {
+        try {
+          const instanceFile = path.join(instancesDirectory, entry);
+          const stat = fileSystem.statSync(instanceFile);
+          if (!stat.isFile() || stat.size > KIMI_MAX_INSTANCE_FILE_SIZE) {
+            return [];
+          }
+          const instance = JSON.parse(
+            fileSystem.readFileSync(instanceFile, "utf8"),
+          );
+          const explicitUrl = stringAt(instance, "url", "endpoint");
+          const host = stringAt(instance, "host");
+          const port = isRecord(instance) ? instance.port : undefined;
+          const candidate =
+            explicitUrl ??
+            (typeof host === "string" &&
+            typeof port === "number" &&
+            Number.isInteger(port)
+              ? `http://${host}:${port}`
+              : undefined);
+          if (!candidate) return [];
+          const endpoint = new URL(candidate);
+          return endpoint.protocol === "http:" &&
+            (endpoint.hostname === "127.0.0.1" ||
+              endpoint.hostname === "::1") &&
+            endpoint.pathname === "/" &&
+            endpoint.username === "" &&
+            endpoint.password === "" &&
+            endpoint.port !== "" &&
+            Number.isInteger(Number(endpoint.port)) &&
+            Number(endpoint.port) > 0 &&
+            Number(endpoint.port) <= 65535
+            ? [endpoint]
+            : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+function kimiUserInfoRequest(
+  endpoint: URL,
+  bearerToken: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: unknown) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const request = http.request(
+      new URL("/api/v1/oauth/userinfo", endpoint),
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${bearerToken}` },
+      },
+      (response) => {
+        if (response.statusCode !== 200) {
+          response.resume();
+          finish(undefined);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        response.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > 64 * 1024) {
+            request.destroy();
+            finish(undefined);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.once("end", () => {
+          if (size <= 64 * 1024) {
+            finish(parseJson(Buffer.concat(chunks).toString("utf8")));
+          }
+        });
+        response.once("error", () => finish(undefined));
+      },
+    );
+    request.once("error", () => finish(undefined));
+    request.setTimeout(timeoutMs, () => {
+      request.destroy();
+      finish(undefined);
+    });
+    request.end();
+  });
+}
+
+/**
+ * Reuses only a registered loopback Kimi server. Starting `kimi web` would
+ * print a bearer credential and can leave a child process behind, so this
+ * probe intentionally never launches a server.
+ */
+export async function localKimiServerEmail(
+  options: KimiServerProbeOptions = {},
+): Promise<string | undefined> {
+  const userHome = os.homedir();
+  const instancesDirectory =
+    options.instancesDirectory ??
+    path.join(userHome, ".kimi-code", "server", "instances");
+  const tokenFile =
+    options.tokenFile ?? path.join(userHome, ".kimi-code", "server.token");
+  const fileSystem = options.fileSystem ?? fs;
+  const endpoints = localLoopbackKimiServerEndpoints(
+    instancesDirectory,
+    fileSystem,
+  );
+  if (endpoints.length === 0) return undefined;
+  try {
+    const tokenStat = fileSystem.statSync(tokenFile);
+    if (!tokenStat.isFile() || tokenStat.size > KIMI_MAX_TOKEN_FILE_SIZE) {
+      return undefined;
+    }
+    const bearerToken = fileSystem.readFileSync(tokenFile, "utf8").trim();
+    if (!bearerToken || /[\x00-\x1f\x7f]/.test(bearerToken)) return undefined;
+    for (const endpoint of endpoints) {
+      const response = await (options.request ?? kimiUserInfoRequest)(
+        endpoint,
+        bearerToken,
+        options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
+      );
+      const data = isRecord(response) ? response.data : undefined;
+      const userInfo =
+        isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
+      const email = safeEmail(stringAt(userInfo, "email"));
+      if (email) return email;
+    }
+  } catch {
+    // Token and endpoint failures deliberately remain non-diagnostic.
+  }
+  return undefined;
+}
 
 /**
  * Credentials are ordered newest-first, then by filename, so a current
@@ -613,15 +757,14 @@ export function localKimiCredentials(
           const claims =
             decodeJwtPayload(stringAt(credential, "access_token")) ??
             decodeJwtPayload(stringAt(credential, "id_token"));
-          const identity =
-            safeIdentityFromRecord(credential) ??
-            safeIdentityFromRecord(claims);
-          if (!identity) return [];
+          const email =
+            safeEmail(stringAt(credential, "email")) ??
+            safeEmail(stringAt(claims, "email"));
+          if (!email) return [];
           return [
             {
               credential: {
-                email: safeEmail(identity),
-                name: safeDisplayName(identity),
+                email,
               },
               modifiedAt: stat.mtimeMs,
               filename: entry,
@@ -669,15 +812,6 @@ function localMetadata(vendor: VendorWithCli): unknown {
       return {
         tokens: {
           email: safeEmail(stringAt(claims, "email")),
-          name: safeDisplayName(
-            stringAt(
-              claims,
-              "name",
-              "preferred_username",
-              "nickname",
-              "username",
-            ),
-          ),
         },
       };
     }
@@ -687,15 +821,6 @@ function localMetadata(vendor: VendorWithCli): unknown {
           issuer,
           {
             email: safeEmail(stringAt(entry, "email")),
-            name: safeDisplayName(
-              stringAt(
-                entry,
-                "name",
-                "preferred_username",
-                "nickname",
-                "username",
-              ),
-            ),
           },
         ]),
       );
@@ -779,11 +904,18 @@ export async function probeVendorExecutable(
       vendor === "qwen"
         ? JSON.stringify(metadata ?? {})
         : `${stdout}\n${stderr}`;
+    const kimiEmail =
+      vendor === "kimi" &&
+      !identity &&
+      (/source=oauth/i.test(output) ||
+        nativeCliJsonIndicatesAuthenticated("kimi", output))
+        ? await localKimiServerEmail()
+        : undefined;
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
       installed: true,
-      ...classifyVendorAuthOutput(vendor, output, identity),
+      ...classifyVendorAuthOutput(vendor, output, identity ?? kimiEmail),
     };
   } catch (error) {
     // A wrapper that exists but fails internally is still installed. In

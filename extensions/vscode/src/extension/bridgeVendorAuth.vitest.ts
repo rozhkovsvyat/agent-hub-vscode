@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "fs";
+import * as http from "http";
 import * as path from "path";
 
 import {
@@ -11,6 +12,7 @@ import {
   classifyVendorAuthOutput,
   isMissingCliError,
   localKimiCredentials,
+  localKimiServerEmail,
   probeVendorExecutable,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -38,14 +40,16 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput("codex", "Logged in using ChatGPT"),
     ).toMatchObject({
-      state: "connected",
-      accountLabel: "Account connected",
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Email unavailable — sign in again",
     });
     expect(
       classifyVendorAuthOutput("grok", "You are logged in with grok.com."),
     ).toMatchObject({
-      state: "connected",
-      accountLabel: "Account connected",
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Email unavailable — sign in again",
     });
     expect(
       classifyVendorAuthOutput(
@@ -62,15 +66,17 @@ describe("Cukii vendor CLI accounts", () => {
     expect(
       classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
     ).toMatchObject({
-      accountLabel: "Account connected",
-      actions: ["logout"],
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Email unavailable — sign in again",
+      actions: ["login"],
     });
     expect(
       classifyVendorAuthOutput(
         "qwen",
         '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
       ).state,
-    ).toBe("connected");
+    ).toBe("unknown");
   });
 
   it("uses local native auth metadata for a safe, stable account label", () => {
@@ -97,7 +103,7 @@ describe("Cukii vendor CLI accounts", () => {
           { access_token: jwt({ preferred_username: "moonshot" }) },
         ],
       }),
-    ).toBe("moonshot");
+    ).toBeUndefined();
     expect(
       accountLabelFromAuthMetadata("kimi", {
         credentials: [{ access_token: "not-a-jwt" }],
@@ -157,9 +163,9 @@ describe("Cukii vendor CLI accounts", () => {
       guidOnly ?? opaqueId,
     );
     expect(status).toMatchObject({
-      state: "connected",
-      authenticated: true,
-      accountLabel: "Account connected",
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Email unavailable — sign in again",
     });
     expect(JSON.stringify(status)).not.toContain(opaqueId);
     expect(JSON.stringify(status)).not.toContain(token);
@@ -183,8 +189,9 @@ describe("Cukii vendor CLI accounts", () => {
         identity,
       );
       expect(connected).toMatchObject({
-        state: "connected",
-        accountLabel: "Account connected",
+        state: "unknown",
+        authenticated: false,
+        accountLabel: "Email unavailable — sign in again",
       });
       expect(signedOut).toMatchObject({
         state: "disconnected",
@@ -217,7 +224,140 @@ describe("Cukii vendor CLI accounts", () => {
     expect(JSON.stringify(credentials)).not.toContain("eyJhbGciOiJub25lIn0");
   });
 
-  it("uses Kimi auth claims only for an email or human-readable handle", () => {
+  it("uses only the exact Kimi loopback userinfo email and never returns its bearer", async () => {
+    const bearer = "test-bearer-do-not-display";
+    const email = await localKimiServerEmail({
+      instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+      tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+      fileSystem: {
+        readdirSync: () => ["instance.json"],
+        statSync: () => ({ isFile: () => true, size: 100 }),
+        readFileSync: (file) =>
+          file.endsWith(".token")
+            ? bearer
+            : JSON.stringify({ host: "127.0.0.1", port: 58627 }),
+      },
+      request: async () => ({
+        data: {
+          kind: "ok",
+          userInfo: {
+            email: "moonshot@example.test",
+            userId: "2c30f0f3-9742-47d8-b01a-66e2d1c3fd64",
+            echoedBearer: bearer,
+          },
+        },
+      }),
+    });
+
+    expect(email).toBe("moonshot@example.test");
+    expect(JSON.stringify({ email })).not.toContain(bearer);
+  });
+
+  it("bounds Kimi loopback failures and does not launch a server", async () => {
+    let requested = false;
+    const noInstance = await localKimiServerEmail({
+      instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+      tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+      fileSystem: {
+        readdirSync: () => [],
+        statSync: () => ({ isFile: () => true, size: 20 }),
+        readFileSync: () => "unused",
+      },
+      request: async () => {
+        requested = true;
+        return undefined;
+      },
+    });
+    expect(noInstance).toBeUndefined();
+    expect(requested).toBe(false);
+
+    const remoteInstance = await localKimiServerEmail({
+      instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+      tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+      fileSystem: {
+        readdirSync: () => ["remote.json"],
+        statSync: () => ({ isFile: () => true, size: 20 }),
+        readFileSync: (file) =>
+          file.endsWith(".token")
+            ? "test-bearer-do-not-display"
+            : JSON.stringify({ url: "http://example.test:58627" }),
+      },
+      request: async () => {
+        requested = true;
+        return undefined;
+      },
+    });
+    expect(remoteInstance).toBeUndefined();
+    expect(requested).toBe(false);
+
+    const server = http.createServer(() => undefined);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+    try {
+      await expect(
+        localKimiServerEmail({
+          instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
+          tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
+          timeoutMs: 25,
+          fileSystem: {
+            readdirSync: () => ["instance.json"],
+            statSync: () => ({ isFile: () => true, size: 20 }),
+            readFileSync: (file) =>
+              file.endsWith(".token")
+                ? "test-bearer-do-not-display"
+                : JSON.stringify({ host: "127.0.0.1", port }),
+          },
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps connected vendor labels distinguishable by exact email", () => {
+    const labels = [
+      classifyVendorAuthOutput(
+        "claude",
+        '{"loggedIn":true,"email":"personal@example.test"}',
+      ),
+      classifyVendorAuthOutput(
+        "codex",
+        "Logged in using ChatGPT",
+        accountLabelFromAuthMetadata("codex", {
+          tokens: { id_token: jwt({ email: "shared@example.test" }) },
+        }),
+      ),
+      classifyVendorAuthOutput(
+        "grok",
+        "You are logged in with grok.com as xai@example.test",
+      ),
+      classifyVendorAuthOutput(
+        "cursor",
+        '{"isAuthenticated":true,"userInfo":{"email":"cursor@example.test"}}',
+      ),
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code source=oauth account=moonshot@example.test",
+      ),
+    ];
+    expect(labels.every((status) => status.state === "connected")).toBe(true);
+    expect(new Set(labels.map((status) => status.accountLabel)).size).toBe(
+      labels.length,
+    );
+    expect(
+      classifyVendorAuthOutput(
+        "qwen",
+        '{"security":{"auth":{"selectedType":"qwen-oauth"}}}',
+      ),
+    ).toMatchObject({
+      state: "unknown",
+      accountLabel: "Email unavailable — sign in again",
+    });
+  });
+
+  it("uses Kimi auth claims only for an exact email", () => {
     const technicalId = "8e780a44-7d30-4a09-b6c4-e779dfd0c5f7";
     expect(
       accountLabelFromAuthMetadata("kimi", {
@@ -230,14 +370,14 @@ describe("Cukii vendor CLI accounts", () => {
       accountLabelFromAuthMetadata("kimi", {
         credentials: [{ id_token: jwt({ preferred_username: "moonshot" }) }],
       }),
-    ).toBe("moonshot");
+    ).toBeUndefined();
     const status = classifyVendorAuthOutput(
       "kimi",
       "managed:kimi-code source=oauth",
     );
     expect(status).toMatchObject({
-      state: "connected",
-      accountLabel: "Account connected",
+      state: "unknown",
+      accountLabel: "Email unavailable — sign in again",
     });
     expect(JSON.stringify(status)).not.toContain(technicalId);
   });
@@ -260,7 +400,7 @@ describe("Cukii vendor CLI accounts", () => {
         "kimi",
         "managed:kimi-code source=oauth account=@moonshot",
       ).accountLabel,
-    ).toBe("@moonshot");
+    ).toBe("Email unavailable — sign in again");
   });
 
   it("allows terminal CRLF framing for exact Grok and Kimi status lines", () => {
@@ -279,7 +419,7 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("rejects vertical-tab framing before strict Grok and Kimi identity checks", () => {
-    const unavailable = "Account connected";
+    const unavailable = "Email unavailable — sign in again";
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -316,7 +456,7 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("never derives a native CLI identity from arbitrary or secret-like output", () => {
-    const unavailable = "Account connected";
+    const unavailable = "Email unavailable — sign in again";
     expect(
       classifyVendorAuthOutput(
         "grok",
@@ -428,7 +568,12 @@ describe("Cukii vendor CLI accounts", () => {
     }
     expect(
       classifyVendorAuthOutput("kimi", "managed:kimi-code source=oauth"),
-    ).toMatchObject({ accountLabel: "Account connected" });
+    ).toMatchObject({
+      state: "unknown",
+      authenticated: false,
+      accountLabel: "Email unavailable — sign in again",
+      actions: ["login"],
+    });
     const labels = [
       classifyVendorAuthOutput("claude", '{"loggedIn":false}').accountLabel,
       classifyVendorAuthOutput("codex", "not logged in").accountLabel,
@@ -553,11 +698,11 @@ describe("Cukii vendor CLI accounts", () => {
 
       expect(statuses.map((status) => status.state)).toEqual([
         "connected",
+        "unknown",
         "connected",
         "connected",
         "connected",
-        "connected",
-        "connected",
+        "unknown",
       ]);
       expect(statuses[2].accountLabel).toBe("xai@example.test");
       expect(statuses[4].accountLabel).toBe("kimi@example.test");
@@ -595,8 +740,9 @@ describe("Cukii vendor CLI accounts", () => {
       ]);
 
       expect(connected).toMatchObject({
-        state: "connected",
-        authenticated: true,
+        state: "unknown",
+        authenticated: false,
+        accountLabel: "Email unavailable — sign in again",
       });
       expect(rejected).toMatchObject({
         state: "disconnected",
