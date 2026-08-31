@@ -1,6 +1,5 @@
-import fs from "node:fs";
 import crypto from "node:crypto";
-import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 
 import type { ChatMessage } from "core";
@@ -13,10 +12,7 @@ export type RuntimeCanaryTurn = {
   nonce: string;
 };
 
-export type RuntimeCanaryEventName =
-  | "ui_submit"
-  | "bridge_dispatch"
-  | "vendor_completed";
+export type RuntimeCanaryEventName = "bridge_dispatch" | "vendor_completed";
 
 export type RuntimeCanaryResult = "completed" | "provider_quota" | "failed";
 
@@ -27,8 +23,8 @@ export type RuntimeCanaryExtensionBinding = {
   manifestSha256: string;
 };
 
-type RuntimeCanaryEvent = {
-  schema: "cukii.runtime-canary-event/v1";
+export type RuntimeCanaryEvent = {
+  schema: "cukii.runtime-canary-attestation/v1";
   turn_id: string;
   nonce: string;
   seq: number;
@@ -42,52 +38,62 @@ type RuntimeCanaryEvent = {
   manifest_sha256: string;
   result?: RuntimeCanaryResult;
   exit_code?: number | null;
+  response_sha256?: string;
+  response_length?: number;
 };
 
+export type RuntimeCanaryReporter = (event: RuntimeCanaryEvent) => void;
+
 function userText(message: ChatMessage): string | undefined {
-  if (typeof message.content === "string") return message.content;
-  return undefined;
+  return typeof message.content === "string" ? message.content : undefined;
 }
 
 /**
- * Runtime receipts are opt-in. The envelope is deliberately part of the exact
- * user turn, so a later trace cannot be attached to an arbitrary request. Do
- * not persist ordinary prompts or their contents in the canary trace.
+ * The runner arms a local CDP observer before the user sends this envelope.
+ * Only Kimi turns opt in; ordinary prompts never produce harness traffic.
  */
 export function runtimeCanaryTurn(
   messages: ChatMessage[],
 ): RuntimeCanaryTurn | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
-    if (message.role !== "user") continue;
-    const text = userText(message);
-    const match = text?.match(CANARY_ENVELOPE);
-    if (match) return { turnId: match[1], nonce: match[2] };
+    if (message.role !== "user") {
+      continue;
+    }
+    const match = userText(message)?.match(CANARY_ENVELOPE);
+    if (match) {
+      return { turnId: match[1], nonce: match[2] };
+    }
     return undefined;
   }
   return undefined;
 }
 
-export class RuntimeCanaryTrace {
+/**
+ * This object intentionally has no file sink.  Remote-SSH filesystem data is
+ * not an attestation channel: the registered reporter sends the event through
+ * the already-open extension -> local webview transport, where the local CDP
+ * controller owns the nonce and receipt HMAC.
+ */
+export class RuntimeCanaryAttestation {
   private sequence = 0;
 
   constructor(
     private readonly turn: RuntimeCanaryTurn,
     private readonly model: string,
     private readonly extension: RuntimeCanaryExtensionBinding,
-    private readonly tracePath = path.join(
-      process.env.CUKII_RUNTIME_CANARY_TRACE_DIR ??
-        path.join(os.homedir(), ".agent-hub", "cukii-runtime-canary"),
-      "events.jsonl",
-    ),
+    private readonly report: RuntimeCanaryReporter | undefined,
   ) {}
 
   record(
     event: RuntimeCanaryEventName,
-    details: Pick<RuntimeCanaryEvent, "result" | "exit_code"> = {},
+    details: Pick<
+      RuntimeCanaryEvent,
+      "result" | "exit_code" | "response_sha256" | "response_length"
+    > = {},
   ): void {
-    const entry: RuntimeCanaryEvent = {
-      schema: "cukii.runtime-canary-event/v1",
+    this.report?.({
+      schema: "cukii.runtime-canary-attestation/v1",
       turn_id: this.turn.turnId,
       nonce: this.turn.nonce,
       seq: ++this.sequence,
@@ -100,9 +106,7 @@ export class RuntimeCanaryTrace {
       extension_version: this.extension.extensionVersion,
       manifest_sha256: this.extension.manifestSha256,
       ...details,
-    };
-    fs.mkdirSync(path.dirname(this.tracePath), { recursive: true });
-    fs.appendFileSync(this.tracePath, `${JSON.stringify(entry)}\n`, "utf8");
+    });
   }
 }
 
@@ -139,4 +143,17 @@ export function runtimeCanaryResult(
     return "provider_quota";
   }
   return exitCode === 0 ? "completed" : "failed";
+}
+
+export function runtimeCanaryResponseSummary(text: string): {
+  response_sha256: string;
+  response_length: number;
+} {
+  return {
+    response_sha256: crypto
+      .createHash("sha256")
+      .update(text, "utf8")
+      .digest("hex"),
+    response_length: text.length,
+  };
 }

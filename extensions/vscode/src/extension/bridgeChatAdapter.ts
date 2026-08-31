@@ -48,11 +48,13 @@ import {
   writeBridgeScratchFile,
 } from "./bridgeScratch";
 import {
-  RuntimeCanaryTrace,
+  RuntimeCanaryAttestation,
   runtimeCanaryExtensionBinding,
+  runtimeCanaryResponseSummary,
   runtimeCanaryResult,
   runtimeCanaryTurn,
-} from "./runtimeCanaryTrace";
+  type RuntimeCanaryReporter,
+} from "./runtimeCanaryAttestation";
 
 export type BridgeRoute = {
   label: string;
@@ -78,6 +80,8 @@ export type ClaudePermissionTransport = {
   onBrokerDisposed?: (broker: ClaudePermissionBroker) => void;
   steering?: BridgeSteeringController;
   onToolActivity?: (event: { kind: "start" | "finish"; id: string }) => void;
+  /** Local-controller receipt channel. Never persist canary events on Remote-SSH. */
+  onRuntimeCanaryEvent?: RuntimeCanaryReporter;
   abortSignal?: AbortSignal;
 };
 
@@ -1211,9 +1215,13 @@ async function* streamBridgeChatWithSteer(
     : undefined;
   const canary =
     canaryTurn && args.brokerModel.startsWith("kimi") && extensionBinding
-      ? new RuntimeCanaryTrace(canaryTurn, args.brokerModel, extensionBinding)
+      ? new RuntimeCanaryAttestation(
+          canaryTurn,
+          args.brokerModel,
+          extensionBinding,
+          permissionTransport?.onRuntimeCanaryEvent,
+        )
       : undefined;
-  canary?.record("ui_submit");
   let permissionBroker: ClaudePermissionBroker | undefined;
   if (
     ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(args.brokerModel) &&
@@ -1275,6 +1283,7 @@ async function* streamBridgeChatWithSteer(
   let cancelled = false;
   let done = false;
   const queue: BridgeEvent[] = [];
+  let canaryResponse = "";
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "userEcho") {
@@ -1296,6 +1305,9 @@ async function* streamBridgeChatWithSteer(
       }
       if (event.kind === "toolResult") {
         permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
+      }
+      if (event.kind === "text") {
+        canaryResponse += event.text;
       }
       queue.push(event);
     }
@@ -1401,6 +1413,7 @@ async function* streamBridgeChatWithSteer(
       canary?.record("vendor_completed", {
         result: runtimeCanaryResult(code, rawStdout, stderr),
         exit_code: code,
+        ...runtimeCanaryResponseSummary(canaryResponse || rawStdout),
       });
     }
     done = true;

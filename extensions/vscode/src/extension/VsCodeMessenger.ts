@@ -752,6 +752,12 @@ export class VsCodeMessenger {
           if (event.kind === "start") cancellation.toolStarted(event.id);
           else cancellation.toolFinished(event.id);
         },
+        // This is deliberately sent over the active extension/webview channel.
+        // The local canary controller watches this iframe over CDP; a Remote-SSH
+        // user-writable JSONL file is never accepted as runtime evidence.
+        onRuntimeCanaryEvent: (event) => {
+          protocol.send("cukii/runtimeCanaryAttestation", event);
+        },
         abortSignal: controller.signal,
       };
       const stream = streamBridgeChat(msg.data, permissionTransport);
