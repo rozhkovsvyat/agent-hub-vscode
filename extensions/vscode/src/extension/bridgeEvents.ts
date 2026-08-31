@@ -39,6 +39,7 @@ export type BridgeFormat =
 // model-authored assistant text: retrying the same blocked hook can replay the
 // complete feedback after an otherwise new assistant turn.
 const CLAUDE_STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:";
+const MAX_STOP_HOOK_FEEDBACK_CACHE = 64;
 
 function isStopHookFeedback(
   envelope: any,
@@ -47,6 +48,9 @@ function isStopHookFeedback(
   return (
     envelope?.type === "user" &&
     envelope?.message?.role === "user" &&
+    // `isMeta` is set only on Claude's synthetic hook envelope. A human user
+    // can legitimately write the same prefix, so absent/false is never folded.
+    envelope?.isMeta === true &&
     event.kind === "text" &&
     event.text.startsWith(CLAUDE_STOP_HOOK_FEEDBACK_PREFIX)
   );
@@ -386,6 +390,8 @@ export class BridgeEventParser {
   private structured = false;
   /** Scoped to one native bridge process, never shared between user runs. */
   private readonly seenStopHookFeedback = new Set<string>();
+  /** FIFO companion to the set: retries are finite without retaining a run. */
+  private readonly stopHookFeedbackOrder: string[] = [];
 
   constructor(private readonly format: BridgeFormat) {}
 
@@ -437,6 +443,13 @@ export class BridgeEventParser {
           return [];
         }
         this.seenStopHookFeedback.add(parsedEvent.text);
+        this.stopHookFeedbackOrder.push(parsedEvent.text);
+        if (this.stopHookFeedbackOrder.length > MAX_STOP_HOOK_FEEDBACK_CACHE) {
+          const oldest = this.stopHookFeedbackOrder.shift();
+          if (oldest !== undefined) {
+            this.seenStopHookFeedback.delete(oldest);
+          }
+        }
       }
       const wait =
         parsedEvent.kind === "toolStart"

@@ -262,6 +262,7 @@ describe("BridgeEventParser", () => {
       '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Прогон идёт."}]}}',
       JSON.stringify({
         type: "user",
+        isMeta: true,
         message: {
           role: "user",
           content: [{ type: "text", text: hookFeedback }],
@@ -272,6 +273,7 @@ describe("BridgeEventParser", () => {
       // Claude may retry a blocked Stop hook without changing its feedback.
       JSON.stringify({
         type: "user",
+        isMeta: true,
         message: {
           role: "user",
           content: [{ type: "text", text: hookFeedback }],
@@ -302,14 +304,64 @@ describe("BridgeEventParser", () => {
 
   it("не схлопывает отличающийся Stop hook feedback", () => {
     const { events } = collect("anthropic-envelope", [
-      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: first missing receipt"}]}}',
-      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: second missing receipt"}]}}',
+      '{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: first missing receipt"}]}}',
+      '{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: second missing receipt"}]}}',
     ]);
 
     expect(events).toEqual([
       { kind: "text", text: "Stop hook feedback: first missing receipt" },
       { kind: "text", text: "Stop hook feedback: second missing receipt" },
     ]);
+  });
+
+  it("не считает human user text hook feedback без isMeta", () => {
+    const feedback = "Stop hook feedback: human wrote this intentionally";
+    const { events } = collect("anthropic-envelope", [
+      JSON.stringify({
+        type: "user",
+        isMeta: false,
+        message: { role: "user", content: [{ type: "text", text: feedback }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        isMeta: false,
+        message: { role: "user", content: [{ type: "text", text: feedback }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: feedback }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: feedback }] },
+      }),
+    ]);
+
+    expect(events).toEqual([
+      { kind: "text", text: feedback },
+      { kind: "text", text: feedback },
+      { kind: "text", text: feedback },
+      { kind: "text", text: feedback },
+    ]);
+  });
+
+  it("forgets old synthetic feedback after the bounded retry cache fills", () => {
+    const feedback = (index: number) => `Stop hook feedback: retry ${index}`;
+    const envelope = (text: string) =>
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: { role: "user", content: [{ type: "text", text }] },
+      });
+    const { events } = collect("anthropic-envelope", [
+      ...Array.from({ length: 65 }, (_, index) => envelope(feedback(index))),
+      envelope(feedback(0)),
+    ]);
+
+    // The first of 65 unique frames has been evicted from the 64-item cache,
+    // so a later retry is rendered instead of retaining an unbounded history.
+    expect(events.filter((event) => event.kind === "text")).toHaveLength(66);
+    expect(events.at(-1)).toEqual({ kind: "text", text: feedback(0) });
   });
 
   it("возвращает terminal receipt из Claude result до закрытия процесса", () => {
