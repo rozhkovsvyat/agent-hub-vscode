@@ -253,6 +253,65 @@ describe("BridgeEventParser", () => {
     ).toEqual([{ kind: "text", text: "Working." }]);
   });
 
+  it("показывает повторное Stop hook feedback только один раз, не трогая model turns", () => {
+    const hookFeedback =
+      "Stop hook feedback: ГЕЙТ РИСКОВАННЫХ ПРАВОК: сначала прогони приёмку.";
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_acceptance","name":"Bash","input":{"command":"npm test"}}]}}',
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_acceptance","content":"passed"}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Прогон идёт."}]}}',
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: hookFeedback }],
+        },
+      }),
+      // This is a new model turn, not a repeated transport frame.
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Прогон идёт."}]}}',
+      // Claude may retry a blocked Stop hook without changing its feedback.
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: hookFeedback }],
+        },
+      }),
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Приёмка завершена."}]}}',
+    ]);
+
+    expect(events).toEqual([
+      {
+        kind: "toolStart",
+        id: "toolu_acceptance",
+        name: "Bash",
+        args: JSON.stringify({ command: "npm test" }),
+      },
+      {
+        kind: "toolResult",
+        id: "toolu_acceptance",
+        output: "passed",
+        isError: false,
+      },
+      { kind: "text", text: "Прогон идёт." },
+      { kind: "text", text: hookFeedback },
+      { kind: "text", text: "Прогон идёт." },
+      { kind: "text", text: "Приёмка завершена." },
+    ]);
+  });
+
+  it("не схлопывает отличающийся Stop hook feedback", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: first missing receipt"}]}}',
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback: second missing receipt"}]}}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "text", text: "Stop hook feedback: first missing receipt" },
+      { kind: "text", text: "Stop hook feedback: second missing receipt" },
+    ]);
+  });
+
   it("возвращает terminal receipt из Claude result до закрытия процесса", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(

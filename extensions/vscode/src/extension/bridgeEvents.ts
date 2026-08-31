@@ -35,6 +35,23 @@ export type BridgeFormat =
   | "kimi-ndjson"
   | "text";
 
+// Claude emits a blocked Stop hook as a synthetic `user` envelope. It is not
+// model-authored assistant text: retrying the same blocked hook can replay the
+// complete feedback after an otherwise new assistant turn.
+const CLAUDE_STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:";
+
+function isStopHookFeedback(
+  envelope: any,
+  event: BridgeEvent,
+): event is Extract<BridgeEvent, { kind: "text" }> {
+  return (
+    envelope?.type === "user" &&
+    envelope?.message?.role === "user" &&
+    event.kind === "text" &&
+    event.text.startsWith(CLAUDE_STOP_HOOK_FEEDBACK_PREFIX)
+  );
+}
+
 function asText(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -367,6 +384,8 @@ function parseKimiNdjson(event: any): BridgeEvent[] {
 export class BridgeEventParser {
   private buffer = "";
   private structured = false;
+  /** Scoped to one native bridge process, never shared between user runs. */
+  private readonly seenStopHookFeedback = new Set<string>();
 
   constructor(private readonly format: BridgeFormat) {}
 
@@ -410,6 +429,15 @@ export class BridgeEventParser {
           ? parseKimiNdjson(event)
           : parseAnthropicEnvelope(event);
     const events = parsed.flatMap((parsedEvent) => {
+      // Deduplicate only Claude's explicitly-labelled synthetic hook feedback.
+      // Assistant text is deliberately never compared: two equal model turns
+      // can be intentional and must remain in the transcript.
+      if (isStopHookFeedback(event, parsedEvent)) {
+        if (this.seenStopHookFeedback.has(parsedEvent.text)) {
+          return [];
+        }
+        this.seenStopHookFeedback.add(parsedEvent.text);
+      }
       const wait =
         parsedEvent.kind === "toolStart"
           ? explicitWaitForToolStart(parsedEvent)
