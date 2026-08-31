@@ -10,7 +10,7 @@ interface VendorAccountsModalProps {
   onClose: () => void;
 }
 
-type RefreshReason = "initial" | "user" | "action" | "poll";
+type RefreshReason = "initial" | "user" | "action";
 
 const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   install: "Install",
@@ -27,7 +27,6 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [actionNotice, setActionNotice] = useState<string>();
   const refreshInFlight = useRef(false);
   const authActionOpening = useRef(false);
-  const pendingPoll = useRef(false);
   const pendingExplicitRefresh = useRef<
     | {
         reason: "user" | "action";
@@ -50,13 +49,9 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           : explicitRefreshGeneration.current);
       if (reason === "user") setLoading(true);
       if (refreshInFlight.current) {
-        if (reason === "poll") {
-          // Coalesce any number of timer ticks behind the current native probe.
-          if (!pendingExplicitRefresh.current) pendingPoll.current = true;
-        } else if (explicit) {
+        if (explicit) {
           // Only user/action intent invalidates the active result.
           pendingExplicitRefresh.current = { reason, generation };
-          pendingPoll.current = false;
         }
         return;
       }
@@ -70,7 +65,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         if (response.status === "success") {
           setAccounts(response.content);
           setRefreshError(undefined);
-        } else if (reason !== "poll") {
+        } else {
           setRefreshError(response.error);
         }
       } finally {
@@ -81,11 +76,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         const queuedExplicit = pendingExplicitRefresh.current;
         if (queuedExplicit) {
           pendingExplicitRefresh.current = undefined;
-          pendingPoll.current = false;
           void refresh(queuedExplicit.reason, queuedExplicit.generation);
-        } else if (pendingPoll.current) {
-          pendingPoll.current = false;
-          void refresh("poll");
         }
       }
     },
@@ -94,13 +85,11 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
 
   useEffect(() => {
     void refresh("initial");
-    const poll = window.setInterval(() => void refresh("poll"), 5_000);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
-      window.clearInterval(poll);
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose, refresh]);
@@ -115,7 +104,6 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
     // briefly painting the old login state after the user requested a change.
     explicitRefreshGeneration.current += 1;
     pendingExplicitRefresh.current = undefined;
-    pendingPoll.current = false;
     authActionOpening.current = true;
     setBusy(key);
     try {

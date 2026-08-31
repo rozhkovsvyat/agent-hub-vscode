@@ -370,12 +370,9 @@ describe("VendorAccountsModal", () => {
     );
   });
 
-  it("coalesces timer ticks without starving a slow current probe", async () => {
-    vi.useFakeTimers();
-    let unmount: (() => void) | undefined;
+  it("does not rewrite a loaded snapshot without an explicit refresh", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
-      const first = deferred<unknown>();
-      const second = deferred<unknown>();
       const ideMessenger = new MockIdeMessenger();
       const originalRequest = ideMessenger.request.bind(ideMessenger);
       let accountRequests = 0;
@@ -385,47 +382,25 @@ describe("VendorAccountsModal", () => {
       ) => {
         if (messageType === "cukii/listVendorAccounts") {
           accountRequests += 1;
-          const response =
-            accountRequests === 1 ? first.promise : second.promise;
-          return (await response) as never;
+          return {
+            status: "success",
+            content: [connectedAccount("stable@example.test")],
+            done: true,
+          } as never;
         }
         return originalRequest(messageType, data);
       }) as typeof ideMessenger.request);
-      ({ unmount } = await renderWithProviders(
-        <VendorAccountsModal onClose={vi.fn()} />,
-        { mockIdeMessenger: ideMessenger },
-      ));
-      expect(accountRequests).toBe(1);
+      await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+        mockIdeMessenger: ideMessenger,
+      });
+      await getElementByText("stable@example.test");
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(60_000);
       });
       expect(accountRequests).toBe(1);
-
-      await act(async () => {
-        first.resolve({
-          status: "success",
-          content: [connectedAccount("current@example.test")],
-          done: true,
-        });
-        await Promise.resolve();
-      });
-      expect(accountRequests).toBe(2);
-      expect(document.body.textContent).toContain("current@example.test");
-      expect(document.body.textContent).not.toContain("Checking vendor CLIs");
-
-      await act(async () => {
-        second.resolve({
-          status: "success",
-          content: [connectedAccount("coalesced@example.test")],
-          done: true,
-        });
-        await Promise.resolve();
-      });
-      expect(accountRequests).toBe(2);
-      expect(document.body.textContent).toContain("coalesced@example.test");
+      expect(document.body.textContent).toContain("stable@example.test");
     } finally {
-      unmount?.();
       vi.useRealTimers();
     }
   });
