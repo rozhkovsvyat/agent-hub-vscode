@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
+import { createHash } from "crypto";
 import { cukiiVendorLabel } from "core/cukiiVendorRegistry";
 import type {
   BrokerVendorAuthAction,
@@ -13,6 +14,7 @@ import * as path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+type ProcessTreeRunner = (program: string, args: string[]) => Promise<unknown>;
 // A short allowance avoids hiding a valid local session when the workstation
 // clock is only slightly behind the identity provider.
 const JWT_CLOCK_SKEW_SECONDS = 60;
@@ -559,12 +561,12 @@ type KimiCredentialFileSystem = {
   };
   readFileSync(file: string, encoding: BufferEncoding): string;
 };
-
 type KimiServerProbeFileSystem = {
   readdirSync(directory: string): string[];
   statSync(file: string): { isFile(): boolean; size: number };
   readFileSync(file: string, encoding: BufferEncoding): string;
 };
+
 type KimiServerRequest = (
   endpoint: URL,
   bearerToken: string,
@@ -572,6 +574,11 @@ type KimiServerRequest = (
 ) => Promise<unknown>;
 type KimiServerProbeOptions = {
   instancesDirectory?: string;
+  /**
+   * Retained for callers that provide a filesystem fixture.  A registry token
+   * is deliberately never read: any local process could publish a registry
+   * entry and receive it back over loopback.
+   */
   tokenFile?: string;
   fileSystem?: KimiServerProbeFileSystem;
   request?: KimiServerRequest;
@@ -592,9 +599,6 @@ type KimiServerProbeOptions = {
 
 const KIMI_SERVER_TIMEOUT_MS = 800;
 const KIMI_SERVER_LAUNCH_TIMEOUT_MS = 3_500;
-const KIMI_MAX_INSTANCE_FILES = 8;
-const KIMI_MAX_INSTANCE_FILE_SIZE = 8 * 1024;
-const KIMI_MAX_TOKEN_FILE_SIZE = 4 * 1024;
 const KIMI_MAX_STARTUP_OUTPUT_SIZE = 8 * 1024;
 const KIMI_MAX_BEARER_TOKEN_LENGTH = 512;
 const kimiEmailCache = new Map<string, string>();
@@ -603,59 +607,6 @@ type KimiWebStartup = {
   endpoint: URL;
   bearerToken: string;
 };
-
-function localLoopbackKimiServerEndpoints(
-  instancesDirectory: string,
-  fileSystem: KimiServerProbeFileSystem,
-): URL[] {
-  try {
-    return fileSystem
-      .readdirSync(instancesDirectory)
-      .filter((entry) => entry.endsWith(".json"))
-      .sort()
-      .slice(0, KIMI_MAX_INSTANCE_FILES)
-      .flatMap((entry) => {
-        try {
-          const instanceFile = path.join(instancesDirectory, entry);
-          const stat = fileSystem.statSync(instanceFile);
-          if (!stat.isFile() || stat.size > KIMI_MAX_INSTANCE_FILE_SIZE) {
-            return [];
-          }
-          const instance = JSON.parse(
-            fileSystem.readFileSync(instanceFile, "utf8"),
-          );
-          const explicitUrl = stringAt(instance, "url", "endpoint");
-          const host = stringAt(instance, "host");
-          const port = isRecord(instance) ? instance.port : undefined;
-          const candidate =
-            explicitUrl ??
-            (typeof host === "string" &&
-            typeof port === "number" &&
-            Number.isInteger(port)
-              ? `http://${host}:${port}`
-              : undefined);
-          if (!candidate) return [];
-          const endpoint = new URL(candidate);
-          return endpoint.protocol === "http:" &&
-            (endpoint.hostname === "127.0.0.1" ||
-              endpoint.hostname === "::1") &&
-            endpoint.pathname === "/" &&
-            endpoint.username === "" &&
-            endpoint.password === "" &&
-            endpoint.port !== "" &&
-            Number.isInteger(Number(endpoint.port)) &&
-            Number(endpoint.port) > 0 &&
-            Number(endpoint.port) <= 65535
-            ? [endpoint]
-            : [];
-        } catch {
-          return [];
-        }
-      });
-  } catch {
-    return [];
-  }
-}
 
 function kimiUserInfoRequest(
   endpoint: URL,
@@ -811,7 +762,9 @@ function kimiStartupFromBanner(
       if (
         (!before || /[\s\"'(]/.test(before)) &&
         token &&
-        (!after || /[\s\"')\]\r\n]/.test(after))
+        // A chunk boundary is not a token boundary: accepting there would
+        // send a truncated bearer before a later chunk completes the banner.
+        Boolean(after && /[\s\"')\]\r\n]/.test(after))
       ) {
         try {
           const endpoint = new URL(`${prefix}${token}`);
@@ -930,11 +883,7 @@ async function stopEphemeralKimiWeb(
   if (exited || child.killed) return;
   try {
     if (process.platform === "win32") {
-      // /T is intentionally scoped to this exact spawned PID and its children.
-      await execFileAsync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        timeout: 1_000,
-        windowsHide: true,
-      });
+      await terminateWindowsProcessTree(child.pid);
     } else {
       child.kill("SIGTERM");
     }
@@ -947,7 +896,48 @@ async function stopEphemeralKimiWeb(
   }
 }
 
-function kimiCredentialFingerprint(userHome: string): string | undefined {
+/**
+ * `taskkill /T` is the normal, atomic tree cleanup.  If it is unavailable or
+ * races with a just-exited root process, retain the original parent PID and
+ * explicitly terminate every remaining descendant.  The PID is numeric and
+ * passed as an argv member, never interpolated into the PowerShell program.
+ */
+export async function terminateWindowsProcessTree(
+  pid: number,
+  run: ProcessTreeRunner = (program, args) =>
+    execFileAsync(program, args, { timeout: 1_000, windowsHide: true }),
+): Promise<void> {
+  try {
+    await run("taskkill", ["/pid", String(pid), "/T", "/F"]);
+    return;
+  } catch {
+    const powershell = path.win32.join(
+      process.env.SystemRoot ?? "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    await run(powershell, [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      [
+        "$root = [int]$args[0]",
+        "$all = @(Get-CimInstance Win32_Process)",
+        "$pending = @($root); $seen = @{}",
+        "while ($pending.Count) { $parent = [int]$pending[0]; $pending = @($pending | Select-Object -Skip 1); if ($seen.ContainsKey($parent)) { continue }; $seen[$parent] = $true; foreach ($process in $all) { if ($process.ParentProcessId -eq $parent) { $pending += [int]$process.ProcessId } } }",
+        "$seen.Keys | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+      ].join("; "),
+      String(pid),
+    ]);
+  }
+}
+
+export function kimiCredentialFingerprint(
+  userHome: string,
+): string | undefined {
   const credentialsDirectory = path.join(userHome, ".kimi-code", "credentials");
   try {
     return fs
@@ -955,8 +945,15 @@ function kimiCredentialFingerprint(userHome: string): string | undefined {
       .filter((entry) => entry.endsWith(".json"))
       .sort()
       .map((entry) => {
-        const stat = fs.statSync(path.join(credentialsDirectory, entry));
-        return stat.isFile() ? `${entry}:${stat.size}:${stat.mtimeMs}` : "";
+        const file = path.join(credentialsDirectory, entry);
+        const stat = fs.statSync(file);
+        if (!stat.isFile()) return "";
+        // Metadata alone is mutable by an account switcher.  Keep only a
+        // one-way digest in the cache key; credential text never enters it.
+        const digest = createHash("sha256")
+          .update(fs.readFileSync(file))
+          .digest("hex");
+        return `${entry}:${stat.size}:${stat.mtimeMs}:${digest}`;
       })
       .filter(Boolean)
       .join("|");
@@ -966,61 +963,23 @@ function kimiCredentialFingerprint(userHome: string): string | undefined {
 }
 
 /**
- * Reuses the documented Kimi server registry first. Kimi 0.38 no longer
- * creates it reliably, so an unavailable registry has a narrow compatibility
- * fallback: an exact local child whose private startup URL is consumed once.
+ * A Kimi registry is not an authorization boundary: another local process can
+ * publish an exact-looking loopback endpoint and capture `server.token`.
+ * Identity is therefore read only from an ephemeral child on the port this
+ * process reserved, and its bearer never escapes this function.
  */
 export async function localKimiServerEmail(
   options: KimiServerProbeOptions = {},
 ): Promise<string | undefined> {
-  const userHome = os.homedir();
-  const instancesDirectory =
-    options.instancesDirectory ??
-    path.join(userHome, ".kimi-code", "server", "instances");
-  const tokenFile =
-    options.tokenFile ?? path.join(userHome, ".kimi-code", "server.token");
-  const fileSystem = options.fileSystem ?? fs;
   if (options.cacheKey) {
     const cached = kimiEmailCache.get(options.cacheKey);
     if (cached) return cached;
   }
-  const endpoints = localLoopbackKimiServerEndpoints(
-    instancesDirectory,
-    fileSystem,
-  );
   let ephemeral: ChildProcess | undefined;
   let ephemeralEndpoint: URL | undefined;
   let bearerToken: string | undefined;
   try {
     if (options.signal?.aborted) return undefined;
-    if (endpoints.length > 0) {
-      const tokenStat = fileSystem.statSync(tokenFile);
-      if (tokenStat.isFile() && tokenStat.size <= KIMI_MAX_TOKEN_FILE_SIZE) {
-        const candidateBearer = fileSystem
-          .readFileSync(tokenFile, "utf8")
-          .trim();
-        if (candidateBearer && !/[\x00-\x1f\x7f]/.test(candidateBearer)) {
-          bearerToken = candidateBearer;
-          for (const endpoint of endpoints) {
-            if (options.signal?.aborted) return undefined;
-            const response = await (options.request ?? kimiUserInfoRequest)(
-              endpoint,
-              bearerToken,
-              options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
-            );
-            const data = isRecord(response) ? response.data : undefined;
-            const userInfo =
-              isRecord(data) && data.kind === "ok" ? data.userInfo : undefined;
-            const email = safeEmail(stringAt(userInfo, "email"));
-            if (email) {
-              if (options.cacheKey) kimiEmailCache.set(options.cacheKey, email);
-              return email;
-            }
-          }
-          return undefined;
-        }
-      }
-    }
     if (options.executable) {
       const port = await (options.reservePort ?? reserveLoopbackPort)();
       if (!port || options.signal?.aborted) return undefined;
@@ -1051,12 +1010,16 @@ export async function localKimiServerEmail(
     // Token and endpoint failures deliberately remain non-diagnostic.
   } finally {
     if (ephemeral) {
-      await (options.stopEphemeral ?? stopEphemeralKimiWeb)(
-        ephemeral,
-        ephemeralEndpoint,
-        bearerToken,
-        options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
-      );
+      try {
+        await (options.stopEphemeral ?? stopEphemeralKimiWeb)(
+          ephemeral,
+          ephemeralEndpoint,
+          bearerToken,
+          options.timeoutMs ?? KIMI_SERVER_TIMEOUT_MS,
+        );
+      } catch {
+        // A cleanup implementation must not surface a bearer-bearing error.
+      }
     }
     bearerToken = undefined;
   }

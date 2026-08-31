@@ -15,6 +15,8 @@ import {
   isMissingCliError,
   localKimiCredentials,
   localKimiServerEmail,
+  kimiCredentialFingerprint,
+  terminateWindowsProcessTree,
   probeVendorExecutable,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -226,8 +228,9 @@ describe("Cukii vendor CLI accounts", () => {
     expect(JSON.stringify(credentials)).not.toContain("eyJhbGciOiJub25lIn0");
   });
 
-  it("uses only the exact Kimi loopback userinfo email and never returns its bearer", async () => {
+  it("never sends a registry bearer to a hostile loopback service", async () => {
     const bearer = "test-bearer-do-not-display";
+    let requested: { endpoint: URL; bearerToken: string } | undefined;
     const email = await localKimiServerEmail({
       instancesDirectory: "C:\\Users\\owner\\.kimi-code\\server\\instances",
       tokenFile: "C:\\Users\\owner\\.kimi-code\\server.token",
@@ -239,20 +242,15 @@ describe("Cukii vendor CLI accounts", () => {
             ? bearer
             : JSON.stringify({ host: "127.0.0.1", port: 58627 }),
       },
-      request: async () => ({
-        data: {
-          kind: "ok",
-          userInfo: {
-            email: "moonshot@example.test",
-            userId: "2c30f0f3-9742-47d8-b01a-66e2d1c3fd64",
-            echoedBearer: bearer,
-          },
-        },
-      }),
+      request: async (endpoint, bearerToken) => {
+        requested = { endpoint, bearerToken };
+        return undefined;
+      },
     });
 
-    expect(email).toBe("moonshot@example.test");
-    expect(JSON.stringify({ email })).not.toContain(bearer);
+    expect(email).toBeUndefined();
+    expect(requested).toBeUndefined();
+    expect(JSON.stringify({ email, requested })).not.toContain(bearer);
   });
 
   it("bounds Kimi loopback failures and does not launch a server", async () => {
@@ -492,6 +490,205 @@ describe("Cukii vendor CLI accounts", () => {
       "cached@example.test",
     );
     expect(launches).toBe(1);
+  });
+
+  it("changes the Kimi cache fingerprint when credentials switch at identical metadata", () => {
+    const directory = fs.mkdtempSync("D:\\Scratch\\cukii-kimi-fingerprint-");
+    const credentialsDirectory = path.join(
+      directory,
+      ".kimi-code",
+      "credentials",
+    );
+    const credential = path.join(credentialsDirectory, "default.json");
+    fs.mkdirSync(credentialsDirectory, { recursive: true });
+    const first = JSON.stringify({
+      access_token: jwt({ email: "first@example.test" }),
+    });
+    const second = JSON.stringify({
+      access_token: jwt({ email: "other@example.test" }),
+    });
+    expect(first.length).toBe(second.length);
+    const mtime = new Date("2026-08-31T00:00:00.000Z");
+    try {
+      fs.writeFileSync(credential, first, "utf8");
+      fs.utimesSync(credential, mtime, mtime);
+      const firstFingerprint = kimiCredentialFingerprint(directory);
+      fs.writeFileSync(credential, second, "utf8");
+      fs.utimesSync(credential, mtime, mtime);
+      const secondFingerprint = kimiCredentialFingerprint(directory);
+      expect(secondFingerprint).not.toBe(firstFingerprint);
+      expect(secondFingerprint).not.toContain("other@example.test");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not join startup banners across stdout and stderr or exceed either stream bound", async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      killed: false,
+      stdout,
+      stderr,
+    }) as unknown as import("child_process").ChildProcess;
+    const bearer = "split-banner-bearer";
+    let requests = 0;
+    let stops = 0;
+    await expect(
+      localKimiServerEmail({
+        executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+        launchTimeoutMs: 25,
+        reservePort: async () => 58627,
+        launch: () => {
+          setImmediate(() => {
+            stdout.end(`http://127.0.0.1:58627/#token=${bearer.slice(0, 8)}`);
+            stderr.end(bearer.slice(8));
+          });
+          return child;
+        },
+        request: async () => {
+          requests += 1;
+          return undefined;
+        },
+        stopEphemeral: async () => {
+          stops += 1;
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(requests).toBe(0);
+    expect(stops).toBe(1);
+    expect(JSON.stringify({ requests, stops })).not.toContain(bearer);
+  });
+
+  it("cleans up after child exit even when both startup streams reach their bound", async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      killed: false,
+      stdout,
+      stderr,
+    }) as unknown as import("child_process").ChildProcess;
+    let requests = 0;
+    let stops = 0;
+    await expect(
+      localKimiServerEmail({
+        executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+        launchTimeoutMs: 100,
+        reservePort: async () => 58627,
+        launch: () => {
+          setImmediate(() => {
+            stdout.write("x".repeat(8 * 1024));
+            stderr.write("y".repeat(8 * 1024));
+            child.emit("exit", 1);
+          });
+          return child;
+        },
+        request: async () => {
+          requests += 1;
+          return undefined;
+        },
+        stopEphemeral: async () => {
+          stops += 1;
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(requests).toBe(0);
+    expect(stops).toBe(1);
+  });
+
+  it("falls back to a descendant-aware Windows cleanup when taskkill /T fails", async () => {
+    const calls: Array<{ program: string; args: string[] }> = [];
+    await expect(
+      terminateWindowsProcessTree(4242, async (program, args) => {
+        calls.push({ program, args });
+        if (program === "taskkill") throw new Error("taskkill unavailable");
+      }),
+    ).resolves.toBeUndefined();
+    expect(calls[0]).toEqual({
+      program: "taskkill",
+      args: ["/pid", "4242", "/T", "/F"],
+    });
+    expect(calls[1]?.program).toMatch(/powershell\.exe$/i);
+    expect(calls[1]?.args).toContain("4242");
+    expect(calls[1]?.args.join(" ")).toContain("ParentProcessId");
+    expect(calls[1]?.args.join(" ")).toContain("Stop-Process");
+  });
+
+  it("bounds the private userinfo response at 64 KiB", async () => {
+    const bearer = "large-response-bearer";
+    const server = http.createServer((request, response) => {
+      expect(request.url).toBe("/api/v1/oauth/userinfo");
+      expect(request.headers.authorization).toBe(`Bearer ${bearer}`);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("x".repeat(64 * 1024 + 1));
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      killed: false,
+      stdout,
+      stderr,
+    }) as unknown as import("child_process").ChildProcess;
+    let stops = 0;
+    try {
+      await expect(
+        localKimiServerEmail({
+          executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+          launchTimeoutMs: 100,
+          reservePort: async () => port,
+          launch: () => {
+            setImmediate(() =>
+              stdout.end(`http://127.0.0.1:${port}/#token=${bearer}\n`),
+            );
+            return child;
+          },
+          stopEphemeral: async () => {
+            stops += 1;
+          },
+        }),
+      ).resolves.toBeUndefined();
+      expect(stops).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("swallows cleanup errors that contain an ephemeral bearer", async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      killed: false,
+      stdout,
+      stderr,
+    }) as unknown as import("child_process").ChildProcess;
+    const bearer = "cleanup-bearer-do-not-display";
+    await expect(
+      localKimiServerEmail({
+        executable: "C:\\Users\\owner\\.kimi-code\\bin\\kimi.exe",
+        launchTimeoutMs: 100,
+        reservePort: async () => 58627,
+        launch: () => {
+          setImmediate(() =>
+            stdout.end(`http://127.0.0.1:58627/#token=${bearer}\n`),
+          );
+          return child;
+        },
+        request: async () => ({
+          data: { kind: "ok", userInfo: { email: "owner@example.test" } },
+        }),
+        stopEphemeral: async () => {
+          throw new Error(`cleanup failed: ${bearer}`);
+        },
+      }),
+    ).resolves.toBe("owner@example.test");
   });
 
   it("keeps connected vendor labels distinguishable by exact email", () => {
