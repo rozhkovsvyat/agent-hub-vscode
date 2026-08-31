@@ -52,7 +52,9 @@ import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
 import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
 import {
   displayModelLabel,
+  effortLevelsForModel,
   modelInfo,
+  normalizeEffortForModel,
   supportsNativeSpeed,
   supportsNativeThinking,
 } from "../modelSelection/vendors";
@@ -114,15 +116,6 @@ function CommandSectionHeader(props: { children: string; divided?: boolean }) {
     </>
   );
 }
-
-const EFFORT_LEVELS: readonly BrokerEffort[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultra",
-];
 
 const EFFORT_LABELS: Record<BrokerEffort, string> = {
   low: "Low",
@@ -216,6 +209,7 @@ function InputToolbar(props: InputToolbarProps) {
     nextThinking: boolean = hasReasoningEnabled,
     nextPermissionMode: CukiiPermissionMode = brokerPermissionMode,
   ) => {
+    const resolvedEffort = normalizeEffortForModel(nextModel, nextEffort);
     const vendor = brokerVendorForModel(nextModel);
     const capability = permissionCapabilities[vendor];
     const targetCapabilities = capability
@@ -242,7 +236,7 @@ function InputToolbar(props: InputToolbarProps) {
       }),
     );
     dispatch(setBrokerSubagent(nextSubagent));
-    dispatch(setBrokerEffort(nextEffort));
+    dispatch(setBrokerEffort(resolvedEffort));
     dispatch(setBrokerSpeed(nextSpeed));
     dispatch(setHasReasoningEnabled(nextThinking));
     dispatch(setBrokerPermissionMode(resolvedPermissionMode));
@@ -254,7 +248,7 @@ function InputToolbar(props: InputToolbarProps) {
       cukiiBrokerDraft: {
         brokerModel: nextModel,
         brokerSubagent: nextSubagent,
-        brokerEffort: nextEffort,
+        brokerEffort: resolvedEffort,
         brokerSpeed: nextSpeed,
         thinkingEnabled: nextThinking,
         brokerPermissionMode: resolvedPermissionMode,
@@ -264,7 +258,7 @@ function InputToolbar(props: InputToolbarProps) {
       ideMessenger.post("cukii/setBrokerPreferences", {
         brokerModel: nextModel,
         brokerSubagent: nextSubagent,
-        brokerEffort: nextEffort,
+        brokerEffort: resolvedEffort,
         brokerSpeed: nextSpeed,
         thinkingEnabled: nextThinking,
         brokerPermissionMode: resolvedPermissionMode,
@@ -322,8 +316,10 @@ function InputToolbar(props: InputToolbarProps) {
   const currentLabel = currentModelInfo
     ? displayModelLabel(currentModelInfo)
     : "Opus 5 (1M)";
-  const effortIndex = EFFORT_LEVELS.indexOf(brokerEffort);
-  const effortFraction = effortIndex / (EFFORT_LEVELS.length - 1);
+  const effortLevels = effortLevelsForModel(currentModel);
+  const visibleEffort = normalizeEffortForModel(currentModel, brokerEffort);
+  const effortIndex = effortLevels.indexOf(visibleEffort);
+  const effortFraction = effortIndex / (effortLevels.length - 1);
   const effortPosition = `calc(${effortFraction * 100}% ${9 - effortFraction * 18 >= 0 ? "+" : "-"} ${Math.abs(9 - effortFraction * 18)}px)`;
   const effortFillWidth = `calc(${effortFraction * 100}% + ${18 - effortFraction * 18}px)`;
   const nativeFastAvailable = supportsNativeSpeed(currentModel);
@@ -383,11 +379,11 @@ function InputToolbar(props: InputToolbarProps) {
       0,
       Math.min(1, (clientX - trackStart) / trackWidth),
     );
-    const nextIndex = Math.round(fraction * (EFFORT_LEVELS.length - 1));
+    const nextIndex = Math.round(fraction * (effortLevels.length - 1));
     updateBrokerPreferences(
       currentModel,
       brokerSubagent ?? "auto",
-      EFFORT_LEVELS[nextIndex],
+      effortLevels[nextIndex],
       brokerSpeed,
     );
   };
@@ -553,7 +549,7 @@ function InputToolbar(props: InputToolbarProps) {
                         <span>
                           Effort
                           <span className="ml-1 text-[var(--vscode-descriptionForeground)]">
-                            ({EFFORT_LABELS[brokerEffort]})
+                            ({EFFORT_LABELS[visibleEffort]})
                           </span>
                         </span>
                         <button
@@ -563,9 +559,9 @@ function InputToolbar(props: InputToolbarProps) {
                           title="Click or drag to set effort level"
                           aria-label="Effort"
                           aria-valuemin={0}
-                          aria-valuemax={EFFORT_LEVELS.length - 1}
+                          aria-valuemax={effortLevels.length - 1}
                           aria-valuenow={effortIndex}
-                          aria-valuetext={EFFORT_LABELS[brokerEffort]}
+                          aria-valuetext={EFFORT_LABELS[visibleEffort]}
                           role="slider"
                           onClick={(event) => {
                             event.preventDefault();
@@ -627,11 +623,11 @@ function InputToolbar(props: InputToolbarProps) {
                               event.key === "Home"
                                 ? 0
                                 : event.key === "End"
-                                  ? EFFORT_LEVELS.length - 1
+                                  ? effortLevels.length - 1
                                   : Math.max(
                                       0,
                                       Math.min(
-                                        EFFORT_LEVELS.length - 1,
+                                        effortLevels.length - 1,
                                         effortIndex +
                                           (event.key === "ArrowRight" ? 1 : -1),
                                       ),
@@ -639,7 +635,7 @@ function InputToolbar(props: InputToolbarProps) {
                             updateBrokerPreferences(
                               currentModel,
                               brokerSubagent ?? "auto",
-                              EFFORT_LEVELS[nextIndex],
+                              effortLevels[nextIndex],
                               brokerSpeed,
                             );
                           }}
@@ -648,12 +644,12 @@ function InputToolbar(props: InputToolbarProps) {
                             className="cukii-effort-fill"
                             style={{ width: effortFillWidth }}
                           />
-                          {EFFORT_LEVELS.map((level, index) => (
+                          {effortLevels.map((level, index) => (
                             <span
                               key={level}
                               className={`cukii-effort-notch ${level === "ultra" ? "cukii-effort-notch-ultra" : ""}`}
                               style={{
-                                left: `calc(${(index / (EFFORT_LEVELS.length - 1)) * 100}% ${9 - (index / (EFFORT_LEVELS.length - 1)) * 18 >= 0 ? "+" : "-"} ${Math.abs(9 - (index / (EFFORT_LEVELS.length - 1)) * 18)}px)`,
+                                left: `calc(${(index / (effortLevels.length - 1)) * 100}% ${9 - (index / (effortLevels.length - 1)) * 18 >= 0 ? "+" : "-"} ${Math.abs(9 - (index / (effortLevels.length - 1)) * 18)}px)`,
                               }}
                             />
                           ))}

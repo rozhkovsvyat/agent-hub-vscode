@@ -667,6 +667,7 @@ describe("native bridge argv", () => {
     );
     if (route.promptFile) promptFiles.push(route.promptFile);
     expect(route.args[route.args.indexOf("--model") + 1]).toBe("qwen3.8-max");
+    expect(route.args).toContain("--safe-mode");
     expect(route.args.join(" ")).not.toContain("qwen3.8-max-preview");
     expect(route.args.join(" ")).not.toMatch(/preview/i);
   });
@@ -727,9 +728,10 @@ describe("native bridge argv", () => {
       "bypass",
     );
     expect(route.program).toBe("qwen");
-    expect(route.args.slice(0, 4)).toEqual([
+    expect(route.args.slice(0, 5)).toEqual([
       "--model",
       "qwen3.8-max",
+      "--safe-mode",
       "--prompt",
       "Follow the Cukii broker instructions supplied on stdin.",
     ]);

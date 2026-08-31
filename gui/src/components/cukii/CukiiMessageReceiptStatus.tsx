@@ -24,8 +24,8 @@ export function CukiiMessageReceiptStatus({
       data-testid={`cukii-message-receipt-status-${status}`}
       fill="none"
       height="10"
-      viewBox={isRead ? "0 0 16 10" : "0 0 10 10"}
-      width={isRead ? "16" : "10"}
+      viewBox="0 0 16 10"
+      width="16"
     >
       {isRead && (
         <path
@@ -39,7 +39,7 @@ export function CukiiMessageReceiptStatus({
       )}
       <path
         className="cukii-receipt-check-front"
-        d={isRead ? "M5 5L8 8L14 2" : "M1 5L4 8L9 2"}
+        d="M5 5L8 8L14 2"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"

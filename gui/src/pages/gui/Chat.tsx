@@ -210,10 +210,12 @@ export function Chat() {
         dispatch(setFocusView(!focusView));
       }
     };
-    window.addEventListener("keydown", listener);
+    // Capture before TipTap consumes Escape. Visible dialogs/menus are still
+    // protected by dispatchResponseEscape's visibility-aware overlay check.
+    window.addEventListener("keydown", listener, true);
 
     return () => {
-      window.removeEventListener("keydown", listener);
+      window.removeEventListener("keydown", listener, true);
     };
   }, [
     isStreaming,

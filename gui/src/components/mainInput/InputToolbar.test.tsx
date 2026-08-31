@@ -108,9 +108,13 @@ describe("Cukii Claude-parity input toolbar", () => {
   });
 
   it("opens the Cukii permission popover with exact copy and cycles with Shift+Tab", async () => {
-    const { store, user } = await renderWithProviders(
-      <InputToolbar {...props} />,
-    );
+    const mockIdeMessenger = new MockIdeMessenger();
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
 
     await user.click(await getElementByText("Bypass permissions"));
     expect(await getElementByText("Modes")).toBeDefined();
@@ -205,6 +209,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     const mockIdeMessenger = new MockIdeMessenger();
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
     store.dispatch(setBrokerPermissionMode("manual"));
     seedSavedHistory(store);
     retainInitializedSession(mockIdeMessenger, store);
@@ -231,6 +236,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     ];
     const postSpy = vi.spyOn(mockIdeMessenger, "post");
     const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
     store.dispatch(setBrokerPermissionMode("manual"));
     seedSavedHistory(store);
     retainInitializedSession(mockIdeMessenger, store);
@@ -352,9 +358,13 @@ describe("Cukii Claude-parity input toolbar", () => {
   });
 
   it("opens the Claude-style command menu and keeps broker controls", async () => {
-    const { store, user } = await renderWithProviders(
-      <InputToolbar {...props} />,
-    );
+    const mockIdeMessenger = new MockIdeMessenger();
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "opus-5" });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
 
     await user.click(await getElementByTestId("broker-menu-button"));
     expect(await getElementByText("Clear conversation")).toBeDefined();

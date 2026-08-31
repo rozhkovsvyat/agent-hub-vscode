@@ -1,6 +1,7 @@
 import type {
   BrokerVendorId,
   BrokerVendorModelCatalog,
+  BrokerEffort,
   BrokerModel,
   BrokerSubagent,
 } from "core/protocol/ideWebview";
@@ -270,5 +271,67 @@ export function supportsNativeThinking(model: BrokerModel): boolean {
     model.startsWith("codex-") ||
     model.startsWith("codex:") ||
     model.startsWith("cursor:claude-")
+  );
+}
+
+const FULL_EFFORT_LEVELS: readonly BrokerEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+];
+
+/** Levels the selected route can express without silently clamping a dot. */
+export function effortLevelsForModel(
+  model: BrokerModel,
+): readonly BrokerEffort[] {
+  if (
+    model === "codex-5-6-sol" ||
+    model === "codex-5-6-terra" ||
+    /(?:^|:)gpt-5\.6-(?:sol|terra)$/.test(model)
+  ) {
+    return FULL_EFFORT_LEVELS;
+  }
+  if (
+    model === "codex-5-6-luna" ||
+    /(?:^|:)gpt-5\.6-luna$/.test(model) ||
+    model === "opus-5" ||
+    model === "sonnet-5" ||
+    model === "fable-5" ||
+    model === "haiku-4-5" ||
+    model.startsWith("cursor:claude-")
+  ) {
+    return FULL_EFFORT_LEVELS.slice(0, 5);
+  }
+  if (
+    model === "codex-5-5" ||
+    model === "codex-5-4" ||
+    model === "codex-5-4-mini" ||
+    /(?:^|:)gpt-5\.[45](?:-|$)/.test(model) ||
+    model === "grok-4-6" ||
+    model === "grok-4-5" ||
+    model.startsWith("grok:")
+  ) {
+    return FULL_EFFORT_LEVELS.slice(0, 4);
+  }
+  // Kimi, Qwen and Composer currently expose no verified native effort argv.
+  // Retain the useful broker-contract range without painting fake extra tiers.
+  return FULL_EFFORT_LEVELS.slice(0, 3);
+}
+
+export function normalizeEffortForModel(
+  model: BrokerModel,
+  effort: BrokerEffort,
+): BrokerEffort {
+  const levels = effortLevelsForModel(model);
+  const requested = FULL_EFFORT_LEVELS.indexOf(effort);
+  return (
+    [...levels]
+      .reverse()
+      .find(
+        (candidate) => FULL_EFFORT_LEVELS.indexOf(candidate) <= requested,
+      ) ?? levels[0]
   );
 }

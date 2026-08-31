@@ -7,7 +7,6 @@ export type InterruptShortcutState = {
 export function shouldInterruptFromEscape(
   event: KeyboardEvent,
   state: InterruptShortcutState,
-  root: Pick<Document, "querySelector"> = document,
 ): boolean {
   return (
     event.key === "Escape" &&
@@ -21,9 +20,6 @@ export function shouldInterruptFromEscape(
     !event.metaKey &&
     !event.ctrlKey &&
     !event.altKey &&
-    !event.shiftKey &&
-    !root.querySelector(
-      '[role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]',
-    )
+    !event.shiftKey
   );
 }

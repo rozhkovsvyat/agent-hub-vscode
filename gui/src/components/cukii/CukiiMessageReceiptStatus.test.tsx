@@ -8,6 +8,8 @@ describe("CukiiMessageReceiptStatus", () => {
 
     const icon = screen.getByTestId("cukii-message-receipt-status-sent");
     expect(icon.tagName).toBe("svg");
+    expect(icon).toHaveAttribute("width", "16");
+    expect(icon).toHaveAttribute("viewBox", "0 0 16 10");
     expect(icon.querySelectorAll("path")).toHaveLength(1);
   });
 
@@ -20,6 +22,8 @@ describe("CukiiMessageReceiptStatus", () => {
     expect(checks).toHaveLength(2);
     expect(checks[0]).toHaveClass("cukii-receipt-check-back");
     expect(checks[1]).toHaveClass("cukii-receipt-check-front");
+    expect(icon).toHaveAttribute("width", "16");
+    expect(checks[1]?.getAttribute("d")).toBe("M5 5L8 8L14 2");
     expect(checks[0]?.getAttribute("d")).not.toBe(checks[1]?.getAttribute("d"));
     expect(icon.textContent).toBe("");
   });

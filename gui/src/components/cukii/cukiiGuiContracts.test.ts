@@ -213,6 +213,13 @@ describe("Cukii GUI contracts", () => {
     expect(selectionRule).not.toContain("--vscode-list-activeSelection");
   });
 
+  it("keeps assistant prose and tool rows on the same timeline axis", () => {
+    const css = source("index.css");
+    expect(css).toMatch(
+      /\.cukii-timeline-item \.thread-message \.bg-background\s*\{[\s\S]*?padding-inline:\s*0 !important;/,
+    );
+  });
+
   it("keeps permission modes on a compact dark or light panel and selected blue", () => {
     const css = source("index.css");
     const panelStart = css.indexOf(".cukii-permission-popover {");

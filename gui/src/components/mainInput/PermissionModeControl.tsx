@@ -44,7 +44,7 @@ type CapabilityMap = Partial<
 >;
 
 function staticCapabilities(vendor: BrokerVendorId) {
-  return ["claude", "codex", "kimi"].includes(vendor)
+  return ["claude", "codex", "kimi", "qwen"].includes(vendor)
     ? defaultVendorPermissionCapabilities(vendor)
     : undefined;
 }

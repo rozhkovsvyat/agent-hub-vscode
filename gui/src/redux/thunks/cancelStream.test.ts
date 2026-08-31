@@ -12,7 +12,7 @@ function deferred<T>() {
 }
 
 describe("cancelStream", () => {
-  it("does not paint Interrupted before the native cancellation receipt", async () => {
+  it("paints Interrupted immediately while native cancellation finishes", async () => {
     const state = getEmptyRootState();
     state.session.history = [
       {
@@ -35,13 +35,13 @@ describe("cancelStream", () => {
     const first = store.dispatch(cancelStream() as any);
     const duplicate = store.dispatch(cancelStream() as any);
     await vi.waitFor(() =>
-      expect(store.getState().session.isCancelling).toBe(true),
+      expect(
+        messenger.responseHandlers["cukii/cancelBridgeRun"],
+      ).toHaveBeenCalledTimes(1),
     );
-    expect(store.getState().session.isStreaming).toBe(true);
-    expect(store.getState().session.history[1].interrupted).not.toBe(true);
-    expect(
-      messenger.responseHandlers["cukii/cancelBridgeRun"],
-    ).toHaveBeenCalledTimes(1);
+    expect(store.getState().session.isStreaming).toBe(false);
+    expect(store.getState().session.isCancelling).toBe(true);
+    expect(store.getState().session.history[1].interrupted).toBe(true);
 
     receipt.resolve({
       requestId: "cancel-1",
@@ -51,6 +51,7 @@ describe("cancelStream", () => {
     });
     await Promise.all([first, duplicate]);
     expect(store.getState().session.isStreaming).toBe(false);
+    expect(store.getState().session.isCancelling).toBe(false);
     expect(store.getState().session.history[1].interrupted).toBe(true);
   });
 

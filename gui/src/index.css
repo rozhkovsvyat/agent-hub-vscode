@@ -1175,7 +1175,8 @@ button.cukii-submit-button--stop:active {
 
 .cukii-receipt-status {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 0 16px;
+  width: 16px;
   vertical-align: -1px;
 }
 
@@ -1334,8 +1335,16 @@ button.cukii-submit-button--stop:active {
   font-size: 12px;
 }
 
+.cukii-timeline-item .thread-message > div,
+.cukii-timeline-item .thread-message .bg-background {
+  /* StepContainer still carries Tailwind `px-1.5` on the nested markdown
+     surface. Tool rows do not, which shifted prose 6px to the right even
+     though both timeline items shared the same outer inset. */
+  padding-inline: 0 !important;
+}
+
 .cukii-timeline-item .thread-message > div {
-  padding: 0 !important;
+  padding-block: 0 !important;
 }
 
 /* Разнобой точек («все едет») — первая строка у текста, thinking и tool-рядов

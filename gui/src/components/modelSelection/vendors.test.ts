@@ -6,6 +6,8 @@ import {
   BROKER_MODEL_OPTIONS,
   cukiiCapabilityRating,
   displayModelLabel,
+  effortLevelsForModel,
+  normalizeEffortForModel,
   presentVendorModels,
   supportsNativeThinking,
   VENDORS,
@@ -221,6 +223,37 @@ describe("Cukii model context labels", () => {
     expect(supportsNativeThinking("grok-4-6")).toBe(false);
     expect(supportsNativeThinking("cursor:claude-opus-5")).toBe(true);
     expect(supportsNativeThinking("cursor:gpt-5.6-luna")).toBe(false);
+  });
+
+  it("renders only the effort levels supported by the selected route", () => {
+    expect(effortLevelsForModel("codex-5-6-sol")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra",
+    ]);
+    expect(effortLevelsForModel("codex-5-6-luna")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(effortLevelsForModel("grok-4-6")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(effortLevelsForModel("qwen-3-8-max")).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(normalizeEffortForModel("grok-4-6", "ultra")).toBe("xhigh");
+    expect(normalizeEffortForModel("qwen-3-8-max", "max")).toBe("high");
   });
 
   it.each([

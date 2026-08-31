@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { shouldInterruptFromEscape } from "./interruptShortcut";
 
-const clearRoot = { querySelector: () => null };
 const active = {
   isStreaming: true,
   isCancelling: false,
@@ -26,32 +25,16 @@ function escape(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 
 describe("shouldInterruptFromEscape", () => {
   it("allows one unmodified Escape for an active run", () => {
-    expect(shouldInterruptFromEscape(escape(), active, clearRoot)).toBe(true);
+    expect(shouldInterruptFromEscape(escape(), active)).toBe(true);
   });
 
   it.each([
-    ["idle", { ...active, isStreaming: false }, escape(), clearRoot],
-    ["repeat", active, escape({ repeat: true }), clearRoot],
-    ["IME", active, escape({ isComposing: true }), clearRoot],
-    [
-      "permission",
-      { ...active, hasPendingPermission: true },
-      escape(),
-      clearRoot,
-    ],
-    [
-      "already cancelling",
-      { ...active, isCancelling: true },
-      escape(),
-      clearRoot,
-    ],
-    [
-      "open overlay",
-      active,
-      escape(),
-      { querySelector: () => ({}) as Element },
-    ],
-  ])("guards %s", (_name, state, event, root) => {
-    expect(shouldInterruptFromEscape(event, state, root)).toBe(false);
+    ["idle", { ...active, isStreaming: false }, escape()],
+    ["repeat", active, escape({ repeat: true })],
+    ["IME", active, escape({ isComposing: true })],
+    ["permission", { ...active, hasPendingPermission: true }, escape()],
+    ["already cancelling", { ...active, isCancelling: true }, escape()],
+  ])("guards %s", (_name, state, event) => {
+    expect(shouldInterruptFromEscape(event, state)).toBe(false);
   });
 });
