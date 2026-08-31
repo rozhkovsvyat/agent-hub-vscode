@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ChatMessage } from "core";
 
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import {
   abortStream,
+  type ChatHistoryItemWithMessageId,
   newSession,
   setBrokerPermissionMode,
   setActive,
@@ -14,6 +16,13 @@ import {
   isSameTerminalError,
   streamBrokerBridgeInput,
 } from "./streamBrokerBridgeInput";
+
+function messageWithId<T extends ChatMessage>(
+  message: T,
+  id: string,
+): T & { id: string } {
+  return { ...message, id };
+}
 
 describe("streamBrokerBridgeInput controls", () => {
   it("normalizes terminal error decoration and repeated frames without merging distinct errors", () => {
@@ -160,27 +169,28 @@ describe("streamBrokerBridgeInput controls", () => {
       yield [{ role: "assistant", content: "", cukiiTerminal: true }];
     }) as typeof ideMessenger.streamRequest;
 
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId({ role: "system", content: "" }, "switch"),
+        contextItems: [],
+        modelSwitch: {
+          model: "codex-5-6-terra",
+          displayName: "GPT-5.6 Terra",
+        },
+      },
+      {
+        message: messageWithId({ role: "user", content: "Run it" }, "prompt"),
+        contextItems: [],
+        messageReceipt: { sentAt: 1_700_000_000_000, status: "queued" },
+      },
+    ];
     const store = setupStore({ ideMessenger });
     store.dispatch(
       newSession({
         sessionId: "receipt-activity",
         title: "Receipt activity",
         workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
-        history: [
-          {
-            message: { id: "switch", role: "system", content: "" },
-            contextItems: [],
-            modelSwitch: {
-              model: "codex-5-6-terra",
-              displayName: "GPT-5.6 Terra",
-            },
-          },
-          {
-            message: { id: "prompt", role: "user", content: "Run it" },
-            contextItems: [],
-            messageReceipt: { sentAt: 1_700_000_000_000, status: "queued" },
-          },
-        ],
+        history,
       }),
     );
 

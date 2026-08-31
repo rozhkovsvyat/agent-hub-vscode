@@ -7,7 +7,7 @@ import StepContainer from "./StepContainer";
 const activeThought: ChatHistoryItem = {
   message: { role: "assistant", content: "" },
   contextItems: [],
-  reasoning: { text: "Checking the active thought", startAt: 1 },
+  reasoning: { text: "Checking the active thought", startAt: 1, active: true },
 };
 
 describe("StepContainer thinking lifecycle", () => {

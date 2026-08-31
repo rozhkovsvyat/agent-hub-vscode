@@ -64,7 +64,6 @@ describe("Cukii Claude-parity input toolbar", () => {
         history: [
           {
             message: {
-              id: "saved-user-message",
               role: "user",
               content: "Persist the selected broker preferences",
             },
