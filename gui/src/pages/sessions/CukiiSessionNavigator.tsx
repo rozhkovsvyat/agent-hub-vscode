@@ -317,6 +317,7 @@ export default function CukiiSessionNavigator() {
     new Map<string, { title: string; revision: number }>(),
   );
   const deletingSessionIdsRef = useRef(new Set<string>());
+  const groupsSyncedWithCoreRef = useRef(false);
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
   );
@@ -413,10 +414,55 @@ export default function CukiiSessionNavigator() {
     },
     [],
   );
-  useEffect(
-    () => localStorage.setItem(STORAGE_KEY, JSON.stringify(groups)),
-    [groups],
-  );
+  useEffect(() => {
+    // First-paint cache and offline fallback; the authoritative copy lives
+    // beside the journal so every surface on this host (local window,
+    // Remote-SSH window) shares one identical grouping.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+    if (!groupsSyncedWithCoreRef.current) return;
+    void (async () => {
+      try {
+        await messenger.request("cukii/sessionGroupsSave", groups);
+      } catch {
+        // Transport failure keeps the localStorage cache as the fallback.
+      }
+    })();
+  }, [groups, messenger]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let result;
+      try {
+        result = await messenger.request("cukii/sessionGroupsLoad", undefined);
+      } catch {
+        // Core unreachable: the localStorage cache stays authoritative for
+        // this surface until the next mount can reach the journal copy.
+        return;
+      }
+      if (cancelled) return;
+      groupsSyncedWithCoreRef.current = true;
+      if (result.status !== "success") return;
+      const remote = result.content;
+      const remoteEmpty =
+        remote.groups.length === 0 &&
+        Object.keys(remote.assignments).length === 0;
+      if (remoteEmpty) {
+        // One-shot migration: per-window localStorage was the old home.
+        const local = parseSessionGroups(localStorage.getItem(STORAGE_KEY));
+        if (
+          local.groups.length > 0 ||
+          Object.keys(local.assignments).length > 0
+        ) {
+          setGroups(local);
+        }
+        return;
+      }
+      setGroups(remote);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messenger]);
   useEffect(() => {
     if (!context) return;
     const close = (event: MouseEvent) => {

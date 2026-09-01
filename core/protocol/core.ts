@@ -48,6 +48,7 @@ import { ConfigHandler } from "../config/ConfigHandler";
 import { ProcessedItem } from "../nextEdit/NextEditPrefetchQueue";
 import { NextEditOutcome } from "../nextEdit/types";
 import { ContinueErrorReason } from "../util/errors";
+import { SessionGroupState } from "../util/sessionGroups";
 
 export enum OnboardingModes {
   API_KEY = "API Key",
@@ -74,6 +75,9 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "history/rename": [{ id: string; title: string }, Session | undefined];
   "history/share": [{ id: string; outputDir?: string }, void];
   "history/clear": [undefined, void];
+  // Session groups persist beside the journal, one identical set per host.
+  "cukii/sessionGroupsLoad": [undefined, SessionGroupState];
+  "cukii/sessionGroupsSave": [SessionGroupState, { ok: boolean }];
   "devdata/log": [DevDataLogEvent, void];
   "config/addOpenAiKey": [string, void];
   "config/addModel": [

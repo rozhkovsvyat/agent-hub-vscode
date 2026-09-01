@@ -1,10 +1,7 @@
 import type { BaseSessionMetadata } from "core";
+import type { SessionGroup, SessionGroupState } from "core/util/sessionGroups";
 
-export type SessionGroup = { id: string; name: string };
-export type SessionGroupState = {
-  groups: SessionGroup[];
-  assignments: Record<string, string>;
-};
+export type { SessionGroup, SessionGroupState };
 
 export const EMPTY_SESSION_GROUPS: SessionGroupState = {
   groups: [],

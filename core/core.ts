@@ -98,6 +98,7 @@ import { OnboardingModes } from "./protocol/core";
 import type { IMessenger, Message } from "./protocol/messenger";
 import { ContinueError, ContinueErrorReason } from "./util/errors";
 import { shareSession } from "./util/historyUtils";
+import { loadSessionGroups, saveSessionGroups } from "./util/sessionGroups";
 import { Logger } from "./util/Logger.js";
 import { fileURLToPath } from "node:url";
 
@@ -349,6 +350,12 @@ export class Core {
       async (msg) =>
         await historyManager.renameExisting(msg.data.id, msg.data.title),
     );
+
+    on("cukii/sessionGroupsLoad", async () => loadSessionGroups());
+    on("cukii/sessionGroupsSave", async (msg) => {
+      await saveSessionGroups(msg.data);
+      return { ok: true };
+    });
 
     on("history/share", async (msg) => {
       const session = await historyManager.load(msg.data.id);
