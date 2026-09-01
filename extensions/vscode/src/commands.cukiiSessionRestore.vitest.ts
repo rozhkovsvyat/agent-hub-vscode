@@ -30,7 +30,10 @@ vi.mock("vscode", () => ({
 }));
 
 import { registerAllCommands } from "./commands";
-import { cukiiPanelRegistry } from "./cukiiPanelRegistry";
+import {
+  CUKII_BLANK_PANEL_TITLE,
+  cukiiPanelRegistry,
+} from "./cukiiPanelRegistry";
 
 function panel() {
   return {
@@ -225,8 +228,8 @@ describe("saved Cukii sidebar session opening", () => {
     // Remote-SSH extension host without a local workspace URI.
     expect(invoke).not.toHaveBeenCalled();
     expect(state.createWebviewPanel).toHaveBeenCalledTimes(2);
-    expect(first.title).toBe("Cukii");
-    expect(second.title).toBe("Cukii");
+    expect(first.title).toBe(CUKII_BLANK_PANEL_TITLE);
+    expect(second.title).toBe(CUKII_BLANK_PANEL_TITLE);
     const entries = cukiiPanelRegistry.values();
     expect(entries).toHaveLength(2);
     expect(new Set(entries.map((entry) => entry.id)).size).toBe(2);

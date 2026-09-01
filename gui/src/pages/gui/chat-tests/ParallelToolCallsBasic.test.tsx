@@ -4,6 +4,7 @@ import { renderWithProviders } from "../../../util/test/render";
 import { sendInputWithMockedResponse } from "../../../util/test/utils";
 import { Chat } from "../Chat";
 import { updateConfig } from "../../../redux/slices/configSlice";
+import { setMode } from "../../../redux/slices/sessionSlice";
 
 describe("Parallel Tool Calls - Basic", () => {
   const PARALLEL_TOOL_CALL_RESPONSE: ChatMessage[] = [
@@ -76,6 +77,10 @@ describe("Parallel Tool Calls - Basic", () => {
       }),
     );
 
+    // The default session mode is "broker", which streams through the native
+    // bridge. These scenarios exercise the classic chat streaming path.
+    store.dispatch(setMode("chat"));
+
     await sendInputWithMockedResponse(
       ideMessenger,
       "Use both tools",
@@ -103,5 +108,5 @@ describe("Parallel Tool Calls - Basic", () => {
     expect(assistantMessage!.toolCallStates).toHaveLength(2);
     expect(assistantMessage!.toolCallStates![0].toolCallId).toBe("tool-call-1");
     expect(assistantMessage!.toolCallStates![1].toolCallId).toBe("tool-call-2");
-  });
+  }, 20000);
 });

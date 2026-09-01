@@ -212,11 +212,20 @@ function getChatTitleFromMessage(message: ChatMessage) {
 
 export const saveCurrentSession = createAsyncThunk<
   void,
-  { openNewSession: boolean; generateTitle: boolean },
+  {
+    openNewSession: boolean;
+    generateTitle: boolean;
+    /** Persist a fallback title without touching the live header, so a later
+     * end-of-turn save can still upgrade it to a semantic title. */
+    provisionalTitle?: boolean;
+  },
   ThunkApiType
 >(
   "session/saveCurrent",
-  async ({ openNewSession, generateTitle }, { dispatch, extra, getState }) => {
+  async (
+    { openNewSession, generateTitle, provisionalTitle },
+    { dispatch, extra, getState },
+  ) => {
     const session = getState().session; // assign to a variable so that even when current session changes, we have the reference to the old session
     if (session.history.length === 0) {
       return;
@@ -312,15 +321,17 @@ export const saveCurrentSession = createAsyncThunk<
       title = liveSession.title;
       titleManuallySet = true;
     }
-    if (liveSession.id === session.id && liveSession.title !== title) {
-      dispatch(updateSessionTitle(title));
-    }
-    if (
-      liveSession.id === session.id &&
-      titleManuallySet &&
-      !liveSession.titleManuallySet
-    ) {
-      dispatch(setTitleManuallySet(true));
+    if (!provisionalTitle) {
+      if (liveSession.id === session.id && liveSession.title !== title) {
+        dispatch(updateSessionTitle(title));
+      }
+      if (
+        liveSession.id === session.id &&
+        titleManuallySet &&
+        !liveSession.titleManuallySet
+      ) {
+        dispatch(setTitleManuallySet(true));
+      }
     }
 
     const updatedSession: Session = {
@@ -342,5 +353,15 @@ export const saveCurrentSession = createAsyncThunk<
 
     const result = await dispatch(updateSession(updatedSession));
     unwrapResult(result);
+    // updateSessionMetadata's optimistic reducer mirrors the persisted title
+    // into the live header. For a provisional title that would replace the
+    // fresh-session placeholder with the fallback and suppress the semantic
+    // title at end of turn, so restore the pre-save header title.
+    if (provisionalTitle) {
+      const after = getState().session;
+      if (after.id === session.id && after.title !== session.title) {
+        dispatch(updateSessionTitle(session.title));
+      }
+    }
   },
 );

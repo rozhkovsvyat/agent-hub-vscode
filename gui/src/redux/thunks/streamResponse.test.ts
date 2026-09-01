@@ -110,6 +110,7 @@ describe("streamResponseThunk", () => {
       },
     ];
     initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     const mockStore = createMockStore(initialState);
     const mockIdeMessenger = mockStore.mockIdeMessenger;
 
@@ -168,6 +169,86 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: expect.objectContaining({
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: expect.objectContaining({
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: expect.objectContaining({
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: expect.objectContaining({
+          requestStatus: "fulfilled",
+        }),
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: expect.objectContaining({
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
+        // Provisional save restores the live header title.
+        type: "session/updateSessionTitle",
+        payload: "New Session",
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: expect.objectContaining({
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -201,6 +282,94 @@ describe("streamResponseThunk", () => {
         },
       },
       {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: expect.objectContaining({
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: expect.objectContaining({
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: expect.objectContaining({
+          requestStatus: "pending",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: expect.objectContaining({
+          arg: [],
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: expect.objectContaining({
+          requestStatus: "fulfilled",
+        }),
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: expect.objectContaining({
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
+        // Provisional save restores the live header title.
+        type: "session/updateSessionTitle",
+        payload: "New Session",
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: expect.objectContaining({
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestStatus: "fulfilled",
+        }),
+        payload: undefined,
+      },
+      {
         type: "chat/streamNormalInput/pending",
         meta: expect.objectContaining({
           arg: { legacySlashCommandData: undefined },
@@ -230,14 +399,6 @@ describe("streamResponseThunk", () => {
       {
         type: "session/setContextPercentage",
         payload: 0.8,
-      },
-      {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: expect.objectContaining({
-          arg: [],
-          requestStatus: "fulfilled",
-        }),
-        payload: undefined,
       },
       {
         type: "session/streamUpdate",
@@ -289,6 +450,11 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // The semantic title replaces the restored placeholder in the header.
+        type: "session/updateSessionTitle",
+        payload: "Session summary",
+      },
+      {
         type: "session/update/pending",
         meta: expect.objectContaining({
           requestStatus: "pending",
@@ -300,6 +466,13 @@ describe("streamResponseThunk", () => {
         payload: {
           sessionId: "session-123",
           title: "Session summary",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -396,12 +569,18 @@ describe("streamResponseThunk", () => {
           ],
         },
       ],
-      options: {},
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
 
     expect(mockIdeMessenger.llmStreamChat).toHaveBeenCalledWith(
       {
-        completionOptions: {},
+        completionOptions: {
+          reasoning: true,
+          reasoningBudgetTokens: 2048,
+        },
         legacySlashCommandData: undefined,
         messageOptions: { precompiled: true },
         messages: [
@@ -459,6 +638,10 @@ describe("streamResponseThunk", () => {
               id: "mock-uuid-123",
               role: "user",
             },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
+            },
           },
           {
             contextItems: [],
@@ -503,6 +686,7 @@ describe("streamResponseThunk", () => {
       [grepName]: "allowedWithoutPermission", // Auto-approve this tool
     };
     stateWithToolSettings.session.id = "session-123";
+    stateWithToolSettings.session.mode = "chat";
     const mockStoreWithToolSettings = createMockStore(stateWithToolSettings);
 
     const mockIdeMessengerWithTool = mockStoreWithToolSettings.mockIdeMessenger;
@@ -606,17 +790,41 @@ describe("streamResponseThunk", () => {
     expect(actionTypes).toEqual([
       "chat/streamResponse/pending",
       "chat/streamWrapper/pending",
+      // Pre-stream persist of the previous turns.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/updateSessionTitle",
+      "session/saveCurrent/fulfilled",
       "session/submitEditorAndInitAtIndex",
       "session/resetNextCodeBlockToApplyIndex",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
+      // First-turn persist with the new user message.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "symbols/updateFromContextItems/fulfilled",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/updateSessionTitle",
+      "session/saveCurrent/fulfilled",
       "chat/streamNormalInput/pending",
       "session/setAppliedRulesAtIndex",
       "session/setActive",
       "session/setInlineErrorMessage",
       "session/setIsPruned",
       "session/setContextPercentage",
-      "symbols/updateFromContextItems/fulfilled",
       "session/streamUpdate",
       "session/streamUpdate",
       "session/addPromptCompletionPair",
@@ -627,6 +835,18 @@ describe("streamResponseThunk", () => {
       "session/acceptToolCall",
       "chat/streamAfterToolCall/pending",
       "chat/streamWrapper/pending",
+      // The inner wrapper also pre-persists before its vendor round-trip.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/updateSessionTitle",
+      "session/saveCurrent/fulfilled",
       "session/resetNextCodeBlockToApplyIndex",
       "session/streamUpdate",
       "chat/streamNormalInput/pending",
@@ -640,8 +860,10 @@ describe("streamResponseThunk", () => {
       "session/setInactive",
       "chat/streamNormalInput/fulfilled",
       "session/saveCurrent/pending",
+      "session/updateSessionTitle",
       "session/update/pending",
       "session/updateSessionMetadata",
+      "session/setSessionRevision",
       "session/refreshMetadata/pending",
       "session/setIsSessionMetadataLoading",
       "session/setAllSessionMetadata",
@@ -655,6 +877,7 @@ describe("streamResponseThunk", () => {
       "session/saveCurrent/pending",
       "session/update/pending",
       "session/updateSessionMetadata",
+      "session/setSessionRevision",
       "session/refreshMetadata/pending",
       "session/setIsSessionMetadataLoading",
       "session/setAllSessionMetadata",
@@ -755,7 +978,10 @@ describe("streamResponseThunk", () => {
           ],
         },
       ],
-      options: { tools: [grepTool] },
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
 
     expect(requestSpy).toHaveBeenCalledWith("tools/call", {
@@ -801,6 +1027,10 @@ describe("streamResponseThunk", () => {
               id: expect.any(String),
               role: "user",
               content: "Hello, please help me with this code",
+            },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
             },
           },
           {
@@ -905,6 +1135,7 @@ describe("streamResponseThunk", () => {
       },
     ];
     abortState.session.id = "session-123";
+    abortState.session.mode = "chat";
     const mockStoreWithAbort = createMockStore(abortState);
     const mockIdeMessengerAbort = mockStoreWithAbort.mockIdeMessenger;
     mockIdeMessengerAbort.responses["llm/compileChat"] = {
@@ -983,6 +1214,104 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        // Provisional save restores the live header title.
+        type: "session/updateSessionTitle",
+        payload: "New Session",
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -1017,6 +1346,113 @@ describe("streamResponseThunk", () => {
         },
       },
       {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: {
+          arg: [],
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        // Provisional save restores the live header title.
+        type: "session/updateSessionTitle",
+        payload: "New Session",
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/streamNormalInput/pending",
         meta: {
           arg: {
@@ -1049,15 +1485,6 @@ describe("streamResponseThunk", () => {
       {
         type: "session/setContextPercentage",
         payload: 0.8,
-      },
-      {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: {
-          arg: [],
-          requestId: expect.any(String),
-          requestStatus: "fulfilled",
-        },
-        payload: undefined,
       },
       {
         type: "session/streamUpdate",
@@ -1101,6 +1528,11 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // The semantic title replaces the restored placeholder in the header.
+        type: "session/updateSessionTitle",
+        payload: "Session summary",
+      },
+      {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
@@ -1119,6 +1551,13 @@ describe("streamResponseThunk", () => {
         payload: {
           sessionId: "session-123",
           title: "Session summary",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -1240,12 +1679,18 @@ describe("streamResponseThunk", () => {
           ],
         },
       ],
-      options: {},
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
 
     expect(mockIdeMessengerAbort.llmStreamChat).toHaveBeenCalledWith(
       {
-        completionOptions: {},
+        completionOptions: {
+          reasoning: true,
+          reasoningBudgetTokens: 2048,
+        },
         legacySlashCommandData: undefined,
         messageOptions: { precompiled: true },
         messages: [
@@ -1285,6 +1730,10 @@ describe("streamResponseThunk", () => {
               content: "Hello, please help me with this code",
               id: "mock-uuid-123",
               role: "user",
+            },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
             },
           },
           {

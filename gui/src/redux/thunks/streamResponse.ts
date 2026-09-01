@@ -13,6 +13,7 @@ import {
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 import { compactConversationThunk } from "./compactConversation";
+import { saveCurrentSession } from "./session";
 import { streamNormalInput } from "./streamNormalInput";
 import { streamThunkWrapper } from "./streamThunkWrapper";
 import { updateFileSymbolsFromFiles } from "./updateFileSymbols";
@@ -94,6 +95,23 @@ export const streamResponseThunk = createAsyncThunk<
           }),
         );
 
+        // The wrapper's pre-stream save ran before this first user message
+        // existed; on a brand-new session it persisted nothing. Save again the
+        // moment the message lands so the session appears in the navigator and
+        // survives a restart during its first (possibly long broker) turn.
+        // Best effort: the end-of-turn save still retries persistence.
+        if (!getState().session.isInEdit) {
+          const earlySave = dispatch(
+            saveCurrentSession({
+              openNewSession: false,
+              generateTitle: false,
+              provisionalTitle: true,
+            }),
+          );
+          void earlySave.catch(() => undefined);
+          await earlySave.catch(() => undefined);
+        }
+
         unwrapResult(
           await dispatch(
             streamNormalInput({
@@ -111,9 +129,8 @@ export const streamResponseThunk = createAsyncThunk<
         );
       }),
     );
-    const { continueIfTrailingSteer } = await import(
-      "./continueIfTrailingSteer"
-    );
+    const { continueIfTrailingSteer } =
+      await import("./continueIfTrailingSteer");
     await dispatch(continueIfTrailingSteer());
   },
 );

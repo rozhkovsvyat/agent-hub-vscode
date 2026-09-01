@@ -170,6 +170,27 @@ export class HistoryManager {
   private assistantCount(s: Session) {
     return s.history.filter((item) => item.message.role === "assistant").length;
   }
+  /** Runtime message envelopes carry a GUI-minted id the ChatMessage union
+   * does not declare; read it structurally. */
+  private messageId(item: Session["history"][number] | undefined) {
+    return (item?.message as { id?: string } | undefined)?.id;
+  }
+  /** True when `incoming` appends new entries onto `stored`. Message ids
+   * carry the prefix check; an idless item cannot be verified and fails
+   * closed into the normal conflict path. Equal-length saves stay conflicts:
+   * identical history can still diverge on title/metadata. */
+  private isHistoryExtension(
+    stored: Session["history"],
+    incoming: Session["history"],
+  ) {
+    if (!Array.isArray(stored) || !Array.isArray(incoming)) return false;
+    if (incoming.length <= stored.length) return false;
+    for (let i = 0; i < stored.length; i++) {
+      const a = this.messageId(stored[i]);
+      if (!a || a !== this.messageId(incoming[i])) return false;
+    }
+    return true;
+  }
   private body(s: Session, revision: number, manual: boolean) {
     return { ...s, revision, titleManuallySet: manual || undefined };
   }
@@ -604,10 +625,17 @@ export class HistoryManager {
         );
         return next;
       }
-      if (Number(incoming.revision || 0) !== current.revision)
-        throw new HistoryConflictError(incoming.sessionId);
-      const old = this.fromRow(current),
-        manual = !!current.manual_title || !!incoming.titleManuallySet,
+      const old = this.fromRow(current);
+      if (Number(incoming.revision || 0) !== current.revision) {
+        // A lagging writer whose history is a continuation of the stored
+        // timeline is fast-forwarded instead of being deadlocked: a ghost
+        // panel or a mid-turn reload can bump the row's revision with an
+        // older snapshot, after which every honest save fails the CAS check
+        // and the session tail silently never persists again.
+        if (!this.isHistoryExtension(old.history, incoming.history))
+          throw new HistoryConflictError(incoming.sessionId);
+      }
+      const manual = !!current.manual_title || !!incoming.titleManuallySet,
         next = this.body(
           {
             ...old,

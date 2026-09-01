@@ -30,9 +30,15 @@ export const streamThunkWrapper = createAsyncThunk<
         // must appear in the journal immediately after the chat starts, and
         // the conversation must survive a window reload that lands mid-turn;
         // waiting for the full turn to finish leaves long broker runs
-        // invisible and unrecoverable.
+        // invisible and unrecoverable. provisionalTitle keeps the fallback
+        // title out of the live header so a later end-of-turn save can still
+        // upgrade a fresh session to its semantic title.
         await dispatch(
-          saveCurrentSession({ openNewSession: false, generateTitle: false }),
+          saveCurrentSession({
+            openNewSession: false,
+            generateTitle: false,
+            provisionalTitle: true,
+          }),
         );
       }
       await runStream();
@@ -47,6 +53,15 @@ export const streamThunkWrapper = createAsyncThunk<
       }
       return;
     } catch (e) {
+      // The partial turn is the user's work too. Persist it before any retry
+      // or error dialog so a reload cannot drop what already happened.
+      if (!getState().session.isInEdit) {
+        const rescueSave = dispatch(
+          saveCurrentSession({ openNewSession: false, generateTitle: false }),
+        );
+        void rescueSave.catch(() => undefined);
+        await rescueSave.catch(() => undefined);
+      }
       // Get the selected model from the state for error analysis
       const state = getState();
       const selectedModel = selectSelectedChatModel(state);

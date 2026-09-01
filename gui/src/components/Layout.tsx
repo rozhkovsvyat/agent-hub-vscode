@@ -76,6 +76,19 @@ const Layout = () => {
     location.pathname === ROUTES.HOME ||
     location.pathname === ROUTES.HOME_INDEX;
 
+  useEffect(() => {
+    // Best-effort tail persist when the window closes or reloads. Delivery is
+    // not guaranteed during teardown; the in-turn periodic save bounds the
+    // loss, this listener closes the remaining gap in the common case.
+    const persistOnExit = () => {
+      void dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      ).catch(() => undefined);
+    };
+    window.addEventListener("beforeunload", persistOnExit);
+    return () => window.removeEventListener("beforeunload", persistOnExit);
+  }, [dispatch]);
+
   useWebviewListener(
     "newSession",
     async () => {

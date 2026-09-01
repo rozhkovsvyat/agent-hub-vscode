@@ -317,6 +317,41 @@ describe("SQLite session history", () => {
       b.save(make(`b-${uuid()}`)),
     ]);
   });
+  test("lagging writer with an appended tail fast-forwards the revision deadlock", async () => {
+    const id = `ff-${uuid()}`;
+    const base = await history.save(make(id, "t", [user("m1", "one")]));
+    // A ghost panel bumps the revision with the same short timeline, leaving
+    // the honest panel stuck on a stale revision mid-conversation.
+    const ghost = await history.save({ ...base, title: "ghost" });
+    expect(ghost.revision).toBeGreaterThan(base.revision!);
+    const honest = await history.save({
+      ...base,
+      history: [...base.history, user("m2", "two"), user("m3", "three")],
+    });
+    expect(honest.revision).toBeGreaterThan(ghost.revision!);
+    expect(
+      (await history.load(id)).history.map(
+        (h) => (h.message as { id?: string }).id,
+      ),
+    ).toEqual(["m1", "m2", "m3"]);
+  });
+  test("stale divergent or shorter tails keep the explicit conflict", async () => {
+    const id = `ff-div-${uuid()}`;
+    const base = await history.save(make(id, "t", [user("m1", "one")]));
+    await history.save({
+      ...base,
+      history: [...base.history, user("x1", "other")],
+    });
+    await expect(
+      history.save({
+        ...base,
+        history: [...base.history, user("y1", "mine")],
+      }),
+    ).rejects.toBeInstanceOf(HistoryConflictError);
+    await expect(history.save({ ...base })).rejects.toBeInstanceOf(
+      HistoryConflictError,
+    );
+  });
   test("OS-process CAS gives one same-id winner and preserves different ids", async () => {
     const id = `os-${uuid()}`,
       base = await history.save(make(id));

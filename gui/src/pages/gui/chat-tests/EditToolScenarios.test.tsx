@@ -6,7 +6,7 @@ import { Chat } from "../Chat";
 import { waitFor } from "@testing-library/dom";
 import { act } from "@testing-library/react";
 import { ChatMessage } from "core";
-import { setInactive } from "../../../redux/slices/sessionSlice";
+import { setInactive, setMode } from "../../../redux/slices/sessionSlice";
 import {
   getElementByTestId,
   getElementByText,
@@ -110,6 +110,9 @@ test(
     );
 
     // Send the input that will respond with an edit tool call
+    // The default session mode is "broker", which streams through the native
+    // bridge. This scenario exercises the classic chat streaming path.
+    store.dispatch(setMode("chat"));
     await sendInputWithMockedResponse(
       ideMessenger,
       "Edit this file",
