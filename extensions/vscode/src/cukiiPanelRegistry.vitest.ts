@@ -70,12 +70,10 @@ describe("CukiiPanelRegistry", () => {
 
   it("keeps exact reserved manual titles in the sidebar", () => {
     const registry = new CukiiPanelRegistry<{ panel: { title: string } }>();
-    registry.add(
-      "cukii-title",
-      { panel: { title: CUKII_BLANK_PANEL_TITLE } },
-      "s1",
-    );
-    registry.updateTitle("cukii-title", CUKII_BLANK_PANEL_TITLE);
+    // A session manually renamed to the product name must survive verbatim,
+    // even though fresh blank tabs no longer carry that title.
+    registry.add("cukii-title", { panel: { title: "Cukii" } }, "s1");
+    registry.updateTitle("cukii-title", "Cukii");
     registry.add("new-title", { panel: { title: "New Session" } }, "s2");
     registry.updateTitle("new-title", "New Session");
 

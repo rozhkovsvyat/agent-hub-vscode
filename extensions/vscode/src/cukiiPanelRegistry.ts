@@ -1,7 +1,10 @@
 import type * as vscode from "vscode";
 import type { VsCodeWebviewProtocol } from "./webviewProtocol";
 
-export const CUKII_BLANK_PANEL_TITLE = "Cukii";
+// Must not read like a saved session title: a blank tab titled after the
+// product collided with real sessions users renamed to the same name, making
+// fresh tabs look like the previously opened session with lost history.
+export const CUKII_BLANK_PANEL_TITLE = "New Session";
 
 export type CukiiPanelEntry<TPanel> = {
   id: string;

@@ -266,13 +266,13 @@ describe("Cukii GUI contracts", () => {
       panelStart,
       css.indexOf("@media screen and (max-width: 300px)", panelStart),
     );
-    expect(panelContract).toContain("padding: 4px;");
+    expect(panelContract).toContain("padding: 6px 0 4px;");
     expect(panelContract).toContain(
       "background: var(--vscode-menu-background, #252526) !important;",
     );
-    expect(panelContract).toContain("min-height: 48px;");
+    expect(panelContract).toContain("min-height: 52px;");
     expect(panelContract).toContain("background: transparent !important;");
-    expect(panelContract).toContain("background: #0e639c !important;");
+    expect(panelContract).toContain("background: rgb(4, 57, 94) !important;");
     expect(panelContract).toContain("color: #ffffff !important;");
     expect(panelContract).toContain('html[data-cukii-panel-tone="light"]');
     expect(panelContract).toContain("#ffffff) !important;");
