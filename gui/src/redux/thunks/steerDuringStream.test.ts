@@ -142,6 +142,7 @@ describe("steerDuringStream", () => {
         messageId: expect.any(String),
         sessionId: sessionOf(store).id,
         content: "do it this way instead",
+        brokerModel: sessionOf(store).brokerModel,
       }),
     );
     const saves = request.mock.calls.filter(

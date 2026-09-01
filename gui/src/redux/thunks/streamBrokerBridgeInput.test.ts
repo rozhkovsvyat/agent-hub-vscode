@@ -26,6 +26,73 @@ function messageWithId<T extends ChatMessage>(
 }
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("keeps the newer run active when this bridge request is superseded", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      return {
+        cukiiBridgeDisposition: "superseded" as const,
+        sessionId: "superseded-session",
+        runId: "old-candidate",
+      };
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "superseded-session",
+        title: "Superseded",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: { role: "user", content: "older candidate" },
+            contextItems: [],
+          },
+        ],
+        mode: "broker",
+      }),
+    );
+
+    const result = await store.dispatch(streamBrokerBridgeInput());
+
+    expect(result.type).toBe("chat/streamBrokerBridgeInput/fulfilled");
+    expect(store.getState().session.isStreaming).toBe(true);
+    expect(store.getState().session.history.at(-1)?.promptLogs).toBeUndefined();
+    store.dispatch(setInactive());
+  });
+
+  it("rejects and settles activity when bridge replacement is blocked", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      return {
+        cukiiBridgeDisposition: "blocked" as const,
+        sessionId: "blocked-session",
+        runId: "blocked-candidate",
+      };
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "blocked-session",
+        title: "Blocked",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: { role: "user", content: "blocked candidate" },
+            contextItems: [],
+          },
+        ],
+        mode: "broker",
+      }),
+    );
+
+    const result = await store.dispatch(streamBrokerBridgeInput());
+
+    expect(result.type).toBe("chat/streamBrokerBridgeInput/rejected");
+    if (!("error" in result)) throw new Error("Expected rejected thunk");
+    expect(result.error.message).toContain("replacement is blocked");
+    expect(store.getState().session.isStreaming).toBe(false);
+    expect(store.getState().session.history.at(-1)?.promptLogs).toBeUndefined();
+  });
+
   it("keeps a queued follow-up pending until factual vendor activity, then persists read", async () => {
     const ideMessenger = new MockIdeMessenger();
     const request = vi.spyOn(ideMessenger, "request");

@@ -1,5 +1,6 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
+import type { CukiiBridgeStreamDisposition } from "core/protocol/ideWebview";
 import { renderChatMessage } from "core/util/messageContent";
 import {
   acceptToolCall,
@@ -35,8 +36,24 @@ type CukiiBridgeMessage = ChatMessage & {
 };
 
 type RaceResult<T> =
-  | { kind: "value"; value: IteratorResult<T, PromptLog | undefined> }
+  | {
+      kind: "value";
+      value: IteratorResult<
+        T,
+        PromptLog | CukiiBridgeStreamDisposition | undefined
+      >;
+    }
   | { kind: "cancelled" };
+
+function isBridgeStreamDisposition(
+  value: PromptLog | CukiiBridgeStreamDisposition,
+): value is CukiiBridgeStreamDisposition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "cukiiBridgeDisposition" in value
+  );
+}
 
 function isBridgeTerminalMessage(message: ChatMessage): boolean {
   return (
@@ -93,7 +110,12 @@ export function isSameTerminalError(
  * isStreaming — лоадер продолжал крутиться после остановки сессии.
  */
 function raceNextOrCancellation<T>(
-  nextPromise: Promise<IteratorResult<T, PromptLog | undefined>>,
+  nextPromise: Promise<
+    IteratorResult<
+      T,
+      PromptLog | CukiiBridgeStreamDisposition | undefined
+    >
+  >,
   getState: () => RootState,
 ): Promise<RaceResult<T>> {
   return Promise.race([
@@ -228,6 +250,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     let lastPeriodicSavedLen = historyLengthAtRunStart;
     const seenTerminalErrors = new Set<string>();
     let terminalSettled = false;
+    let superseded = false;
 
     const settleTerminal = () => {
       if (!terminalSettled && getState().session.id === sessionId) {
@@ -312,8 +335,21 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           }
           if (result.value.done) {
             completed = true;
-            if (result.value.value) {
-              dispatch(addPromptCompletionPair([result.value.value]));
+            const finalValue = result.value.value;
+            if (finalValue && isBridgeStreamDisposition(finalValue)) {
+              if (finalValue.cukiiBridgeDisposition === "superseded") {
+                // A newer submit owns the shared session activity indicator.
+                // This stale thunk must not turn it off or record a fake
+                // prompt log for a vendor process that never started.
+                superseded = true;
+                break;
+              }
+              throw new Error(
+                `Native bridge run replacement is blocked for session ${finalValue.sessionId}.`,
+              );
+            }
+            if (finalValue) {
+              dispatch(addPromptCompletionPair([finalValue]));
             }
             break;
           }
@@ -392,7 +428,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         if (!completed) await gen.return(undefined);
       }
     } finally {
-      settleTerminal();
+      if (!superseded) settleTerminal();
     }
   },
 );

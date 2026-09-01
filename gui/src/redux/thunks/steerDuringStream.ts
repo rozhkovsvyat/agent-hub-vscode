@@ -82,6 +82,7 @@ export const steerDuringStream = createAsyncThunk<
           messageId,
           sessionId,
           content,
+          brokerModel: currentSession.brokerModel,
         },
       );
       const status =
