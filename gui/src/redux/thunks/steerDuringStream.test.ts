@@ -160,6 +160,44 @@ describe("steerDuringStream", () => {
     expect(steer?.steerStatus).not.toBe("cancelled");
   });
 
+  it("redelivers through a fresh turn when the live run disappears during steering", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["cukii/steerDuringStream"] = vi.fn(
+      async () => {
+        throw new Error("active bridge run disappeared");
+      },
+    );
+    const redelivered: string[] = [];
+    mockIdeMessenger.streamRequest = vi.fn(async function* (
+      _messageType,
+      data: any,
+    ) {
+      redelivered.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "thinking",
+          content: "Vendor accepted the follow-up",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof mockIdeMessenger.streamRequest;
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    await vi.waitFor(() => expect(redelivered).toHaveLength(1));
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
+    ).toBe(true);
+    const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(redelivered).toEqual([steer?.message.id]);
+    expect(steer?.steerStatus).toBe("read");
+    expect(steer?.messageReceipt?.status).toBe("read");
+  });
+
   it("does not interrupt when the vendor accepts the steer live", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     // Default mock returns status "delivered" (Claude-style live injection).

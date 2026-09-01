@@ -77,8 +77,9 @@ export const steerDuringStream = createAsyncThunk<
       dispatch(setSteerStatus({ messageId, status }));
     } catch {
       // The persisted bubble stays retryable if the live bridge disappeared.
-      // A vanished bridge is not a running turn, so there is nothing to
-      // interrupt here; the durable outbox replays it on the next turn.
+      // Treat transport loss like an explicit deferred receipt: settle any
+      // stale GUI run and drain the durable outbox through a fresh turn.
+      deferredByVendor = true;
       dispatch(setSteerStatus({ messageId, status: "deferred" }));
     }
     unwrapResult(
