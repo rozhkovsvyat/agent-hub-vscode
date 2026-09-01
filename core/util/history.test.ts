@@ -108,6 +108,30 @@ describe("SQLite session history", () => {
       revision: automatic.revision,
     });
   });
+  test("sequential manual renameExisting applies each requested title", async () => {
+    const id = `rename-seq-${uuid()}`;
+    const initial = await history.save(make(id, "A", [user("u", "x")]));
+    const first = await history.renameExisting(id, "B");
+    expect(first?.title).toBe("B");
+    expect(first?.titleManuallySet).toBe(true);
+    expect(first!.revision!).toBeGreaterThan(initial.revision!);
+    const second = await history.renameExisting(id, "C");
+    expect(second?.title).toBe("C");
+    expect(second?.titleManuallySet).toBe(true);
+    expect(second!.revision!).toBeGreaterThan(first!.revision!);
+    const loaded = await history.load(id);
+    expect(loaded).toMatchObject({
+      title: "C",
+      titleManuallySet: true,
+      revision: second!.revision,
+    });
+    expect(
+      (await history.list()).find((item) => item.sessionId === id),
+    ).toMatchObject({
+      title: "C",
+      revision: second!.revision,
+    });
+  });
   test("concurrent manual renames retry at the CAS boundary without losing either commit", async () => {
     const id = `rename-race-${uuid()}`;
     const initial = await history.save(make(id, "A", [user("u", "x")]));
@@ -115,9 +139,14 @@ describe("SQLite session history", () => {
       history.renameExisting(id, "B"),
       history.renameExisting(id, "C"),
     ]);
+    expect(one?.title).toBe("B");
+    expect(two?.title).toBe("C");
     expect(one?.revision).not.toBe(two?.revision);
     const final = await history.load(id);
     expect(["B", "C"]).toContain(final.title);
+    const winner = (one!.revision! > two!.revision! ? one : two)!;
+    expect(final.title).toBe(winner.title);
+    expect(final.revision).toBe(winner.revision);
     expect(final.revision).toBe(initial.revision! + 2);
     expect(final.titleManuallySet).toBe(true);
   });

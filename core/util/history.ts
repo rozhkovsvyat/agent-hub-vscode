@@ -561,7 +561,7 @@ export class HistoryManager {
     ).get<Row>("SELECT * FROM sessions WHERE id=?", id);
     return row ? this.fromRow(row) : this.empty(id);
   }
-  async save(incoming: Session) {
+  async save(incoming: Session, opts?: { authoritativeTitle?: boolean }) {
     this.validId(incoming.sessionId);
     const db = await this.db();
     await this.options.beforeMutation?.();
@@ -612,7 +612,10 @@ export class HistoryManager {
           {
             ...old,
             ...incoming,
-            title: current.manual_title ? current.title : incoming.title,
+            title:
+              current.manual_title && !opts?.authoritativeTitle
+                ? current.title
+                : incoming.title,
             history: incoming.history,
           },
           current.revision + 1,
@@ -646,7 +649,10 @@ export class HistoryManager {
       if (current.title === NEW_SESSION_TITLE && !current.history.length)
         return undefined;
       try {
-        return await this.save({ ...current, title, titleManuallySet: true });
+        return await this.save(
+          { ...current, title, titleManuallySet: true },
+          { authoritativeTitle: true },
+        );
       } catch (error) {
         if (error instanceof HistoryConflictError && attempt < 3) continue;
         throw error;
