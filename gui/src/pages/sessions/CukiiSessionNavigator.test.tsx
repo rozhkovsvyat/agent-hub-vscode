@@ -5,6 +5,7 @@ import { renderWithProviders } from "../../util/test/render";
 import CukiiSessionNavigator, {
   formatSessionAge,
 } from "./CukiiSessionNavigator";
+import type { SessionGroupState } from "./sessionGroups";
 
 describe("CukiiSessionNavigator Claude parity", () => {
   beforeEach(() => {
@@ -707,5 +708,192 @@ describe("CukiiSessionNavigator Claude parity", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CukiiSessionNavigator cross-window group sync", () => {
+  it("retries loading groups until core answers and never saves before that", async () => {
+    // Remote-SSH windows start with an empty per-window cache; the mount
+    // attempt can race core boot and must be retried by the poll.
+    localStorage.removeItem("cukii.session-groups.v1");
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "ssh-session",
+        title: "SSH session",
+        dateCreated: "2026-08-31T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    const saveSpy = vi.fn().mockResolvedValue({ ok: true });
+    messenger.responseHandlers["cukii/sessionGroupsSave"] = saveSpy;
+    let coreReady = false;
+    messenger.responseHandlers["cukii/sessionGroupsLoad"] = vi.fn(async () => {
+      if (!coreReady) {
+        throw new Error("core is still booting");
+      }
+      return {
+        groups: [{ id: "work", name: "Работа" }],
+        assignments: { "ssh-session": "work" },
+      };
+    });
+
+    vi.useFakeTimers();
+    try {
+      await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.queryByRole("button", { name: "Работа 1" })).toBeNull();
+      // No synced copy yet: an empty cache must not overwrite the shared one.
+      expect(saveSpy).not.toHaveBeenCalled();
+
+      coreReady = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.getByRole("button", { name: "Работа 1" }),
+      ).toBeInTheDocument();
+      expect(screen.getByTitle("SSH session")).toBeInTheDocument();
+      // Loading the shared copy must not echo-save it back.
+      expect(saveSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("converges with group edits made in another window within one poll", async () => {
+    localStorage.removeItem("cukii.session-groups.v1");
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "ssh-session",
+        title: "SSH session",
+        dateCreated: "2026-08-31T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    const saveSpy = vi.fn().mockResolvedValue({ ok: true });
+    messenger.responseHandlers["cukii/sessionGroupsSave"] = saveSpy;
+    let core: SessionGroupState = {
+      groups: [{ id: "work", name: "Работа" }],
+      assignments: { "ssh-session": "work" },
+    };
+    messenger.responseHandlers["cukii/sessionGroupsLoad"] = vi.fn(
+      async () => core,
+    );
+
+    vi.useFakeTimers();
+    try {
+      await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(
+        screen.getByRole("button", { name: "Работа 1" }),
+      ).toBeInTheDocument();
+
+      // Another window on the same host renames the group; the shared
+      // journal-side copy is the only notification channel.
+      core = {
+        groups: [{ id: "work", name: "Проекты" }],
+        assignments: { "ssh-session": "work" },
+      };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.getByRole("button", { name: "Проекты 1" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Работа 1" })).toBeNull();
+      expect(saveSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a local edit while its save is in flight against a stale poll", async () => {
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "plugin", name: "Плагин" }],
+        assignments: { session: "plugin" },
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "Grouped session",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    let core: SessionGroupState = {
+      groups: [{ id: "plugin", name: "Плагин" }],
+      assignments: { session: "plugin" },
+    };
+    messenger.responseHandlers["cukii/sessionGroupsLoad"] = vi.fn(
+      async () => core,
+    );
+    let resolveSave: ((value: { ok: boolean }) => void) | undefined;
+    const saveSpy = vi.fn(
+      (payload) =>
+        new Promise<{ ok: boolean }>((resolve) => {
+          resolveSave = (value) => {
+            core = payload;
+            resolve(value);
+          };
+        }),
+    );
+    messenger.responseHandlers["cukii/sessionGroupsSave"] = saveSpy;
+
+    vi.useFakeTimers();
+    try {
+      await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const header = screen.getByRole("button", { name: "Плагин 1" });
+
+      fireEvent.contextMenu(header, { clientX: 120, clientY: 160 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename group" }));
+      const input = screen.getByLabelText("Rename group Плагин");
+      fireEvent.change(input, { target: { value: "Проекты" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(
+        screen.getByRole("button", { name: "Проекты 1" }),
+      ).toBeInTheDocument();
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // The next poll still reads the pre-edit copy; it must not revert the
+      // edit whose save has not landed yet.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.getByRole("button", { name: "Проекты 1" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Плагин 1" })).toBeNull();
+
+      resolveSave?.({ ok: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(core.groups).toEqual([{ id: "plugin", name: "Проекты" }]);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
