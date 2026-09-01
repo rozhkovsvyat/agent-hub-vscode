@@ -23,6 +23,7 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
+import { hasImageAttachment, materializeBridgeImages } from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
 import {
   closeFollowers,
@@ -355,6 +356,7 @@ function buildPrompt(
   cwd: string,
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode,
+  hasImages: boolean,
   steerInterrupt?: boolean,
 ): string {
   const subagent =
@@ -410,6 +412,11 @@ function buildPrompt(
     ...(steerInterrupt
       ? [
           "The latest user message was injected while you were mid-task; the previous turn was interrupted so you would see it promptly. Address this newest message first, then resume the task you were working on, taking it into account. Do not discard your prior work unless the new message changes the task.",
+        ]
+      : []),
+    ...(hasImages && !isClaudeNativeModel(brokerModel)
+      ? [
+          "User-attached images appear in the transcript as @<absolute path> references. If an image did not arrive inline in your view, read the file at that path with your file-reading tool before answering.",
         ]
       : []),
     "",
@@ -1254,12 +1261,13 @@ async function* streamBridgeChatWithSteer(
     args.thinkingEnabled,
   );
   const prompt = buildPrompt(
-    args.messages,
+    materializeBridgeImages(args.messages),
     args.brokerModel,
     args.brokerSubagent,
     cwd,
     controls,
     args.brokerPermissionMode,
+    hasImageAttachment(args.messages),
     args.steerInterrupt,
   );
   const route = routeForModel(
