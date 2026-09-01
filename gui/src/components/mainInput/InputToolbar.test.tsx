@@ -502,6 +502,11 @@ describe("Cukii Claude-parity input toolbar", () => {
     const panel = menu.parentElement;
     expect(panel).toHaveClass("cukii-command-menu");
     expect(panel?.className).toContain("absolute");
+    // The command menu's left edge must sit flush with the attach menu's edge:
+    // the attach panel anchors left-0, while the command launcher sits one
+    // button-width (28px) to the right, so the panel shifts back by exactly
+    // that amount. A different value reintroduces the pixel drift vs the "+".
+    expect(panel?.className).toContain("left-[-28px]");
     expect(panel?.className).not.toContain("w-[calc(100vw-38px)]");
     expect(
       menu.querySelector('[data-testid="broker-switch-model"] span'),

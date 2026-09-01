@@ -165,9 +165,7 @@ function InputToolbar(props: InputToolbarProps) {
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const restoredPanelDraft = useRef(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const selectedVendor = brokerVendorForModel(
-    brokerModel ?? "qwen-3-8-max",
-  );
+  const selectedVendor = brokerVendorForModel(brokerModel ?? "qwen-3-8-max");
   const [permissionCapabilities, setPermissionCapabilities] = useState<{
     vendor: BrokerVendorId;
     supportedModes: CukiiPermissionMode[];
@@ -463,7 +461,7 @@ function InputToolbar(props: InputToolbarProps) {
               >
                 <CommandControlIcon />
               </PopoverButton>
-              <PopoverPanel className="cukii-command-menu cukii-menu-surface absolute bottom-full left-[-34px] z-[1000] mb-2 max-h-[min(62vh,520px)] overflow-y-auto overflow-x-hidden rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl">
+              <PopoverPanel className="cukii-command-menu cukii-menu-surface absolute bottom-full left-[-28px] z-[1000] mb-2 max-h-[min(62vh,520px)] overflow-y-auto overflow-x-hidden rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl">
                 {({ close }) => (
                   <div
                     ref={commandMenuRef}
