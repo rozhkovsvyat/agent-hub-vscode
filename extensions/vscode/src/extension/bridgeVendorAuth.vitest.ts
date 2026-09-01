@@ -26,6 +26,7 @@ import {
   managedKimiProfileIdentity,
   kimiCredentialFingerprint,
   clearBrokerVendorAccountCache,
+  extractAuthFlowAssist,
   launchKimiWeb,
   stopEphemeralKimiWeb,
   probeVendorExecutable,
@@ -33,6 +34,7 @@ import {
   sortVendorAccountsByLabel,
   storedCodexAccountLabel,
   vendorAuthTerminalCommand,
+  vendorAuthTransitionReached,
 } from "./bridgeVendorAuth";
 
 describe("Cukii vendor CLI accounts", () => {
@@ -1832,5 +1834,42 @@ describe("vendor account ordering", () => {
       "OpenAI",
       "xAI",
     ]);
+  });
+});
+
+describe("vendor auth flow assist", () => {
+  it("detects the transition expected by each action", () => {
+    expect(vendorAuthTransitionReached("login", true)).toBe(true);
+    expect(vendorAuthTransitionReached("login", false)).toBe(false);
+    expect(vendorAuthTransitionReached("logout", false)).toBe(true);
+    expect(vendorAuthTransitionReached("logout", true)).toBe(false);
+  });
+
+  it("extracts the first https URL from device-auth output", () => {
+    const assist = extractAuthFlowAssist(
+      "Open https://auth.openai.com/device?user_code=ABCD-EFGH in a browser\n" +
+        "or visit https://example.com/fallback later",
+    );
+    expect(assist.url).toBe(
+      "https://auth.openai.com/device?user_code=ABCD-EFGH",
+    );
+  });
+
+  it("accepts a one-time code only on a line explicitly about a code", () => {
+    const assist = extractAuthFlowAssist(
+      "Then enter the code: ABCD-EFGH\nYour project code is PROJ-1234",
+    );
+    expect(assist.code).toBe("ABCD-EFGH");
+  });
+
+  it("does not take a code from unrelated dashed tokens", () => {
+    const assist = extractAuthFlowAssist(
+      "Logged out from session 2026-09-01 successfully",
+    );
+    expect(assist.code).toBeUndefined();
+  });
+
+  it("returns nothing for output without URL or code", () => {
+    expect(extractAuthFlowAssist("You are logged in.")).toEqual({});
   });
 });

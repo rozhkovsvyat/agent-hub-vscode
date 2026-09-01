@@ -68,8 +68,10 @@ import {
 import { runAlibabaAuthAction } from "./alibabaTokenPlan";
 import {
   clearBrokerVendorAccountCache,
+  extractAuthFlowAssist,
   listBrokerVendorAccounts,
   vendorAuthTerminalCommand,
+  watchVendorAuthTransition,
 } from "./bridgeVendorAuth";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 
@@ -165,6 +167,100 @@ export class VsCodeMessenger {
     if (!brokers) return;
     brokers.delete(broker);
     if (brokers.size === 0) this.claudePermissionBrokers.delete(protocol);
+  }
+
+  private async runAuthTerminalFlow(
+    terminal: vscode.Terminal,
+    spec: { name: string; command: string; followup?: string },
+    vendor: BrokerVendorId,
+    action: BrokerVendorAuthAction,
+  ): Promise<{
+    outcome: "transition" | "terminal-closed" | "cap" | "timeout";
+    assisted: string[];
+  }> {
+    const assisted: string[] = [];
+    // Device-auth CLIs print a URL/code instead of opening a browser. Shell
+    // integration is the only supported way to read terminal output; without
+    // it the flow still works, just without the browser/clipboard assist.
+    const watchOutput = (chunk: string) => {
+      if (action !== "login") return;
+      const assist = extractAuthFlowAssist(chunk);
+      if (assist.url && !assisted.includes("url")) {
+        assisted.push("url");
+        void vscode.env.openExternal(vscode.Uri.parse(assist.url));
+      }
+      if (assist.code && !assisted.includes("code")) {
+        assisted.push("code");
+        void vscode.env.clipboard.writeText(assist.code);
+      }
+    };
+    // Shell integration shipped in VS Code 1.93; the pinned 1.70 typings do
+    // not declare it, so feature-detect a minimal shape at runtime instead.
+    type TerminalShellIntegrationReader = {
+      executeCommand: (command: string) => {
+        read: () => AsyncIterable<string>;
+      };
+    };
+    const shellIntegration = (
+      terminal as vscode.Terminal & {
+        shellIntegration?: TerminalShellIntegrationReader;
+      }
+    ).shellIntegration;
+    if (shellIntegration) {
+      const runThroughShell = (command: string) => {
+        const stream = shellIntegration.executeCommand(command).read();
+        void (async () => {
+          try {
+            for await (const chunk of stream) watchOutput(chunk);
+          } catch {
+            // Reading terminal output is best-effort assist only.
+          }
+        })();
+      };
+      runThroughShell(spec.command);
+      if (spec.followup) {
+        const followup = spec.followup;
+        setTimeout(() => runThroughShell(followup), 1_500);
+      }
+    } else {
+      terminal.sendText(spec.command, true);
+      if (spec.followup) {
+        const followup = spec.followup;
+        setTimeout(() => terminal.sendText(followup, true), 1_500);
+      }
+    }
+
+    const closed = new Promise<"terminal-closed">((resolve) => {
+      const subscription = vscode.window.onDidCloseTerminal(
+        (closedTerminal) => {
+          if (closedTerminal === terminal) {
+            subscription.dispose();
+            resolve("terminal-closed");
+          }
+        },
+      );
+    });
+    const cap = new Promise<"cap">((resolve) =>
+      setTimeout(() => resolve("cap"), 300_000),
+    );
+    const controller = new AbortController();
+    try {
+      return {
+        outcome:
+          vendor !== "deepseek" && (action === "login" || action === "logout")
+            ? await Promise.race([
+                closed,
+                cap,
+                watchVendorAuthTransition(vendor, action, {
+                  signal: controller.signal,
+                }),
+              ])
+            : await Promise.race([closed, cap]),
+        assisted,
+      };
+    } finally {
+      controller.abort();
+    }
   }
 
   onWebview<T extends keyof FromWebviewProtocol>(
@@ -706,16 +802,37 @@ export class VsCodeMessenger {
       }
       const terminal = vscode.window.createTerminal({ name: spec.name });
       terminal.show();
-      terminal.sendText(spec.command, true);
-      if (spec.followup) {
-        setTimeout(() => terminal.sendText(spec.followup!, true), 1_500);
+      // Stay pending until the native flow completes so the accounts button
+      // keeps its loader instead of snapping back to the pre-action state.
+      const flow = await this.runAuthTerminalFlow(
+        terminal,
+        spec,
+        vendor,
+        action,
+      );
+      clearBrokerVendorAccountCache();
+      const notes: string[] = [];
+      if (flow.assisted.includes("url")) {
+        notes.push("The sign-in page opened in your browser.");
       }
+      if (flow.assisted.includes("code")) {
+        notes.push("The one-time code was copied to the clipboard.");
+      }
+      const summary =
+        action === "install"
+          ? flow.outcome === "terminal-closed"
+            ? "CLI installation finished in the integrated terminal."
+            : "Latest CLI installation is running in the integrated terminal."
+          : flow.outcome === "transition"
+            ? action === "login"
+              ? "Signed in; the account status was refreshed."
+              : "Signed out; the account status was refreshed."
+            : flow.outcome === "terminal-closed"
+              ? "Authentication flow finished in the integrated terminal."
+              : "Authentication flow is still running in the integrated terminal.";
       return {
         opened: true,
-        message:
-          action === "install"
-            ? "Latest CLI installation opened in the integrated terminal."
-            : "Authentication flow opened in the integrated terminal.",
+        message: [...notes, summary].join(" "),
       };
     });
     this.onWebview("cukii/respondClaudePermission", (msg) => {

@@ -1684,6 +1684,81 @@ async function probeVendor(
   return probeVendorExecutable(vendor, executable);
 }
 
+export async function probeBrokerVendorAccount(
+  vendor: VendorWithCli,
+): Promise<BrokerVendorAuthStatus> {
+  return probeVendor(vendor);
+}
+
+/**
+ * Polls the vendor's own status probe until the native flow reaches the
+ * outcome the requested action produces. The terminal keeps being the
+ * authority for the user; this only detects completion so the accounts
+ * button can stop showing the loader without a manual refresh.
+ */
+export async function watchVendorAuthTransition(
+  vendor: VendorWithCli,
+  action: "login" | "logout",
+  options: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<"transition" | "timeout"> {
+  const intervalMs = options.intervalMs ?? 2_500;
+  const timeoutMs = options.timeoutMs ?? 240_000;
+  const startedAt = Date.now();
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if (options.signal?.aborted || Date.now() - startedAt >= timeoutMs) {
+      return "timeout";
+    }
+    let status: BrokerVendorAuthStatus;
+    try {
+      status = await probeVendor(vendor);
+    } catch {
+      continue;
+    }
+    if (vendorAuthTransitionReached(action, status.authenticated === true)) {
+      return "transition";
+    }
+  }
+}
+
+export function vendorAuthTransitionReached(
+  action: "login" | "logout",
+  authenticated: boolean,
+): boolean {
+  return action === "login" ? authenticated : !authenticated;
+}
+
+const AUTH_FLOW_URL_PATTERN = /https:\/\/[^\s"'<>()\]]+/i;
+const AUTH_FLOW_CODE_LINE_PATTERN = /\bcode\b/i;
+const AUTH_FLOW_CODE_PATTERN = /\b[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10}){1,3}\b/;
+
+/**
+ * Device-auth CLIs print a URL and a one-time code instead of opening a
+ * browser themselves. Both are untrusted process output: only the first
+ * https URL is taken, and a code is accepted only on a line that is
+ * explicitly about a code.
+ */
+export function extractAuthFlowAssist(text: string): {
+  url?: string;
+  code?: string;
+} {
+  const url = text.match(AUTH_FLOW_URL_PATTERN)?.[0];
+  let code: string | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    if (!AUTH_FLOW_CODE_LINE_PATTERN.test(line)) continue;
+    const match = line.match(AUTH_FLOW_CODE_PATTERN);
+    if (match) {
+      code = match[0];
+      break;
+    }
+  }
+  return { ...(url ? { url } : {}), ...(code ? { code } : {}) };
+}
+
 // No state is retained between requests: after a terminal login/logout every
 // modal refresh launches fresh native probes. Kept explicit for the action path.
 export function clearBrokerVendorAccountCache(): void {

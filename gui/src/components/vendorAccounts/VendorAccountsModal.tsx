@@ -5,6 +5,7 @@ import type {
 } from "core/protocol/ideWebview";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { CukiiCrumbs } from "../cukii/CukiiCrumbs";
 
 interface VendorAccountsModalProps {
   onClose: () => void;
@@ -192,15 +193,22 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                 <span className="flex shrink-0 items-center">
                   {account.actions.map((action) => {
                     const key = `${account.id}:${action}`;
+                    const isBusy = busy === key;
                     return (
                       <button
                         key={action}
                         type="button"
                         disabled={busy !== undefined}
                         className="cukii-vendor-action"
+                        aria-busy={isBusy}
+                        title={
+                          isBusy
+                            ? "Waiting for the authentication flow to finish"
+                            : undefined
+                        }
                         onClick={() => void runAction(account, action)}
                       >
-                        {busy === key ? "Opening…" : ACTION_LABELS[action]}
+                        {isBusy ? <CukiiCrumbs /> : ACTION_LABELS[action]}
                       </button>
                     );
                   })}
