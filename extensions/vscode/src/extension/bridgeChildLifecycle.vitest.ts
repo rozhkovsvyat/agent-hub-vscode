@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
@@ -42,6 +43,7 @@ type TreePids = {
 
 async function readTreePids(child: ChildProcess): Promise<TreePids> {
   let buffer = "";
+  let stderr = "";
   return new Promise<TreePids>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`grandchild pid not reported; stdout=${buffer}`));
@@ -53,50 +55,71 @@ async function readTreePids(child: ChildProcess): Promise<TreePids> {
       clearTimeout(timer);
       resolve(JSON.parse(match[1]) as TreePids);
     });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(error);
     });
     child.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`root exited before pid (${code}); stdout=${buffer}`));
+      reject(
+        new Error(
+          `root exited before pid (${code}); stdout=${buffer}; stderr=${stderr}`,
+        ),
+      );
     });
   });
 }
 
 /** cmd.exe → node parent → node grandchild (matches Windows bridge shape). */
 function spawnWindowsMultilevelTree(): ChildProcess {
-  const parentScript = [
-    "const {spawn}=require('node:child_process')",
-    "const g=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true})",
-    "g.once('spawn',()=>process.stdout.write(JSON.stringify({parentPid:process.pid,grandchildPid:g.pid})+'\\n'))",
-    "g.once('error',e=>{process.stderr.write(String(e));process.exitCode=1})",
-    "setInterval(()=>{},1000)",
-  ].join(";");
-  const command = `"${process.execPath}" -e "${parentScript}"`;
+  const launcherPath = path.join(__dirname, "bridgeChildTreeFixture.cmd");
   return spawn(
     process.env.ComSpec ?? "cmd.exe",
-    ["/d", "/s", "/c", command],
+    ["/d", "/c", launcherPath],
     {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      env: { ...process.env, CUKII_TEST_NODE_PATH: process.execPath },
     },
   );
+}
+
+async function waitForRootExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    child.once("exit", () => resolve());
+    child.once("error", reject);
+  });
 }
 
 async function taskkillTree(
   pid: number,
   timeoutMs = 10_000,
-): Promise<number | null> {
-  return new Promise<number | null>((resolve, reject) => {
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
     const killer = spawn(
       "C:\\Windows\\System32\\taskkill.exe",
       ["/pid", String(pid), "/T", "/F"],
-      { windowsHide: true, stdio: "ignore" },
+      { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
     );
+    let stdout = "";
+    let stderr = "";
+    killer.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    killer.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
     const timer = setTimeout(() => {
       killer.kill();
-      reject(new Error(`taskkill timed out for pid ${pid}`));
+      reject(
+        new Error(
+          `taskkill timed out for pid ${pid}; stdout=${JSON.stringify(stdout)}; stderr=${JSON.stringify(stderr)}`,
+        ),
+      );
     }, timeoutMs);
     killer.once("error", (error) => {
       clearTimeout(timer);
@@ -104,7 +127,7 @@ async function taskkillTree(
     });
     killer.once("close", (code) => {
       clearTimeout(timer);
-      resolve(code);
+      resolve({ code, stdout, stderr });
     });
   });
 }
@@ -220,15 +243,15 @@ describe("terminateBridgeChild", () => {
         expect(isPidAlive(pids.parentPid)).toBe(true);
         expect(isPidAlive(pids.grandchildPid)).toBe(true);
 
-        const rootClosed = new Promise<void>((resolve) =>
-          root.once("close", () => resolve()),
-        );
         root.kill();
-        await rootClosed;
+        // Root-only kill orphans the Node descendants. `close` cannot arrive
+        // yet because they retain cmd.exe's stdout handle; `exit` proves only
+        // the root process itself is gone, which is the old broken ordering.
+        await waitForRootExit(root);
 
-        const taskkillExitCode = await taskkillTree(rootPid!);
+        const taskkillReceipt = await taskkillTree(rootPid!);
         // Old ordering: root is already dead, so /T cannot walk the tree.
-        expect(taskkillExitCode).not.toBe(0);
+        expect(taskkillReceipt.code, JSON.stringify(taskkillReceipt)).not.toBe(0);
         expect(isPidAlive(pids.parentPid)).toBe(true);
         expect(isPidAlive(pids.grandchildPid)).toBe(true);
       } finally {
