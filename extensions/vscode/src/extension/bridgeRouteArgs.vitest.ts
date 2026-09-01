@@ -821,4 +821,34 @@ describe("native bridge argv", () => {
       ).toThrow("Coming soon");
     }
   });
+
+  it("maps a steer read receipt to a private transport frame, never visible text", () => {
+    expect(
+      toChatMessages({ kind: "steerRead", messageId: "follow-up" }),
+    ).toEqual([
+      { role: "thinking", content: "", cukiiSteerReadMessageId: "follow-up" },
+    ]);
+  });
+
+  it("acknowledges a redelivered follow-up only after the prompt handoff", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    const handoffAt = source.indexOf("child.stdin.write(");
+    const ackAt = source.indexOf(
+      'queue.push({ kind: "steerRead", messageId: args.queuedFollowUpMessageId });',
+    );
+    const parserAt = source.indexOf(
+      "const parser = new BridgeEventParser(route.format);",
+    );
+    expect(handoffAt).toBeGreaterThan(-1);
+    expect(ackAt).toBeGreaterThan(handoffAt);
+    expect(parserAt).toBeGreaterThan(ackAt);
+    // The ack must stay gated so a cancelled run or an already-read receipt
+    // can never produce a second checkmark on its own.
+    const ackBlock = source.slice(ackAt - 400, ackAt);
+    expect(ackBlock).toContain("!queuedFollowUpRead");
+    expect(ackBlock).toContain("!cancelled");
+  });
 });

@@ -1433,6 +1433,15 @@ async function* streamBridgeChatWithSteer(
     }
   }
 
+  // A redelivered follow-up is physically inside the prompt handed to the
+  // child above (stdin or prompt file). Acknowledge it now: waiting for the
+  // vendor's first stdout leaves the bubble at one checkmark through the
+  // whole kill + cold-start gap, which reads as "the message was ignored".
+  if (args.queuedFollowUpMessageId && !queuedFollowUpRead && !cancelled) {
+    queuedFollowUpRead = true;
+    queue.push({ kind: "steerRead", messageId: args.queuedFollowUpMessageId });
+  }
+
   const parser = new BridgeEventParser(route.format);
   const toolNamesById = new Map<string, string>();
   const followers: NestedWorkerFollower[] = [];
