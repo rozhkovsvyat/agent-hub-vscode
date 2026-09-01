@@ -35,6 +35,7 @@ vi.mock("./permissionCapabilities", () => ({
 
 import {
   attachClaudePermissionTransport,
+  claudeInitialContent,
   claudeStreamingInput,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
@@ -399,6 +400,40 @@ describe("native bridge argv", () => {
         { type: "imageUrl", imageUrl: { url: "file:///D:/image.png" } },
       ]),
     ).toThrow(/only data-URL image attachments/i);
+  });
+
+  it("re-attaches the current turn's data-URL images to the Claude cold start", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "earlier question" },
+      { role: "assistant", content: "earlier answer" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look at this" },
+          {
+            type: "imageUrl",
+            imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+          },
+          { type: "imageUrl", imageUrl: { url: "https://example.com/x.png" } },
+        ],
+      },
+    ];
+
+    const content = claudeInitialContent("transcript prompt", messages);
+    // The cold-start envelope must stay writable: remote URLs remain
+    // materialized paths in the transcript text, never native blocks.
+    expect(() => claudeStreamingInput(content)).not.toThrow();
+    expect(JSON.parse(claudeStreamingInput(content))).toMatchObject({
+      message: {
+        content: [
+          { type: "text", text: "transcript prompt" },
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png" },
+          },
+        ],
+      },
+    });
   });
 
   it("adds the real Claude MCP permission transport without leaking its token", async () => {

@@ -183,4 +183,33 @@ describe("BridgeSteeringController", () => {
     await expect(receipt).resolves.toMatchObject({ status: "deferred" });
     finish(true);
   });
+
+  it("lets echo-less vendors retire the ledger on the accepted stdin write", async () => {
+    const writes: string[] = [];
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(async (message) => {
+      writes.push(String(message.content));
+      return true;
+    });
+    const first = controller.deliver({
+      messageId: "first",
+      sessionId: "session-1",
+      content: "same text",
+    });
+    await expect(first).resolves.toMatchObject({ status: "delivered" });
+
+    expect(controller.acknowledgeWritten("unknown")).toBe(false);
+    expect(controller.acknowledgeWritten("first")).toBe(true);
+    // The write already consumed the envelope: a later identical stdout line
+    // is ordinary transcript text, never a second read receipt.
+    expect(controller.consumeVendorEcho("same text")).toBeUndefined();
+
+    const second = controller.deliver({
+      messageId: "second",
+      sessionId: "session-1",
+      content: "same text",
+    });
+    await expect(second).resolves.toMatchObject({ status: "delivered" });
+    expect(writes).toEqual(["same text", "same text"]);
+  });
 });

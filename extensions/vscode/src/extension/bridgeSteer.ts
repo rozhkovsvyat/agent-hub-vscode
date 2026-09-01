@@ -90,6 +90,23 @@ export class BridgeSteeringController {
     return messageId;
   }
 
+  /**
+   * Claude's streaming transport consumes stdin user envelopes without ever
+   * echoing them back on stdout, so the echo-based read receipt would leave
+   * every live steer at one checkmark forever. A successful stdin write is
+   * that vendor's definitive acceptance: retire the ledger entry so the
+   * adapter can paint the read receipt, and unblock equal-text follow-ups.
+   */
+  acknowledgeWritten(messageId: string): boolean {
+    const index = this.awaitingVendorEcho.findIndex(
+      (message) => message.messageId === messageId,
+    );
+    if (index < 0) return false;
+    this.awaitingVendorEcho.splice(index, 1);
+    void this.flush();
+    return true;
+  }
+
   private async flush(): Promise<void> {
     if (this.flushing) return;
     const writer = this.writer;

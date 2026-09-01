@@ -551,6 +551,38 @@ export function claudeStreamingInput(content: MessageContent): string {
   })}\n`;
 }
 
+/**
+ * The cold-start prompt is a single text blob, but Claude's streaming input
+ * accepts native image blocks. Re-attach the current turn's data-URL images
+ * so the vendor sees them with vision instead of only as materialized file
+ * paths in the transcript. Older turns stay text-only to keep the envelope
+ * bounded; remote (non data-URL) images stay materialized paths as well.
+ */
+export function claudeInitialContent(
+  prompt: string,
+  messages: ChatMessage[],
+): MessageContent {
+  const parts: MessageContent = [{ type: "text", text: prompt }];
+  let lastUser: ChatMessage | undefined;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].role === "user") {
+      lastUser = messages[index];
+      break;
+    }
+  }
+  if (lastUser && typeof lastUser.content !== "string") {
+    for (const part of lastUser.content) {
+      if (
+        part.type === "imageUrl" &&
+        CLAUDE_DATA_IMAGE_URL.test(part.imageUrl?.url ?? "")
+      ) {
+        parts.push(part);
+      }
+    }
+  }
+  return parts;
+}
+
 function commandCandidates(program: string): string[] {
   if (
     process.platform !== "win32" ||
@@ -1425,7 +1457,7 @@ async function* streamBridgeChatWithSteer(
   if (!route.noStdin && !cancelled) {
     child.stdin.write(
       route.stdinFormat === "claude-stream-json"
-        ? claudeStreamingInput(prompt)
+        ? claudeStreamingInput(claudeInitialContent(prompt, args.messages))
         : prompt,
     );
     if (!route.stdinFormat) child.stdin.end();
@@ -1439,9 +1471,20 @@ async function* streamBridgeChatWithSteer(
           return false;
         }
         return new Promise<boolean>((resolve) => {
-          child.stdin.write(claudeStreamingInput(message.content), (error) =>
-            resolve(!error),
-          );
+          child.stdin.write(claudeStreamingInput(message.content), (error) => {
+            const written = !error;
+            if (
+              written &&
+              permissionTransport?.steering?.acknowledgeWritten(
+                message.messageId,
+              )
+            ) {
+              // Claude accepts the envelope but never echoes it, so the
+              // echo-based receipt would never fire for this vendor.
+              queue.push({ kind: "steerRead", messageId: message.messageId });
+            }
+            resolve(written);
+          });
         });
       });
     }
