@@ -22,6 +22,10 @@ function wait(ms: number): Promise<"timeout"> {
   return new Promise((resolve) => setTimeout(() => resolve("timeout"), ms));
 }
 
+function remainingBudget(deadline: number): number {
+  return Math.max(0, deadline - Date.now());
+}
+
 function hasExited(child: BridgeChild): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
@@ -31,6 +35,7 @@ async function waitForClose(
   child: BridgeChild,
   budgetMs: number,
 ): Promise<boolean> {
+  if (hasExited(child)) return true;
   const outcome = await Promise.race([
     closed.then(() => "closed" as const),
     wait(budgetMs),
@@ -98,9 +103,9 @@ export async function terminateBridgeChild(
   // Tree-kill while the root PID still exists; never root-only kill first.
   if (platform === "win32") {
     if (hasExited(child)) return true;
-    const forceAccepted = (await forceKill(child)) !== false;
-    const verifiedClosed = await waitForClose(closed, child, forceMs);
-    return forceAccepted && verifiedClosed;
+    const deadline = Date.now() + forceMs;
+    await forceKill(child);
+    return waitForClose(closed, child, remainingBudget(deadline));
   }
 
   child.kill();
@@ -110,7 +115,7 @@ export async function terminateBridgeChild(
 
   if (hasExited(child)) return true;
 
-  const forceAccepted = (await forceKill(child)) !== false;
-  const verifiedClosed = await waitForClose(closed, child, forceMs);
-  return forceAccepted && verifiedClosed;
+  const deadline = Date.now() + forceMs;
+  await forceKill(child);
+  return waitForClose(closed, child, remainingBudget(deadline));
 }

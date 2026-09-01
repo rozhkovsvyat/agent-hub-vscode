@@ -25,4 +25,10 @@ describe("VsCodeMessenger native bridge run contract", () => {
     expect(source).toContain("brokerModel: msg.data.brokerModel");
     expect(source).toContain("bridgeRunAcceptsSteer(run, msg.data)");
   });
+
+  it("invalidates pending replacements when their webview is disposed", () => {
+    expect(source).toMatch(
+      /onDispose\(\(protocol\) => \{[\s\S]*?const run = this\.bridgeRuns\.activeFor\(protocol\);[\s\S]*?this\.bridgeRuns\.forget\(protocol\);[\s\S]*?this\.cancelBridgeRun\(run/,
+    );
+  });
 });

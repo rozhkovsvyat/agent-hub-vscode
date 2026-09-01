@@ -102,6 +102,8 @@ export class BridgeRunCoordinator<
   }
 
   forget(key: Key): void {
+    const slot = this.slots.get(key);
+    if (slot) ++slot.latestTicket;
     this.slots.delete(key);
   }
 

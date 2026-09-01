@@ -120,6 +120,27 @@ describe("BridgeRunCoordinator", () => {
     coordinator.release("panel", active);
     expect(coordinator.activeFor("panel")).toBeUndefined();
   });
+
+  it("forget invalidates a replacement waiting behind cancellation", async () => {
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000);
+    const active = run("active");
+    await coordinator.acquire("panel", active, async () => true);
+    let finishCancellation!: (result: boolean) => void;
+    const replacement = coordinator.acquire(
+      "panel",
+      run("replacement"),
+      async () =>
+        new Promise<boolean>((resolve) => {
+          finishCancellation = resolve;
+        }),
+    );
+
+    coordinator.forget("panel");
+    finishCancellation(true);
+
+    await expect(replacement).resolves.toBe("superseded");
+    expect(coordinator.activeFor("panel")).toBeUndefined();
+  });
 });
 
 describe("bridgeRunAcceptsSteer", () => {

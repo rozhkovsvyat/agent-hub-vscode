@@ -224,6 +224,46 @@ describe("terminateBridgeChild", () => {
     expect(Date.now() - started).toBeLessThan(100);
   });
 
+  it("returns true from verified death even when the force command reports failure", async () => {
+    const child = new UncooperativeChild();
+    const started = Date.now();
+    await expect(
+      terminateBridgeChild(child, {
+        platform: "win32",
+        forceMs: 25,
+        forceKill: vi.fn(() => {
+          child.exitCode = 1;
+          return false;
+        }),
+      }),
+    ).resolves.toBe(true);
+    expect(Date.now() - started).toBeLessThan(20);
+  });
+
+  it("returns false on Windows when force is accepted but no death is verified", async () => {
+    const child = new UncooperativeChild();
+    await expect(
+      terminateBridgeChild(child, {
+        platform: "win32",
+        forceMs: 5,
+        forceKill: vi.fn(() => true),
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("shares one force budget between the kill command and close verification", async () => {
+    const child = new UncooperativeChild();
+    const started = Date.now();
+    await expect(
+      terminateBridgeChild(child, {
+        platform: "win32",
+        forceMs: 20,
+        forceKill: () => new Promise((resolve) => setTimeout(resolve, 15)),
+      }),
+    ).resolves.toBe(false);
+    expect(Date.now() - started).toBeLessThan(35);
+  });
+
   it("is idempotent for an already-exited child", async () => {
     const child = new ExitedChild();
     await expect(terminateBridgeChild(child)).resolves.toBe(true);

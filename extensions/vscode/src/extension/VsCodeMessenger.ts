@@ -321,13 +321,14 @@ export class VsCodeMessenger {
   ) {
     this.webviewProtocol.onDispose((protocol) => {
       const run = this.bridgeRuns.activeFor(protocol);
+      // Invalidate candidates already waiting behind this run before their
+      // cancellation barrier can resolve and start work for a disposed panel.
+      this.bridgeRuns.forget(protocol);
       if (run) {
         void this.cancelBridgeRun(run, `dispose:${run.sessionId}`).then(
-          () => this.bridgeRuns.forget(protocol),
+          () => undefined,
           () => undefined,
         );
-      } else {
-        this.bridgeRuns.forget(protocol);
       }
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
       for (const broker of brokers) broker.denyAll();
