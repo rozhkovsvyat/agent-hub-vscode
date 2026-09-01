@@ -78,6 +78,12 @@ export type CukiiCancelReceipt = {
   interrupted: "turn" | "tool";
 };
 
+export type CukiiBridgeStreamDisposition = {
+  cukiiBridgeDisposition: "superseded" | "blocked";
+  sessionId: string;
+  runId: string;
+};
+
 export type CukiiClaudePermissionRequest = {
   runId: string;
   requestId: string;
@@ -204,10 +210,16 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
        * cannot accept live steering. The broker must resume the prior task. */
       steerInterrupt?: boolean;
     },
-    AsyncGenerator<ChatMessage, PromptLog>,
+    AsyncGenerator<ChatMessage, PromptLog | CukiiBridgeStreamDisposition>,
   ];
   "cukii/steerDuringStream": [
-    { messageId: string; sessionId: string; content: ChatMessage["content"] },
+    {
+      messageId: string;
+      sessionId: string;
+      content: ChatMessage["content"];
+      /** Optional on the wire; a missing identity is conservatively deferred. */
+      brokerModel?: BrokerModel;
+    },
     CukiiSteerReceipt,
   ];
   "cukii/cancelBridgeRun": [

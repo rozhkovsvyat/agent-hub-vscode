@@ -62,6 +62,11 @@ import {
 import { BridgeSteeringController } from "./bridgeSteer";
 import { BridgeRunCancellation } from "./bridgeRunCancellation";
 import {
+  BridgeRunCoordinator,
+  bridgeRunAcceptsSteer,
+  type BridgeRunIdentity,
+} from "./bridgeRunCoordinator";
+import {
   allVendorPermissionCapabilities,
   vendorPermissionCapabilities,
 } from "./permissionCapabilities";
@@ -88,10 +93,9 @@ function sourceProtocol(
   );
 }
 
-type ActiveBridgeRun = {
+type ActiveBridgeRun = BridgeRunIdentity & {
   controller: AbortController;
-  done: Promise<void>;
-  sessionId: string;
+  done: Promise<{ terminationVerified: boolean }>;
   steering: BridgeSteeringController;
   cancellation: BridgeRunCancellation;
 };
@@ -107,10 +111,11 @@ export class VsCodeMessenger {
     Set<ClaudePermissionBroker>
   >();
   private readonly panelSessionIds = new Map<VsCodeWebviewProtocol, string>();
-  private readonly activeBridgeRuns = new Map<
+  private readonly bridgeRuns = new BridgeRunCoordinator<
     VsCodeWebviewProtocol,
     ActiveBridgeRun
   >();
+  private nextBridgeRunId = 0;
   /** Preserve click order when two panels rename the same session together. */
   private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
 
@@ -134,6 +139,12 @@ export class VsCodeMessenger {
   ): Promise<CukiiCancelReceipt> {
     const { alreadyCancelled, receipt } = run.cancellation.cancel();
     const result = await receipt;
+    const completion = await run.done;
+    if (!completion.terminationVerified) {
+      throw new Error(
+        `Native bridge run ${run.runId} did not terminate; replacement is blocked`,
+      );
+    }
     return {
       requestId,
       sessionId: run.sessionId,
@@ -309,14 +320,20 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     this.webviewProtocol.onDispose((protocol) => {
-      const run = this.activeBridgeRuns.get(protocol);
-      if (run) void this.cancelBridgeRun(run, `dispose:${run.sessionId}`);
+      const run = this.bridgeRuns.activeFor(protocol);
+      if (run) {
+        void this.cancelBridgeRun(run, `dispose:${run.sessionId}`).then(
+          () => this.bridgeRuns.forget(protocol),
+          () => undefined,
+        );
+      } else {
+        this.bridgeRuns.forget(protocol);
+      }
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
       for (const broker of brokers) broker.denyAll();
       void Promise.all(brokers.map((broker) => broker.dispose())).finally(
         () => {
           this.claudePermissionBrokers.delete(protocol);
-          this.activeBridgeRuns.delete(protocol);
           this.panelSessionIds.delete(protocol);
         },
       );
@@ -847,9 +864,14 @@ export class VsCodeMessenger {
     const disposePermissionBrokersFor = async (
       protocol: VsCodeWebviewProtocol,
     ) => {
-      const run = this.activeBridgeRuns.get(protocol);
+      const run = this.bridgeRuns.activeFor(protocol);
+      let cancellationError: unknown;
       if (run) {
-        await this.cancelBridgeRun(run, `abort:${run.sessionId}`);
+        try {
+          await this.cancelBridgeRun(run, `abort:${run.sessionId}`);
+        } catch (error) {
+          cancellationError = error;
+        }
       }
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
       for (const broker of brokers) {
@@ -858,6 +880,7 @@ export class VsCodeMessenger {
         await broker.dispose();
         this.removePermissionBroker(protocol, broker);
       }
+      if (cancellationError) throw cancellationError;
     };
     this.onWebview("abort", async (msg) => {
       await disposePermissionBrokersFor(
@@ -874,27 +897,26 @@ export class VsCodeMessenger {
     });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       const protocol = sourceProtocol(msg, this.webviewProtocol);
-      const previous = this.activeBridgeRuns.get(protocol);
-      if (previous) {
-        void this.cancelBridgeRun(previous, `replace:${previous.sessionId}`);
-      }
       const controller = new AbortController();
-      let resolveDone!: () => void;
-      const done = new Promise<void>((resolve) => {
+      let resolveDone!: (result: { terminationVerified: boolean }) => void;
+      const done = new Promise<{ terminationVerified: boolean }>((resolve) => {
         resolveDone = resolve;
       });
+      let terminationVerified = true;
       const steering = new BridgeSteeringController(
         msg.data.sessionId,
         isClaudeNativeModel(msg.data.brokerModel),
       );
       const cancellation = new BridgeRunCancellation(
         () => controller.abort(),
-        done,
+        done.then(() => undefined),
       );
-      const run = {
+      const run: ActiveBridgeRun = {
+        runId: `${Date.now()}-${++this.nextBridgeRunId}`,
         controller,
         done,
         sessionId: msg.data.sessionId,
+        brokerModel: msg.data.brokerModel,
         steering,
         cancellation,
       };
@@ -918,23 +940,48 @@ export class VsCodeMessenger {
         onRuntimeCanaryEvent: (event) => {
           protocol.send("cukii/runtimeCanaryAttestation", event);
         },
+        onTerminationResult: (terminated) => {
+          terminationVerified = terminated;
+        },
         abortSignal: controller.signal,
       };
       const stream = streamBridgeChat(msg.data, permissionTransport);
+      const messenger = this;
       const wrapped = (async function* () {
-        if (previous) await previous.done;
+        const acquisition = await messenger.bridgeRuns.acquire(
+          protocol,
+          run,
+          async (previous) => {
+            try {
+              await messenger.cancelBridgeRun(
+                previous,
+                `replace:${previous.sessionId}:${run.runId}`,
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        );
+        if (acquisition !== "acquired") {
+          resolveDone({ terminationVerified: true });
+          return {
+            cukiiBridgeDisposition: acquisition,
+            sessionId: run.sessionId,
+            runId: run.runId,
+          };
+        }
         try {
           return yield* stream;
         } finally {
-          resolveDone();
+          resolveDone({ terminationVerified });
+          if (terminationVerified) {
+            messenger.bridgeRuns.release(protocol, run);
+          }
         }
       })();
-      this.activeBridgeRuns.set(protocol, run);
       void done.finally(() => {
         steering.close();
-        if (this.activeBridgeRuns.get(protocol)?.controller === controller) {
-          this.activeBridgeRuns.delete(protocol);
-        }
       });
       return wrapped;
     });
@@ -942,8 +989,8 @@ export class VsCodeMessenger {
       "cukii/steerDuringStream",
       async (msg): Promise<CukiiSteerReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
-        const run = this.activeBridgeRuns.get(protocol);
-        if (!run || run.sessionId !== msg.data.sessionId) {
+        const run = this.bridgeRuns.activeFor(protocol);
+        if (!bridgeRunAcceptsSteer(run, msg.data)) {
           return {
             messageId: msg.data.messageId,
             sessionId: msg.data.sessionId,
@@ -957,7 +1004,7 @@ export class VsCodeMessenger {
       "cukii/cancelBridgeRun",
       async (msg): Promise<CukiiCancelReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
-        const run = this.activeBridgeRuns.get(protocol);
+        const run = this.bridgeRuns.activeFor(protocol);
         if (!run || run.sessionId !== msg.data.sessionId) {
           return {
             requestId: msg.data.requestId,

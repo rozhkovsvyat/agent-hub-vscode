@@ -117,6 +117,8 @@ export type ClaudePermissionTransport = {
   onToolActivity?: (event: { kind: "start" | "finish"; id: string }) => void;
   /** Local-controller receipt channel. Never persist canary events on Remote-SSH. */
   onRuntimeCanaryEvent?: RuntimeCanaryReporter;
+  /** Reports whether the spawned vendor process tree was verified terminated. */
+  onTerminationResult?: (terminated: boolean) => void;
   abortSignal?: AbortSignal;
 };
 
@@ -1625,11 +1627,22 @@ async function* streamBridgeChatWithSteer(
     permissionTransport?.steering?.close();
     closeFollowers(followers);
     child.stdin.end();
-    await terminateBridgeChild(child);
+    let terminated = false;
+    try {
+      terminated = await terminateBridgeChild(child);
+    } catch {
+      terminated = false;
+    }
+    permissionTransport?.onTerminationResult?.(terminated);
     if (route.promptFile) removeBridgeScratchFile(route.promptFile);
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
+    }
+    if (!terminated) {
+      throw new Error(
+        "Native bridge process tree did not terminate within the safety budget",
+      );
     }
   }
 
