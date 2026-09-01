@@ -43,8 +43,7 @@ export function canonicalCukiiModelDescription(
     return "Best for everyday, complex tasks";
   if (matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/))
     return "Efficient for routine development tasks";
-  if (matches(/(?:^|[-\s])haiku(?:[-\s]|$)/))
-    return "Fastest for quick answers";
+  if (matches(/(?:^|[-\s])haiku(?:[-\s]|$)/)) return "Fastest for simple tasks";
   if (matches(/gpt[-\s]?5[.-]6[-\s]sol/))
     return "Latest frontier agentic coding model";
   if (matches(/gpt[-\s]?5[.-]6[-\s]terra/))
@@ -57,7 +56,7 @@ export function canonicalCukiiModelDescription(
     return "Fast, cost-efficient model for simpler coding tasks";
   if (matches(/gpt[-\s]?5[.-]4/)) return "Strong model for everyday coding";
   if (matches(/grok[-\s]?4[.-]6/))
-    return "Most capable frontier model for coding, agentic tasks, and knowledge work";
+    return "Flagship xAI model for coding and agentic tasks";
   if (matches(/grok[-\s]?4[.-]5/))
     return "Engineering-focused model for coding and agentic software workflows";
   if (matches(/(?:^|[-\s])grok(?:[-\s]|$)/))
@@ -70,10 +69,10 @@ export function canonicalCukiiModelDescription(
       : "Flagship for long-horizon coding and knowledge work";
   if (matches(/kimi[-\s]?k2|k2[.-]7/))
     return /highspeed/.test(id) || /highspeed/.test(name)
-      ? "High-speed option for routine development"
+      ? "Fast option for routine development"
       : "Coding model for completion and routine development";
   if (matches(/qwen[-\s]?3[.-]8[-\s]max/))
-    return "Max model for tool use and agent workflows";
+    return "Alibaba flagship for tool use and agent workflows";
   if (matches(/qwen[-\s]?3[.-]8[-\s]flash/))
     return "Fast Alibaba model for everyday coding";
   if (matches(/qwen[-\s]?3[.-]7[-\s]plus/))
@@ -90,8 +89,8 @@ export function canonicalCukiiModelDescription(
     return "DeepSeek Pro on Alibaba Token Plan";
   if (matches(/qwen[-\s]?glm[-\s]?5[.-]2/))
     return "GLM reasoning model on Alibaba Token Plan";
-  if (matches(/gemini/)) return "Gemini model available through Cursor";
-  if (matches(/glm/)) return "GLM model available through Cursor";
+  if (matches(/gemini/)) return "Google model available through Cursor";
+  if (matches(/glm/)) return "Zhipu reasoning model available through Cursor";
   if (matches(/deepseek/)) return "DeepSeek coding model";
   return "Model available through the vendor CLI";
 }
@@ -113,18 +112,20 @@ export function cukiiCapabilityRating(
     matches(/gpt[-\s]?5[.-]5/) ||
     matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
     matches(/qwen[-\s]?3[.-]8[-\s]max/) ||
-    matches(/qwen[-\s]?3[.-]7[-\s]max/) ||
-    matches(/deepseek[-\s]?v4[-\s]?pro/)
+    matches(/qwen[-\s]?3[.-]7[-\s]max/)
   ) {
     return 3;
   }
+  // DeepSeek V4 Pro sits with the everyday tier-2 peers (GPT-5.4, Sonnet,
+  // Grok, GLM 5.2); three bottles overstated it against that class.
   if (
     matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
     matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
     matches(/gpt[-\s]?5[.-]4/) ||
     matches(/(?:^|[-\s])grok(?:[-\s]|$)/) ||
     matches(/qwen[-\s]?3[.-]7[-\s]plus/) ||
-    matches(/glm[-\s]?5[.-]2/)
+    matches(/glm[-\s]?5[.-]2/) ||
+    matches(/deepseek[-\s]?v4[-\s]?pro/)
   ) {
     return 2;
   }

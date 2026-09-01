@@ -58,8 +58,7 @@ describe("Cukii live subscription model catalog", () => {
         value: "grok-4-6",
         label: "Grok 4.6",
         contextWindowLabel: "500K",
-        description:
-          "Most capable frontier model for coding, agentic tasks, and knowledge work",
+        description: "Flagship xAI model for coding and agentic tasks",
       },
       {
         value: "grok-4-5",
@@ -143,7 +142,7 @@ describe("Cukii live subscription model catalog", () => {
         value: "cursor:glm-5.2",
         label: "GLM 5.2",
         contextWindowLabel: "200K",
-        description: "GLM model available through Cursor",
+        description: "Zhipu reasoning model available through Cursor",
       },
     ]);
     expect(

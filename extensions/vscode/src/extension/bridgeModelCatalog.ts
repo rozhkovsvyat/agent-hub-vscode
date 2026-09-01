@@ -62,6 +62,11 @@ const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
   ],
   cursor: [
     {
+      value: "cursor:grok-4.6",
+      label: "Grok 4.6",
+      contextWindowLabel: "500K",
+    },
+    {
       value: "composer-2-5",
       label: "Composer 2.5",
       contextWindowLabel: "200K",

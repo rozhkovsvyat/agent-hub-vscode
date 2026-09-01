@@ -33,6 +33,7 @@ describe("Cukii model context labels", () => {
       "codex-5-4-mini": "GPT-5.4 Mini",
       "grok-4-6": "Grok 4.6",
       "grok-4-5": "Grok 4.5",
+      "cursor:grok-4.6": "Grok 4.6",
       "composer-2-5": "Composer 2.5",
       "kimi-k2": "Kimi K2.7 Coding",
       "kimi-k2-highspeed": "Kimi K2.7 Coding Highspeed",
@@ -118,14 +119,14 @@ describe("Cukii model context labels", () => {
         "codex-5-4-mini",
       ],
       grok: ["grok-4-6", "grok-4-5"],
-      cursor: ["composer-2-5"],
+      cursor: ["cursor:grok-4.6", "composer-2-5"],
       kimi: ["kimi-k3", "kimi-k3-256k", "kimi-k2", "kimi-k2-highspeed"],
       qwen: [
         "qwen-3-8-max",
         "qwen-3-7-max",
+        "qwen-3-7-plus",
         "qwen-deepseek-v4-pro-0813",
         "qwen-deepseek-v4-pro",
-        "qwen-3-7-plus",
         "qwen-glm-5-2",
         "qwen-3-8-flash",
         "qwen-3-6-flash",
@@ -300,7 +301,7 @@ describe("Cukii model context labels", () => {
 
     expect(new Set(grokDescriptions).size).toBe(grokDescriptions.length);
     expect(modelsByValue.get("grok-4-6")?.description).toBe(
-      "Most capable frontier model for coding, agentic tasks, and knowledge work",
+      "Flagship xAI model for coding and agentic tasks",
     );
     expect(modelsByValue.get("grok-4-5")?.description).toBe(
       "Engineering-focused model for coding and agentic software workflows",
