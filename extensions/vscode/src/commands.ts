@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention */
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 
 import { ContextMenuConfig, ILLM, ModelInstaller } from "core";
@@ -62,7 +63,23 @@ import { VsCodeIde } from "./VsCodeIde";
 
 export const FULL_SCREEN_VIEW_TYPE = "cukii.fullScreenChat";
 
-let nextFullScreenPanelId = 1;
+// All Cukii webviews share one localStorage origin, and the GUI's persisted
+// state is namespaced by panel id. A restart-reset counter handed a new tab
+// the persisted state (session identity included) of an earlier tab with the
+// same number, cross-binding tabs to foreign sessions: renames then hit two
+// panels at once and "new session" tabs opened as the previous one. Random
+// ids never collide with stale persisted keys.
+function newCukiiPanelId(): string {
+  return `cukii-panel-${randomUUID()}`;
+}
+
+/** Serializer state is untrusted input; accept only ids we could have minted. */
+function reviveCukiiPanelId(candidate: unknown): string | undefined {
+  return typeof candidate === "string" &&
+    /^cukii-panel-[0-9a-fA-F-]{8,64}$/.test(candidate)
+    ? candidate
+    : undefined;
+}
 
 /**
  * Наполняет полноэкранную панель и берёт её под учёт.
@@ -88,8 +105,8 @@ function attachFullScreenPanel(
   initialSessionId?: string,
   initialTitle?: string,
   suppressInitialChordCharacter = false,
+  panelId: string = newCukiiPanelId(),
 ) {
-  const panelId = `cukii-panel-${nextFullScreenPanelId++}`;
   const protocol = sidebar.webviewProtocol.cloneHandlers();
   fullScreenPanels.add(panelId, { panel, protocol }, initialSessionId);
   applyCukiiPanelChrome(panel, initialTitle);
@@ -171,15 +188,20 @@ export function registerFullScreenPanelSerializer(
     vscode.window.registerWebviewPanelSerializer(FULL_SCREEN_VIEW_TYPE, {
       async deserializeWebviewPanel(
         panel: vscode.WebviewPanel,
-        state: { sessionId?: string; title?: string } | undefined,
+        state:
+          { sessionId?: string; title?: string; panelId?: string } | undefined,
       ) {
         panel.webview.options = { enableScripts: true };
+        // A restored tab keeps its own panel id so its persisted GUI state
+        // (tool permissions, model controls) is rehydrated from its own key.
         attachFullScreenPanel(
           panel,
           extensionContext,
           sidebar,
           state?.sessionId,
           state?.title,
+          false,
+          reviveCukiiPanelId(state?.panelId),
         );
       },
     }),
@@ -946,8 +968,10 @@ const getCommandsMap: (
       if (!entry || entry.sessionId !== target.sessionId) {
         return;
       }
-      const currentTitle =
-        entry.displayTitle?.trim() || entry.panel.panel.title.trim();
+      // Prefill only from the persisted session title. Falling back to the
+      // editor-tab chrome title leaked the blank-panel placeholder "Cukii"
+      // into the input and let it be saved as a manual session title.
+      const currentTitle = entry.displayTitle?.trim() ?? "";
       const nextTitle = await vscode.window.showInputBox({
         title: "Rename Cukii session",
         value: currentTitle,

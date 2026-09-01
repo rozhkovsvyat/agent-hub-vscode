@@ -78,6 +78,9 @@ function ParallelListeners() {
       ...(window.cukiiVscode?.getState() ?? {}),
       sessionId,
       title: sessionTitle,
+      // The panel serializer revives this id after a window restart so the
+      // tab rehydrates its own persisted state instead of a foreign one.
+      panelId: window.cukiiPanelId,
     });
     ideMessenger.post("cukii/panelSessionChanged", {
       sessionId,

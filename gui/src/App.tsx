@@ -14,9 +14,14 @@ import { ROUTES } from "./util/navigation";
 import CukiiSessionNavigator from "./pages/sessions/CukiiSessionNavigator";
 
 document.documentElement.dataset.cukiiSurface = window.cukiiSurface ?? "chat";
-const panelSequence = Number(window.cukiiPanelId?.match(/(\d+)$/)?.[1] ?? 1);
+// Panel ids carry a random suffix now; derive the alternating tone from a
+// stable hash of the whole id instead of a trailing counter.
+const panelToneSeed = [...(window.cukiiPanelId ?? "sidebar")].reduce(
+  (sum, ch) => sum + ch.charCodeAt(0),
+  0,
+);
 document.documentElement.dataset.cukiiPanelTone =
-  panelSequence % 2 === 0 ? "light" : "dark";
+  panelToneSeed % 2 === 0 ? "light" : "dark";
 
 const router = createMemoryRouter([
   {
