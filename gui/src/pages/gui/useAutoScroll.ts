@@ -33,7 +33,11 @@ export const useAutoScroll = (
       return;
     }
 
-    if (!isNearBottom(element)) {
+    // Follow on any non-zero gap. Gating on the 50px latch threshold let the
+    // streaming loader drift up to 50px below the fold before a jumpy
+    // catch-up scroll; the threshold still guards manual scroll-up detection
+    // in handleScroll, but a latched transcript must never lag its content.
+    if (element.scrollTop + element.clientHeight < element.scrollHeight) {
       element.scrollTop = element.scrollHeight;
     }
   };

@@ -92,10 +92,13 @@ function useFixture(
 beforeEach(() => {
   ResizeObserverMock.instances = [];
   vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-  vi.stubGlobal("requestAnimationFrame", vi.fn((callback) => {
-    callback(0);
-    return 1;
-  }));
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn((callback) => {
+      callback(0);
+      return 1;
+    }),
+  );
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
 });
 
@@ -123,6 +126,23 @@ test("follows initial, queued user, and streaming updates immediately", () => {
     nextSessionId: "session-1",
   });
   expect(fixture.element.scrollTop).toBe(1450);
+});
+
+test("RED: a sub-threshold growth while latched scrolls immediately", () => {
+  const fixture = createScrollFixture();
+  const initial = [message("user-1", "user"), message("assistant-1")];
+  const hook = useFixture(fixture, initial, true);
+
+  // The streaming loader row lands at the bottom: a 30px growth, strictly
+  // inside the 50px latch threshold. A latched transcript must not let it
+  // drift below the fold waiting for a bigger gap.
+  fixture.setGeometry({ scrollHeight: 1030, scrollTop: 900 });
+  hook.rerender({
+    nextHistory: [...initial, message("tool-1")],
+    nextIsStreaming: true,
+    nextSessionId: "session-1",
+  });
+  expect(fixture.element.scrollTop).toBe(1030);
 });
 
 test("RED: manual scroll-up stays put until strictly inside Claude's 50px latch", () => {
@@ -168,10 +188,13 @@ test("resets the latch for a different session and follows dynamic-height blocks
   expect(fixture.element.scrollTop).toBe(1200);
 
   const frames: FrameRequestCallback[] = [];
-  vi.stubGlobal("requestAnimationFrame", vi.fn((callback) => {
-    frames.push(callback);
-    return frames.length;
-  }));
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn((callback) => {
+      frames.push(callback);
+      return frames.length;
+    }),
+  );
   fixture.setGeometry({ scrollHeight: 1500, scrollTop: 1200 });
   act(() => {
     observer.trigger();
