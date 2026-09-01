@@ -267,10 +267,12 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
     transform 180ms ease;
 }
 
-/* Historical user turns: Claude userMessage — inline bubble, not the composer shell. */
+/* Historical user turns: Claude userMessage — inline bubble, not the composer shell.
+   Messenger recolor: the user capsule wears the cookie-orange brand tokens of
+   the send/stop buttons, with dark ink inside for readability on orange. */
 .cukii-user-bubble .cukii-input-box {
-  background: var(--vscode-input-background, var(--cukii-shell)) !important;
-  border: 1px solid var(--vscode-input-border, var(--cukii-line)) !important;
+  background: var(--cukii-primary-action-background, #e3a867) !important;
+  border: 1px solid var(--cukii-primary-action-background-hover, #c9873f) !important;
   border-radius: 6px !important;
   box-shadow: none !important;
   transform: none !important;
@@ -317,6 +319,9 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  /* Dark ink on the cookie-orange capsule; beats the generic `.ProseMirror`
+     theme-foreground rule by specificity. */
+  color: var(--cukii-text, #2c241c);
 }
 
 .cukii-user-bubble .ProseMirror p {
@@ -1146,8 +1151,27 @@ button.cukii-submit-button--stop:active {
 }
 
 .thread-message > div,
-.thread-message .bg-background {
+.thread-message .bg-background:not(.cukii-assistant-bubble) {
   background: transparent !important;
+}
+
+/* Messenger capsules: the assistant answers in the slate capsule the user
+   turns used to wear, while the user moved to cookie-orange (see
+   `.cukii-user-bubble`). Left edge sits on the shared timeline axis. */
+.cukii-assistant-bubble {
+  background: var(--vscode-input-background, var(--cukii-shell)) !important;
+  border: 1px solid var(--vscode-input-border, var(--cukii-line));
+  border-radius: 6px;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--vscode-foreground, var(--cukii-on-dark));
+}
+
+/* The capsule's own top padding pushes the first line down, so the timeline
+   dot follows it instead of staying on the old flush baseline. */
+.cukii-timeline-bubble::before {
+  top: 10px;
 }
 
 /* Geometry copied from Claude Code webview `.messagesContainer` / `.timelineMessage`. */
@@ -1429,6 +1453,14 @@ button.cukii-submit-button--stop:active {
   padding-block: 0 !important;
 }
 
+/* The assistant capsule is the exception: its LEFT EDGE — not its prose — is
+   what sits on the shared 26px axis, so it keeps its own inner padding.
+   Kept OUTSIDE the rule above: nested inside its braces the selector would
+   compile to a chain that never matches. */
+.cukii-timeline-item .thread-message .bg-background.cukii-assistant-bubble {
+  padding-inline: 6px !important;
+}
+
 /* Разнобой точек («все едет») — первая строка у текста, thinking и tool-рядов
    стартует с разного верхнего отступа (текст: markdown-абзац 13px + падинг
    бабла 4px; thinking: mt-1 4px + падинг кнопки 4px; tool: 0). Сводим ВСЕ
@@ -1442,7 +1474,7 @@ button.cukii-submit-button--stop:active {
 .cukii-timeline-item p:first-child {
   margin-top: 0 !important;
 }
-.cukii-timeline-item .bg-background {
+.cukii-timeline-item .bg-background:not(.cukii-assistant-bubble) {
   padding-top: 0 !important;
 }
 .cukii-timeline-item .mt-1 {

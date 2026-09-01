@@ -259,6 +259,41 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
+  it("dresses the two messenger capsules in opposite tones", () => {
+    const css = source("index.css");
+
+    // User turns wear the cookie-orange of the send/stop buttons with dark ink.
+    const userStart = css.indexOf(".cukii-user-bubble .cukii-input-box {");
+    const userContract = css.slice(userStart, userStart + 400);
+    expect(userContract).toContain("--cukii-primary-action-background");
+    expect(css).toMatch(
+      /\.cukii-user-bubble \.ProseMirror\s*\{[\s\S]*?color: var\(--cukii-text/,
+    );
+
+    // The assistant wears the slate capsule the user turns used to have.
+    const botStart = css.indexOf(".cukii-assistant-bubble {");
+    expect(botStart).toBeGreaterThanOrEqual(0);
+    const botContract = css.slice(botStart, botStart + 400);
+    expect(botContract).toContain("--vscode-input-background");
+    expect(botContract).toContain("border-radius: 6px;");
+    expect(botContract).toContain("width: fit-content;");
+
+    // The capsule keeps its own background and padding: the generic
+    // transparency and axis-flush rules must both spare it.
+    expect(css).toContain(
+      ".thread-message .bg-background:not(.cukii-assistant-bubble)",
+    );
+    expect(css).toContain(
+      ".cukii-timeline-item .bg-background:not(.cukii-assistant-bubble)",
+    );
+    expect(css).toMatch(
+      /\.bg-background\.cukii-assistant-bubble\s*\{\s*padding-inline: 6px !important;/,
+    );
+
+    // The dot follows the capsule's first line instead of the flush baseline.
+    expect(css).toMatch(/\.cukii-timeline-bubble::before\s*\{\s*top: 10px;/);
+  });
+
   it("keeps permission modes on a compact dark or light panel and selected blue", () => {
     const css = source("index.css");
     const panelStart = css.indexOf(".cukii-permission-popover {");

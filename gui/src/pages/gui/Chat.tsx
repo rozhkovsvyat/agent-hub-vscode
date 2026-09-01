@@ -524,7 +524,7 @@ export function Chat() {
           rows.push(
             <div
               key={`${message.id}-text`}
-              className={`cukii-timeline-item cukii-timeline-event shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-bubble shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
             >
               {errorBoundary(
                 <div className="thread-message">
