@@ -2,7 +2,6 @@ import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { JSONContent } from "@tiptap/core";
 import { InputModifiers } from "core";
 
-import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
 import { isCompactSlashCommand } from "../../util/isCompactSlashCommand";
 import { selectSelectedChatModel } from "../slices/configSlice";
@@ -18,6 +17,8 @@ import { streamNormalInput } from "./streamNormalInput";
 import { streamThunkWrapper } from "./streamThunkWrapper";
 import { updateFileSymbolsFromFiles } from "./updateFileSymbols";
 
+const activeNormalSubmissions = new WeakMap<object, string>();
+
 export const streamResponseThunk = createAsyncThunk<
   void,
   {
@@ -29,29 +30,64 @@ export const streamResponseThunk = createAsyncThunk<
 >(
   "chat/streamResponse",
   async ({ editorState, modifiers, index }, { dispatch, extra, getState }) => {
+    const initialState = getState();
+    const dispatchKey = dispatch as unknown as object;
+    const submissionKey = JSON.stringify({ editorState, modifiers, index });
+    const activeSubmission = activeNormalSubmissions.get(dispatchKey);
+
+    if (
+      initialState.session.isStreaming &&
+      activeSubmission === submissionKey
+    ) {
+      // A key-repeat can invoke the same React callback again before the
+      // synchronous Redux claim reaches isStreamingRef. It is the same
+      // captured submit, not a second steering message.
+      return;
+    }
+
+    if (initialState.session.isStreaming && index === undefined) {
+      // React may still render the idle submit path for one event after Redux
+      // has synchronously claimed the turn below. Preserve that captured input
+      // as steering instead of starting a second normal vendor run.
+      const { steerDuringStream } = await import("./steerDuringStream");
+      await dispatch(steerDuringStream({ editorState, modifiers }));
+      return;
+    }
+
+    activeNormalSubmissions.set(dispatchKey, submissionKey);
+    try {
+
+      if (isCompactSlashCommand(editorState)) {
+        await dispatch(
+          streamThunkWrapper(async () => {
+            const compactIndex = getState().session.history.length - 1;
+            if (compactIndex >= 0 && getState().session.id) {
+              await dispatch(compactConversationThunk({ index: compactIndex }));
+            }
+          }),
+        );
+        return;
+      }
+
+    if (!selectSelectedChatModel(initialState)) {
+      throw new Error("No chat model selected");
+    }
+
+    const inputIndex = index ?? initialState.session.history.length;
+    // Render and claim the turn before the first async persistence/context
+    // boundary. Besides making the user's text visible immediately, setActive
+    // prevents rapid Enter presses from starting parallel normal turns while
+    // the durable pre-save is blocked.
+    dispatch(submitEditorAndInitAtIndex({ index: inputIndex, editorState }));
+    const messageId = getState().session.history[inputIndex]?.message.id;
+    if (!messageId) {
+      throw new Error("Failed to initialize the user turn");
+    }
+    dispatch(resetNextCodeBlockToApplyIndex());
+
     await dispatch(
       streamThunkWrapper(async () => {
         const state = getState();
-
-        if (isCompactSlashCommand(editorState)) {
-          const compactIndex = state.session.history.length - 1;
-          if (compactIndex >= 0 && state.session.id) {
-            await dispatch(compactConversationThunk({ index: compactIndex }));
-          }
-          return;
-        }
-
-        const selectedChatModel = selectSelectedChatModel(state);
-        const inputIndex = index ?? state.session.history.length; // Either given index or concat to end
-
-        if (!selectedChatModel) {
-          throw new Error("No chat model selected");
-        }
-        dispatch(
-          submitEditorAndInitAtIndex({ index: inputIndex, editorState }),
-        );
-
-        dispatch(resetNextCodeBlockToApplyIndex());
 
         const defaultContextProviders =
           state.config.config.experimental?.defaultContext ?? [];
@@ -88,18 +124,17 @@ export const streamResponseThunk = createAsyncThunk<
               message: {
                 role: "user",
                 content,
-                id: uuidv4(),
+                id: messageId,
               },
               contextItems: selectedContextItems,
             },
           }),
         );
 
-        // The wrapper's pre-stream save ran before this first user message
-        // existed; on a brand-new session it persisted nothing. Save again the
-        // moment the message lands so the session appears in the navigator and
-        // survives a restart during its first (possibly long broker) turn.
-        // Best effort: the end-of-turn save still retries persistence.
+        // Persist the resolved payload before vendor dispatch. The wrapper's
+        // pre-save already made the optimistic bubble durable; this second
+        // save upgrades it with resolved context/content while preserving its
+        // identity.
         if (!getState().session.isInEdit) {
           const earlySave = dispatch(
             saveCurrentSession({
@@ -129,8 +164,13 @@ export const streamResponseThunk = createAsyncThunk<
         );
       }),
     );
-    const { continueIfTrailingSteer } =
-      await import("./continueIfTrailingSteer");
-    await dispatch(continueIfTrailingSteer());
+      const { continueIfTrailingSteer } =
+        await import("./continueIfTrailingSteer");
+      await dispatch(continueIfTrailingSteer());
+    } finally {
+      if (activeNormalSubmissions.get(dispatchKey) === submissionKey) {
+        activeNormalSubmissions.delete(dispatchKey);
+      }
+    }
   },
 );

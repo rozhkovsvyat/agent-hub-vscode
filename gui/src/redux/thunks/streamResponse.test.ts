@@ -101,6 +101,74 @@ beforeEach(() => {
 });
 
 describe("streamResponseThunk", () => {
+  it("renders a stable user turn before the durable pre-save resolves", async () => {
+    const initialState = getRootStateWithClaude();
+    const mockStore = createMockStore(initialState);
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => (releaseSave = resolve));
+    mockStore.mockIdeMessenger.responseHandlers["history/save"] = vi.fn(
+      async (session: any) => {
+        await saveGate;
+        return session;
+      },
+    );
+
+    const pending = mockStore.dispatch(
+      streamResponseThunk({
+        editorState: mockEditorState,
+        modifiers: mockModifiers,
+      }) as any,
+    );
+
+    const optimistic = (mockStore.getState() as RootState).session.history[0];
+    expect(optimistic?.message.role).toBe("user");
+    expect(optimistic?.editorState).toEqual(mockEditorState);
+    expect(optimistic?.messageReceipt?.status).toBe("queued");
+    const optimisticId = optimistic?.message.id;
+
+    releaseSave();
+    await pending;
+    expect(
+      (mockStore.getState() as RootState).session.history[0]?.message.id,
+    ).toBe(optimisticId);
+  });
+
+  it("keeps repeated Enter to one normal vendor run while history save is blocked", async () => {
+    const mockStore = createMockStore(getRootStateWithClaude());
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => (releaseSave = resolve));
+    const save = vi.fn(async (session: any) => {
+      await saveGate;
+      return session;
+    });
+    mockStore.mockIdeMessenger.responseHandlers["history/save"] = save;
+    const vendor = vi.spyOn(mockStore.mockIdeMessenger, "streamRequest");
+
+    const pending = Array.from({ length: 10 }, () =>
+      mockStore.dispatch(
+        streamResponseThunk({
+          editorState: mockEditorState,
+          modifiers: mockModifiers,
+        }) as any,
+      ),
+    );
+
+    await Promise.all(pending.slice(1));
+    expect(save).toHaveBeenCalledTimes(1);
+    const blockedHistory = (mockStore.getState() as RootState).session.history;
+    expect(
+      blockedHistory.filter(
+        (item) => item.message.role === "user" && !item.isSteer,
+      ),
+    ).toHaveLength(1);
+    expect(blockedHistory.filter((item) => item.isSteer)).toHaveLength(0);
+    expect(vendor).not.toHaveBeenCalled();
+
+    releaseSave();
+    await Promise.all(pending);
+    expect(vendor).toHaveBeenCalledTimes(1);
+  });
+
   it("should execute complete streaming flow with all dispatches", async () => {
     const initialState = getRootStateWithClaude();
     initialState.session.history = [
@@ -159,6 +227,17 @@ describe("streamResponseThunk", () => {
           arg: { editorState: mockEditorState, modifiers: mockModifiers },
           requestStatus: "pending",
         }),
+        payload: undefined,
+      },
+      {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {
@@ -246,17 +325,6 @@ describe("streamResponseThunk", () => {
           },
           requestStatus: "fulfilled",
         }),
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {
@@ -789,6 +857,8 @@ describe("streamResponseThunk", () => {
     const actionTypes = dispatchedActions.map((action: any) => action.type);
     expect(actionTypes).toEqual([
       "chat/streamResponse/pending",
+      "session/submitEditorAndInitAtIndex",
+      "session/resetNextCodeBlockToApplyIndex",
       "chat/streamWrapper/pending",
       // Pre-stream persist of the previous turns.
       "session/saveCurrent/pending",
@@ -802,8 +872,6 @@ describe("streamResponseThunk", () => {
       "session/update/fulfilled",
       "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
-      "session/submitEditorAndInitAtIndex",
-      "session/resetNextCodeBlockToApplyIndex",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
       // First-turn persist with the new user message.
@@ -1205,6 +1273,17 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
         type: "chat/streamWrapper/pending",
         meta: {
           arg: expect.any(Function),
@@ -1309,17 +1388,6 @@ describe("streamResponseThunk", () => {
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {

@@ -11,6 +11,7 @@ import {
 import { ThunkApiType } from "../store";
 import { cancelStream } from "./cancelStream";
 import { saveCurrentSession } from "./session";
+import { streamResponseThunk } from "./streamResponse";
 
 export const steerDuringStream = createAsyncThunk<
   void,
@@ -23,7 +24,14 @@ export const steerDuringStream = createAsyncThunk<
   "chat/steerDuringStream",
   async ({ editorState, modifiers }, { dispatch, extra, getState }) => {
     const state = getState();
-    if (!state.session.isStreaming || state.session.isInEdit) {
+    if (state.session.isInEdit) {
+      return;
+    }
+    if (!state.session.isStreaming) {
+      // React's isStreaming ref can lag one render behind Redux when a run
+      // stops or hands off. The editor has already been cleared by this point,
+      // so route the captured input into a normal turn instead of dropping it.
+      await dispatch(streamResponseThunk({ editorState, modifiers }));
       return;
     }
 
@@ -41,6 +49,11 @@ export const steerDuringStream = createAsyncThunk<
 
     const currentSession = getState().session;
     if (!currentSession.isStreaming || currentSession.id !== state.session.id) {
+      if (!currentSession.isStreaming) {
+        // The run may finish while context providers resolve. Preserve the
+        // captured input via the same normal-turn fallback.
+        await dispatch(streamResponseThunk({ editorState, modifiers }));
+      }
       return;
     }
     const messageId = uuidv4();

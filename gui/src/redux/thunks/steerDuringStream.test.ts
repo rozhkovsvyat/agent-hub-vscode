@@ -3,8 +3,11 @@ import { InputModifiers } from "core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
-import { createMockStore } from "../../util/test/mockStore";
-import { setActive } from "../slices/sessionSlice";
+import {
+  createMockStore,
+  getEmptyRootState,
+} from "../../util/test/mockStore";
+import { setActive, setInactive } from "../slices/sessionSlice";
 import { RootState } from "../store";
 import { steerDuringStream } from "./steerDuringStream";
 
@@ -36,17 +39,91 @@ function sessionOf(store: ReturnType<typeof createMockStore>) {
   return (store.getState() as RootState).session;
 }
 
+function createStoreWithChatModel(
+  title = "Claude before handoff",
+  brokerModel: RootState["session"]["brokerModel"] = "qwen-3-8-max",
+  mockIdeMessenger?: MockIdeMessenger,
+) {
+  const state = getEmptyRootState();
+  state.config.config.selectedModelByRole.chat = {
+    title,
+    model: "claude-test",
+    provider: "anthropic",
+  } as NonNullable<
+    typeof state.config.config.selectedModelByRole.chat
+  >;
+  state.session.brokerModel = brokerModel;
+  return createMockStore(state, mockIdeMessenger);
+}
+
 describe("steerDuringStream", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("no-ops when idle", async () => {
-    const store = createMockStore();
+  it("routes stale streaming input after handoff through the switched model", async () => {
+    const store = createStoreWithChatModel(
+      "Claude after model switch",
+      "codex-5-6-terra",
+    );
     const request = vi.spyOn(store.mockIdeMessenger, "request");
+    const vendor = vi.spyOn(store.mockIdeMessenger, "streamRequest");
     await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
-    expect(sessionOf(store).history).toHaveLength(0);
-    expect(request).not.toHaveBeenCalled();
+    const userTurns = sessionOf(store).history.filter(
+      (item) => item.message.role === "user" && !item.isSteer,
+    );
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]?.message.content).toBe("do it this way instead");
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/steerDuringStream"),
+    ).toBe(false);
+    expect(vendor).toHaveBeenCalledTimes(1);
+    expect(vendor.mock.calls[0]?.[0]).toBe("cukii/streamBridgeChat");
+    expect(vendor.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ brokerModel: "codex-5-6-terra" }),
+    );
+  });
+
+  it("falls back to a normal turn when the run ends during context resolution", async () => {
+    let releaseContext!: (value: Awaited<ReturnType<typeof resolveEditorContent>>) => void;
+    vi.mocked(resolveEditorContent).mockImplementationOnce(
+      () => new Promise((resolve) => (releaseContext = resolve)),
+    );
+    const store = createStoreWithChatModel();
+    store.dispatch(setActive());
+
+    const pending = store.dispatch(
+      steerDuringStream({ editorState, modifiers }) as any,
+    );
+    store.dispatch(setInactive());
+    releaseContext({
+      selectedContextItems: [],
+      selectedCode: [],
+      content: "do it this way instead",
+      legacyCommandWithInput: undefined,
+    });
+    await pending;
+
+    const userTurns = sessionOf(store).history.filter(
+      (item) => item.message.role === "user" && !item.isSteer,
+    );
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]?.message.content).toBe("do it this way instead");
+  });
+
+  it("does not start ten parallel normal turns from ten stale-ref submits", async () => {
+    const store = createStoreWithChatModel();
+    const pending = Array.from({ length: 10 }, () =>
+      store.dispatch(steerDuringStream({ editorState, modifiers }) as any),
+    );
+
+    // The first normal fallback claims isStreaming synchronously. Remaining
+    // inputs are steering/outbox items, never parallel normal vendor turns.
+    const normalTurns = sessionOf(store).history.filter(
+      (item) => item.message.role === "user" && !item.isSteer,
+    );
+    expect(normalTurns).toHaveLength(1);
+    await Promise.all(pending);
   });
 
   it("appends a user message and notifies the native bridge", async () => {
