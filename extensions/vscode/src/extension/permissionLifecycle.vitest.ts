@@ -24,7 +24,7 @@ describe("Claude permission lifecycle", () => {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    await terminateBridgeChild(child);
+    await expect(terminateBridgeChild(child)).resolves.toBe(true);
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
   });
 });
