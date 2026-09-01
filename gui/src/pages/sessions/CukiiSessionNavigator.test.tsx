@@ -896,4 +896,170 @@ describe("CukiiSessionNavigator cross-window group sync", () => {
       vi.useRealTimers();
     }
   });
+
+  it("applies an empty snapshot when another window deleted every group", async () => {
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "work", name: "Работа" }],
+        assignments: { "ssh-session": "work" },
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "ssh-session",
+        title: "SSH session",
+        dateCreated: "2026-08-31T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    let core: SessionGroupState = {
+      groups: [{ id: "work", name: "Работа" }],
+      assignments: { "ssh-session": "work" },
+    };
+    messenger.responseHandlers["cukii/sessionGroupsLoad"] = vi.fn(
+      async () => core,
+    );
+    messenger.responseHandlers["cukii/sessionGroupsSave"] = vi
+      .fn()
+      .mockResolvedValue({ ok: true });
+
+    vi.useFakeTimers();
+    try {
+      const first = await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(
+        screen.getByRole("button", { name: "Работа 1" }),
+      ).toBeInTheDocument();
+
+      // Another window deletes the last group: the empty snapshot is a
+      // real state, not a migration trigger.
+      core = { groups: [], assignments: {} };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.queryByRole("button", { name: "Работа 1" })).toBeNull();
+      expect(screen.getByTitle("SSH session")).toBeInTheDocument();
+
+      // A remount must not resurrect the deleted groups from the cache.
+      first.unmount();
+      await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.queryByRole("button", { name: "Работа 1" })).toBeNull();
+      expect(screen.getByTitle("SSH session")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("serializes rapid edits so only the newest payload lands", async () => {
+    localStorage.setItem(
+      "cukii.session-groups.v1",
+      JSON.stringify({
+        groups: [{ id: "plugin", name: "Плагин" }],
+        assignments: {},
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = [
+      {
+        sessionId: "session",
+        title: "Grouped session",
+        dateCreated: "2026-08-27T12:00:00Z",
+        workspaceDirectory: "D:/Brain/vault",
+      },
+    ];
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+    let core: SessionGroupState = {
+      groups: [{ id: "plugin", name: "Плагин" }],
+      assignments: {},
+    };
+    messenger.responseHandlers["cukii/sessionGroupsLoad"] = vi.fn(
+      async () => core,
+    );
+    const saveCalls: SessionGroupState[] = [];
+    const resolvers: Array<(value: { ok: boolean }) => void> = [];
+    const saveSpy = vi.fn((payload: SessionGroupState) => {
+      saveCalls.push(payload);
+      return new Promise<{ ok: boolean }>((resolve) => {
+        resolvers.push((value) => {
+          core = payload;
+          resolve(value);
+        });
+      });
+    });
+    messenger.responseHandlers["cukii/sessionGroupsSave"] = saveSpy;
+
+    const renameGroup = (fromName: string, toName: string) => {
+      fireEvent.contextMenu(
+        screen.getByRole("button", { name: `${fromName} 0` }),
+        { clientX: 120, clientY: 160 },
+      );
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename group" }));
+      const input = screen.getByLabelText(`Rename group ${fromName}`);
+      fireEvent.change(input, { target: { value: toName } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    };
+
+    vi.useFakeTimers();
+    try {
+      await renderWithProviders(<CukiiSessionNavigator />, {
+        mockIdeMessenger: messenger,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      renameGroup("Плагин", "Проекты");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      // Second edit while the first save is still in flight: it must be
+      // queued, not fired as a racing second request.
+      renameGroup("Проекты", "Релизы");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      resolvers[0]?.({ ok: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+      resolvers[1]?.({ ok: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(saveCalls.map((state) => state.groups[0]?.name)).toEqual([
+        "Проекты",
+        "Релизы",
+      ]);
+      expect(core.groups).toEqual([{ id: "plugin", name: "Релизы" }]);
+      expect(
+        screen.getByRole("button", { name: "Релизы 0" }),
+      ).toBeInTheDocument();
+
+      // The following poll reads back the acked copy and must not re-save.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

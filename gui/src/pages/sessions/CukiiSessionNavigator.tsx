@@ -29,6 +29,10 @@ import {
 } from "./cukiiSessionMerge";
 
 const STORAGE_KEY = "cukii.session-groups.v1";
+// Survives remounts: once this window has touched the journal-side copy,
+// an empty snapshot is a real state (all groups deleted elsewhere), not a
+// trigger to migrate this window's cache over the shared file.
+const EVER_SYNCED_KEY = "cukii.session-groups-synced.v1";
 const Shell = styled.div`
   min-height: 100%;
   color: var(--vscode-foreground);
@@ -319,10 +323,17 @@ export default function CukiiSessionNavigator() {
   const deletingSessionIdsRef = useRef(new Set<string>());
   const groupsSyncedWithCoreRef = useRef(false);
   const groupsLoadSequenceRef = useRef(0);
-  const groupsMigrationDoneRef = useRef(false);
-  // JSON of the last copy received from (or pushed to) the journal-side
-  // store; lets the poll tell external edits apart from echo reads.
-  const lastAppliedGroupsJsonRef = useRef<string | null>(null);
+  // Serialized writer for the shared copy: at most one save in flight, the
+  // newest payload wins the re-save, and lastAckedJson tells the poll
+  // whether the UI still holds an edit that has not landed yet.
+  const groupsSaveRef = useRef<{
+    inFlight: boolean;
+    pending: SessionGroupState | null;
+    lastAckedJson: string | null;
+  }>({ inFlight: false, pending: null, lastAckedJson: null });
+  const groupsJsonRef = useRef<string>(
+    JSON.stringify(parseSessionGroups(localStorage.getItem(STORAGE_KEY))),
+  );
   const [groups, setGroups] = useState<SessionGroupState>(() =>
     parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
   );
@@ -373,6 +384,40 @@ export default function CukiiSessionNavigator() {
     }
   }, [messenger]);
 
+  const saveGroups = useCallback(
+    async (state: SessionGroupState) => {
+      const saveState = groupsSaveRef.current;
+      const json = JSON.stringify(state);
+      if (json === saveState.lastAckedJson) return;
+      if (saveState.inFlight) {
+        // Rapid edits: only the newest payload matters; the running save
+        // re-saves it instead of racing a second request to the journal.
+        saveState.pending = state;
+        return;
+      }
+      saveState.inFlight = true;
+      let payload = state;
+      for (;;) {
+        try {
+          await messenger.request("cukii/sessionGroupsSave", payload);
+        } catch {
+          // Transport failure keeps the localStorage cache as the fallback.
+          // lastAckedJson stays stale, so the poll keeps protecting the edit
+          // it failed to persist instead of clobbering it with remote state.
+          saveState.pending = null;
+          saveState.inFlight = false;
+          return;
+        }
+        saveState.lastAckedJson = JSON.stringify(payload);
+        if (!saveState.pending) break;
+        payload = saveState.pending;
+        saveState.pending = null;
+      }
+      saveState.inFlight = false;
+    },
+    [messenger],
+  );
+
   const loadGroups = useCallback(async () => {
     const sequence = ++groupsLoadSequenceRef.current;
     let result;
@@ -386,18 +431,28 @@ export default function CukiiSessionNavigator() {
     }
     if (sequence !== groupsLoadSequenceRef.current) return;
     if (result.status !== "success") return;
-    // Synced only after a real core answer: marking an error response as
-    // synced would let this window's cache overwrite the shared copy on
-    // the very next edit.
-    groupsSyncedWithCoreRef.current = true;
     const remote = result.content;
+    if (
+      !remote ||
+      !Array.isArray(remote.groups) ||
+      !remote.assignments ||
+      typeof remote.assignments !== "object"
+    ) {
+      return;
+    }
+    // Synced only after a real, well-formed core answer: marking an error
+    // response as synced would let this window's cache overwrite the
+    // shared copy on the very next edit.
+    groupsSyncedWithCoreRef.current = true;
+    const everSynced = localStorage.getItem(EVER_SYNCED_KEY) === "1";
+    localStorage.setItem(EVER_SYNCED_KEY, "1");
     const remoteEmpty =
       remote.groups.length === 0 &&
       Object.keys(remote.assignments).length === 0;
-    if (remoteEmpty) {
-      // One-shot migration: per-window localStorage was the old home.
-      if (groupsMigrationDoneRef.current) return;
-      groupsMigrationDoneRef.current = true;
+    if (remoteEmpty && !everSynced) {
+      // One-shot migration: per-window localStorage was the old home. An
+      // empty answer after this point is a legitimate state (another
+      // window deleted everything) and goes through the normal apply path.
       const local = parseSessionGroups(localStorage.getItem(STORAGE_KEY));
       if (
         local.groups.length > 0 ||
@@ -408,8 +463,23 @@ export default function CukiiSessionNavigator() {
       return;
     }
     const remoteJson = JSON.stringify(remote);
-    if (remoteJson === lastAppliedGroupsJsonRef.current) return;
-    lastAppliedGroupsJsonRef.current = remoteJson;
+    const saveState = groupsSaveRef.current;
+    if (
+      remoteJson === saveState.lastAckedJson &&
+      remoteJson === groupsJsonRef.current
+    ) {
+      // Pure echo: the shared copy equals what this window already shows.
+      return;
+    }
+    if (
+      saveState.lastAckedJson !== null &&
+      groupsJsonRef.current !== saveState.lastAckedJson
+    ) {
+      // This window holds an edit whose save is in flight, queued, or
+      // failed; applying any snapshot now could roll it back.
+      return;
+    }
+    saveState.lastAckedJson = remoteJson;
     setGroups((current) =>
       JSON.stringify(current) === remoteJson ? current : remote,
     );
@@ -472,19 +542,12 @@ export default function CukiiSessionNavigator() {
     // First-paint cache and offline fallback; the authoritative copy lives
     // beside the journal so every surface on this host (local window,
     // Remote-SSH window) shares one identical grouping.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+    const json = JSON.stringify(groups);
+    groupsJsonRef.current = json;
+    localStorage.setItem(STORAGE_KEY, json);
     if (!groupsSyncedWithCoreRef.current) return;
-    // Applying a remote copy runs this effect too; pushing it straight back
-    // would just churn the journal on every poll cycle.
-    if (JSON.stringify(groups) === lastAppliedGroupsJsonRef.current) return;
-    void (async () => {
-      try {
-        await messenger.request("cukii/sessionGroupsSave", groups);
-      } catch {
-        // Transport failure keeps the localStorage cache as the fallback.
-      }
-    })();
-  }, [groups, messenger]);
+    void saveGroups(groups);
+  }, [groups, messenger, saveGroups]);
   useEffect(() => {
     if (!context) return;
     const close = (event: MouseEvent) => {
