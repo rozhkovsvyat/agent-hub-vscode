@@ -819,13 +819,6 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   min-width: 0;
 }
 
-@media (max-width: 420px) {
-  .cukii-command-menu {
-    /* Keep the popup's left gutter visible when the toolbar itself narrows. */
-    left: calc(-1px - 18.2vw) !important;
-  }
-}
-
 .cukii-menu-item {
   min-height: 28px;
   padding: 6px 12px !important;

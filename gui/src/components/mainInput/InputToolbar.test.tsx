@@ -515,8 +515,9 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(css).toContain("width: min(360px, calc(100vw - 16px)) !important;");
     expect(css).toContain("max-width: calc(100vw - 16px) !important;");
     expect(css).toContain("min-width: 0 !important;");
-    expect(css).toContain("@media (max-width: 420px)");
-    expect(css).toContain("left: calc(-1px - 18.2vw) !important;");
+    // The composer-edge offset must stay constant; the old viewport-scaled
+    // left pushed the panel past the left border on narrow screens.
+    expect(css).not.toMatch(/\.cukii-command-menu[^}]*left:\s*calc\([^)]*vw/);
   });
 
   it("has shared ordered command sections and removes unsupported Rewind", async () => {
