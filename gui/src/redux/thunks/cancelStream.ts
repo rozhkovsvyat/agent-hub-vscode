@@ -10,7 +10,10 @@ import {
 import { ThunkApiType } from "../store";
 
 type CancelStreamArgs = {
-  source?: "user" | "error" | "lifecycle";
+  /** "steer" interrupts an in-flight turn to redeliver a live follow-up the
+   * vendor could not inject. Like error/lifecycle it must keep the durable
+   * outbox alive and drain it; only "user" is a terminal Stop. */
+  source?: "user" | "error" | "lifecycle" | "steer";
 };
 
 export const cancelStream = createAsyncThunk<

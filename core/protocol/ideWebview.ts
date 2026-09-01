@@ -200,6 +200,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerPermissionMode: CukiiPermissionMode;
       /** Durable user follow-up being dispatched as this fresh vendor turn. */
       queuedFollowUpMessageId?: string;
+      /** The follow-up above interrupted an in-flight turn because the vendor
+       * cannot accept live steering. The broker must resume the prior task. */
+      steerInterrupt?: boolean;
     },
     AsyncGenerator<ChatMessage, PromptLog>,
   ];

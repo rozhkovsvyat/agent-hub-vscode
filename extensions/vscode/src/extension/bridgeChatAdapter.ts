@@ -355,6 +355,7 @@ function buildPrompt(
   cwd: string,
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode,
+  steerInterrupt?: boolean,
 ): string {
   const subagent =
     brokerSubagent === "auto" ? "Auto" : displayBridgeModel(brokerSubagent);
@@ -404,6 +405,11 @@ function buildPrompt(
     ...(isClaudeNativeModel(brokerModel)
       ? [
           "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
+        ]
+      : []),
+    ...(steerInterrupt
+      ? [
+          "The latest user message was injected while you were mid-task; the previous turn was interrupted so you would see it promptly. Address this newest message first, then resume the task you were working on, taking it into account. Do not discard your prior work unless the new message changes the task.",
         ]
       : []),
     "",
@@ -1202,6 +1208,7 @@ export async function* streamBridgeChat(
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
+    steerInterrupt?: boolean;
   },
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
@@ -1221,6 +1228,7 @@ async function* streamBridgeChatWithSteer(
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
+    steerInterrupt?: boolean;
   },
   cwd: string,
   permissionTransport?: ClaudePermissionTransport,
@@ -1252,6 +1260,7 @@ async function* streamBridgeChatWithSteer(
     cwd,
     controls,
     args.brokerPermissionMode,
+    args.steerInterrupt,
   );
   const route = routeForModel(
     args.brokerModel,

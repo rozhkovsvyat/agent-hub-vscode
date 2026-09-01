@@ -133,4 +133,45 @@ describe("steerDuringStream", () => {
       expect.arrayContaining([expect.objectContaining({ type: "imageUrl" })]),
     );
   });
+
+  it("interrupts an in-flight run to redeliver when the vendor defers steering", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["cukii/steerDuringStream"] = vi.fn(
+      async () => ({
+        messageId: "mock-steer",
+        sessionId: "mock-session",
+        status: "deferred" as const,
+      }),
+    );
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    // The vendor cannot accept the steer live, so the run is interrupted to
+    // redeliver it promptly instead of waiting for the turn to end on its own.
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
+    ).toBe(true);
+    // The durable follow-up must survive the interrupt; only an explicit user
+    // Stop may cancel it. Leaving it deferred keeps it eligible for redelivery.
+    const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(steer?.steerStatus).not.toBe("cancelled");
+  });
+
+  it("does not interrupt when the vendor accepts the steer live", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    // Default mock returns status "delivered" (Claude-style live injection).
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
+    ).toBe(false);
+    expect(sessionOf(store).history.at(-1)?.steerStatus).toBe("delivered");
+  });
 });

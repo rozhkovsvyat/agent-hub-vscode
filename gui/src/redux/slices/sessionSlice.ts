@@ -326,6 +326,10 @@ type SessionState = {
   isCancelling?: boolean;
   /** Ephemeral per-tab state; deliberately excluded from persisted Session. */
   bridgeWait?: CukiiBridgeWait;
+  /** A live steer could not be injected, so the current turn was interrupted
+   * to redeliver it. Consumed by the next bridge turn to resume the task.
+   * Ephemeral; never persisted. */
+  steerInterruptPending?: boolean;
   title: string;
   titleManuallySet: boolean;
   revision: number;
@@ -783,6 +787,12 @@ export const sessionSlice = createSlice({
         }
       }
     },
+    requestSteerInterrupt: (state) => {
+      state.steerInterruptPending = true;
+    },
+    clearSteerInterrupt: (state) => {
+      state.steerInterruptPending = false;
+    },
     markSteerRead: (state, action: PayloadAction<{ messageId: string }>) => {
       const item = state.history.find(
         (entry) => entry.message.id === action.payload.messageId,
@@ -1008,6 +1018,7 @@ export const sessionSlice = createSlice({
       state.isStreaming = false;
       state.isCancelling = false;
       state.bridgeWait = undefined;
+      state.steerInterruptPending = false;
       state.isSessionLoading = false;
       state.symbols = {};
 
@@ -1066,7 +1077,9 @@ export const sessionSlice = createSlice({
       { payload }: PayloadAction<{ sessionId: string; revision: number }>,
     ) => {
       if (state.id === payload.sessionId) {
-        state.revision = payload.revision;
+        // Save receipts can arrive out of order; a late stale receipt must
+        // never roll the revision back and re-deadlock the CAS check.
+        state.revision = Math.max(state.revision ?? 0, payload.revision);
       }
     },
     setIsSessionMetadataLoading: (
@@ -1482,6 +1495,8 @@ export const {
   markLatestUserReceiptDelivered,
   setSteerStatus,
   cancelQueuedSteers,
+  requestSteerInterrupt,
+  clearSteerInterrupt,
   streamUpdate,
   newSession,
   updateSessionTitle,

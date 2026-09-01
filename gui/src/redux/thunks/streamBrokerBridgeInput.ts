@@ -5,6 +5,7 @@ import {
   acceptToolCall,
   addPromptCompletionPair,
   abortStream,
+  clearSteerInterrupt,
   errorToolCall,
   markSteerRead,
   markLatestUserReceiptDelivered,
@@ -189,6 +190,16 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         `Queued follow-up ${queuedFollowUpMessageId} is absent from session ${state.session.id}.`,
       );
     }
+    // A steer that the vendor could not accept live interrupted the previous
+    // turn so it could be redelivered here. Tell the bridge so the broker
+    // prompt asks the model to resume the interrupted task instead of reading
+    // the follow-up as a brand-new request.
+    const steerInterrupt =
+      Boolean(queuedFollowUpMessageId) &&
+      Boolean(state.session.steerInterruptPending);
+    if (state.session.steerInterruptPending) {
+      dispatch(clearSteerInterrupt());
+    }
     const messages: ChatMessage[] = state.session.history
       // A model switch is a local timeline receipt. It must not become a
       // system turn in the next vendor request, even on the direct bridge path.
@@ -209,6 +220,12 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       .filter((message) => message.role !== "thinking");
     if (queuedFollowUp) messages.push(queuedFollowUp.message);
     const historyLengthAtRunStart = state.session.history.length;
+    // Long broker turns must not bet the whole tail on the end-of-turn save:
+    // a reload, crash, or Remote-SSH reconnect mid-turn loses everything
+    // since the last persist. Re-persist at most every 30 s while new entries
+    // arrive; the core fast-forwards a lagging revision for this exact race.
+    let lastPeriodicSaveAt = Date.now();
+    let lastPeriodicSavedLen = historyLengthAtRunStart;
     const seenTerminalErrors = new Set<string>();
     let terminalSettled = false;
 
@@ -265,6 +282,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     dispatch(setIsPruned(false));
     dispatch(setContextPercentage(0));
 
+    const { saveCurrentSession } = await import("./session");
     try {
       const gen = extra.ideMessenger.streamRequest(
         "cukii/streamBridgeChat",
@@ -278,6 +296,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           thinkingEnabled,
           brokerPermissionMode: state.session.brokerPermissionMode,
           queuedFollowUpMessageId,
+          steerInterrupt,
         },
         streamAborter.signal,
       );
@@ -340,6 +359,24 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             }
             dispatch(streamUpdate([message]));
             settleObservedToolCalls([message], dispatch);
+          }
+          const liveSession = getState().session;
+          if (
+            liveSession.id === sessionId &&
+            !liveSession.isInEdit &&
+            liveSession.history.length > lastPeriodicSavedLen &&
+            Date.now() - lastPeriodicSaveAt >= 30_000
+          ) {
+            // Fire-and-forget: the next check is gated by the watermark, and
+            // a stale-revision receipt is healed by the core fast-forward.
+            lastPeriodicSaveAt = Date.now();
+            lastPeriodicSavedLen = liveSession.history.length;
+            void dispatch(
+              saveCurrentSession({
+                openNewSession: false,
+                generateTitle: false,
+              }),
+            ).catch(() => undefined);
           }
           if (hasTerminalReceipt) {
             // Hide activity synchronously on the native terminal receipt. The

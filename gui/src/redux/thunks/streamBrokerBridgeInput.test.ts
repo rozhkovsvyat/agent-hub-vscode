@@ -6,6 +6,7 @@ import {
   abortStream,
   type ChatHistoryItemWithMessageId,
   newSession,
+  requestSteerInterrupt,
   setBrokerPermissionMode,
   setActive,
   setInactive,
@@ -90,6 +91,111 @@ describe("streamBrokerBridgeInput controls", () => {
           ),
         ),
     ).toBe(true);
+  });
+
+  it("passes steerInterrupt and consumes the pending flag on a redelivered follow-up", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: any[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "original" },
+          "original",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "assistant", content: "working" },
+          "assistant-1",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "injected steer" },
+          "steer-1",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 1,
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "steer-interrupt",
+        title: "Steer interrupt",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+    store.dispatch(requestSteerInterrupt());
+    expect(store.getState().session.steerInterruptPending).toBe(true);
+
+    await store.dispatch(
+      streamBrokerBridgeInput({ queuedFollowUpMessageId: "steer-1" }),
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].queuedFollowUpMessageId).toBe("steer-1");
+    expect(captured[0].steerInterrupt).toBe(true);
+    // The pending flag is consumed by the turn that redelivers the steer.
+    expect(store.getState().session.steerInterruptPending).toBe(false);
+  });
+
+  it("does not set steerInterrupt on a normal (non-interrupt) follow-up turn", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: any[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "original" },
+          "original",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "queued follow-up" },
+          "steer-1",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 1,
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "plain-followup",
+        title: "Plain follow-up",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(
+      streamBrokerBridgeInput({ queuedFollowUpMessageId: "steer-1" }),
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].queuedFollowUpMessageId).toBe("steer-1");
+    expect(captured[0].steerInterrupt).toBe(false);
   });
 
   it("dispatches exactly one claimed queued follow-up as the final FIFO user turn", async () => {
