@@ -652,10 +652,7 @@ const KIMI_IDENTITY_CACHE_MAX_ENTRIES = 32;
 type KimiIdentityCacheEntry = { identity: string; expiresAt: number };
 const kimiIdentityCache = new Map<string, KimiIdentityCacheEntry>();
 const kimiProfileIdentityCache = new Map<string, KimiIdentityCacheEntry>();
-const kimiIdentityInFlight = new Map<
-  string,
-  Promise<string | undefined>
->();
+const kimiIdentityInFlight = new Map<string, Promise<string | undefined>>();
 let kimiIdentityCacheGeneration = 0;
 const KIMI_CODE_ME_URL = new URL("https://api.kimi.ai/coding/v1/me");
 
@@ -927,8 +924,9 @@ export function launchKimiWeb(
         cwd: workingDirectory,
         env: {
           ...process.env,
-          CUKII_KIMI_EXECUTABLE_B64:
-            Buffer.from(executable, "utf8").toString("base64"),
+          CUKII_KIMI_EXECUTABLE_B64: Buffer.from(executable, "utf8").toString(
+            "base64",
+          ),
           CUKII_KIMI_PORT: String(port),
           CUKII_KIMI_FORCE_JOB_FAILURE: forceJobFailure ? "1" : "0",
         },
@@ -1116,10 +1114,7 @@ export async function stopEphemeralKimiWeb(
   }
   const rootPid = child.pid;
   if (!rootPid) return;
-  if (
-    child.killed ||
-    (child.exitCode !== null && child.exitCode !== undefined)
-  )
+  if (child.killed || (child.exitCode !== null && child.exitCode !== undefined))
     return;
   const exited = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), 300);
@@ -1698,6 +1693,14 @@ export function clearBrokerVendorAccountCache(): void {
   kimiIdentityInFlight.clear();
 }
 
+export function sortVendorAccountsByLabel(
+  accounts: BrokerVendorAuthStatus[],
+): BrokerVendorAuthStatus[] {
+  return [...accounts].sort((left, right) =>
+    left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
+  );
+}
+
 export async function listBrokerVendorAccounts(): Promise<
   BrokerVendorAuthStatus[]
 > {
@@ -1706,7 +1709,7 @@ export async function listBrokerVendorAccounts(): Promise<
       (vendor) => probeVendor(vendor.id as VendorWithCli),
     ),
   );
-  return [...live, notSupportedVendorStatus()];
+  return sortVendorAccountsByLabel([...live, notSupportedVendorStatus()]);
 }
 
 export function vendorAuthTerminalCommand(

@@ -6,6 +6,11 @@ import { EventEmitter } from "events";
 import { spawn as spawnChild } from "child_process";
 import { PassThrough } from "stream";
 
+import type {
+  BrokerVendorAuthStatus,
+  BrokerVendorId,
+} from "core/protocol/ideWebview";
+
 import {
   accountLabelFromAuthMetadata,
   nativeCliCandidates,
@@ -25,6 +30,7 @@ import {
   stopEphemeralKimiWeb,
   probeVendorExecutable,
   resolveKimiAccountIdentity,
+  sortVendorAccountsByLabel,
   storedCodexAccountLabel,
   vendorAuthTerminalCommand,
 } from "./bridgeVendorAuth";
@@ -946,7 +952,10 @@ describe("Cukii vendor CLI accounts", () => {
         await Promise.race([
           new Promise<void>((resolve) => owner.once("close", () => resolve())),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("owner setup did not stop")), 5_000),
+            setTimeout(
+              () => reject(new Error("owner setup did not stop")),
+              5_000,
+            ),
           ),
         ]);
         expect(owner.exitCode).toBe(73);
@@ -1788,5 +1797,40 @@ describe("Cukii vendor CLI accounts", () => {
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("vendor account ordering", () => {
+  const account = (
+    id: BrokerVendorId,
+    label: string,
+  ): BrokerVendorAuthStatus => ({
+    id,
+    label,
+    installed: true,
+    authenticated: false,
+    state: "unknown",
+    actions: [],
+  });
+
+  it("lists vendor accounts alphabetically by vendor name", () => {
+    const ordered = sortVendorAccountsByLabel([
+      account("qwen", "Alibaba"),
+      account("claude", "Anthropic"),
+      account("codex", "OpenAI"),
+      account("grok", "xAI"),
+      account("cursor", "Cursor"),
+      account("kimi", "Moonshot AI"),
+      account("deepseek", "DeepSeek"),
+    ]);
+    expect(ordered.map((entry) => entry.label)).toEqual([
+      "Alibaba",
+      "Anthropic",
+      "Cursor",
+      "DeepSeek",
+      "Moonshot AI",
+      "OpenAI",
+      "xAI",
+    ]);
   });
 });
