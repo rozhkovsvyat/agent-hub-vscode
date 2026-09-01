@@ -76,12 +76,19 @@ export function parseStoredSessionGroups(raw: unknown): SessionGroupState {
 }
 
 export async function loadSessionGroups(): Promise<SessionGroupState> {
+  let raw: string;
   try {
-    const raw = await fs.promises.readFile(sessionGroupsFilePath(), "utf8");
-    return parseStoredSessionGroups(JSON.parse(raw));
-  } catch {
-    return { ...EMPTY_SESSION_GROUP_STATE };
+    raw = await fs.promises.readFile(sessionGroupsFilePath(), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ...EMPTY_SESSION_GROUP_STATE };
+    }
+    // A real I/O failure must not masquerade as "no groups": the caller
+    // would then let a per-window cache migrate over a live shared copy.
+    throw err;
   }
+  // JSON.parse failure throws for the same reason.
+  return parseStoredSessionGroups(JSON.parse(raw));
 }
 
 export async function saveSessionGroups(

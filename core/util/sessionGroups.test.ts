@@ -79,6 +79,13 @@ describe("session group storage", () => {
     });
   });
 
+  it("rejects a corrupt file instead of reporting empty groups", async () => {
+    const filePath = sessionGroupsModule.sessionGroupsFilePath();
+    fs.writeFileSync(filePath, "{ not json", "utf8");
+    await expect(sessionGroupsModule.loadSessionGroups()).rejects.toThrow();
+    fs.rmSync(filePath, { force: true });
+  });
+
   it("round-trips state through the shared host file", async () => {
     const state: SessionGroupState = {
       groups: [{ id: "g1", name: "Проект" }],

@@ -440,8 +440,11 @@ export default function CukiiSessionNavigator() {
         return;
       }
       if (cancelled) return;
-      groupsSyncedWithCoreRef.current = true;
       if (result.status !== "success") return;
+      // Synced only after a real core answer: marking an error response as
+      // synced would let this window's cache overwrite the shared copy on
+      // the very next edit.
+      groupsSyncedWithCoreRef.current = true;
       const remote = result.content;
       const remoteEmpty =
         remote.groups.length === 0 &&
