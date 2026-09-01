@@ -69,9 +69,17 @@ export const streamResponseThunk = createAsyncThunk<
         return;
       }
 
-    if (!selectSelectedChatModel(initialState)) {
-      throw new Error("No chat model selected");
-    }
+      if (!selectSelectedChatModel(initialState)) {
+        await dispatch(
+          streamThunkWrapper(async () => {
+            throw new Error("No chat model selected");
+          }),
+        );
+        const { continueIfTrailingSteer } =
+          await import("./continueIfTrailingSteer");
+        await dispatch(continueIfTrailingSteer());
+        return;
+      }
 
     const inputIndex = index ?? initialState.session.history.length;
     // Render and claim the turn before the first async persistence/context

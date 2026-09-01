@@ -253,6 +253,8 @@ describe("streamResponseThunk - tool calls", () => {
     const actionTypes = dispatchedActions.map((action: any) => action.type);
     expect(actionTypes).toEqual([
       "chat/streamResponse/pending",
+      "session/submitEditorAndInitAtIndex",
+      "session/resetNextCodeBlockToApplyIndex",
       "chat/streamWrapper/pending",
       // Pre-stream persist of the previous turns.
       "session/saveCurrent/pending",
@@ -266,8 +268,6 @@ describe("streamResponseThunk - tool calls", () => {
       "session/update/fulfilled",
       "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
-      "session/submitEditorAndInitAtIndex",
-      "session/resetNextCodeBlockToApplyIndex",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
       // First-turn persist with the new user message.
@@ -710,6 +710,17 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
         type: "chat/streamWrapper/pending",
         meta: {
           arg: expect.any(Function),
@@ -816,17 +827,6 @@ describe("streamResponseThunk - tool calls", () => {
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {
@@ -1506,6 +1506,17 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
         type: "chat/streamWrapper/pending",
         meta: {
           arg: expect.any(Function),
@@ -1612,17 +1623,6 @@ describe("streamResponseThunk - tool calls", () => {
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {

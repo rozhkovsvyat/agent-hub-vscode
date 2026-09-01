@@ -494,6 +494,17 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
         type: "chat/streamWrapper/pending",
         meta: {
           arg: expect.any(Function),
@@ -600,17 +611,6 @@ describe("streamResponseThunk", () => {
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {
@@ -1079,6 +1079,17 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "session/submitEditorAndInitAtIndex",
+        payload: {
+          editorState: mockEditorState,
+          index: 1,
+        },
+      },
+      {
+        type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
         type: "chat/streamWrapper/pending",
         meta: {
           arg: expect.any(Function),
@@ -1185,17 +1196,6 @@ describe("streamResponseThunk", () => {
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
-        payload: undefined,
-      },
-      {
-        type: "session/submitEditorAndInitAtIndex",
-        payload: {
-          editorState: mockEditorState,
-          index: 1,
-        },
-      },
-      {
-        type: "session/resetNextCodeBlockToApplyIndex",
         payload: undefined,
       },
       {
