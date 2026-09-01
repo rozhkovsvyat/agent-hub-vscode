@@ -211,14 +211,20 @@ function InputToolbar(props: InputToolbarProps) {
       permissionCapabilities?.vendor === vendor
         ? permissionCapabilities
         : undefined;
+    // An empty snapshot means discovery failed, not that the vendor has no
+    // modes: never resolve the user's intent down against it. Route dispatch
+    // performs the same live probe before process creation.
+    const verifiedCapability =
+      capability && capability.supportedModes.length > 0
+        ? capability
+        : undefined;
     const targetCapabilities = {
       vendor,
-      supportedModes: capability?.supportedModes ?? [],
-      helpSource: capability ? "live" : "pending",
+      supportedModes: verifiedCapability?.supportedModes ?? [],
+      helpSource: verifiedCapability ? "live" : "pending",
     };
     // While the probe is pending preserve intent without claiming support.
-    // Route dispatch performs the same live probe before process creation.
-    const resolvedPermissionMode = !capability
+    const resolvedPermissionMode = !verifiedCapability
       ? nextPermissionMode
       : resolvePermissionModeForVendor(targetCapabilities, nextPermissionMode);
     dispatch(

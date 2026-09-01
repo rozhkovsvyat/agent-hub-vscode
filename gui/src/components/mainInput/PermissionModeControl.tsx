@@ -73,6 +73,18 @@ type CapabilitySnapshot = {
   generation?: number;
 };
 
+type ProbeStatus = "pending" | "verified" | "degraded";
+
+/** A failed capability probe must heal itself after a load spike instead of
+ * leaving every window in Manual until a reload. */
+export const PERMISSION_PROBE_RETRY_MS = 8_000;
+
+let probeRetryMs = PERMISSION_PROBE_RETRY_MS;
+
+export function setPermissionProbeRetryMsForTests(ms: number): void {
+  probeRetryMs = ms;
+}
+
 export function PermissionModeControl({
   brokerModel,
   permissionMode,
@@ -87,37 +99,72 @@ export function PermissionModeControl({
   const [capabilities, setCapabilities] = useState<CapabilitySnapshot | null>(
     null,
   );
+  const [probeStatus, setProbeStatus] = useState<ProbeStatus>("pending");
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setCapabilities(null);
-    void ideMessenger
-      .request("cukii/getPermissionCapabilities", { vendor })
-      .then((response) => {
-        if (cancelled || response.status !== "success") return;
-        if (response.content.vendor !== vendor) return;
+    setProbeStatus("pending");
+
+    const attempt = async (): Promise<boolean> => {
+      try {
+        const response = await ideMessenger.request(
+          "cukii/getPermissionCapabilities",
+          { vendor },
+        );
+        if (cancelled || response.status !== "success") return false;
+        if (response.content.vendor !== vendor) return false;
         setCapabilities(response.content);
-      })
-      .catch(() => {
-        // No live snapshot means no advertised permission mode.
-      });
+        if (response.content.supportedModes.length > 0) {
+          setProbeStatus("verified");
+          return true;
+        }
+      } catch {
+        // No live snapshot: keep the selected mode and retry discovery.
+      }
+      if (!cancelled) setProbeStatus("degraded");
+      return false;
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled || timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void attempt().then((verified) => {
+          if (!verified && !cancelled) scheduleRetry();
+        });
+      }, probeRetryMs);
+    };
+
+    void attempt().then((verified) => {
+      if (!verified && !cancelled) scheduleRetry();
+    });
+
     return () => {
       cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
     };
   }, [ideMessenger, vendor]);
 
   const visibleModes = useMemo(() => {
-    const isCurrent = capabilities?.vendor === vendor;
-    const supportedModes = isCurrent ? capabilities.supportedModes : [];
+    const isVerified =
+      probeStatus === "verified" && capabilities?.vendor === vendor;
+    const supportedModes = isVerified ? capabilities.supportedModes : [];
     return visiblePermissionModes({
       vendor,
       supportedModes,
-      helpSource: isCurrent ? "live" : "pending-live-probe",
+      helpSource: isVerified ? "live" : "pending-live-probe",
     });
-  }, [capabilities, vendor]);
+  }, [capabilities, probeStatus, vendor]);
 
   const resolvedPermissionMode = useMemo(() => {
-    if (capabilities?.vendor !== vendor) return permissionMode;
+    // Only a probe that verified at least one native mode may demote the
+    // user's selection. An empty snapshot means discovery itself failed and
+    // must never cascade a Manual downgrade into shared preferences.
+    if (probeStatus !== "verified" || capabilities?.vendor !== vendor) {
+      return permissionMode;
+    }
     if (visibleModes.includes(permissionMode)) return permissionMode;
     if (visibleModes.length === 1 && visibleModes[0] === "bypass") {
       return "bypass";
@@ -126,19 +173,27 @@ export function PermissionModeControl({
       { vendor, supportedModes: visibleModes, helpSource: "displayed" },
       permissionMode,
     );
-  }, [capabilities, permissionMode, vendor, visibleModes]);
+  }, [capabilities, permissionMode, probeStatus, vendor, visibleModes]);
 
   // A model can be changed while the capability request is still in flight.
   // Once the actual native CLI has answered, never leave the session pointing
   // at a mode that this concrete bridge cannot honour.
   useEffect(() => {
     if (
+      probeStatus === "verified" &&
       capabilities?.vendor === vendor &&
       resolvedPermissionMode !== permissionMode
     ) {
       onChange(resolvedPermissionMode);
     }
-  }, [capabilities, onChange, permissionMode, resolvedPermissionMode, vendor]);
+  }, [
+    capabilities,
+    onChange,
+    permissionMode,
+    probeStatus,
+    resolvedPermissionMode,
+    vendor,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -166,8 +221,40 @@ export function PermissionModeControl({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onChange, permissionMode, visibleModes]);
 
-  if (visibleModes.length === 0) {
+  if (probeStatus === "pending") {
     return null;
+  }
+
+  if (probeStatus === "degraded") {
+    const degradedCopy = CUKII_PERMISSION_MODE_COPY[permissionMode];
+    return (
+      <Popover className="relative">
+        <PopoverButton
+          type="button"
+          className="cukii-permission-button cukii-permission-button-degraded flex items-center gap-2 rounded px-2 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+          title={`${degradedCopy.description}. Native permission modes are not verified on this host yet; Cukii keeps retrying discovery.`}
+          aria-label="Toggle permission mode"
+        >
+          <PermissionModeIcon mode={permissionMode} />
+          <span className="cukii-permission-label">{degradedCopy.title}</span>
+        </PopoverButton>
+        <PopoverPanel
+          className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[300px]"
+          data-testid="cukii-permission-popover"
+        >
+          <div className="cukii-permission-header flex items-center justify-between text-[var(--vscode-descriptionForeground)]">
+            <span>Modes</span>
+          </div>
+          <div
+            className="cukii-permission-degraded-note"
+            data-testid="cukii-permission-degraded-note"
+          >
+            Native permission modes could not be verified on this host. The
+            selected mode is preserved; Cukii retries discovery automatically.
+          </div>
+        </PopoverPanel>
+      </Popover>
+    );
   }
 
   const hasSelectedVisibleMode = visibleModes.includes(resolvedPermissionMode);

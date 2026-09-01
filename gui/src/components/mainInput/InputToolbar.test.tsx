@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent } from "@testing-library/react";
+import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
@@ -171,7 +171,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(css).toContain("background: rgb(4, 57, 94) !important;");
   });
 
-  it("advertises no permission route when live capabilities are empty", async () => {
+  it("keeps the preserved mode visible when live capabilities are empty", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
       async ({ vendor }) => ({
@@ -185,9 +185,11 @@ describe("Cukii Claude-parity input toolbar", () => {
       mockIdeMessenger,
     });
 
-    expect(
-      document.querySelector('[aria-label="Toggle permission mode"]'),
-    ).toBeNull();
+    const button = document.querySelector(
+      '[aria-label="Toggle permission mode"]',
+    );
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toContain("Bypass permissions");
   });
 
   it("uses the successful live capability set as authoritative", async () => {
@@ -407,7 +409,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     },
   );
 
-  it("keeps the Codex selector hidden after a capability probe error", async () => {
+  it("keeps the Codex selector reachable after a capability probe error", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/getPermissionCapabilities"] =
       async () => {
@@ -418,15 +420,22 @@ describe("Cukii Claude-parity input toolbar", () => {
       type: "session/setBrokerModel",
       payload: "codex-5-6-sol",
     });
+    store.dispatch(setBrokerPermissionMode("bypass"));
 
     await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
       store,
     });
 
-    expect(
-      document.querySelector('[aria-label="Toggle permission mode"]'),
-    ).toBeNull();
+    const button = await waitFor(() => {
+      const found = document.querySelector(
+        '[aria-label="Toggle permission mode"]',
+      );
+      expect(found).not.toBeNull();
+      return found;
+    });
+    expect(button?.textContent).toContain("Bypass permissions");
+    expect(store.getState().session.brokerPermissionMode).toBe("bypass");
   });
 
   it("preserves explicit Kimi Bypass intent while the live probe is pending", async () => {

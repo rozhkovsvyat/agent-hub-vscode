@@ -65,7 +65,7 @@ export function selfTestClaudePermissionWorker(): Promise<boolean> {
       child.kill();
       resolve(ready);
     };
-    const timeout = setTimeout(() => finish(false), 2_000);
+    const timeout = setTimeout(() => finish(false), 10_000);
     child.once("error", () => finish(false));
     child.stdout?.on("data", (chunk) => {
       stdout += String(chunk);
@@ -189,6 +189,34 @@ function resolveProbeCommand(program: string): ProbeCommand | undefined {
   return candidate ? probeCommandForRoute(candidate) : undefined;
 }
 
+function killProbeTree(child: ReturnType<typeof spawn>): void {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    try {
+      // Killing only the cmd shell orphans the actual CLI node process, so a
+      // timed-out probe would keep consuming CPU and deepen the very load
+      // spike that caused the timeout.
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      }).unref();
+    } catch {
+      // The probe is already gone.
+    }
+    return;
+  }
+  try {
+    child.kill();
+  } catch {
+    // The probe is already gone.
+  }
+}
+
+// Native CLI cold starts take ~1s even when idle; under build/test load they
+// can need several seconds. A short budget turned probes into false negatives
+// that degraded every open window's permission mode at once.
+const PROBE_TIMEOUT_MS = 10_000;
+
 function runProbe(command: ProbeCommand, flag: string): Promise<ProbeOutput> {
   return new Promise((resolve) => {
     const args = command.argsPrefix.length
@@ -211,7 +239,7 @@ function runProbe(command: ProbeCommand, flag: string): Promise<ProbeOutput> {
     });
     let stdout = "";
     let stderr = "";
-    const timeout = setTimeout(() => child.kill(), 2_000);
+    const timeout = setTimeout(() => killProbeTree(child), PROBE_TIMEOUT_MS);
     child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
     child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
     child.once("error", () => {
