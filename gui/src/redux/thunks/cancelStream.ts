@@ -2,6 +2,7 @@ import { createAsyncThunk } from "@reduxjs/toolkit";
 import { v4 as uuidv4 } from "uuid";
 import {
   abortStream,
+  cancelQueuedSteers,
   clearDanglingMessages,
   setCancelling,
   setInactive,
@@ -43,6 +44,12 @@ export const cancelStream = createAsyncThunk<
   dispatch(setInactive());
   dispatch(abortStream());
   dispatch(clearDanglingMessages(interrupted));
+  if (userInitiated) {
+    // An explicit Stop/Escape is a terminal decision. Cancel the durable
+    // follow-up outbox too; otherwise the trailing drain below would restart
+    // the bridge a couple of seconds after the user believes it was stopped.
+    dispatch(cancelQueuedSteers());
+  }
   // Keep duplicate Stop/Escape events gated until the native process-tree
   // cancellation receipt arrives, even though the visible turn is already
   // settled optimistically.
@@ -64,9 +71,14 @@ export const cancelStream = createAsyncThunk<
   } finally {
     if (getState().session.id === session.id) {
       dispatch(setCancelling(false));
-      const { continueIfTrailingSteer } =
-        await import("./continueIfTrailingSteer");
-      void dispatch(continueIfTrailingSteer());
+      // Only provider/lifecycle cancellations may drain the durable outbox.
+      // After an explicit user Stop the queued follow-ups are already
+      // cancelled and the broker must stay stopped.
+      if (!userInitiated) {
+        const { continueIfTrailingSteer } =
+          await import("./continueIfTrailingSteer");
+        void dispatch(continueIfTrailingSteer());
+      }
     }
   }
 });

@@ -198,7 +198,11 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           item.message.id !== queuedFollowUpMessageId &&
           !(
             item.isSteer &&
-            (item.steerStatus === "queued" || item.steerStatus === "deferred")
+            (item.steerStatus === "queued" ||
+              item.steerStatus === "deferred" ||
+              // An explicit Stop cancelled this follow-up before the vendor
+              // accepted it. It must never reach a later turn either.
+              item.steerStatus === "cancelled")
           ),
       )
       .map((item) => item.message)

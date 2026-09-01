@@ -220,15 +220,19 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   /** Messenger-style receipt persisted on every newly sent user message. */
   messageReceipt?: {
     sentAt: number;
-    status: "queued" | "delivered" | "read" | "deferred" | "failed";
+    status:
+      "queued" | "delivered" | "read" | "deferred" | "failed" | "cancelled";
   };
   isSteer?: boolean;
   /**
    * `delivered` means the native bridge accepted the follow-up. `read` is
    * reserved for an explicit vendor echo of this exact input, never for an
-   * arbitrary later assistant/tool event.
+   * arbitrary later assistant/tool event. `cancelled` is a terminal state set
+   * by an explicit user Stop: the bubble stays visible, but no drain or late
+   * transport frame may revive it.
    */
-  steerStatus?: "queued" | "delivered" | "read" | "deferred" | "failed";
+  steerStatus?:
+    "queued" | "delivered" | "read" | "deferred" | "failed" | "cancelled";
   /** Epoch milliseconds captured at send time and persisted with history. */
   steerSentAt?: number;
   // Set on the last kept assistant turn when the user cancels (Esc). Drives the
@@ -439,23 +443,25 @@ export const sessionSlice = createSlice({
         return;
       }
 
-      const isPendingSteer = (item: ChatHistoryItemWithMessageId) =>
+      const isDurableSteer = (item: ChatHistoryItemWithMessageId) =>
         item.isSteer &&
-        (item.steerStatus === "queued" || item.steerStatus === "deferred");
+        (item.steerStatus === "queued" ||
+          item.steerStatus === "deferred" ||
+          item.steerStatus === "cancelled");
       const lastUserOrToolIdx = findLastIndex(
         state.history,
         (item) =>
-          !isPendingSteer(item) &&
+          !isDurableSteer(item) &&
           (item.message.role === "tool" || item.message.role === "user"),
       );
 
       let validAssistantMessageIdx = -1;
       for (let i = state.history.length - 1; i > lastUserOrToolIdx; i--) {
         const message = state.history[i];
-        // Queued/deferred steer messages are a durable outbox. Cancellation
-        // cleanup may settle the active turn, but must leave these entries for
-        // continueIfTrailingSteer to drain after the native receipt arrives.
-        if (isPendingSteer(message)) continue;
+        // Steer bubbles are a durable outbox, including ones an explicit Stop
+        // already cancelled. Cancellation cleanup may settle the active turn,
+        // but must never delete or truncate these entries.
+        if (isDurableSteer(message)) continue;
         // Any in-flight tool call (even still "generating") makes this message
         // worth keeping: we mark it canceled below so the transcript shows
         // "Tool interrupted", instead of silently deleting the turn on Esc.
@@ -506,17 +512,17 @@ export const sessionSlice = createSlice({
         if (lastRole === "user") {
           state.mainEditorContentTrigger = lastMsg.editorState;
           state.history = state.history.filter(
-            (item, index) => index < lastUserOrToolIdx || isPendingSteer(item),
+            (item, index) => index < lastUserOrToolIdx || isDurableSteer(item),
           );
         } else {
           state.history = state.history.filter(
-            (item, index) => index <= lastUserOrToolIdx || isPendingSteer(item),
+            (item, index) => index <= lastUserOrToolIdx || isDurableSteer(item),
           );
         }
       } else {
         state.history = state.history.filter(
           (item, index) =>
-            index <= validAssistantMessageIdx || isPendingSteer(item),
+            index <= validAssistantMessageIdx || isDurableSteer(item),
         );
       }
     },
@@ -752,9 +758,30 @@ export const sessionSlice = createSlice({
       const item = state.history.find(
         (entry) => entry.message.id === action.payload.messageId,
       );
+      // An explicit user Stop is terminal. A late transport frame must not
+      // requeue a cancelled follow-up and make the broker resume by itself.
+      if (
+        item?.isSteer &&
+        item.steerStatus === "cancelled" &&
+        (action.payload.status === "queued" ||
+          action.payload.status === "deferred")
+      ) {
+        return;
+      }
       if (item?.isSteer) item.steerStatus = action.payload.status;
       if (item?.messageReceipt)
         item.messageReceipt.status = action.payload.status;
+    },
+    cancelQueuedSteers: (state) => {
+      for (const item of state.history) {
+        if (
+          item.isSteer &&
+          (item.steerStatus === "queued" || item.steerStatus === "deferred")
+        ) {
+          item.steerStatus = "cancelled";
+          if (item.messageReceipt) item.messageReceipt.status = "cancelled";
+        }
+      }
     },
     markSteerRead: (state, action: PayloadAction<{ messageId: string }>) => {
       const item = state.history.find(
@@ -1454,6 +1481,7 @@ export const {
   markSteerRead,
   markLatestUserReceiptDelivered,
   setSteerStatus,
+  cancelQueuedSteers,
   streamUpdate,
   newSession,
   updateSessionTitle,

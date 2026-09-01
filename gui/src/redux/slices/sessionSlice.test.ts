@@ -6,6 +6,8 @@ import { addToolCallDeltaToState } from "../../util/toolCallState";
 import {
   ChatHistoryItemWithMessageId,
   appendUserSteerMessage,
+  cancelQueuedSteers,
+  clearDanglingMessages,
   markSteerRead,
   newSession,
   sessionSlice,
@@ -859,6 +861,115 @@ describe("sessionSlice mid-task steer messages", () => {
     const next = sessionSlice.reducer(steered, newSession(undefined));
     expect(next.history).toHaveLength(0);
     expect(next.isStreaming).toBe(false);
+  });
+});
+
+describe("sessionSlice explicit Stop steer semantics", () => {
+  const streamingWithOutbox = () => {
+    let state = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    state = sessionSlice.reducer(
+      state,
+      appendUserSteerMessage({ content: "first", messageId: "s1" }),
+    );
+    state = sessionSlice.reducer(
+      state,
+      setSteerStatus({ messageId: "s1", status: "deferred" }),
+    );
+    state = sessionSlice.reducer(
+      state,
+      appendUserSteerMessage({ content: "second", messageId: "s2" }),
+    );
+    return state;
+  };
+
+  it("cancelQueuedSteers cancels queued and deferred follow-ups with their receipts", () => {
+    const cancelled = sessionSlice.reducer(
+      streamingWithOutbox(),
+      cancelQueuedSteers(),
+    );
+    expect(cancelled.history.map((item) => item.steerStatus)).toEqual([
+      "cancelled",
+      "cancelled",
+    ]);
+    expect(
+      cancelled.history.map((item) => item.messageReceipt?.status),
+    ).toEqual(["cancelled", "cancelled"]);
+  });
+
+  it("cancelQueuedSteers leaves accepted follow-ups untouched", () => {
+    const withDelivered = sessionSlice.reducer(
+      streamingWithOutbox(),
+      setSteerStatus({ messageId: "s2", status: "delivered" }),
+    );
+    const cancelled = sessionSlice.reducer(withDelivered, cancelQueuedSteers());
+    expect(cancelled.history.map((item) => item.steerStatus)).toEqual([
+      "cancelled",
+      "delivered",
+    ]);
+  });
+
+  it("setSteerStatus never revives a cancelled follow-up into the outbox", () => {
+    const cancelled = sessionSlice.reducer(
+      streamingWithOutbox(),
+      cancelQueuedSteers(),
+    );
+    for (const status of ["queued", "deferred"] as const) {
+      const revived = sessionSlice.reducer(
+        cancelled,
+        setSteerStatus({ messageId: "s1", status }),
+      );
+      expect(revived.history[0].steerStatus).toBe("cancelled");
+      expect(revived.history[0].messageReceipt?.status).toBe("cancelled");
+    }
+    const read = sessionSlice.reducer(
+      cancelled,
+      setSteerStatus({ messageId: "s1", status: "read" }),
+    );
+    expect(read.history[0].steerStatus).toBe("read");
+  });
+
+  it("clearDanglingMessages keeps cancelled steer bubbles in the transcript", () => {
+    const stopHistory: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "u1", role: "user", content: "work" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a1", role: "assistant", content: "working" },
+        contextItems: [],
+      },
+      {
+        message: { id: "s1", role: "user", content: "queued" },
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "queued",
+        messageReceipt: { sentAt: 1, status: "queued" },
+      },
+    ];
+    const state = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "stop-keeps-bubbles",
+        title: "Stop keeps bubbles",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: stopHistory,
+      }),
+    );
+    const cancelled = sessionSlice.reducer(state, cancelQueuedSteers());
+    const cleaned = sessionSlice.reducer(
+      cancelled,
+      clearDanglingMessages("turn"),
+    );
+    expect(cleaned.history.map((item) => item.message.id)).toEqual([
+      "u1",
+      "a1",
+      "s1",
+    ]);
+    expect(cleaned.history[2].steerStatus).toBe("cancelled");
+    expect(cleaned.history[1].interrupted).toBe(true);
   });
 });
 

@@ -24,6 +24,17 @@ export const streamThunkWrapper = createAsyncThunk<
 >("chat/streamWrapper", async (runStream, { dispatch, getState }) => {
   for (let attempt = 0; attempt <= OVERLOADED_RETRIES; attempt++) {
     try {
+      const preState = getState();
+      if (!preState.session.isInEdit) {
+        // Persist the user turn before the vendor round-trip. The session row
+        // must appear in the journal immediately after the chat starts, and
+        // the conversation must survive a window reload that lands mid-turn;
+        // waiting for the full turn to finish leaves long broker runs
+        // invisible and unrecoverable.
+        await dispatch(
+          saveCurrentSession({ openNewSession: false, generateTitle: false }),
+        );
+      }
       await runStream();
       const state = getState();
       if (!state.session.isInEdit) {

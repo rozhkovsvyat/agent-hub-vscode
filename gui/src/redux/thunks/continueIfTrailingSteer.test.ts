@@ -84,6 +84,31 @@ describe("hasTrailingSteerMessage", () => {
     },
   );
 
+  it("never drains a follow-up cancelled by an explicit user Stop", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.streamRequest = vi.fn(async function* () {
+      yield [{ role: "assistant", content: "must not run" }];
+    }) as typeof messenger.streamRequest;
+    const cancelled = item("user", "stopped by the user", true);
+    cancelled.steerStatus = "cancelled";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "cancelled-no-drain",
+        title: "Cancelled stays cancelled",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [item("user", "active prompt"), cancelled],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(messenger.streamRequest).not.toHaveBeenCalled();
+    expect(store.getState().session.history[1].steerStatus).toBe("cancelled");
+  });
+
   it("drains two messages FIFO once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[] = [];
