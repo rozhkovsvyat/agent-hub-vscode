@@ -1362,8 +1362,14 @@ async function* streamBridgeChatWithSteer(
           args.messages,
           args.queuedFollowUpMessageId,
           event.text,
-          queuedFollowUpRead,
+          false,
         );
+        if (queuedMessageId && queuedFollowUpRead) {
+          // Already acknowledged at the prompt handoff. The vendor echo of
+          // the same follow-up must be swallowed, never leak into the
+          // visible transcript as a second user message.
+          continue;
+        }
         const messageId = queuedMessageId
           ? queuedMessageId
           : permissionTransport?.steering?.consumeVendorEcho(event.text);
@@ -1434,12 +1440,19 @@ async function* streamBridgeChatWithSteer(
   }
 
   // A redelivered follow-up is physically inside the prompt handed to the
-  // child above (stdin or prompt file). Acknowledge it now: waiting for the
-  // vendor's first stdout leaves the bubble at one checkmark through the
-  // whole kill + cold-start gap, which reads as "the message was ignored".
-  if (args.queuedFollowUpMessageId && !queuedFollowUpRead && !cancelled) {
-    queuedFollowUpRead = true;
-    queue.push({ kind: "steerRead", messageId: args.queuedFollowUpMessageId });
+  // child above (stdin or prompt file). Waiting for the vendor's first stdout
+  // leaves the bubble at one checkmark through the whole kill + cold-start
+  // gap, which reads as "the message was ignored". Acknowledge on the spawn
+  // event instead of immediately: a launch failure must leave the bubble
+  // deferred so the durable outbox drain replays it, never consume it with a
+  // read receipt for a process that never ran.
+  const ackFollowUpMessageId = args.queuedFollowUpMessageId;
+  if (ackFollowUpMessageId && !cancelled) {
+    child.once("spawn", () => {
+      if (queuedFollowUpRead || cancelled) return;
+      queuedFollowUpRead = true;
+      queue.push({ kind: "steerRead", messageId: ackFollowUpMessageId });
+    });
   }
 
   const parser = new BridgeEventParser(route.format);

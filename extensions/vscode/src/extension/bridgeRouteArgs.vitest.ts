@@ -830,25 +830,43 @@ describe("native bridge argv", () => {
     ]);
   });
 
-  it("acknowledges a redelivered follow-up only after the prompt handoff", () => {
+  it("acknowledges a redelivered follow-up only after a live spawn", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const handoffAt = source.indexOf("child.stdin.write(");
+    const spawnListenerAt = source.indexOf('child.once("spawn"');
     const ackAt = source.indexOf(
-      'queue.push({ kind: "steerRead", messageId: args.queuedFollowUpMessageId });',
+      'queue.push({ kind: "steerRead", messageId: ackFollowUpMessageId });',
     );
     const parserAt = source.indexOf(
       "const parser = new BridgeEventParser(route.format);",
     );
     expect(handoffAt).toBeGreaterThan(-1);
-    expect(ackAt).toBeGreaterThan(handoffAt);
+    expect(spawnListenerAt).toBeGreaterThan(handoffAt);
+    expect(ackAt).toBeGreaterThan(spawnListenerAt);
     expect(parserAt).toBeGreaterThan(ackAt);
-    // The ack must stay gated so a cancelled run or an already-read receipt
-    // can never produce a second checkmark on its own.
-    const ackBlock = source.slice(ackAt - 400, ackAt);
-    expect(ackBlock).toContain("!queuedFollowUpRead");
-    expect(ackBlock).toContain("!cancelled");
+    // A launch failure must leave the bubble deferred and replayable, so the
+    // ack stays gated on the spawn event plus the cancellation/read flags.
+    const ackBlock = source.slice(spawnListenerAt, ackAt);
+    expect(ackBlock).toContain("queuedFollowUpRead || cancelled");
+  });
+
+  it("swallows a vendor echo of an already-acknowledged follow-up", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    const swallowAt = source.indexOf(
+      "if (queuedMessageId && queuedFollowUpRead) {",
+    );
+    expect(swallowAt).toBeGreaterThan(-1);
+    const swallowBlock = source.slice(
+      swallowAt,
+      source.indexOf("const messageId = queuedMessageId", swallowAt),
+    );
+    expect(swallowBlock).toContain("continue;");
+    expect(swallowBlock).not.toContain("queue.push");
   });
 });
