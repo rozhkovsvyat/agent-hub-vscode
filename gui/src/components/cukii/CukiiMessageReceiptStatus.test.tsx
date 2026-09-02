@@ -14,7 +14,7 @@ describe("CukiiMessageReceiptStatus", () => {
     expect(icon.querySelectorAll("path")).toHaveLength(1);
   });
 
-  it("renders read as two overlapping SVG paths, not two text glyphs", () => {
+  it("renders read as a full check plus a parallel bare stroke", () => {
     render(<CukiiMessageReceiptStatus status="read" />);
 
     const icon = screen.getByTestId("cukii-message-receipt-status-read");
@@ -25,8 +25,10 @@ describe("CukiiMessageReceiptStatus", () => {
     expect(checks[1]).toHaveClass("cukii-receipt-check-front");
     expect(icon).toHaveAttribute("width", "16");
     expect(icon).toHaveAttribute("height", "10");
-    expect(checks[1]?.getAttribute("d")).toBe("M5 5L8 8L14 2");
-    expect(checks[0]?.getAttribute("d")).not.toBe(checks[1]?.getAttribute("d"));
+    expect(checks[1]?.getAttribute("d")).toBe("M2 5L5 8L11 2");
+    // The second check is only its tail: a stroke parallel to the first
+    // check's right arm, never an overlapping full check.
+    expect(checks[0]?.getAttribute("d")).toBe("M9 8L15 2");
     expect(icon.textContent).toBe("");
   });
 });

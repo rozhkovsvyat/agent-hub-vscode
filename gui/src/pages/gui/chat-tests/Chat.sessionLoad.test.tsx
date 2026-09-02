@@ -16,17 +16,10 @@ import { EMPTY_CONFIG, updateConfig } from "../../../redux/slices/configSlice";
 // light leaf doubles let us observe work that happens only *after* its memo
 // boundary, without making the component under test a plain function mock.
 const markdownRenderSpy = vi.hoisted(() => vi.fn());
-const responseActionsSpy = vi.hoisted(() => vi.fn());
 vi.mock("../../../components/StyledMarkdownPreview", () => ({
   default: ({ source, itemIndex }: { source: string; itemIndex: number }) => {
     markdownRenderSpy(source, itemIndex);
     return <div data-testid={`saved-row-${itemIndex}`}>{source}</div>;
-  },
-}));
-vi.mock("../../../components/StepContainer/ResponseActions", () => ({
-  default: ({ index }: { index: number }) => {
-    responseActionsSpy(index);
-    return <div data-testid={`response-actions-${index}`} />;
   },
 }));
 
@@ -214,8 +207,8 @@ describe("Cukii saved-session loading", () => {
     ).toBeNull();
     expect(markdownRenderSpy).not.toHaveBeenCalled();
 
-    // Streaming is a StepContainer selector: rows must still refresh, while the
-    // last completed response hides its actions during the live stream.
+    // Response actions are gone, so the stream flag no longer feeds any
+    // StepContainer output: flipping it must not re-render saved rows.
     await act(async () => {
       store.dispatch(setActive());
       store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
@@ -223,19 +216,7 @@ describe("Cukii saved-session loading", () => {
     expect(
       container.querySelector('[data-testid="cukii-waiting-receipt"]'),
     ).toHaveTextContent("Waiting for bridge");
-    expect(new Set(renderedStepIds())).toEqual(
-      new Set(
-        Array.from(
-          { length: INITIAL_TRANSCRIPT_WINDOW },
-          (_, index) => `assistant-${firstVisibleIndex + index}`,
-        ),
-      ),
-    );
-    expect(
-      container.querySelector(
-        `[data-testid="response-actions-${lastVisibleIndex}"]`,
-      ),
-    ).toBeNull();
+    expect(markdownRenderSpy).not.toHaveBeenCalled();
 
     markdownRenderSpy.mockClear();
     await act(async () => {
@@ -261,10 +242,9 @@ describe("Cukii saved-session loading", () => {
     });
     expectOnlyWindowRows(firstVisibleIndex, lastVisibleIndex + 1);
 
-    // A row's successor is a selector used for response-action eligibility.
-    // Updating that neighbour must re-render just the affected saved row.
+    // Response actions are gone, so a row's successor no longer feeds its
+    // render inputs: updating the neighbour must not re-render any saved row.
     markdownRenderSpy.mockClear();
-    responseActionsSpy.mockClear();
     await act(async () => {
       store.dispatch(
         updateHistoryItemAtIndex({
@@ -279,12 +259,6 @@ describe("Cukii saved-session loading", () => {
         }),
       );
     });
-    expect(renderedStepIds()).toEqual([`assistant-${firstVisibleIndex}`]);
-    expect(responseActionsSpy).toHaveBeenCalledWith(firstVisibleIndex);
-    expect(
-      container.querySelector(
-        `[data-testid="response-actions-${firstVisibleIndex}"]`,
-      ),
-    ).not.toBeNull();
+    expect(renderedStepIds()).toEqual([]);
   });
 });

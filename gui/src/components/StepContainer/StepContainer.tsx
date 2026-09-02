@@ -1,15 +1,12 @@
 import { ChatHistoryItem } from "core";
 import { renderChatMessage, stripImages } from "core/util/messageContent";
-import { memo, useEffect, useState } from "react";
-import { useDispatch } from "react-redux";
+import { memo } from "react";
 import { useAppSelector } from "../../redux/hooks";
 import { selectUIConfig } from "../../redux/slices/configSlice";
-import { deleteMessage } from "../../redux/slices/sessionSlice";
 import { formatMessageTime } from "../../util/formatMessageTime";
 import ThinkingBlockPeek from "../mainInput/belowMainInput/ThinkingBlockPeek";
 import StyledMarkdownPreview from "../StyledMarkdownPreview";
 import ConversationSummary from "./ConversationSummary";
-import ResponseActions from "./ResponseActions";
 import ThinkingIndicator from "./ThinkingIndicator";
 
 interface StepContainerProps {
@@ -20,9 +17,6 @@ interface StepContainerProps {
 }
 
 function StepContainer(props: StepContainerProps) {
-  const dispatch = useDispatch();
-  const [isTruncated, setIsTruncated] = useState(false);
-  const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const uiConfig = useAppSelector(selectUIConfig);
 
   // Calculate dimming and indicator state based on latest summary index
@@ -31,49 +25,6 @@ function StepContainer(props: StepContainerProps) {
     latestSummaryIndex !== -1 && props.index <= latestSummaryIndex;
   const isLatestSummary =
     latestSummaryIndex !== -1 && props.index === latestSummaryIndex;
-
-  const historyItemAfterThis = useAppSelector(
-    (state) => state.session.history[props.index + 1],
-  );
-  const showResponseActions =
-    (props.isLast || historyItemAfterThis?.message.role === "user") &&
-    !(props.isLast && (isStreaming || props.item.toolCallStates));
-
-  useEffect(() => {
-    if (!isStreaming) {
-      const content = renderChatMessage(props.item.message).trim();
-      const endingPunctuation = [".", "?", "!", "```", ":"];
-
-      // If not ending in punctuation or emoji, we assume the response got truncated
-      if (
-        content.trim() !== "" &&
-        !(
-          endingPunctuation.some((p) => content.endsWith(p)) ||
-          /\p{Emoji}/u.test(content.slice(-2))
-        )
-      ) {
-        setIsTruncated(true);
-      } else {
-        setIsTruncated(false);
-      }
-    }
-  }, [props.item.message.content, isStreaming]);
-
-  function onDelete() {
-    dispatch(deleteMessage(props.index));
-  }
-
-  function onContinueGeneration() {
-    window.postMessage(
-      {
-        messageType: "userInput",
-        data: {
-          input: "Continue your response exactly where you left off:",
-        },
-      },
-      "*",
-    );
-  }
 
   return (
     <div>
@@ -112,21 +63,6 @@ function StepContainer(props: StepContainerProps) {
           </span>
         )}
       </div>
-
-      {showResponseActions && (
-        <div
-          className={`mt-2 h-7 transition-opacity duration-300 ease-in-out ${isBeforeLatestSummary || isStreaming ? "opacity-35" : ""} ${isStreaming && "pointer-events-none cursor-not-allowed"}`}
-        >
-          <ResponseActions
-            isTruncated={isTruncated}
-            onDelete={onDelete}
-            onContinueGeneration={onContinueGeneration}
-            index={props.index}
-            item={props.item}
-            isLast={props.isLast}
-          />
-        </div>
-      )}
 
       {/* Show compaction indicator for the latest summary */}
       {isLatestSummary && (

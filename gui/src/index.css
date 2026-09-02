@@ -1175,6 +1175,14 @@ button.cukii-submit-button--stop:active {
   background-color: transparent !important;
 }
 
+/* Inline code (paths, guids) ships its own dark square too; inside the
+   capsule only the capsule fill remains. */
+.cukii-assistant-bubble .wmde-markdown code,
+.cukii-assistant-bubble .wmde-markdown tt {
+  background: transparent !important;
+  border: 0 !important;
+}
+
 /* Reply time in the capsule's bottom-right corner, on the same 6px right
    inset as the user checks. No reserved slot: it flows after the prose. */
 .cukii-assistant-metadata {
@@ -1190,10 +1198,27 @@ button.cukii-submit-button--stop:active {
   white-space: nowrap;
 }
 
-/* Assistant capsules are prose on the rail, not discrete checkpoints: no
-   timeline dot. The class stays as the layout hook for the capsule row. */
-.cukii-timeline-event.cukii-timeline-bubble::before {
-  content: none;
+/* Assistant capsules live OFF the timeline rail: the row is a plain block at
+   the transcript's own gutter — the same inset the user capsule keeps from
+   the right edge — so no dot and no connector line ride along, and the rail
+   starts and ends strictly between messages. */
+.cukii-assistant-row {
+  display: block;
+  min-width: 0;
+  margin: 10px 0;
+}
+
+/* Right-click menu on capsules; mirrors the Claude Code "Copy Message"
+   entry the owner uses as reference. */
+.cukii-message-context-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--cukii-line));
+  border-radius: 6px;
+  background: var(--vscode-menu-background, #252526);
+  box-shadow: var(--cukii-shadow);
 }
 
 /* Geometry copied from Claude Code webview `.messagesContainer` / `.timelineMessage`. */
@@ -1288,7 +1313,9 @@ button.cukii-submit-button--stop:active {
   display: inline-flex;
   width: 46px;
   height: 12px;
-  align-items: baseline;
+  /* Checks sit on the same bottom edge as the time text, not on the font
+     baseline which left them floating a pixel high. */
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 2px;
   margin: 0;
@@ -1313,18 +1340,12 @@ button.cukii-submit-button--stop:active {
   flex: 0 0 16px;
   width: 16px;
   height: 10px;
-  vertical-align: -1px;
+  align-self: flex-end;
 }
 
 .cukii-receipt-check {
   overflow: visible;
   stroke-width: 1.5px;
-}
-
-.cukii-receipt-check--read .cukii-receipt-check-front {
-  /* This path is painted last, so it deliberately covers the crossing of the
-     rear check and reads as one compact messenger double-check. */
-  paint-order: stroke;
 }
 
 .cukii-user-bubble .ProseMirror img,
@@ -1481,14 +1502,6 @@ button.cukii-submit-button--stop:active {
 
 .cukii-timeline-item .thread-message > div {
   padding-block: 0 !important;
-}
-
-/* The assistant capsule is the exception: its LEFT EDGE — not its prose — is
-   what sits on the shared 26px axis, so it keeps its own inner padding.
-   Kept OUTSIDE the rule above: nested inside its braces the selector would
-   compile to a chain that never matches. */
-.cukii-timeline-item .thread-message .bg-background.cukii-assistant-bubble {
-  padding-inline: 6px !important;
 }
 
 /* Разнобой точек («все едет») — первая строка у текста, thinking и tool-рядов

@@ -1,4 +1,4 @@
-import { act } from "@testing-library/react";
+import { act, fireEvent } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { vi } from "vitest";
@@ -264,7 +264,57 @@ test("a queued follow-up immediately renders one sent check inside its bubble", 
   expect(receipt?.parentElement).toHaveClass("cukii-user-message-bubble");
 });
 
-test("read follow-up uses the compact overlapping double-check SVG", async () => {
+test("assistant capsule shows the corner time, backfills legacy turns and copies via right-click", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "capsule-corner",
+        title: "Capsule corner",
+        history: [
+          { message: { id: "u1", role: "user", content: "ping" }, contextItems: [] },
+          {
+            message: { id: "a1", role: "assistant", content: "pong." },
+            contextItems: [],
+            createdAt: 1_700_000_000_000,
+          },
+          {
+            message: { id: "a2", role: "assistant", content: "legacy." },
+            contextItems: [],
+          },
+        ],
+      },
+    });
+  });
+
+  const rows = container.querySelectorAll(".cukii-assistant-row");
+  expect(rows).toHaveLength(2);
+  // Stamped turn shows its own send time in the capsule corner.
+  expect(
+    rows[0]?.querySelector(".cukii-assistant-metadata time")?.textContent,
+  ).toBe("01:13");
+  // Legacy turn got a restore backfill instead of an empty corner.
+  expect(
+    rows[1]?.querySelector(".cukii-assistant-metadata time")?.textContent,
+  ).toMatch(/^\d{2}:\d{2}$/);
+
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
+  fireEvent.contextMenu(rows[0] as HTMLElement);
+  const copyItem = await getElementByTestId("cukii-copy-message");
+  await act(async () => {
+    fireEvent.click(copyItem);
+  });
+  expect(writeText).toHaveBeenCalledWith("pong.");
+  expect(container.querySelector('[data-testid="cukii-copy-message"]')).toBeNull();
+});
+
+test("read follow-up uses the check-plus-stroke double-check SVG", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -457,20 +507,23 @@ test("assistant text and tool calls render as sibling timeline items", async () 
     });
   });
 
+  // The assistant capsule rides off the rail: only the tool row stays a
+  // timeline item, and both rows remain siblings (never nested).
   const timelineItems = container.querySelectorAll(".cukii-timeline-item");
-  expect(timelineItems).toHaveLength(2);
+  expect(timelineItems).toHaveLength(1);
 
-  const assistantTextItem = container.querySelector(
-    ".cukii-timeline-item.cukii-timeline-event",
-  );
+  const assistantTextRow = container.querySelector(".cukii-assistant-row");
   const toolItem = container.querySelector(
     ".cukii-timeline-item.cukii-timeline-checkpoint",
   );
 
-  expect(assistantTextItem).not.toBeNull();
+  expect(assistantTextRow).not.toBeNull();
+  expect(assistantTextRow?.classList.contains("cukii-timeline-item")).toBe(
+    false,
+  );
   expect(toolItem).not.toBeNull();
-  expect(assistantTextItem?.contains(toolItem ?? null)).toBe(false);
-  expect(toolItem?.contains(assistantTextItem ?? null)).toBe(false);
+  expect(assistantTextRow?.contains(toolItem ?? null)).toBe(false);
+  expect(toolItem?.contains(assistantTextRow ?? null)).toBe(false);
 });
 
 test("renders a persisted Claude-style model switch boundary before the next turn", async () => {
@@ -661,8 +714,11 @@ test("shell tool calls render compact IN/OUT command cards without legacy termin
     container.querySelectorAll('[data-testid="cukii-command-card"]'),
   ).toHaveLength(3);
 
+  // Three tool rows stay on the rail; the assistant capsule rides beside it
+  // in its own off-rail row.
   const timelineItems = container.querySelectorAll(".cukii-timeline-item");
-  expect(timelineItems.length).toBeGreaterThanOrEqual(4);
+  expect(timelineItems).toHaveLength(3);
+  expect(container.querySelectorAll(".cukii-assistant-row")).toHaveLength(1);
   timelineItems.forEach((item) => {
     expect(item.querySelector(".cukii-timeline-item")).toBeNull();
   });
@@ -814,8 +870,10 @@ test("Interrupted is a sibling timeline row, never a detached transcript footer"
   expect(row).not.toBeNull();
   expect(row?.classList).toContain("cukii-timeline-event");
   expect(row?.classList).toContain("cukii-timeline-interrupted");
+  // The interrupted rail row follows the assistant capsule, which lives off
+  // the rail in its own row class.
   expect(row?.previousElementSibling?.classList).toContain(
-    "cukii-timeline-item",
+    "cukii-assistant-row",
   );
   expect(container.querySelector(".cukii-interrupted-fact")).toBeNull();
 });

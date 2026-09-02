@@ -236,7 +236,8 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   /** Epoch milliseconds captured at send time and persisted with history. */
   steerSentAt?: number;
   /** Epoch milliseconds of the assistant placeholder; drives the capsule
-   * corner time. Absent on legacy history — never fabricate one on reload. */
+   * corner time. Legacy history has no per-turn stamp, so restore stamps it
+   * with the reload moment (see `newSession`) and persistence keeps it. */
   createdAt?: number;
   // Set on the last kept assistant turn when the user cancels (Esc). Drives the
   // turn-level "Interrupted" marker for text/thinking streams that have no
@@ -1038,6 +1039,16 @@ export const sessionSlice = createSlice({
 
       if (payload) {
         state.history = normalizeRestoredHistory(payload.history as any);
+        // Legacy turns predate the capsule corner time; without a backfill
+        // their capsules render with an empty corner forever.
+        for (const restored of state.history) {
+          if (
+            restored.message.role === "assistant" &&
+            restored.createdAt === undefined
+          ) {
+            restored.createdAt = Date.now();
+          }
+        }
         state.title = payload.title;
         state.titleManuallySet = Boolean(payload.titleManuallySet);
         state.revision = payload.revision ?? 0;

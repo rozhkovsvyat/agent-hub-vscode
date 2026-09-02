@@ -5,9 +5,9 @@ interface CukiiMessageReceiptStatusProps {
 }
 
 /**
- * Compact messenger-style delivery state. The read state intentionally draws
- * two overlapping paths instead of rendering the two glyphs "✓✓": glyph
- * spacing varies between VS Code fonts and does not read as a double-check.
+ * Compact messenger-style delivery state. The read state draws a full check
+ * plus a parallel bare stroke (the second check's tail only), Telegram-style:
+ * overlapping full checks read as one thick glyph at 10px height.
  */
 export function CukiiMessageReceiptStatus({
   status,
@@ -30,7 +30,7 @@ export function CukiiMessageReceiptStatus({
       {isRead && (
         <path
           className="cukii-receipt-check-back"
-          d="M1 5L4 8L10 2"
+          d="M9 8L15 2"
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -39,7 +39,7 @@ export function CukiiMessageReceiptStatus({
       )}
       <path
         className="cukii-receipt-check-front"
-        d="M5 5L8 8L14 2"
+        d="M2 5L5 8L11 2"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"

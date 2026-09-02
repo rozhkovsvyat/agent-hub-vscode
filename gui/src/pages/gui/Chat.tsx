@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
@@ -65,6 +66,10 @@ import {
   CukiiWaitingReceipt,
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
+import {
+  CukiiMessageContextMenu,
+  type CukiiMessageContextMenuState,
+} from "../../components/cukii/CukiiMessageContextMenu";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
@@ -342,6 +347,17 @@ export function Chat() {
   // a tool call. A tool may be quiet for seconds while the stream is alive.
   const shouldRenderStreamingToolbar = isStreaming && !isInEdit && !bridgeWait;
 
+  const [messageMenu, setMessageMenu] =
+    useState<CukiiMessageContextMenuState | null>(null);
+  const openMessageMenu = useCallback(
+    (e: ReactMouseEvent, text: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMessageMenu({ x: e.clientX, y: e.clientY, text });
+    },
+    [],
+  );
+
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
     const transcriptHistory = history.slice(transcriptStart);
     return transcriptHistory.flatMap((item, relativeIndex): JSX.Element[] => {
@@ -403,7 +419,12 @@ export function Chat() {
         return [
           <div key={message.id} className="cukii-user-row shrink-0">
             <div className="cukii-user-message">
-              <div className="cukii-user-message-bubble">
+              <div
+                className="cukii-user-message-bubble"
+                onContextMenu={(e) =>
+                  openMessageMenu(e, renderChatMessage(message))
+                }
+              >
                 {errorBoundary(
                   <ContinueInputBox
                     onEnter={(nextEditorState, modifiers) =>
@@ -516,7 +537,10 @@ export function Chat() {
           rows.push(
             <div
               key={`${message.id}-text`}
-              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-bubble shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              className={`cukii-assistant-row shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              onContextMenu={(e) =>
+                openMessageMenu(e, renderChatMessage(item.message))
+              }
             >
               {errorBoundary(
                 <div className="thread-message">
@@ -588,6 +612,7 @@ export function Chat() {
     isStreaming,
     activeTimelineToolId,
     latestSummaryIndex,
+    openMessageMenu,
     sendInput,
     transcriptStart,
   ]);
@@ -673,6 +698,10 @@ export function Chat() {
           </div>
         </div>
       )}
+      <CukiiMessageContextMenu
+        state={messageMenu}
+        onClose={() => setMessageMenu(null)}
+      />
     </>
   );
 }

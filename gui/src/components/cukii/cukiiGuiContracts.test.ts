@@ -286,13 +286,32 @@ describe("Cukii GUI contracts", () => {
     expect(css).toContain(
       ".cukii-timeline-item .bg-background:not(.cukii-assistant-bubble)",
     );
+    // Assistant capsules live off the rail entirely: their row is a plain
+    // block at the transcript gutter (same inset the user capsule keeps from
+    // the right edge), so no dot and no connector line ride along.
+    const chat = source("pages/gui/Chat.tsx");
+    expect(chat).toContain("cukii-assistant-row shrink-0");
+    expect(chat).not.toContain("cukii-timeline-bubble");
+    expect(css).toContain(".cukii-assistant-row {");
+
+    // Inline code (paths, guids) keeps no dark square inside the capsule.
     expect(css).toMatch(
-      /\.bg-background\.cukii-assistant-bubble\s*\{\s*padding-inline: 6px !important;/,
+      /\.cukii-assistant-bubble \.wmde-markdown code,[\s\S]*?background: transparent !important;/,
     );
 
-    // Assistant capsules ride the rail without a timeline dot.
+    // Checks bottom-align with the time, and the read state is a full check
+    // plus a parallel bare stroke — not two overlapping checks.
     expect(css).toMatch(
-      /\.cukii-timeline-event\.cukii-timeline-bubble::before\s*\{\s*content: none;/,
+      /\.cukii-user-metadata \{[\s\S]*?align-items: flex-end;/,
+    );
+    const receipt = source("components/cukii/CukiiMessageReceiptStatus.tsx");
+    expect(receipt).toContain('d="M2 5L5 8L11 2"');
+    expect(receipt).toContain('d="M9 8L15 2"');
+
+    // Capsules answer to a right-click copy menu instead of action icons.
+    expect(css).toContain(".cukii-message-context-menu {");
+    expect(source("components/StepContainer/StepContainer.tsx")).not.toContain(
+      "ResponseActions",
     );
 
     // The markdown canvas never paints a second square inside the capsule.
