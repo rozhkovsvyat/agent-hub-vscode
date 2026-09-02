@@ -45,6 +45,7 @@ import {
 } from "./bridgeControls";
 import {
   ensureCursorCatalogVariants,
+  repairCodexModelsCache,
   resolveCursorCatalogModel,
 } from "./bridgeModelCatalog";
 import {
@@ -145,6 +146,7 @@ const MODEL_LABELS: Record<string, string> = {
   "opus-5": "Opus 5",
   "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
+  "fable-5-1": "Fable 5.1",
   "haiku-4-5": "Haiku 4.5",
   "codex-5-6-terra": "GPT-5.6 Terra",
   "codex-5-6-sol": "GPT-5.6 Sol",
@@ -429,14 +431,18 @@ function buildPrompt(
 }
 
 export function isClaudeNativeModel(model: BrokerModel): boolean {
-  return ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(model);
+  return ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(
+    model,
+  );
 }
 
 /** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
 function brokerAgentId(
   model: BrokerModel,
 ): "codex" | "claude" | "grok" | "cursor" | "deepseek" | "qwen" {
-  if (["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(model)) {
+  if (
+    ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(model)
+  ) {
     return "claude";
   }
   if (codexNativeModel(model)) return "codex";
@@ -481,6 +487,8 @@ export function nativeDelegateHint(
       return `claude --model claude-sonnet-5${suffix} -p "<task>"`;
     case "fable-5":
       return `claude --model claude-fable-5${suffix} -p "<task>"`;
+    case "fable-5-1":
+      return `claude --model claude-fable-5-1${suffix} -p "<task>"`;
     case "haiku-4-5":
       return `claude --model claude-haiku-4-5${suffix} -p "<task>"`;
     case "composer-2-5":
@@ -803,6 +811,7 @@ export function routeForModel(
     "opus-5": "claude-opus-5",
     "sonnet-5": "claude-sonnet-5",
     "fable-5": "claude-fable-5",
+    "fable-5-1": "claude-fable-5-1",
     "haiku-4-5": "claude-haiku-4-5",
   }[model];
   if (claudeModel) {
@@ -945,6 +954,23 @@ export function routeForModel(
         args: [
           "--model",
           "claude-fable-5",
+          ...claudeControlArgs(controls),
+          ...permissionArgs,
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        format: "anthropic-envelope",
+        logFile,
+      };
+    case "fable-5-1":
+      return {
+        label: displayBridgeModel(model),
+        program: "claude",
+        args: [
+          "--model",
+          "claude-fable-5-1",
           ...claudeControlArgs(controls),
           ...permissionArgs,
           "-p",
@@ -1279,6 +1305,16 @@ async function* streamBridgeChatWithSteer(
   // The model picker fills this cache in the normal path. A restored saved
   // session may send before that picker opens, so rebuild it on demand.
   await ensureCursorCatalogVariants(args.brokerModel);
+  // The native codex binary aborts at launch when a cached model entry lacks
+  // a field its deserializer requires (`supports_parallel_tool_calls`), even
+  // though upstream no longer writes it. Repair before any codex route starts.
+  if (
+    brokerVendorForModel(args.brokerModel) === "codex" ||
+    (args.brokerSubagent !== "auto" &&
+      brokerVendorForModel(args.brokerSubagent) === "codex")
+  ) {
+    repairCodexModelsCache();
+  }
   const permissionVendors = new Set([
     brokerVendorForModel(args.brokerModel),
     ...(args.brokerSubagent === "auto"
@@ -1335,7 +1371,9 @@ async function* streamBridgeChatWithSteer(
       : undefined;
   let permissionBroker: ClaudePermissionBroker | undefined;
   if (
-    ["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(args.brokerModel) &&
+    ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(
+      args.brokerModel,
+    ) &&
     args.brokerPermissionMode !== "bypass"
   ) {
     if (!permissionTransport) {

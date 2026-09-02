@@ -97,7 +97,13 @@ export const VENDOR_CLI_HELP_FIXTURES: Record<BrokerVendorId, string> = {
   deepseek: "",
 };
 
-const CLAUDE_MODELS = new Set(["opus-5", "sonnet-5", "fable-5", "haiku-4-5"]);
+const CLAUDE_MODELS = new Set([
+  "opus-5",
+  "sonnet-5",
+  "fable-5",
+  "fable-5-1",
+  "haiku-4-5",
+]);
 
 export function brokerVendorForModel(model: BrokerModel): BrokerVendorId {
   if (CLAUDE_MODELS.has(model)) return "claude";

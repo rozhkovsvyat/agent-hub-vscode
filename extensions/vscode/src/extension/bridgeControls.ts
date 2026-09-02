@@ -64,6 +64,7 @@ function nativeEffortFor(
     model === "opus-5" ||
     model === "sonnet-5" ||
     model === "fable-5" ||
+    model === "fable-5-1" ||
     model === "haiku-4-5" ||
     isCodexModel(model) ||
     model.startsWith("cursor:")
