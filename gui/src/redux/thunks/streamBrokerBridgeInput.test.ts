@@ -901,4 +901,74 @@ describe("streamBrokerBridgeInput controls", () => {
         .session.history.filter((item) => item.message.role === "assistant"),
     ).toHaveLength(2);
   });
+
+  it("settles activity once after a double supersede chain without a reload", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondBlocked = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let call = 0;
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      call += 1;
+      if (call === 1) {
+        await firstBlocked;
+        return {
+          cukiiBridgeDisposition: "superseded" as const,
+          sessionId: "double-supersede",
+          runId: "run-1",
+        };
+      }
+      if (call === 2) {
+        await secondBlocked;
+        return {
+          cukiiBridgeDisposition: "superseded" as const,
+          sessionId: "double-supersede",
+          runId: "run-2",
+        };
+      }
+      yield [{ role: "assistant", content: "final", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "double-supersede",
+        title: "Double supersede",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: { role: "user", content: "chain start" },
+            contextItems: [],
+          },
+        ],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    const first = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.isStreaming).toBe(true),
+    );
+
+    // The second submit supersedes the first run.
+    const second = store.dispatch(streamBrokerBridgeInput());
+    releaseFirst();
+    await first;
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    // The third submit supersedes the second run.
+    const third = store.dispatch(streamBrokerBridgeInput());
+    releaseSecond();
+    await second;
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    // Only the final owner may settle the shared activity indicator.
+    await third;
+    expect(store.getState().session.isStreaming).toBe(false);
+  });
 });

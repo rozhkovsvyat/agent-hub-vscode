@@ -3,12 +3,16 @@ import { InputModifiers } from "core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
+import { createMockStore, getEmptyRootState } from "../../util/test/mockStore";
 import {
-  createMockStore,
-  getEmptyRootState,
-} from "../../util/test/mockStore";
-import { setActive, setInactive } from "../slices/sessionSlice";
+  setActive,
+  setBrokerModel,
+  setInactive,
+  setIsInEdit,
+} from "../slices/sessionSlice";
 import { RootState } from "../store";
+import { continueIfTrailingSteer } from "./continueIfTrailingSteer";
+import { streamEditThunk } from "./edit";
 import { steerDuringStream } from "./steerDuringStream";
 
 vi.mock(
@@ -289,5 +293,144 @@ describe("steerDuringStream", () => {
       request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
     ).toBe(false);
     expect(sessionOf(store).history.at(-1)?.steerStatus).toBe("delivered");
+  });
+});
+
+describe("steerDuringStream during an edit run", () => {
+  it("preserves a steer sent while the edit run streams and drains it once the edit settles", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const redelivered: string[] = [];
+    mockIdeMessenger.streamRequest = vi.fn(async function* (
+      _messageType,
+      data: any,
+    ) {
+      redelivered.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "thinking",
+          content: "Vendor accepted the follow-up",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof mockIdeMessenger.streamRequest;
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+    store.dispatch(setIsInEdit(true));
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    // The composer is already cleared by the time the thunk runs; the edit
+    // window has no live steer channel, so the text must land in the durable
+    // outbox instead of vanishing.
+    const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(steer).toBeDefined();
+    expect(steer?.message.content).toBe("do it this way instead");
+    expect(steer?.steerStatus).toBe("deferred");
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/steerDuringStream"),
+    ).toBe(false);
+    expect(
+      request.mock.calls.filter(([type]) => type === "history/save"),
+    ).toHaveLength(1);
+
+    // The edit run settles and edit mode ends; the drain delivers the capsule
+    // as a fresh vendor turn.
+    store.dispatch(setInactive());
+    store.dispatch(setIsInEdit(false));
+    await store.dispatch(continueIfTrailingSteer() as any);
+
+    expect(redelivered).toEqual([steer?.message.id]);
+    const delivered = sessionOf(store).history.find(
+      (item) => item.message.id === steer?.message.id,
+    );
+    expect(delivered?.steerStatus).toBe("read");
+  });
+
+  it("gives the durable outbox its drain chance when an edit run finishes", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["edit/sendPrompt"] = vi.fn(
+      async () => "edited content",
+    );
+    const state = getEmptyRootState();
+    state.editModeState.codeToEdit = [
+      {
+        filepath: "file.py",
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 1, character: 0 },
+        },
+        contents: "old code",
+      },
+    ] as RootState["editModeState"]["codeToEdit"];
+    const store = createMockStore(state, mockIdeMessenger);
+    store.dispatch(setIsInEdit(true));
+    store.dispatch(setActive());
+
+    await store.dispatch(
+      streamEditThunk({
+        editorState,
+        codeToEdit: state.editModeState.codeToEdit,
+      }) as any,
+    );
+
+    expect(sessionOf(store).isStreaming).toBe(false);
+    expect(
+      store
+        .getActions()
+        .some(
+          (action: any) =>
+            action.type === "chat/continueIfTrailingSteer/pending",
+        ),
+    ).toBe(true);
+  });
+
+  it("carries a model-switched steer through interrupt and cancel to the new vendor", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    // The extension refuses live injection once the run's brokerModel no
+    // longer matches the selected one; the GUI only sees the deferred receipt.
+    mockIdeMessenger.responseHandlers["cukii/steerDuringStream"] = vi.fn(
+      async () => ({
+        messageId: "mock-steer",
+        sessionId: "mock-session",
+        status: "deferred" as const,
+      }),
+    );
+    const streams: any[] = [];
+    mockIdeMessenger.streamRequest = vi.fn(async function* (
+      _messageType,
+      data: any,
+    ) {
+      streams.push(data);
+      yield [
+        {
+          role: "thinking",
+          content: "Vendor accepted the follow-up",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof mockIdeMessenger.streamRequest;
+    const request = vi.spyOn(mockIdeMessenger, "request");
+    const store = createMockStore(undefined, mockIdeMessenger);
+    store.dispatch(setActive());
+    // The user already switched vendors while the old model's run streams.
+    store.dispatch(setBrokerModel("codex-5-6-sol"));
+
+    await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
+
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/steerDuringStream"),
+    ).toBe(true);
+    expect(
+      request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
+    ).toBe(true);
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+    const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(streams[0].brokerModel).toBe("codex-5-6-sol");
+    expect(streams[0].queuedFollowUpMessageId).toBe(steer?.message.id);
+    expect(streams[0].steerInterrupt).toBe(true);
+    expect(steer?.steerStatus).toBe("read");
   });
 });

@@ -25,6 +25,44 @@ export const steerDuringStream = createAsyncThunk<
   async ({ editorState, modifiers }, { dispatch, extra, getState }) => {
     const state = getState();
     if (state.session.isInEdit) {
+      // The edit run streams too, but has no live steer channel. The composer
+      // is already cleared by now, so route the captured input through the
+      // same durable outbox as every other deferred steer; the trailing drain
+      // redelivers it once the edit window settles. Dropping it here would
+      // lose text that never reaches history or the outbox.
+      const defaultContextProviders =
+        state.config.config.experimental?.defaultContext ?? [];
+      const { content, selectedContextItems } = await resolveEditorContent({
+        editorState,
+        modifiers,
+        ideMessenger: extra.ideMessenger,
+        defaultContextProviders,
+        availableSlashCommands: state.config.config.slashCommands,
+        dispatch,
+        getState,
+      });
+      const currentSession = getState().session;
+      if (
+        !currentSession.isStreaming ||
+        currentSession.id !== state.session.id
+      ) {
+        return;
+      }
+      const messageId = uuidv4();
+      dispatch(
+        appendUserSteerMessage({
+          messageId,
+          content,
+          contextItems: selectedContextItems,
+          editorState,
+        }),
+      );
+      dispatch(setSteerStatus({ messageId, status: "deferred" }));
+      unwrapResult(
+        await dispatch(
+          saveCurrentSession({ openNewSession: false, generateTitle: false }),
+        ),
+      );
       return;
     }
     if (!state.session.isStreaming) {
