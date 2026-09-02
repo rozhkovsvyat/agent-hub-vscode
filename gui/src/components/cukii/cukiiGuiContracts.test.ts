@@ -174,12 +174,9 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
-  it("lays a fixed receipt slot inside the bubble without shifting or overlaying content", () => {
+  it("flows the receipt inline after the prose like MAX: no reserved footer, no absolute slot", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-row {");
-    // Line-start anchor: descendant selectors like
-    // `.cukii-user-bubble--inline-meta .cukii-user-metadata {` must not cut
-    // the contract window short of the reserved bottom lane.
     const metadata = css.indexOf("\n.cukii-user-metadata {");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(metadata).toBeGreaterThan(start);
@@ -195,14 +192,20 @@ describe("Cukii GUI contracts", () => {
     expect(bubbleContract).toContain("max-width: min(75%, 640px);");
     expect(bubbleContract).toContain("display: inline-block;");
     expect(bubbleContract).toContain("position: relative;");
-    expect(bubbleContract).toContain("padding-bottom: 17px;");
-    expect(metadataContract).toContain("position: absolute;");
-    expect(metadataContract).toContain("right: 6px;");
-    expect(metadataContract).toContain("bottom: 3px;");
-    expect(metadataContract).toContain("width: 46px;");
-    expect(metadataContract).toContain("height: 12px;");
+    // Shared capsule inset: text never hugs either wall.
+    expect(bubbleContract).toContain("padding: 7px 12px 6px;");
+    // The wrappers between bubble and prose are display:contents so the
+    // receipt span shares one inline formatting context with the paragraphs
+    // and rises to the last text line whenever it fits.
+    expect(bubbleContract).toContain("display: contents !important;");
+    expect(bubbleContract).toContain(".cukii-user-bubble .ProseMirror p {");
+    expect(bubbleContract).toContain("display: inline;");
+    expect(bubbleContract).not.toContain("padding-bottom: 17px;");
+    expect(metadataContract).toContain("display: inline-flex;");
+    expect(metadataContract).toContain("vertical-align: bottom;");
     expect(metadataContract).toContain("font-size: 10px;");
     expect(metadataContract).toContain("line-height: 12px;");
+    expect(metadataContract).not.toContain("position: absolute;");
   });
 
   it("keeps right-lane bubbles responsive and leaves the agent timeline left", () => {
@@ -255,30 +258,24 @@ describe("Cukii GUI contracts", () => {
     expect(css).toContain(".cukii-user-row--grouped {");
     expect(css).toContain("margin-top: 3px;");
 
-    // Inline metadata for short turns: the fixed receipt slot releases into
-    // the last text line instead of reserving the bottom lane.
-    expect(css).toContain(".cukii-user-bubble--inline-meta {");
-    expect(css).toContain(
-      ".cukii-user-bubble--inline-meta .cukii-user-metadata {",
-    );
-    const inlineMeta = css.slice(
-      css.indexOf(".cukii-user-bubble--inline-meta .cukii-user-metadata {"),
-      css.indexOf(".cukii-user-bubble--inline-meta .cukii-user-metadata {") +
-        260,
-    );
-    expect(inlineMeta).toContain("position: static;");
+    // Receipt flow is pure CSS: no per-message heuristic class, the meta is
+    // an inline run-on of the prose for every turn.
+    expect(css).not.toContain(".cukii-user-bubble--inline-meta");
+    expect(chat).not.toContain("cukii-user-bubble--inline-meta");
 
-    // Chat derives group position and inline metadata from the transcript.
+    // Chat derives group position from the transcript.
     expect(chat).toContain("cukii-user-bubble--group-middle");
     expect(chat).toContain("cukii-user-bubble--group-start");
     expect(chat).toContain("cukii-user-bubble--group-end");
     expect(chat).toContain("cukii-user-row--grouped");
-    expect(chat).toContain("cukii-user-bubble--inline-meta");
 
     // Agent capsules keep shrink-wrapping: short answers hug their content,
     // long ones may fill the column, never exceed it.
-    const agentStart = css.indexOf(".cukii-assistant-bubble {");
-    const agentContract = css.slice(agentStart, agentStart + 320);
+    // Comment-stripped slice: prose comments must never shift the contract
+    // window away from the declarations it pins.
+    const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const agentStart = flat.indexOf(".cukii-assistant-bubble {");
+    const agentContract = flat.slice(agentStart, agentStart + 320);
     expect(agentContract).toContain("width: fit-content;");
     expect(agentContract).toContain("max-width: 100%;");
     expect(agentContract.replace(/max-width/g, "")).not.toContain(
@@ -300,21 +297,30 @@ describe("Cukii GUI contracts", () => {
     expect(toolbar).toContain("px-4");
     expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
 
-    // Scope toggle: Best is the default; the choice lives in session state so
-    // every picker entry point and reload shares it.
+    // Scope toggle: a compact knob switch between Best and All labels (not a
+    // pair of chunky buttons); Best is the default and the choice lives in
+    // session state so every picker entry point and reload shares it.
     expect(modal).toContain("cukii-scope-toggle");
-    expect(modal).toContain('data-testid={`cukii-scope-toggle-${candidate}`}');
+    expect(modal).toContain('data-testid="cukii-scope-switch"');
+    expect(modal).toContain("cukii-scope-switch-knob");
+    expect(modal).toContain('data-testid="cukii-scope-toggle-best"');
+    expect(modal).toContain('data-testid="cukii-scope-toggle-all"');
     expect(modal).toContain("setBrokerModelScope");
     expect(modal).toContain("isBestModel");
     expect(slice).toContain("brokerModelScope: BrokerModelScope;");
     expect(slice).toContain('brokerModelScope: "best",');
 
-    // Effort row: compact ~28px bottom row inside the permissions popover,
-    // normalized against the selected route.
+    // Effort: ONE shared slider row component rendered in the "/" menu, the
+    // model picker footer and the permissions popover — never a second
+    // from-scratch control.
+    const effortRow = source("components/cukii/CukiiEffortRow.tsx");
+    expect(effortRow).toContain('data-testid="cukii-effort-slider"');
+    expect(effortRow).toContain("normalizeEffortForModel");
+    expect(effortRow).toContain("effortLevelsForModel");
+    expect(toolbar).toContain("<CukiiEffortRow");
+    expect(modal).toContain("<CukiiEffortRow");
+    expect(permissions).toContain("<CukiiEffortRow");
     expect(permissions).toContain('data-testid="cukii-permission-effort-row"');
-    expect(permissions).toContain("min-h-[28px]");
-    expect(permissions).toContain("normalizeEffortForModel");
-    expect(permissions).toContain("effortLevelsForModel");
   });
 
   it("uses the exact shared Claude toggle accent and transition", () => {
@@ -419,8 +425,9 @@ describe("Cukii GUI contracts", () => {
     expect(css).toContain(".cukii-assistant-metadata {");
 
     // The sent capsule wears cookie-orange with dark ink everywhere.
-    const sentStart = css.indexOf(".cukii-user-message-bubble {");
-    const sentContract = css.slice(sentStart, sentStart + 400);
+    const flatSent = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const sentStart = flatSent.indexOf(".cukii-user-message-bubble {");
+    const sentContract = flatSent.slice(sentStart, sentStart + 400);
     expect(sentContract).toContain("--cukii-primary-action-background");
     expect(css).toMatch(
       /\.cukii-user-message-bubble \.cukii-user-metadata\s*\{\s*color: var\(--cukii-text/,

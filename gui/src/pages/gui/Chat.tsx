@@ -430,13 +430,8 @@ export function Chat() {
               : groupedWithPrevious
                 ? "cukii-user-bubble--group-end"
                 : "cukii-user-bubble--solo";
-        // MAX keeps time/checks on the last text line of a short single-line
-        // message and drops them to their own row once the text wraps.
-        const flatText = renderChatMessage(message).trim();
-        const inlineMeta =
-          flatText.length > 0 &&
-          flatText.length <= 64 &&
-          !flatText.includes("\n");
+        // MAX receipt flow is pure CSS: the meta span is an inline run-on of
+        // the prose and rises to the last text line whenever it fits.
         return [
           <div
             key={message.id}
@@ -446,9 +441,7 @@ export function Chat() {
           >
             <div className="cukii-user-message">
               <div
-                className={`cukii-user-message-bubble ${groupClass} ${
-                  inlineMeta ? "cukii-user-bubble--inline-meta" : ""
-                }`}
+                className={`cukii-user-message-bubble ${groupClass}`}
                 data-testid={`cukii-user-bubble-${message.id}`}
                 onContextMenu={(e) =>
                   openMessageMenu(e, renderChatMessage(message))

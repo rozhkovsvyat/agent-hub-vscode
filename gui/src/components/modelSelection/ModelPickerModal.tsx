@@ -4,6 +4,7 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import {
   switchBrokerModel,
+  setBrokerEffort,
   setBrokerPermissionMode,
   setBrokerModelScope,
   setBrokerSubagent,
@@ -12,6 +13,7 @@ import {
 } from "../../redux/slices/sessionSlice";
 import { applyRuntimeVendorCatalog, isBestModel, VENDORS } from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
+import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
 import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
 
 interface ModelPickerModalProps {
@@ -32,6 +34,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const [catalogVersion, setCatalogVersion] = useState(0);
   const scope = useAppSelector(
     (state) => state.session.brokerModelScope ?? "best",
+  );
+  const brokerPermissionMode = useAppSelector(
+    (state) => state.session.brokerPermissionMode,
   );
 
   /** Vendors are alphabetical (account-management order) and the Best scope
@@ -114,26 +119,47 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
             Select a model
           </span>
           <span
-            className="cukii-scope-toggle flex items-center rounded-full border border-[var(--vscode-widget-border)] p-[2px]"
+            className="cukii-scope-toggle flex items-center gap-1"
             role="group"
             aria-label="Model list scope"
           >
-            {(["best", "all"] as const).map((candidate) => (
-              <button
-                key={candidate}
-                type="button"
-                data-testid={`cukii-scope-toggle-${candidate}`}
-                aria-pressed={scope === candidate}
-                className={`cukii-scope-toggle-option rounded-full px-2 py-[1px] text-[11px] ${
-                  scope === candidate
-                    ? "cukii-scope-toggle-option-on bg-[var(--vscode-button-secondaryBackground,var(--vscode-descriptionForeground))] text-[var(--vscode-button-secondaryForeground,var(--vscode-foreground))]"
-                    : "text-[var(--vscode-descriptionForeground)] hover:bg-[var(--vscode-list-hoverBackground)]"
-                }`}
-                onClick={() => dispatch(setBrokerModelScope(candidate))}
-              >
-                {candidate === "best" ? "Best" : "All"}
-              </button>
-            ))}
+            <button
+              type="button"
+              data-testid="cukii-scope-toggle-best"
+              aria-pressed={scope === "best"}
+              className={`cukii-scope-label ${
+                scope === "best" ? "cukii-scope-label-on" : ""
+              }`}
+              onClick={() => dispatch(setBrokerModelScope("best"))}
+            >
+              Best
+            </button>
+            <button
+              type="button"
+              data-testid="cukii-scope-switch"
+              role="switch"
+              aria-checked={scope === "all"}
+              aria-label="Toggle between Best and All models"
+              className={`cukii-scope-switch ${
+                scope === "all" ? "cukii-scope-switch-on" : ""
+              }`}
+              onClick={() =>
+                dispatch(setBrokerModelScope(scope === "all" ? "best" : "all"))
+              }
+            >
+              <span className="cukii-scope-switch-knob" />
+            </button>
+            <button
+              type="button"
+              data-testid="cukii-scope-toggle-all"
+              aria-pressed={scope === "all"}
+              className={`cukii-scope-label ${
+                scope === "all" ? "cukii-scope-label-on" : ""
+              }`}
+              onClick={() => dispatch(setBrokerModelScope("all"))}
+            >
+              All
+            </button>
           </span>
         </div>
 
@@ -177,6 +203,28 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
             })}
           </section>
         ))}
+
+        {/* Claude keeps its effort control as the last row of the model menu;
+            the shared slider row gives Cukii the same footer. */}
+        <div className="sticky bottom-0 z-10 border-t border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] px-1 pb-1 pt-1">
+          <CukiiEffortRow
+            className="flex w-full min-w-0 items-center justify-between gap-3 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)]"
+            model={currentModel}
+            effort={brokerEffort}
+            onEffortChange={(nextEffort) => {
+              dispatch(setBrokerEffort(nextEffort));
+              ideMessenger.post("cukii/setBrokerPreferences", {
+                brokerModel: currentModel,
+                brokerSubagent: "auto",
+                brokerEffort: nextEffort,
+                brokerSpeed,
+                thinkingEnabled,
+                brokerPermissionMode,
+                mode: "broker",
+              });
+            }}
+          />
+        </div>
       </div>
     </div>
   );

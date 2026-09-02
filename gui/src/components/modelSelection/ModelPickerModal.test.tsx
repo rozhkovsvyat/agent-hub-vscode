@@ -140,6 +140,25 @@ describe("ModelPickerModal", () => {
     expect(screen.queryByText("Fable 5")).toBeNull();
   });
 
+  it("keeps the Claude-style effort row as the model menu footer", async () => {
+    const { store, ideMessenger, user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+    const postSpy = vi.spyOn(ideMessenger, "post");
+
+    const slider = await screen.findByTestId("cukii-effort-slider");
+    expect(slider.closest(".cukii-model-picker")).not.toBeNull();
+    expect(slider).toHaveAttribute("aria-valuetext", "High");
+
+    slider.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(store.getState().session.brokerEffort).toBe("medium");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({ brokerEffort: "medium", mode: "broker" }),
+    );
+  });
+
   it("lists vendors alphabetically, matching account management", async () => {
     const { store } = await renderWithProviders(
       <ModelPickerModal onClose={vi.fn()} />,

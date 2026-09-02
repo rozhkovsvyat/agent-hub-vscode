@@ -248,11 +248,12 @@ describe("PermissionModeControl route snapshots", () => {
       expect(
         await screen.findByTestId("cukii-permission-effort-row"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("cukii-permission-effort-high"),
-      ).toHaveAttribute("aria-pressed", "true");
+      // The permissions row reuses the exact /-menu slider component.
+      const slider = screen.getByTestId("cukii-effort-slider");
+      expect(slider).toHaveAttribute("aria-valuetext", "High");
 
-      await user.click(screen.getByTestId("cukii-permission-effort-low"));
+      // jsdom reports a zero-width track, so a click lands on the first level.
+      await user.click(slider);
       expect(onEffortChange).toHaveBeenCalledWith("low");
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
@@ -294,8 +295,8 @@ describe("PermissionModeControl route snapshots", () => {
       expect(
         screen.getByTestId("cukii-permission-effort-row"),
       ).toBeInTheDocument();
-      await user.click(screen.getByTestId("cukii-permission-effort-high"));
-      expect(onEffortChange).toHaveBeenCalledWith("high");
+      await user.click(screen.getByTestId("cukii-effort-slider"));
+      expect(onEffortChange).toHaveBeenCalledWith("low");
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }

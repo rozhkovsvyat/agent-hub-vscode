@@ -411,17 +411,18 @@ test("short, multiline and image user turns stay in the right bubble lane while 
   for (const row of userRows) {
     expect(row.querySelector(".cukii-user-message-bubble")).not.toBeNull();
   }
-  // MAX geometry: corners tighten toward adjacent user bubbles, grouped rows
-  // lose the breathing margin, and short single-line turns carry the receipt
-  // inline while wrapped text drops it to its own row.
+  // MAX geometry: corners tighten toward adjacent user bubbles and grouped
+  // rows lose the breathing margin. The receipt is a pure-CSS inline run-on
+  // of the prose for every turn — no per-message heuristic class.
   const bubbles = container.querySelectorAll(".cukii-user-message-bubble");
   expect(bubbles).toHaveLength(3);
   expect(bubbles[0]).toHaveClass("cukii-user-bubble--group-start");
-  expect(bubbles[0]).toHaveClass("cukii-user-bubble--inline-meta");
   expect(bubbles[1]).toHaveClass("cukii-user-bubble--group-middle");
-  expect(bubbles[1]).not.toHaveClass("cukii-user-bubble--inline-meta");
   expect(bubbles[2]).toHaveClass("cukii-user-bubble--group-end");
-  expect(bubbles[2]).toHaveClass("cukii-user-bubble--inline-meta");
+  for (const bubble of Array.from(bubbles)) {
+    expect(bubble).not.toHaveClass("cukii-user-bubble--inline-meta");
+    expect(bubble.querySelector(".cukii-user-metadata")).not.toBeNull();
+  }
   expect(userRows[0]).not.toHaveClass("cukii-user-row--grouped");
   expect(userRows[1]).toHaveClass("cukii-user-row--grouped");
   expect(userRows[2]).toHaveClass("cukii-user-row--grouped");

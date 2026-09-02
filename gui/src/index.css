@@ -810,6 +810,69 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
 }
 
+/* New composer controls must never fall back to the platform's light native
+   button face: every control owns its background explicitly. */
+.cukii-model-pill,
+.cukii-permission-button,
+.cukii-scope-toggle button {
+  background: transparent;
+}
+
+.cukii-model-pill {
+  border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+}
+
+.cukii-model-pill:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+}
+
+/* Best (o-) All: a compact knob switch between the two scope labels, not a
+   pair of chunky buttons. */
+.cukii-scope-label {
+  padding: 1px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.cukii-scope-label-on {
+  color: var(--vscode-foreground, #cccccc);
+  font-weight: 600;
+}
+
+.cukii-scope-switch {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(204, 204, 204, 0.25);
+  cursor: pointer;
+}
+
+.cukii-scope-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--vscode-foreground, #cccccc);
+  transition: transform 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cukii-scope-switch-on {
+  background: #d97757;
+}
+
+.cukii-scope-switch-on .cukii-scope-switch-knob {
+  transform: translateX(12px);
+}
+
 /* The command launcher lives in the composer toolbar, so its panel must not
  * borrow the viewport width or participate in sizing that toolbar.  The
  * negative offset aligns it with the composer edge; this bound leaves an
@@ -1162,6 +1225,9 @@ button.cukii-submit-button--stop:active {
   background: var(--vscode-input-background, var(--cukii-shell)) !important;
   border: 1px solid var(--vscode-input-border, var(--cukii-line));
   border-radius: 6px;
+  /* Same inset token as the user capsule: both texts sit 12px from their
+     outer walls. */
+  padding: 8px 12px;
   width: fit-content;
   min-width: 0;
   max-width: 100%;
@@ -1173,6 +1239,9 @@ button.cukii-submit-button--stop:active {
 .cukii-assistant-bubble .wmde-markdown,
 .cukii-assistant-bubble .wmde-markdown-var {
   background-color: transparent !important;
+  /* The capsule owns the inset; the markdown canvas must not add a second
+     wall of padding inside it. */
+  padding: 0 !important;
   min-width: 0;
 }
 
@@ -1301,6 +1370,9 @@ button.cukii-submit-button--stop:active {
   min-width: 54px;
   max-width: 100%;
   overflow: hidden;
+  /* Single inset token shared with the assistant capsule: text never hugs
+     the capsule wall on either side. */
+  padding: 7px 12px 6px;
   /* Messenger recolor: the sent capsule wears the same cookie-orange as the
      send/stop buttons; dark ink inside (see `.cukii-user-metadata` below). */
   background: var(--cukii-primary-action-background, #e3a867);
@@ -1323,23 +1395,27 @@ button.cukii-submit-button--stop:active {
   border-top-right-radius: 6px;
 }
 
-/* MAX inline metadata: short single-line messages carry time/checks on the
-   last text line instead of reserving a dedicated bottom row. */
-.cukii-user-bubble--inline-meta {
-  display: flex;
-  align-items: flex-end;
+/* MAX receipt flow: time/checks are an inline run-on of the message text —
+   they ride the last text line while it has room and wrap to the next line
+   only when they do not. No reserved footer, no absolute slot: every wrapper
+   between the bubble and the prose is display:contents, so the receipt span
+   (a direct bubble child) shares one inline formatting context with the
+   paragraphs and rises to line level whenever it fits. */
+.cukii-user-bubble > div.relative,
+.cukii-user-bubble .cukii-input-box,
+.cukii-user-bubble .cukii-editor-stack,
+.cukii-user-bubble .scroll-container,
+.cukii-user-bubble .ProseMirror {
+  display: contents !important;
 }
 
-.cukii-user-bubble--inline-meta .cukii-input-box {
-  padding-bottom: 0;
+.cukii-user-bubble .ProseMirror p {
+  display: inline;
 }
 
-.cukii-user-bubble--inline-meta .cukii-user-metadata {
-  position: static;
-  flex: 0 0 auto;
-  width: auto;
-  height: auto;
-  margin: 0 2px 1px 8px;
+.cukii-user-bubble .ProseMirror p + p::before {
+  content: "";
+  display: block;
 }
 
 .cukii-user-message-bubble > .cukii-user-bubble {
@@ -1351,24 +1427,17 @@ button.cukii-submit-button--stop:active {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
-  /* Own a clear final line for the overlaid receipt. Text, code and images
-     grow naturally above it and can never collide with the fixed slot. */
-  padding-bottom: 17px;
+  padding: 0;
+  min-height: 0;
 }
 
+/* The receipt is an inline run-on of the prose (see the display:contents
+   chain above): it rides the last text line and wraps only when it must. */
 .cukii-user-metadata {
-  position: absolute;
-  right: 6px;
-  bottom: 3px;
   display: inline-flex;
-  width: 46px;
-  height: 12px;
-  /* Checks sit on the same bottom edge as the time text, not on the font
-     baseline which left them floating a pixel high. */
   align-items: flex-end;
-  justify-content: flex-end;
   gap: 2px;
-  margin: 0;
+  margin: 0 0 1px 6px;
   padding: 0;
   color: var(--vscode-descriptionForeground, #a0a0a0);
   font-size: 10px;
@@ -1377,6 +1446,7 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
+  vertical-align: bottom;
 }
 
 /* Dark ink on the orange capsule: time and checks inherit the brand text
@@ -1684,6 +1754,18 @@ button.cukii-submit-button--stop:active {
     --vscode-sideBarActivityBarTop-border,
     var(--cukii-line, #3a382f)
   );
+}
+
+/* Reasoning rows are agent rows: like assistant capsules they live off the
+   rail — no dot, no connector line, transcript gutter only. The rail starts
+   and ends strictly between messages. */
+.cukii-timeline-thinking {
+  padding-inline-start: 0;
+}
+
+.cukii-timeline-thinking::before,
+.cukii-timeline-thinking::after {
+  content: none;
 }
 
 /* Первый элемент: линия начинается от ЦЕНТРА точки (8.5px), а не от верха
