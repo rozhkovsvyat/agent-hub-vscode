@@ -252,16 +252,26 @@ describe("terminateBridgeChild", () => {
   });
 
   it("shares one force budget between the kill command and close verification", async () => {
-    const child = new UncooperativeChild();
-    const started = Date.now();
-    await expect(
-      terminateBridgeChild(child, {
+    // Wall-clock bounds flake on loaded Windows runners; fake timers prove the
+    // same invariant deterministically: after the force kill consumes 15ms of
+    // a 20ms budget, only the remaining 5ms may elapse before the receipt.
+    vi.useFakeTimers();
+    try {
+      const child = new UncooperativeChild();
+      let settledValue: boolean | undefined;
+      const pending = terminateBridgeChild(child, {
         platform: "win32",
         forceMs: 20,
         forceKill: () => new Promise((resolve) => setTimeout(resolve, 15)),
-      }),
-    ).resolves.toBe(false);
-    expect(Date.now() - started).toBeLessThan(35);
+      }).then((value) => {
+        settledValue = value;
+      });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(settledValue).toBe(false);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is idempotent for an already-exited child", async () => {
