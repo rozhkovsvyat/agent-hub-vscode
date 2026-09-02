@@ -177,23 +177,51 @@ describe("native bridge argv", () => {
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 
-  it("rejects 24,000 quote/backslash characters before Scratch or process launch", () => {
-    const writeFileSync = vi.spyOn(fs, "writeFileSync");
-    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+  it("spills a quote-storm prompt beyond the CreateProcess limit into an exclusive Scratch file", () => {
     const oversized = '\\"'.repeat(12_000);
-    expect(() =>
-      routeForModel(
-        "kimi-k3",
-        "D:/Brain/vault",
-        oversized,
-        [],
-        resolveBridgeControls("kimi-k3", "high", "standard"),
-      ),
-    ).toThrow(/safe CreateProcess limit/);
-    expect(writeFileSync).not.toHaveBeenCalled();
-    expect(mkdirSync).not.toHaveBeenCalled();
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      oversized,
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.promptFile).toBeDefined();
+    if (route.promptFile) promptFiles.push(route.promptFile);
+    expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(oversized);
+    const loader = route.args[route.args.indexOf("-p") + 1];
+    expect(loader).toContain(route.promptFile!);
+    expect(loader).not.toBe(oversized);
+    expect(
+      windowsCommandLineUtf16Length(route.program, route.args),
+    ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
     expect(spawn).not.toHaveBeenCalled();
     expect(spawnSync).not.toHaveBeenCalled();
+  });
+
+  it("keeps a 100k-unit live transcript launchable through the Kimi spill file", () => {
+    const transcript =
+      "Cukii broker transcript line with session context.\n".repeat(2_500);
+    expect(transcript.length).toBeGreaterThan(
+      KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
+    );
+    const route = routeForModel(
+      "kimi-k3",
+      "D:/Brain/vault",
+      transcript,
+      [],
+      resolveBridgeControls("kimi-k3", "high", "standard"),
+    );
+    expect(route.promptFile).toBeDefined();
+    if (route.promptFile) promptFiles.push(route.promptFile);
+    expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(transcript);
+    const loader = route.args[route.args.indexOf("-p") + 1];
+    expect(loader).toContain(route.promptFile!);
+    const modelIndex = route.args.indexOf("-m");
+    expect(route.args[modelIndex + 1]).toBe("kimi-code/k3");
+    expect(
+      windowsCommandLineUtf16Length(route.program, route.args),
+    ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
   });
 
   it("fails closed when only a Kimi cmd shim is present", () => {
