@@ -524,8 +524,40 @@ describe("native bridge argv", () => {
     ]);
   });
 
+  it("routes Fable 5.1 through the exact verified Claude argv", () => {
+    const route = routeForModel(
+      "fable-5-1",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("fable-5-1", "high", "standard"),
+    );
+    // The catalog prefers the self-updating native build when installed, so
+    // only the Claude executable identity is stable across machines.
+    expect(route.program).toMatch(/(?:^|[\\/])claude(?:\.exe)?$/i);
+    expect(route.format).toBe("anthropic-envelope");
+    expect(route.stdinFormat).toBe("claude-stream-json");
+    expect(route.args).toEqual([
+      "--model",
+      "claude-fable-5-1",
+      "--exclude-dynamic-system-prompt-sections",
+      "--effort",
+      "high",
+      "--settings",
+      '{"fastMode":false}',
+      "--dangerously-skip-permissions",
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ]);
+  });
+
   it.each([
     ["opus-5", true],
+    ["fable-5-1", true],
     ["haiku-4-5", true],
     ["codex-5-6-terra", false],
     ["composer-2-5", false],

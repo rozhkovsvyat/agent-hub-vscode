@@ -98,25 +98,23 @@ describe("Cukii bridge controls", () => {
     );
   });
 
-  it("does not expose or send a Thinking switch for Fable 5", () => {
-    const controls = resolveBridgeControls(
-      "fable-5",
-      "high",
-      "standard",
-      false,
-    );
-    expect(controls).toMatchObject({
-      requestedThinking: false,
-      effectiveThinking: true,
-      thinkingTransport: "unavailable",
-    });
-    expect(claudeControlArgs(controls)).toEqual([
-      "--effort",
-      "high",
-      "--settings",
-      '{"fastMode":false}',
-    ]);
-  });
+  it.each(["fable-5", "fable-5-1"] as const)(
+    "does not expose or send a Thinking switch for %s",
+    (model) => {
+      const controls = resolveBridgeControls(model, "high", "standard", false);
+      expect(controls).toMatchObject({
+        requestedThinking: false,
+        effectiveThinking: true,
+        thinkingTransport: "unavailable",
+      });
+      expect(claudeControlArgs(controls)).toEqual([
+        "--effort",
+        "high",
+        "--settings",
+        '{"fastMode":false}',
+      ]);
+    },
+  );
 
   it("maps disabled Codex Thinking to the native none reasoning effort", () => {
     const controls = resolveBridgeControls(
@@ -238,7 +236,7 @@ describe("Cukii bridge controls", () => {
     },
   );
 
-  it.each(["sonnet-5", "fable-5"] as const)(
+  it.each(["sonnet-5", "fable-5", "fable-5-1"] as const)(
     "does not claim Claude Fast for %s without a verified native tier",
     (model) => {
       expect(resolveBridgeControls(model, "high", "fast")).toMatchObject({
