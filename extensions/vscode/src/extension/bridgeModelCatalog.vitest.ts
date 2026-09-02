@@ -1,13 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   codexCatalogFromCache,
   cursorCatalogFromOutput,
   grokCatalogFromOutput,
   kimiCatalogFromJson,
+  repairCodexModelsCache,
   resolveCursorCatalogModel,
   staticCatalogForUnavailableDiscovery,
 } from "./bridgeModelCatalog";
+
+const repairDirs: string[] = [];
+
+function repairFixture(models: unknown): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "cukii-codex-cache-"));
+  repairDirs.push(dir);
+  const cachePath = path.join(dir, "models_cache.json");
+  writeFileSync(cachePath, JSON.stringify({ models }, null, 2), "utf8");
+  return cachePath;
+}
+
+afterEach(() => {
+  for (const dir of repairDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("Cukii live subscription model catalog", () => {
   it("keeps every visible Codex subscription model", () => {
@@ -162,6 +182,9 @@ describe("Cukii live subscription model catalog", () => {
     expect(staticCatalogForUnavailableDiscovery("claude")).toContainEqual(
       expect.objectContaining({ value: "haiku-4-5" }),
     );
+    expect(staticCatalogForUnavailableDiscovery("claude")).toContainEqual(
+      expect.objectContaining({ value: "fable-5-1", label: "Fable 5.1" }),
+    );
     expect(staticCatalogForUnavailableDiscovery("qwen")).toContainEqual(
       expect.objectContaining({ value: "qwen-3-8-max" }),
     );
@@ -181,5 +204,45 @@ describe("Cukii live subscription model catalog", () => {
     expect(
       staticCatalogForUnavailableDiscovery("qwen").map((model) => model.value),
     ).not.toContain("qwen-image-3.0-pro");
+  });
+});
+
+describe("repairCodexModelsCache", () => {
+  it("adds the missing deserializer field to every cached model", () => {
+    const cachePath = repairFixture([
+      { slug: "gpt-5.6-sol", display_name: "GPT-5.6-Sol", visibility: "list" },
+      { slug: "gpt-5.6-terra", visibility: "list" },
+    ]);
+    expect(repairCodexModelsCache(cachePath)).toBe(true);
+    const repaired = JSON.parse(readFileSync(cachePath, "utf8")) as {
+      models: Array<Record<string, unknown>>;
+    };
+    expect(
+      repaired.models.every(
+        (model) => model.supports_parallel_tool_calls === true,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves an already-valid cache untouched and reports no change", () => {
+    const cachePath = repairFixture([
+      {
+        slug: "gpt-5.6-sol",
+        visibility: "list",
+        supports_parallel_tool_calls: false,
+      },
+    ]);
+    expect(repairCodexModelsCache(cachePath)).toBe(false);
+  });
+
+  it("never blocks a launch when the cache is missing or unreadable", () => {
+    expect(repairCodexModelsCache(path.join(tmpdir(), "no-such-dir-x.json"))).toBe(
+      false,
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "cukii-codex-cache-"));
+    repairDirs.push(dir);
+    const cachePath = path.join(dir, "models_cache.json");
+    writeFileSync(cachePath, "{not json", "utf8");
+    expect(repairCodexModelsCache(cachePath)).toBe(false);
   });
 });
