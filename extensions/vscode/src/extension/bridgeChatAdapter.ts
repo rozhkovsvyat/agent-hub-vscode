@@ -44,6 +44,7 @@ import {
   type BridgeControlResolution,
 } from "./bridgeControls";
 import {
+  claudeProgram,
   ensureCursorCatalogVariants,
   repairCodexModelsCache,
   resolveCursorCatalogModel,
@@ -294,6 +295,22 @@ function assertKimiWindowsCommandLine(program: string, args: string[]): void {
 
 function kimiCliProgram(): string {
   return "kimi";
+}
+
+/**
+ * `kimi -p` takes the prompt only from argv — no stdin input mode, no prompt
+ * file flag (verified against `kimi --help`). Once a transcript outgrows the
+ * CreateProcess command line, the only remaining transport is an exclusive
+ * Scratch file that the agent reads as its first action.
+ */
+function kimiSpillLoaderPrompt(promptFile: string): string {
+  return (
+    "Your complete task briefing and conversation transcript are stored in the file " +
+    promptFile +
+    ". First read that file in full with your file-read tool; it is the exact content you must work from. " +
+    "Then follow those instructions precisely and answer the latest user request in them. " +
+    "Do not mention the file path to the user."
+  );
 }
 
 /**
@@ -691,21 +708,45 @@ function kimiWindowsNativeProgram(): string {
   return nativeProgram;
 }
 
-function kimiRoute(label: string, args: string[]): BridgeRoute {
+function kimiRoute(
+  label: string,
+  prompt: string,
+  tailArgs: string[],
+): BridgeRoute {
   // Resolve the official native executable, then account for the executable,
   // every final argument, and libuv-style Windows escaping before any broker,
   // child process, or filesystem artefact can be created.
   const command =
     process.platform === "win32"
-      ? { program: kimiWindowsNativeProgram(), args }
-      : resolveCommand(kimiCliProgram(), args);
-  assertKimiWindowsCommandLine(command.program, command.args);
+      ? {
+          program: kimiWindowsNativeProgram(),
+          args: ["-p", prompt, ...tailArgs],
+        }
+      : resolveCommand(kimiCliProgram(), ["-p", prompt, ...tailArgs]);
+  let promptFile: string | undefined;
+  if (
+    process.platform === "win32" &&
+    windowsCommandLineUtf16Length(command.program, command.args) >
+      KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16
+  ) {
+    // Большой транскрипт не проходит в argv; содержимое уходит в эксклюзивный
+    // файл под защищённым Scratch-рутом, а в `-p` остаётся короткий загрузчик.
+    promptFile = writeBridgeScratchFile("kimi-transcript", prompt);
+    command.args = ["-p", kimiSpillLoaderPrompt(promptFile), ...tailArgs];
+  }
+  try {
+    assertKimiWindowsCommandLine(command.program, command.args);
+  } catch (error) {
+    if (promptFile) removeBridgeScratchFile(promptFile);
+    throw error;
+  }
   return {
     label,
     program: command.program,
     args: command.args,
     format: "kimi-ndjson",
     noStdin: true,
+    ...(promptFile ? { promptFile } : {}),
   };
 }
 
@@ -917,9 +958,7 @@ export function routeForModel(
     : undefined;
   if (liveKimiModel) {
     const skillDirs = getKimiSkillDirs();
-    return kimiRoute(displayBridgeModel(model), [
-      "-p",
-      prompt,
+    return kimiRoute(displayBridgeModel(model), prompt, [
       "--output-format",
       "stream-json",
       "-m",
@@ -1001,17 +1040,16 @@ export function routeForModel(
     // Kimi = подписочный CLI `kimi` (device-login), поток stream-json в формате
     // kimi-ndjson. Выбранная модель всегда передаётся exact native alias через
     // `-m`; иначе пользовательский K2 мог молча превратиться в default K3.
-    // `-p` берёт промпт аргументом и stdin не читает; большой transcript
-    // отклоняется до запуска по полному Windows command-line лимиту.
+    // `-p` берёт промпт аргументом и stdin не читает; транскрипт, не проходящий
+    // в Windows command-line лимит, уходит в эксклюзивный Scratch-файл, который
+    // агент читает первым действием (см. kimiRoute).
     case "kimi-k2":
     case "kimi-k2-highspeed":
     case "kimi-k3":
     case "kimi-k3-256k": {
       const modelArg = kimiNativeModel(model);
       const skillDirs = getKimiSkillDirs();
-      return kimiRoute(displayBridgeModel(model), [
-        "-p",
-        prompt,
+      return kimiRoute(displayBridgeModel(model), prompt, [
         "--output-format",
         "stream-json",
         ...(modelArg ? ["-m", modelArg] : []),
@@ -1406,6 +1444,11 @@ async function* streamBridgeChatWithSteer(
         ? "Auto routing may choose the strongest available native worker.\n"
         : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),
   };
+  if (brokerAgentId(args.brokerModel) === "codex") {
+    // A fresh upstream cache fetch can drop fields the binary's deserializer
+    // requires; heal it right before launch so Sol/Terra never exit code 1.
+    repairCodexModelsCache();
+  }
   let command: ResolvedCommand;
   try {
     command = ensureProgramAvailable(route);
