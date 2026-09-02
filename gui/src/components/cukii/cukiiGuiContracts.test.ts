@@ -290,8 +290,26 @@ describe("Cukii GUI contracts", () => {
       /\.bg-background\.cukii-assistant-bubble\s*\{\s*padding-inline: 6px !important;/,
     );
 
-    // The dot follows the capsule's first line instead of the flush baseline.
-    expect(css).toMatch(/\.cukii-timeline-bubble::before\s*\{\s*top: 10px;/);
+    // Assistant capsules ride the rail without a timeline dot.
+    expect(css).toMatch(
+      /\.cukii-timeline-event\.cukii-timeline-bubble::before\s*\{\s*content: none;/,
+    );
+
+    // The markdown canvas never paints a second square inside the capsule.
+    expect(css).toMatch(
+      /\.cukii-assistant-bubble \.wmde-markdown,[\s\S]*?background-color: transparent !important;/,
+    );
+
+    // The reply time flows to the same 6px right inset as the user checks.
+    expect(css).toContain(".cukii-assistant-metadata {");
+
+    // The sent capsule wears cookie-orange with dark ink everywhere.
+    const sentStart = css.indexOf(".cukii-user-message-bubble {");
+    const sentContract = css.slice(sentStart, sentStart + 400);
+    expect(sentContract).toContain("--cukii-primary-action-background");
+    expect(css).toMatch(
+      /\.cukii-user-message-bubble \.cukii-user-metadata\s*\{\s*color: var\(--cukii-text/,
+    );
   });
 
   it("keeps permission modes on a compact dark or light panel and selected blue", () => {

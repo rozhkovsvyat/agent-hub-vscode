@@ -66,6 +66,7 @@ import {
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
+import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
@@ -87,15 +88,6 @@ function assistantHasVisibleText(item: ChatHistoryItemWithMessageId): boolean {
     !!item.conversationSummary ||
     !!item.reasoning?.text?.trim()
   );
-}
-
-function formatSteerSentTime(sentAt: number | undefined): string | undefined {
-  if (!Number.isFinite(sentAt)) return undefined;
-  return new Date(sentAt!).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
 }
 
 const StepsDiv = styled.div`

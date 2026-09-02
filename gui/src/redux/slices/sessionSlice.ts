@@ -235,6 +235,9 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
     "queued" | "delivered" | "read" | "deferred" | "failed" | "cancelled";
   /** Epoch milliseconds captured at send time and persisted with history. */
   steerSentAt?: number;
+  /** Epoch milliseconds of the assistant placeholder; drives the capsule
+   * corner time. Absent on legacy history — never fabricate one on reload. */
+  createdAt?: number;
   // Set on the last kept assistant turn when the user cancels (Esc). Drives the
   // turn-level "Interrupted" marker for text/thinking streams that have no
   // in-flight tool call to carry the label.
@@ -587,6 +590,7 @@ export const sessionSlice = createSlice({
             content: "", // IMPORTANT - this is subsequently updated by response streaming
           },
           contextItems: [],
+          createdAt: Date.now(),
         });
       } else {
         // New input/response messages
@@ -608,6 +612,7 @@ export const sessionSlice = createSlice({
               content: "", // IMPORTANT - this is subsequently updated by response streaming
             },
             contextItems: [],
+            createdAt: Date.now(),
           },
         ]);
       }
@@ -633,6 +638,7 @@ export const sessionSlice = createSlice({
             content: "", // IMPORTANT - this is subsequently updated by response streaming
           },
           contextItems: [],
+          createdAt: Date.now(),
         });
         state.inlineErrorMessage = undefined;
         state.isPruned = false;
@@ -889,6 +895,7 @@ export const sessionSlice = createSlice({
                   id: uuidv4(),
                 },
                 contextItems: [],
+                createdAt: Date.now(),
               });
               lastItem = state.history[state.history.length - 1];
               lastMessage = lastItem.message;
@@ -917,6 +924,9 @@ export const sessionSlice = createSlice({
               },
               contextItems: [],
             };
+            if (message.role === "assistant") {
+              historyItem.createdAt = Date.now();
+            }
             if (message.role === "thinking") {
               historyItem.reasoning = {
                 text: "",

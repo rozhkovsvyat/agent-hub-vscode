@@ -1168,10 +1168,32 @@ button.cukii-submit-button--stop:active {
   color: var(--vscode-foreground, var(--cukii-on-dark));
 }
 
-/* The capsule's own top padding pushes the first line down, so the timeline
-   dot follows it instead of staying on the old flush baseline. */
-.cukii-timeline-bubble::before {
-  top: 10px;
+/* The markdown surface ships its own canvas fill; inside the capsule it
+   reads as a second, inner square. The capsule alone is the fill. */
+.cukii-assistant-bubble .wmde-markdown,
+.cukii-assistant-bubble .wmde-markdown-var {
+  background-color: transparent !important;
+}
+
+/* Reply time in the capsule's bottom-right corner, on the same 6px right
+   inset as the user checks. No reserved slot: it flows after the prose. */
+.cukii-assistant-metadata {
+  display: flex;
+  justify-content: flex-end;
+  margin: 2px 0 0;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 12px;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Assistant capsules are prose on the rail, not discrete checkpoints: no
+   timeline dot. The class stays as the layout hook for the capsule row. */
+.cukii-timeline-event.cukii-timeline-bubble::before {
+  content: none;
 }
 
 /* Geometry copied from Claude Code webview `.messagesContainer` / `.timelineMessage`. */
@@ -1238,8 +1260,10 @@ button.cukii-submit-button--stop:active {
   min-width: 54px;
   max-width: 100%;
   overflow: hidden;
-  background: var(--vscode-input-background, var(--cukii-shell));
-  border: 1px solid var(--vscode-input-border, var(--cukii-line));
+  /* Messenger recolor: the sent capsule wears the same cookie-orange as the
+     send/stop buttons; dark ink inside (see `.cukii-user-metadata` below). */
+  background: var(--cukii-primary-action-background, #e3a867);
+  border: 1px solid var(--cukii-primary-action-background-hover, #c9873f);
   border-radius: 6px;
 }
 
@@ -1276,6 +1300,12 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
+}
+
+/* Dark ink on the orange capsule: time and checks inherit the brand text
+   token instead of the muted description gray. */
+.cukii-user-message-bubble .cukii-user-metadata {
+  color: var(--cukii-text, #2c241c);
 }
 
 .cukii-receipt-status {

@@ -509,6 +509,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             message: {
               content: "I'll search the codebase for you.",
               id: expect.any(String),
@@ -569,6 +570,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "Search completed.",
@@ -1286,6 +1288,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "I'll search the codebase for you.",
@@ -2411,6 +2414,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "I'll search for test functions in the codebase.",
@@ -2474,6 +2478,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content:

@@ -1009,6 +1009,7 @@ describe("streamResponseThunk", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "",

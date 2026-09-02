@@ -5,6 +5,7 @@ import { useDispatch } from "react-redux";
 import { useAppSelector } from "../../redux/hooks";
 import { selectUIConfig } from "../../redux/slices/configSlice";
 import { deleteMessage } from "../../redux/slices/sessionSlice";
+import { formatMessageTime } from "../../util/formatMessageTime";
 import ThinkingBlockPeek from "../mainInput/belowMainInput/ThinkingBlockPeek";
 import StyledMarkdownPreview from "../StyledMarkdownPreview";
 import ConversationSummary from "./ConversationSummary";
@@ -12,7 +13,7 @@ import ResponseActions from "./ResponseActions";
 import ThinkingIndicator from "./ThinkingIndicator";
 
 interface StepContainerProps {
-  item: ChatHistoryItem;
+  item: ChatHistoryItem & { createdAt?: number };
   index: number;
   isLast: boolean;
   latestSummaryIndex?: number;
@@ -96,6 +97,7 @@ function StepContainer(props: StepContainerProps) {
 
             <StyledMarkdownPreview
               isRenderingInStepContainer
+              useParentBackgroundColor
               source={stripImages(props.item.message.content)}
               itemIndex={props.index}
             />
@@ -103,6 +105,11 @@ function StepContainer(props: StepContainerProps) {
         )}
         {props.isLast && !props.item.reasoning?.text?.trim() && (
           <ThinkingIndicator historyItem={props.item} />
+        )}
+        {formatMessageTime(props.item.createdAt) !== undefined && (
+          <span className="cukii-assistant-metadata">
+            <time>{formatMessageTime(props.item.createdAt)}</time>
+          </span>
         )}
       </div>
 

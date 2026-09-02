@@ -713,6 +713,7 @@ describe("streamResponseThunk", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "First chunkSecond chunk", // Chunks get combined
@@ -1103,6 +1104,7 @@ describe("streamResponseThunk", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             message: {
               content: "I'll search the codebase for you.",
               id: expect.any(String),
@@ -1163,6 +1165,7 @@ describe("streamResponseThunk", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "Search completed.",
@@ -1806,6 +1809,7 @@ describe("streamResponseThunk", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "First chunk", // Only first chunk before abort
