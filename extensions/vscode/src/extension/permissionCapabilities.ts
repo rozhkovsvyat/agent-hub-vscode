@@ -290,9 +290,13 @@ async function probeCliCommand(
   if (command.argsPrefix.length > 0 && !isSafeCmdProbeRoute(command.route)) {
     return { help: "" };
   }
-  const [help, version] = await Promise.all([
+  const [help, version, qwenContract] = await Promise.all([
     runProbe(command, "--help"),
     runProbe(command, "--version"),
+    // Qwen's --help does not list approval-mode choices; only the invalid-flag
+    // error does. Run it inside the same probe window instead of a sequential
+    // third spawn a loaded host is far more likely to time out.
+    ...(program === "qwen" ? [runProbe(command, "--approval-mode")] : []),
   ]);
   const helpText = `${help.stdout}\n${help.stderr}`.trim();
   const versionText = version.stdout.trim().split(/\r?\n/)[0];
@@ -300,9 +304,15 @@ async function probeCliCommand(
     return { help: "" };
 
   if (program === "qwen" && !helpText.includes("approval-mode")) {
-    const invalid = await runProbe(command, "--approval-mode");
+    // A killed or empty contract probe must not be cached as zero supported
+    // modes: that poisoned every later qwen route until the host restarted.
+    // Report the whole discovery as unavailable so the next request retries
+    // the live executable.
+    if (!qwenContract || !qwenContract.stderr.includes("approval-mode")) {
+      return { help: "" };
+    }
     return {
-      help: `${helpText}\n${invalid.stderr}`.trim(),
+      help: `${helpText}\n${qwenContract.stderr}`.trim(),
       version: versionText,
       route: command.route,
     };
@@ -413,6 +423,19 @@ async function discoverVendorPermissionCapabilities(
     route: probe.route,
     generation,
   };
+  // Every probed vendor CLI exposes at least one permission mode. A parse that
+  // finds none observed a degraded help capture, not a real contract, and a
+  // cached zero-mode snapshot would fail closed every route of that vendor
+  // until the extension host restarted. Leave it uncached so the next request
+  // probes the live executable again.
+  if (capabilities.supportedModes.length === 0) {
+    return {
+      vendor,
+      supportedModes: [],
+      generation,
+      helpSource: "no-modes-discovered",
+    };
+  }
   if (latestProbeGeneration.get(vendor) !== generation) {
     return (
       cachedVendorPermissionCapabilities(vendor) ?? {

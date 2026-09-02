@@ -120,4 +120,70 @@ describe("native permission capability probing", () => {
       }
     },
   );
+
+  const qwenCmdFixture = (contractStderr: string) =>
+    [
+      "@echo off",
+      'if /I "%~1"=="--help" (',
+      "  echo Usage: qwen [options] [command]",
+      "  echo   -p, --prompt  Prompt  [string]",
+      "  exit /b 0",
+      ")",
+      'if /I "%~1"=="--version" (',
+      "  echo 0.22.2",
+      "  exit /b 0",
+      ")",
+      'if /I "%~1"=="--approval-mode" (',
+      `  echo ${contractStderr} 1>&2`,
+      "  exit /b 1",
+      ")",
+      "echo unexpected argument: %~1 1>&2",
+      "exit /b 1",
+    ].join("\r\n");
+
+  it.skipIf(process.platform !== "win32")(
+    "treats an empty Qwen approval-mode contract probe as unavailable",
+    async () => {
+      const fixtureDir = await fs.mkdtemp(
+        path.join("D:\\Scratch", "cukii qwen probe "),
+      );
+      const fixture = path.join(fixtureDir, "qwen.cmd");
+      try {
+        // A load-killed contract probe prints nothing; the discovery must not
+        // survive as a zero-mode capability snapshot.
+        await fs.writeFile(fixture, qwenCmdFixture(""));
+        await expect(probeCliRoute("qwen", fixture)).resolves.toEqual({
+          help: "",
+        });
+      } finally {
+        await fs.rm(fixtureDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "parses the full Qwen approval-mode contract from the invalid-flag probe",
+    async () => {
+      const fixtureDir = await fs.mkdtemp(
+        path.join("D:\\Scratch", "cukii qwen probe "),
+      );
+      const fixture = path.join(fixtureDir, "qwen.cmd");
+      try {
+        await fs.writeFile(
+          fixture,
+          qwenCmdFixture(
+            'Argument: approval-mode, Given: "", Choices: "plan", "default", "auto-edit", "auto", "yolo"',
+          ),
+        );
+        const probe = await probeCliRoute("qwen", fixture);
+        expect(probe.version).toBe("0.22.2");
+        expect(
+          parseVendorPermissionCapabilities("qwen", probe.help, probe.version)
+            .supportedModes,
+        ).toEqual(["manual", "editAutomatically", "plan", "auto", "bypass"]);
+      } finally {
+        await fs.rm(fixtureDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
