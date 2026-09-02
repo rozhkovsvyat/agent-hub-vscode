@@ -1712,24 +1712,35 @@ async function* launchBridgeChild(options: {
     enqueueVisibleEvents(parser.flush());
     if (!cancelled && code && code !== 0) {
       const detail = stderr.trim() || stdoutTail.trim();
-      // Name the real cause instead of letting a raw Rust panic read like a
-      // quota/limit failure: an incompatible models cache is a startup crash,
-      // and Cukii repairs known missing fields before the next launch.
+      // Name the real cause instead of dumping a raw native error that reads
+      // like noise. Order matters: the Codex models-cache warning is logged
+      // but non-fatal on current builds, while "out of credits" is the actual
+      // terminal condition — a quota failure must never be disguised by the
+      // cache line that precedes it in the same stderr.
+      const logSuffix = route.logFile ? ` Bridge log: ${route.logFile}` : "";
+      const creditFailure = /out of credits|refill/i.test(detail);
       const cacheField = detail.match(
         /failed to load models cache: missing field `([^`]+)`/,
       );
-      error = cacheField
-        ? new Error(
-            `${route.label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
-              (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
-          )
-        : new Error(
-            `${route.label} bridge exited with code ${code}.` +
-              (detail
-                ? ` ${detail}`
-                : " Native CLI stopped before returning a normal response.") +
-              (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
-          );
+      if (creditFailure) {
+        error = new Error(
+          `${route.label} bridge stopped because the vendor workspace is out of credits. This is a usage limit, not a Cukii defect: ask the workspace owner to refill credits, then send the message again.` +
+            logSuffix,
+        );
+      } else if (cacheField) {
+        error = new Error(
+          `${route.label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
+            logSuffix,
+        );
+      } else {
+        error = new Error(
+          `${route.label} bridge exited with code ${code}.` +
+            (detail
+              ? ` ${detail}`
+              : " Native CLI stopped before returning a normal response.") +
+            logSuffix,
+        );
+      }
     }
     if (!cancelled) {
       canary?.record("vendor_completed", {
