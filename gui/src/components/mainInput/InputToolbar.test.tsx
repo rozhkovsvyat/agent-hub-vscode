@@ -107,6 +107,30 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByText("Add context")).toBeDefined();
   });
 
+  it("shows a Claude-style model pill beside the slash control that opens the model picker", async () => {
+    const { user } = await renderWithProviders(<InputToolbar {...props} />);
+
+    const pill = await getElementByTestId("cukii-model-pill");
+    expect(pill).toHaveAttribute(
+      "aria-label",
+      "Selected model: Qwen 3.8 Max",
+    );
+    // Claude pill geometry: ~26px capsule with 16px horizontal padding.
+    expect(pill.className).toContain("h-[26px]");
+    expect(pill.className).toContain("rounded-full");
+    expect(pill.className).toContain("px-4");
+    // It rides directly next to the "/" command control in the left cluster.
+    const slashControl = await getElementByTestId("broker-menu-button");
+    expect(slashControl.closest(".relative")?.nextElementSibling).toBe(pill);
+
+    await user.click(pill);
+
+    // The same picker as "Switch model…" opens, with the Best/All toggle.
+    expect(await getElementByText("Select a model")).toBeDefined();
+    const bestToggle = await getElementByTestId("cukii-scope-toggle-best");
+    expect(bestToggle).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("opens the Cukii permission popover with exact copy and cycles with Shift+Tab", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     const store = setupStore({ ideMessenger: mockIdeMessenger });

@@ -15,6 +15,7 @@ import type {
 import { useContext, useEffect, useMemo, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import {
+  EFFORT_LABELS,
   effortLevelsForModel,
   normalizeEffortForModel,
 } from "../modelSelection/vendors";
@@ -22,15 +23,6 @@ import { Popover, PopoverButton, PopoverPanel } from "../ui";
 
 const modeRowClass =
   "cukii-permission-mode-row flex w-full items-center text-left";
-
-const PERMISSION_EFFORT_LABELS: Record<BrokerEffort, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
-  max: "Max",
-  ultra: "Ultra",
-};
 
 /**
  * The same session effort budget the /-menu slider edits, rendered as a
@@ -66,7 +58,7 @@ export function PermissionEffortRow({
             type="button"
             data-testid={`cukii-permission-effort-${level}`}
             aria-pressed={level === visibleEffort}
-            title={`${PERMISSION_EFFORT_LABELS[level]} effort`}
+            title={`${EFFORT_LABELS[level]} effort`}
             className={`cukii-permission-effort-option rounded px-1.5 py-[1px] text-[11px] ${
               level === visibleEffort
                 ? "cukii-permission-effort-option-on bg-[var(--vscode-button-secondaryBackground,var(--vscode-descriptionForeground))] text-[var(--vscode-button-secondaryForeground,var(--vscode-foreground))]"
@@ -74,7 +66,7 @@ export function PermissionEffortRow({
             }`}
             onClick={() => onEffortChange(level)}
           >
-            {PERMISSION_EFFORT_LABELS[level]}
+            {EFFORT_LABELS[level]}
           </button>
         ))}
       </span>

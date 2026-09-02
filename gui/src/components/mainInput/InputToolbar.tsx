@@ -754,6 +754,21 @@ function InputToolbar(props: InputToolbarProps) {
             </Popover>
           )}
 
+          {/* MAX/Claude-style model pill rides right next to the "/" command
+              control; it opens the same picker as "Switch model…". */}
+          {!isInEdit && (
+            <button
+              type="button"
+              data-testid="cukii-model-pill"
+              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full border border-[var(--vscode-widget-border)] px-4 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+              title={`Model: ${currentLabel}. Click to switch`}
+              aria-label={`Selected model: ${currentLabel}`}
+              onClick={() => setModelPickerOpen(true)}
+            >
+              <span className="truncate">{currentLabel}</span>
+            </button>
+          )}
+
           {isInEdit && (
             <button
               className={menuItemClass}
@@ -769,19 +784,6 @@ function InputToolbar(props: InputToolbarProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {!isInEdit && (
-            <button
-              type="button"
-              data-testid="cukii-model-pill"
-              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full border border-[var(--vscode-widget-border)] px-4 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
-              title={`Model: ${currentLabel}. Click to switch`}
-              aria-label={`Selected model: ${currentLabel}`}
-              onClick={() => setModelPickerOpen(true)}
-            >
-              <span className="truncate">{currentLabel}</span>
-            </button>
-          )}
-
           {!isInEdit && (
             <PermissionModeControl
               brokerModel={currentModel}
