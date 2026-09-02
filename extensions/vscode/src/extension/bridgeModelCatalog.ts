@@ -427,7 +427,7 @@ async function run(program: string, args: string[]): Promise<string> {
 /**
  * The native-installer Claude Code (`claude install`) lives in ~/.local/bin
  * and self-updates; the npm/scoop copy on PATH cannot and can lag below the
- * minimum build a model needs (claude-fable-5-1 requires >= 2.1.251). Prefer
+ * minimum build a model needs (claude-fable-5-1 requires >= 2.1.258). Prefer
  * the native build for both the catalog version probe and bridge launches.
  */
 export function claudeProgram(): string {
@@ -477,7 +477,24 @@ export function filterClaudeCatalogByVersion(
   });
 }
 
+/**
+ * The picker can reopen on every panel focus, but the installed Claude build
+ * changes at most on a manual CLI update. Cache the probe result so repeated
+ * opens never pay the subprocess cost again within the TTL.
+ */
+const CLAUDE_CATALOG_PROBE_TTL_MS = 5 * 60_000;
+let claudeCatalogProbeCache:
+  | { at: number; entries: BrokerModelCatalogEntry[] }
+  | undefined;
+
 async function claudeCatalogProbe(): Promise<BrokerModelCatalogEntry[]> {
+  const now = Date.now();
+  if (
+    claudeCatalogProbeCache &&
+    now - claudeCatalogProbeCache.at < CLAUDE_CATALOG_PROBE_TTL_MS
+  ) {
+    return claudeCatalogProbeCache.entries;
+  }
   const maintained = staticCatalogForUnavailableDiscovery("claude");
   let version: string | undefined;
   try {
@@ -487,7 +504,17 @@ async function claudeCatalogProbe(): Promise<BrokerModelCatalogEntry[]> {
   } catch {
     version = undefined;
   }
-  return filterClaudeCatalogByVersion(maintained, version);
+  // A missing or unreadable CLI keeps the maintained catalog intact: hiding
+  // models on a failed probe would strand restored sessions whose saved model
+  // actually works, and the accounts screen explains the CLI state separately.
+  const entries = filterClaudeCatalogByVersion(maintained, version);
+  claudeCatalogProbeCache = { at: now, entries };
+  return entries;
+}
+
+/** Discard the cached Claude CLI probe so the next open re-discovers. */
+export function resetClaudeCatalogProbeCache(): void {
+  claudeCatalogProbeCache = undefined;
 }
 
 async function liveModels(
