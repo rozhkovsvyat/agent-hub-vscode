@@ -192,7 +192,7 @@ describe("Cukii GUI contracts", () => {
     expect(bubbleContract).toContain("align-items: flex-start;");
     expect(bubbleContract).toContain(".cukii-user-message-bubble");
     expect(bubbleContract).toContain("margin-left: auto;");
-    expect(bubbleContract).toContain("max-width: min(78%, 640px);");
+    expect(bubbleContract).toContain("max-width: min(75%, 640px);");
     expect(bubbleContract).toContain("display: inline-block;");
     expect(bubbleContract).toContain("position: relative;");
     expect(bubbleContract).toContain("padding-bottom: 17px;");
@@ -213,7 +213,7 @@ describe("Cukii GUI contracts", () => {
     const proseStart = css.indexOf(".cukii-user-bubble .scroll-container");
     const proseContract = css.slice(proseStart, proseStart + 550);
     expect(contract).toContain("min-width: 0;");
-    expect(contract).toContain("max-width: min(78%, 640px);");
+    expect(contract).toContain("max-width: min(75%, 640px);");
     expect(contract).toContain("width: fit-content;");
     expect(contract).toContain("max-width: 100%;");
     expect(proseContract).toContain("overflow-wrap: anywhere;");
@@ -222,6 +222,99 @@ describe("Cukii GUI contracts", () => {
     const timeline = css.slice(timelineStart, timelineStart + 500);
     expect(timeline).not.toContain("margin-left: auto");
     expect(timeline).not.toContain("justify-content: flex-end");
+  });
+
+  it("applies MAX grouping geometry: narrow lane, large outer corners, tight group corners, inline short metadata", () => {
+    const css = source("index.css");
+    const chat = source("pages/gui/Chat.tsx");
+
+    // Lane: right-aligned, noticeably narrower than the column.
+    const laneStart = css.indexOf(".cukii-user-message {");
+    const laneContract = css.slice(laneStart, laneStart + 320);
+    expect(laneContract).toContain("max-width: min(75%, 640px);");
+    expect(laneContract).toContain("margin-left: auto;");
+
+    // Bubbles: 16px outer corners; the corner facing an adjacent same-side
+    // bubble tightens to 6px. Solo bubbles keep every corner large.
+    const bubbleStart = css.indexOf(".cukii-user-message-bubble {");
+    const bubbleContract = css.slice(bubbleStart, bubbleStart + 800);
+    expect(bubbleContract).toContain("border-radius: 16px;");
+    expect(css).toContain(".cukii-user-bubble--group-start {");
+    expect(css).toContain(".cukii-user-bubble--group-middle {");
+    expect(css).toContain(".cukii-user-bubble--group-end {");
+    const groupStart = css.slice(
+      css.indexOf(".cukii-user-bubble--group-start {"),
+      css.indexOf(".cukii-user-bubble--group-start {") + 120,
+    );
+    expect(groupStart).toContain("border-bottom-right-radius: 6px;");
+    const groupEnd = css.slice(
+      css.indexOf(".cukii-user-bubble--group-end {"),
+      css.indexOf(".cukii-user-bubble--group-end {") + 120,
+    );
+    expect(groupEnd).toContain("border-top-right-radius: 6px;");
+    expect(css).toContain(".cukii-user-row--grouped {");
+    expect(css).toContain("margin-top: 3px;");
+
+    // Inline metadata for short turns: the fixed receipt slot releases into
+    // the last text line instead of reserving the bottom lane.
+    expect(css).toContain(".cukii-user-bubble--inline-meta {");
+    expect(css).toContain(
+      ".cukii-user-bubble--inline-meta .cukii-user-metadata {",
+    );
+    const inlineMeta = css.slice(
+      css.indexOf(".cukii-user-bubble--inline-meta .cukii-user-metadata {"),
+      css.indexOf(".cukii-user-bubble--inline-meta .cukii-user-metadata {") +
+        260,
+    );
+    expect(inlineMeta).toContain("position: static;");
+
+    // Chat derives group position and inline metadata from the transcript.
+    expect(chat).toContain("cukii-user-bubble--group-middle");
+    expect(chat).toContain("cukii-user-bubble--group-start");
+    expect(chat).toContain("cukii-user-bubble--group-end");
+    expect(chat).toContain("cukii-user-row--grouped");
+    expect(chat).toContain("cukii-user-bubble--inline-meta");
+
+    // Agent capsules keep shrink-wrapping: short answers hug their content,
+    // long ones may fill the column, never exceed it.
+    const agentStart = css.indexOf(".cukii-assistant-bubble {");
+    const agentContract = css.slice(agentStart, agentStart + 320);
+    expect(agentContract).toContain("width: fit-content;");
+    expect(agentContract).toContain("max-width: 100%;");
+    expect(agentContract.replace(/max-width/g, "")).not.toContain(
+      "width: 100%",
+    );
+  });
+
+  it("mounts the model pill, Best/All scope toggle and permissions effort row", () => {
+    const toolbar = source("components/mainInput/InputToolbar.tsx");
+    const modal = source("components/modelSelection/ModelPickerModal.tsx");
+    const permissions = source("components/mainInput/PermissionModeControl.tsx");
+    const slice = source("redux/slices/sessionSlice.ts");
+
+    // Pill: Claude-style capsule next to the "/" control showing the current
+    // broker model, opening the existing picker.
+    expect(toolbar).toContain('data-testid="cukii-model-pill"');
+    expect(toolbar).toContain("h-[26px]");
+    expect(toolbar).toContain("rounded-full");
+    expect(toolbar).toContain("px-4");
+    expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
+
+    // Scope toggle: Best is the default; the choice lives in session state so
+    // every picker entry point and reload shares it.
+    expect(modal).toContain("cukii-scope-toggle");
+    expect(modal).toContain('data-testid={`cukii-scope-toggle-${candidate}`}');
+    expect(modal).toContain("setBrokerModelScope");
+    expect(modal).toContain("isBestModel");
+    expect(slice).toContain("brokerModelScope: BrokerModelScope;");
+    expect(slice).toContain('brokerModelScope: "best",');
+
+    // Effort row: compact ~28px bottom row inside the permissions popover,
+    // normalized against the selected route.
+    expect(permissions).toContain('data-testid="cukii-permission-effort-row"');
+    expect(permissions).toContain("min-h-[28px]");
+    expect(permissions).toContain("normalizeEffortForModel");
+    expect(permissions).toContain("effortLevelsForModel");
   });
 
   it("uses the exact shared Claude toggle accent and transition", () => {

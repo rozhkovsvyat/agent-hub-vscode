@@ -1283,13 +1283,14 @@ button.cukii-submit-button--stop:active {
 
 /* MAX-style message bubble: user turns own the right lane while the timeline
    for assistant/tool/thinking remains untouched on the left. The lane is
-   noticeably narrower than the column; agent answers keep full width. */
+   noticeably narrower than the column (~75%); agent answers may fill the
+   column only when their content is large. */
 .cukii-user-message {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  max-width: min(78%, 640px);
+  max-width: min(75%, 640px);
   margin-left: auto;
 }
 
