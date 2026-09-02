@@ -119,6 +119,8 @@ export type ClaudePermissionTransport = {
   onRuntimeCanaryEvent?: RuntimeCanaryReporter;
   /** Reports whether the spawned vendor process tree was verified terminated. */
   onTerminationResult?: (terminated: boolean) => void;
+  /** Reports the vendor child pid once known; undefined on spawn failure. */
+  onChildSpawned?: (pid: number | undefined) => void;
   abortSignal?: AbortSignal;
 };
 
@@ -1391,6 +1393,9 @@ async function* streamBridgeChatWithSteer(
     shell: false,
     windowsHide: true,
   });
+  // The pid is the only handle a dispose-time retry has when the primary
+  // teardown could not verify death. Report it before any await can race it.
+  permissionTransport?.onChildSpawned?.(child.pid);
   canary?.record("bridge_dispatch");
   let cancelled = false;
   let done = false;

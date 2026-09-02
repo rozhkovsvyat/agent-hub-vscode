@@ -4,12 +4,21 @@ export type BridgeRunIdentity = {
   runId: string;
   sessionId: string;
   brokerModel: BrokerModel;
+  /** Vendor child pid once spawned. Lets a liveness probe reclaim a slot whose
+   * occupant is verifiably dead although its teardown never verified it. */
+  childPid?: number;
 };
 
 export type BridgeRunAcquireResult =
   | "acquired"
   | "superseded"
   | "blocked";
+
+export type BridgeRunCoordinatorOptions = {
+  /** Liveness probe for an occupant's childPid. Injected so recovery tests
+   * stay deterministic without real processes. */
+  isPidAlive?: (pid: number) => boolean | Promise<boolean>;
+};
 
 type Slot<Run extends BridgeRunIdentity> = {
   active?: Run;
@@ -49,8 +58,14 @@ export class BridgeRunCoordinator<
   Run extends BridgeRunIdentity,
 > {
   private readonly slots = new Map<Key, Slot<Run>>();
+  private readonly isPidAlive?: (pid: number) => boolean | Promise<boolean>;
 
-  constructor(private readonly replacementTimeoutMs = 12_000) {}
+  constructor(
+    private readonly replacementTimeoutMs = 12_000,
+    options: BridgeRunCoordinatorOptions = {},
+  ) {
+    this.isPidAlive = options.isPidAlive;
+  }
 
   activeFor(key: Key): Run | undefined {
     return this.slots.get(key)?.active;
@@ -61,8 +76,8 @@ export class BridgeRunCoordinator<
     candidate: Run,
     cancel: (run: Run) => Promise<boolean>,
   ): Promise<BridgeRunAcquireResult> {
-    const slot = this.slotFor(key);
-    const ticket = ++slot.latestTicket;
+    let slot = this.slotFor(key);
+    let ticket = ++slot.latestTicket;
 
     while (true) {
       if (ticket !== slot.latestTicket) return "superseded";
@@ -73,6 +88,21 @@ export class BridgeRunCoordinator<
         return "acquired";
       }
       if (active.runId === candidate.runId) return "acquired";
+
+      if (
+        this.isPidAlive &&
+        active.childPid !== undefined &&
+        !(await this.isPidAlive(active.childPid))
+      ) {
+        // The occupant is verifiably dead even though its teardown never
+        // confirmed it. Drop the zombie like forget() and retry against a
+        // fresh slot instead of cancelling a corpse or blocking forever;
+        // the ticket bump supersedes every waiter parked on the old slot.
+        this.forget(key);
+        slot = this.slotFor(key);
+        ticket = ++slot.latestTicket;
+        continue;
+      }
 
       let cancellation = slot.cancellation;
       if (!cancellation || cancellation.runId !== active.runId) {

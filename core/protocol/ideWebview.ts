@@ -76,6 +76,17 @@ export type CukiiCancelReceipt = {
   sessionId: string;
   status: "cancelled" | "already-cancelled";
   interrupted: "turn" | "tool";
+  /** Teardown itself could not confirm death; a post-mortem pid liveness
+   * probe did, so the run slot was released. */
+  postMortem?: boolean;
+};
+
+/** Completion receipt of one native bridge run, consumed by the extension's
+ * run coordinator. */
+export type CukiiBridgeRunCompletion = {
+  terminationVerified: boolean;
+  /** Vendor child pid once the run reached spawn; undefined on spawn failure. */
+  childPid?: number;
 };
 
 export type CukiiBridgeStreamDisposition = {

@@ -28,7 +28,21 @@ describe("VsCodeMessenger native bridge run contract", () => {
 
   it("invalidates pending replacements when their webview is disposed", () => {
     expect(source).toMatch(
-      /onDispose\(\(protocol\) => \{[\s\S]*?const run = this\.bridgeRuns\.activeFor\(protocol\);[\s\S]*?this\.bridgeRuns\.forget\(protocol\);[\s\S]*?this\.cancelBridgeRun\(run/,
+      /onDispose\(\(protocol\) => \{[\s\S]*?const run = this\.bridgeRuns\.activeFor\(protocol\);[\s\S]*?this\.bridgeRuns\.forget\(protocol\);[\s\S]*?this\.cancelBridgeRun\((protocol, )?run/,
     );
+  });
+
+  it("retries an unverified dispose teardown and reports orphans instead of swallowing", () => {
+    expect(source).toContain("retryBridgeTeardownOnDispose(");
+    // The old dispose path swallowed cancellation refusals with a two-armed
+    // no-op .then(); a refused teardown must reach a retry and telemetry.
+    expect(source).not.toMatch(
+      /cancelBridgeRun\(run, `dispose:\$\{run\.sessionId\}`\)\.then\(/,
+    );
+  });
+
+  it("re-probes pid liveness before blocking on an unverified cancellation", () => {
+    expect(source).toContain("isBridgePidAlive(");
+    expect(source).toContain("replacement is blocked");
   });
 });

@@ -3,7 +3,11 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { terminateBridgeChild } from "./bridgeChildLifecycle";
+import {
+  isBridgePidAlive,
+  retryBridgeTreeKill,
+  terminateBridgeChild,
+} from "./bridgeChildLifecycle";
 
 class UncooperativeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -336,4 +340,88 @@ describe("terminateBridgeChild", () => {
     },
     30_000,
   );
+});
+
+function spawnSleeperChild(): ChildProcess {
+  return spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+}
+
+describe("isBridgePidAlive", () => {
+  it("reports a live child as alive and a killed child as dead", async () => {
+    const child = spawnSleeperChild();
+    await waitForSpawn(child);
+    const pid = child.pid;
+    expect(pid).toBeTypeOf("number");
+    try {
+      expect(await isBridgePidAlive(pid!)).toBe(true);
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      expect(await waitForPidExit(pid!)).toBe(true);
+      expect(await isBridgePidAlive(pid!)).toBe(false);
+    } finally {
+      await cleanupPid(pid, false);
+    }
+  }, 30_000);
+});
+
+describe("retryBridgeTreeKill", () => {
+  it("returns true without forcing when the pid is already dead", async () => {
+    const forceTreeKill = vi.fn(async () => true);
+    await expect(
+      retryBridgeTreeKill(4242, {
+        pidAlive: vi.fn(() => false),
+        forceTreeKill,
+      }),
+    ).resolves.toBe(true);
+    expect(forceTreeKill).not.toHaveBeenCalled();
+  });
+
+  it("forces the tree kill exactly once and verifies death afterwards", async () => {
+    const pidAlive = vi
+      .fn<() => boolean>()
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    const forceTreeKill = vi.fn(async () => true);
+
+    await expect(
+      retryBridgeTreeKill(4242, {
+        pidAlive,
+        forceTreeKill,
+        budgetMs: 1_000,
+      }),
+    ).resolves.toBe(true);
+    expect(forceTreeKill).toHaveBeenCalledTimes(1);
+    expect(forceTreeKill).toHaveBeenCalledWith(4242, expect.any(Number));
+  });
+
+  it("returns false when the pid stays alive past the budget", async () => {
+    const forceTreeKill = vi.fn(async () => true);
+    const started = Date.now();
+    await expect(
+      retryBridgeTreeKill(4242, {
+        pidAlive: vi.fn(() => true),
+        forceTreeKill,
+        budgetMs: 60,
+      }),
+    ).resolves.toBe(false);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("kills a real bridge child through the default platform force path", async () => {
+    const child = spawnSleeperChild();
+    await waitForSpawn(child);
+    const pid = child.pid;
+    expect(pid).toBeTypeOf("number");
+    try {
+      await expect(
+        retryBridgeTreeKill(pid!, { budgetMs: 10_000 }),
+      ).resolves.toBe(true);
+      expect(await waitForPidExit(pid!)).toBe(true);
+    } finally {
+      await cleanupPid(pid, false);
+    }
+  }, 30_000);
 });

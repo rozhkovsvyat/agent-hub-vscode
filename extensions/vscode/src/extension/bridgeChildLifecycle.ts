@@ -119,3 +119,136 @@ export async function terminateBridgeChild(
   await forceKill(child);
   return waitForClose(closed, child, remainingBudget(deadline));
 }
+
+function windowsTasklistHasPid(pid: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = spawn(
+      "C:\\Windows\\System32\\tasklist.exe",
+      ["/FI", `PID eq ${pid}`, "/NH"],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let stdout = "";
+    const timer = setTimeout(() => {
+      probe.kill();
+      resolve(false);
+    }, 2_000);
+    probe.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    probe.once("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    probe.once("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 && stdout.includes(String(pid)));
+    });
+  });
+}
+
+/**
+ * Liveness probe for a bridge pid. Windows asks tasklist; POSIX uses
+ * signal 0. A probe failure is reported as "dead" so callers never block
+ * recovery on a probe that cannot answer.
+ */
+export async function isBridgePidAlive(pid: number): Promise<boolean> {
+  if (process.platform === "win32") {
+    return windowsTasklistHasPid(pid);
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means a live process we are not allowed to signal.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** The exact command an operator can run to reap an orphaned bridge tree. */
+export function manualTreeKillCommand(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32" ? `taskkill /PID ${pid} /T /F` : `kill -9 ${pid}`;
+}
+
+function windowsTaskKillTree(pid: number, budgetMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const killer = spawn(
+      "C:\\Windows\\System32\\taskkill.exe",
+      ["/pid", String(pid), "/T", "/F"],
+      { windowsHide: true, stdio: "ignore" },
+    );
+    const timer = setTimeout(
+      () => {
+        killer.kill();
+        resolve(false);
+      },
+      Math.max(1, budgetMs),
+    );
+    killer.once("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    killer.once("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}
+
+function posixForceTreeKill(pid: number): Promise<boolean> {
+  // A detached bridge would own a process group keyed by its pid; otherwise
+  // the group kill misses and the direct SIGKILL is the fallback.
+  try {
+    process.kill(-pid, "SIGKILL");
+    return Promise.resolve(true);
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+      return Promise.resolve(true);
+    } catch {
+      return Promise.resolve(false);
+    }
+  }
+}
+
+export type BridgeTreeKillRetryOptions = {
+  budgetMs?: number;
+  platform?: NodeJS.Platform;
+  /** One forced tree kill; its own verdict is advisory. Only the pid
+   * liveness verification afterwards decides the result. */
+  forceTreeKill?: (pid: number, budgetMs: number) => Promise<boolean>;
+  pidAlive?: (pid: number) => boolean | Promise<boolean>;
+};
+
+/**
+ * Last-resort teardown for a bridge tree whose primary cancellation could not
+ * verify death. Performs exactly one forced tree kill within the budget and
+ * verifies the pid afterwards; resolves true only on verified death.
+ */
+export async function retryBridgeTreeKill(
+  pid: number,
+  options: BridgeTreeKillRetryOptions = {},
+): Promise<boolean> {
+  const platform = options.platform ?? process.platform;
+  const budgetMs = options.budgetMs ?? 5_000;
+  const pidAlive = options.pidAlive ?? (() => isBridgePidAlive(pid));
+  if (!(await pidAlive(pid))) return true;
+
+  const deadline = Date.now() + budgetMs;
+  const force =
+    options.forceTreeKill ??
+    ((forcePid: number, forceBudgetMs: number) =>
+      platform === "win32"
+        ? windowsTaskKillTree(forcePid, forceBudgetMs)
+        : posixForceTreeKill(forcePid));
+  await force(pid, remainingBudget(deadline));
+
+  // A just-killed pid may take a moment to disappear from the OS tables.
+  while (true) {
+    if (!(await pidAlive(pid))) return true;
+    if (Date.now() >= deadline) return false;
+    await wait(Math.min(50, remainingBudget(deadline)));
+  }
+}

@@ -141,6 +141,35 @@ describe("BridgeRunCoordinator", () => {
     await expect(replacement).resolves.toBe("superseded");
     expect(coordinator.activeFor("panel")).toBeUndefined();
   });
+
+  it("reclaims a zombie slot whose occupant pid is verifiably dead", async () => {
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000, {
+      isPidAlive: (pid) => pid !== 4242,
+    });
+    const zombie: Run = { ...run("zombie"), childPid: 4242 };
+    await coordinator.acquire("panel", zombie, async () => true);
+
+    const cancel = vi.fn(async () => false);
+    await expect(
+      coordinator.acquire("panel", run("replacement"), cancel),
+    ).resolves.toBe("acquired");
+    // The dead occupant must be dropped by liveness, never cancelled.
+    expect(cancel).not.toHaveBeenCalled();
+    expect(coordinator.activeFor("panel")?.runId).toBe("replacement");
+  });
+
+  it("keeps blocking replacement of a live-pid run with unverified teardown", async () => {
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000, {
+      isPidAlive: () => true,
+    });
+    const active: Run = { ...run("active"), childPid: 4242 };
+    await coordinator.acquire("panel", active, async () => true);
+
+    await expect(
+      coordinator.acquire("panel", run("candidate"), async () => false),
+    ).resolves.toBe("blocked");
+    expect(coordinator.activeFor("panel")).toBe(active);
+  });
 });
 
 describe("bridgeRunAcceptsSteer", () => {
