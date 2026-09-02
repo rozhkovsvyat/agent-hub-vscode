@@ -139,10 +139,14 @@ async function taskkillTree(
 async function waitForPidExit(pid: number, budgetMs = 2_000): Promise<boolean> {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
-    if (!isPidAlive(pid)) return true;
+    // Observe death through the same tasklist probe production uses. The
+    // handle-based signal-0 probe keeps reporting "alive" on Windows while
+    // this test still holds the ChildProcess handle, which under machine load
+    // outlasts the kill budget even after a verified kill.
+    if (!(await isBridgePidAlive(pid))) return true;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  return !isPidAlive(pid);
+  return !(await isBridgePidAlive(pid));
 }
 
 async function cleanupPid(pid: number | undefined, includeTree: boolean) {
