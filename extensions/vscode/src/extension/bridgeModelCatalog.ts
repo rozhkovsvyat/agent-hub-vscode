@@ -424,12 +424,83 @@ async function run(program: string, args: string[]): Promise<string> {
   return result.stdout;
 }
 
+/**
+ * The native-installer Claude Code (`claude install`) lives in ~/.local/bin
+ * and self-updates; the npm/scoop copy on PATH cannot and can lag below the
+ * minimum build a model needs (claude-fable-5-1 requires >= 2.1.251). Prefer
+ * the native build for both the catalog version probe and bridge launches.
+ */
+export function claudeProgram(): string {
+  if (process.platform === "win32") {
+    const native = path.join(os.homedir(), ".local", "bin", "claude.exe");
+    if (fs.existsSync(native)) return native;
+  }
+  return "claude";
+}
+
+export function parseClaudeCliVersion(raw: string): string | undefined {
+  return raw.match(/(\d+\.\d+\.\d+)/)?.[1];
+}
+
+export function compareDottedVersions(left: string, right: string): number {
+  const parts = (value: string) =>
+    value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const leftParts = parts(left);
+  const rightParts = parts(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+/**
+ * The minimum Claude Code build that exposes each maintained model. A user who
+ * updates their CLI picks the new model up automatically; no Cukii release is
+ * needed to surface it.
+ */
+const CLAUDE_MODEL_MIN_CLI_VERSION: Record<string, string> = {
+  "fable-5-1": "2.1.258",
+};
+
+export function filterClaudeCatalogByVersion(
+  models: BrokerModelCatalogEntry[],
+  version: string | undefined,
+): BrokerModelCatalogEntry[] {
+  // An unparseable CLI keeps the maintained catalog: hiding models on a
+  // failed probe would strand users whose CLI actually supports them.
+  if (!version) return models;
+  return models.filter((model) => {
+    const minimum = CLAUDE_MODEL_MIN_CLI_VERSION[model.value];
+    return !minimum || compareDottedVersions(version, minimum) >= 0;
+  });
+}
+
+async function claudeCatalogProbe(): Promise<BrokerModelCatalogEntry[]> {
+  const maintained = staticCatalogForUnavailableDiscovery("claude");
+  let version: string | undefined;
+  try {
+    version = parseClaudeCliVersion(
+      await run(claudeProgram(), ["--version"]),
+    );
+  } catch {
+    version = undefined;
+  }
+  return filterClaudeCatalogByVersion(maintained, version);
+}
+
 async function liveModels(
   vendor: BrokerVendorId,
   canUseMaintainedCatalog = false,
 ): Promise<BrokerModelCatalogEntry[]> {
-  // Claude/Qwen have no machine-readable subscription enumeration. Maintained
-  // entries are only a usable-account catalog, never a missing-CLI fallback.
+  // Claude has no machine-readable subscription enumeration; the maintained
+  // catalog is gated on the installed CLI build so newly released models
+  // appear as soon as the user updates Claude Code.
+  if (vendor === "claude") {
+    return canUseMaintainedCatalog ? claudeCatalogProbe() : [];
+  }
+  // Qwen keeps a pure maintained catalog: no enumeration endpoint exists.
   const staticModels = staticCatalogForUnavailableDiscovery(vendor);
   if (staticModels.length > 0) {
     return canUseMaintainedCatalog ? staticModels : [];

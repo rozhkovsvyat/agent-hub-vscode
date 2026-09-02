@@ -5,9 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   codexCatalogFromCache,
+  compareDottedVersions,
   cursorCatalogFromOutput,
+  filterClaudeCatalogByVersion,
   grokCatalogFromOutput,
   kimiCatalogFromJson,
+  parseClaudeCliVersion,
   repairCodexModelsCache,
   resolveCursorCatalogModel,
   staticCatalogForUnavailableDiscovery,
@@ -244,5 +247,36 @@ describe("repairCodexModelsCache", () => {
     const cachePath = path.join(dir, "models_cache.json");
     writeFileSync(cachePath, "{not json", "utf8");
     expect(repairCodexModelsCache(cachePath)).toBe(false);
+  });
+});
+
+describe("claude catalog version gate", () => {
+  it("parses the CLI version banner", () => {
+    expect(parseClaudeCliVersion("2.1.258 (Claude Code)")).toBe("2.1.258");
+    expect(parseClaudeCliVersion("no version here")).toBeUndefined();
+  });
+
+  it("orders dotted versions numerically instead of lexically", () => {
+    expect(compareDottedVersions("2.1.258", "2.1.58")).toBeGreaterThan(0);
+    expect(compareDottedVersions("2.1.258", "2.1.258")).toBe(0);
+    expect(compareDottedVersions("2.0.9", "2.1.0")).toBeLessThan(0);
+  });
+
+  it("hides models the installed CLI build predates and keeps the rest", () => {
+    const maintained = staticCatalogForUnavailableDiscovery("claude");
+    const outdated = filterClaudeCatalogByVersion(
+      maintained,
+      "2.1.202",
+    ).map((model) => model.value);
+    expect(outdated).not.toContain("fable-5-1");
+    expect(outdated).toContain("opus-5");
+    const current = filterClaudeCatalogByVersion(
+      maintained,
+      "2.1.258",
+    ).map((model) => model.value);
+    expect(current).toContain("fable-5-1");
+    expect(filterClaudeCatalogByVersion(maintained, undefined)).toEqual(
+      maintained,
+    );
   });
 });
