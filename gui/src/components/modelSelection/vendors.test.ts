@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_MODELS,
   applyRuntimeVendorCatalog,
+  BEST_MODELS,
   BROKER_MODEL_OPTIONS,
   cukiiCapabilityRating,
   displayModelLabel,
   effortLevelsForModel,
+  isBestModel,
   normalizeEffortForModel,
   presentVendorModels,
   supportsNativeThinking,
@@ -23,6 +25,7 @@ describe("Cukii model context labels", () => {
     ).toEqual({
       "opus-5": "Opus 5",
       "sonnet-5": "Sonnet 5",
+      "fable-5-1": "Fable 5.1",
       "fable-5": "Fable 5",
       "haiku-4-5": "Haiku 4.5",
       "codex-5-6-sol": "GPT-5.6 Sol",
@@ -82,12 +85,34 @@ describe("Cukii model context labels", () => {
       "OpenAI",
       "xAI",
       "Cursor",
-      "Moonshot AI",
+      "MoonshotAI",
       "DeepSeek",
     ]);
     expect(VENDORS[0]?.id).toBe("qwen");
     expect(ALL_MODELS[0]?.value).toBe("qwen-3-8-max");
     expect(BROKER_MODEL_OPTIONS[0]?.value).toBe("qwen-3-8-max");
+  });
+
+  it("keeps the curated Best scope live and selectable", () => {
+    expect(BEST_MODELS).toEqual([
+      "qwen-3-8-max",
+      "qwen-deepseek-v4-pro-0813",
+      "fable-5-1",
+      "opus-5",
+      "sonnet-5",
+      "codex-5-6-sol",
+      "codex-5-6-terra",
+      "grok-4-6",
+      "composer-2-5",
+      "kimi-k3",
+    ]);
+    for (const value of BEST_MODELS) {
+      const model = ALL_MODELS.find((entry) => entry.value === value);
+      expect(model, value).toBeDefined();
+      expect(model?.disabled, value).toBeFalsy();
+      expect(isBestModel(value), value).toBe(true);
+    }
+    expect(isBestModel("haiku-4-5")).toBe(false);
   });
 
   it("does not put Alibaba image/audio/video capabilities in the chat picker", () => {
@@ -109,7 +134,7 @@ describe("Cukii model context labels", () => {
 
   it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
     const expectedModelOrderByVendor = {
-      claude: ["fable-5", "opus-5", "sonnet-5", "haiku-4-5"],
+      claude: ["fable-5-1", "fable-5", "opus-5", "sonnet-5", "haiku-4-5"],
       codex: [
         "codex-5-6-sol",
         "codex-5-5",
@@ -236,6 +261,13 @@ describe("Cukii model context labels", () => {
       "ultra",
     ]);
     expect(effortLevelsForModel("codex-5-6-luna")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(effortLevelsForModel("fable-5-1")).toEqual([
       "low",
       "medium",
       "high",

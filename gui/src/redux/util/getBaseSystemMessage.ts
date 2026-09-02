@@ -12,6 +12,7 @@ export const BROKER_MODEL_LABELS: Record<string, string> = {
   "opus-5": "Opus 5",
   "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
+  "fable-5-1": "Fable 5.1",
   "haiku-4-5": "Haiku 4.5",
   "codex-5-6-sol": "GPT-5.6 Sol",
   "codex-5-6-terra": "GPT-5.6 Terra",
@@ -50,7 +51,9 @@ function brokerModelLabel(value?: string): string | undefined {
 
 function brokerModelAgent(value?: string): string | undefined {
   if (!value) return undefined;
-  if (["opus-5", "sonnet-5", "fable-5", "haiku-4-5"].includes(value)) {
+  if (
+    ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(value)
+  ) {
     return "claude";
   }
   if (value.startsWith("codex")) return "codex";

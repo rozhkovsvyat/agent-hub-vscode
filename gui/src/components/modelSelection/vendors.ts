@@ -39,6 +39,7 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "claude",
     label: "Anthropic",
     models: [
+      { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
       { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
       { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
       { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
@@ -112,7 +113,7 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
   },
   {
     id: "kimi",
-    label: "Moonshot AI",
+    label: "MoonshotAI",
     models: [
       {
         value: "kimi-k2",
@@ -166,6 +167,28 @@ export const VENDORS: VendorInfo[] = CUKII_VENDOR_REGISTRY.map((registered) => {
 export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
 
 export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
+
+/**
+ * The curated default scope of the model picker ("Best"). Every entry must be
+ * a live, selectable route; a model without a connected bridge belongs in the
+ * full catalog only.
+ */
+export const BEST_MODELS: readonly BrokerModel[] = [
+  "qwen-3-8-max",
+  "qwen-deepseek-v4-pro-0813",
+  "fable-5-1",
+  "opus-5",
+  "sonnet-5",
+  "codex-5-6-sol",
+  "codex-5-6-terra",
+  "grok-4-6",
+  "composer-2-5",
+  "kimi-k3",
+];
+
+export function isBestModel(model: BrokerModel): boolean {
+  return BEST_MODELS.includes(model);
+}
 
 export const BROKER_SUBAGENT_OPTIONS: Array<{
   value: BrokerSubagent;
@@ -305,6 +328,7 @@ export function effortLevelsForModel(
     model === "opus-5" ||
     model === "sonnet-5" ||
     model === "fable-5" ||
+    model === "fable-5-1" ||
     model === "haiku-4-5" ||
     model.startsWith("cursor:claude-")
   ) {

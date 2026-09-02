@@ -351,7 +351,7 @@ describe("VendorAccountsModal", () => {
     ideMessenger.responses["cukii/listVendorAccounts"] = [
       {
         id: "kimi",
-        label: "Moonshot AI",
+        label: "MoonshotAI",
         installed: true,
         authenticated: true,
         state: "connected",
@@ -363,7 +363,7 @@ describe("VendorAccountsModal", () => {
       mockIdeMessenger: ideMessenger,
     });
 
-    await getElementByText("Moonshot AI");
+    await getElementByText("MoonshotAI");
     await getElementByText("Log out");
     expect(document.body.textContent).not.toMatch(
       /Connected|identity unavailable|Email unavailable/i,

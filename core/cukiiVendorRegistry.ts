@@ -4,7 +4,7 @@ export const CUKII_VENDOR_REGISTRY = [
   { id: "codex", label: "OpenAI" },
   { id: "grok", label: "xAI" },
   { id: "cursor", label: "Cursor" },
-  { id: "kimi", label: "Moonshot AI" },
+  { id: "kimi", label: "MoonshotAI" },
   { id: "deepseek", label: "DeepSeek" },
 ] as const;
 

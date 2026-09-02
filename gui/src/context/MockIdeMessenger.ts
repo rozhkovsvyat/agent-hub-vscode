@@ -105,6 +105,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       id: "claude",
       label: "Anthropic",
       models: [
+        { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
         { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
         { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
         { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
