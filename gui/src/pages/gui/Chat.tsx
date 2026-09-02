@@ -416,11 +416,40 @@ export function Chat() {
                 receiptStatus === "deferred"
               ? "sent"
               : undefined;
+        // MAX geometry: adjacent user turns form one visual group; corners
+        // facing a neighbor tighten while outer corners stay large.
+        const previousRole = history[historyIndex - 1]?.message.role;
+        const nextRole = history[historyIndex + 1]?.message.role;
+        const groupedWithPrevious = previousRole === "user";
+        const groupedWithNext = nextRole === "user";
+        const groupClass =
+          groupedWithPrevious && groupedWithNext
+            ? "cukii-user-bubble--group-middle"
+            : groupedWithNext
+              ? "cukii-user-bubble--group-start"
+              : groupedWithPrevious
+                ? "cukii-user-bubble--group-end"
+                : "cukii-user-bubble--solo";
+        // MAX keeps time/checks on the last text line of a short single-line
+        // message and drops them to their own row once the text wraps.
+        const flatText = renderChatMessage(message).trim();
+        const inlineMeta =
+          flatText.length > 0 &&
+          flatText.length <= 64 &&
+          !flatText.includes("\n");
         return [
-          <div key={message.id} className="cukii-user-row shrink-0">
+          <div
+            key={message.id}
+            className={`cukii-user-row shrink-0 ${
+              groupedWithPrevious ? "cukii-user-row--grouped" : ""
+            }`}
+          >
             <div className="cukii-user-message">
               <div
-                className="cukii-user-message-bubble"
+                className={`cukii-user-message-bubble ${groupClass} ${
+                  inlineMeta ? "cukii-user-bubble--inline-meta" : ""
+                }`}
+                data-testid={`cukii-user-bubble-${message.id}`}
                 onContextMenu={(e) =>
                   openMessageMenu(e, renderChatMessage(message))
                 }

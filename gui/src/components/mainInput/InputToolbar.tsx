@@ -29,6 +29,7 @@ import {
   setBrokerEffort,
   setBrokerModel,
   switchBrokerModel,
+  setBrokerModelScope,
   setBrokerPermissionMode,
   setBrokerSpeed,
   setBrokerSubagent,
@@ -37,6 +38,7 @@ import {
 import type {
   BrokerEffort,
   BrokerModel,
+  BrokerModelScope,
   BrokerSpeed,
   BrokerSubagent,
   CukiiPermissionMode,
@@ -156,6 +158,9 @@ function InputToolbar(props: InputToolbarProps) {
   );
   const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
   const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
+  const brokerModelScope = useAppSelector(
+    (state) => state.session.brokerModelScope ?? "best",
+  );
   const hasReasoningEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
@@ -248,6 +253,7 @@ function InputToolbar(props: InputToolbarProps) {
         brokerSubagent: nextSubagent,
         brokerEffort: resolvedEffort,
         brokerSpeed: nextSpeed,
+        brokerModelScope,
         thinkingEnabled: nextThinking,
         brokerPermissionMode: resolvedPermissionMode,
       },
@@ -277,6 +283,7 @@ function InputToolbar(props: InputToolbarProps) {
           brokerSubagent: BrokerSubagent;
           brokerEffort: BrokerEffort;
           brokerSpeed: BrokerSpeed;
+          brokerModelScope: BrokerModelScope;
           thinkingEnabled: boolean;
           brokerPermissionMode: CukiiPermissionMode;
         }>
@@ -287,6 +294,9 @@ function InputToolbar(props: InputToolbarProps) {
     if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
     if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
     if (draft.brokerSpeed) dispatch(setBrokerSpeed(draft.brokerSpeed));
+    if (draft.brokerModelScope === "all" || draft.brokerModelScope === "best") {
+      dispatch(setBrokerModelScope(draft.brokerModelScope));
+    }
     if (typeof draft.thinkingEnabled === "boolean") {
       dispatch(setHasReasoningEnabled(draft.thinkingEnabled));
     }
@@ -760,8 +770,22 @@ function InputToolbar(props: InputToolbarProps) {
 
         <div className="flex shrink-0 items-center gap-2">
           {!isInEdit && (
+            <button
+              type="button"
+              data-testid="cukii-model-pill"
+              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full border border-[var(--vscode-widget-border)] px-4 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+              title={`Model: ${currentLabel}. Click to switch`}
+              aria-label={`Selected model: ${currentLabel}`}
+              onClick={() => setModelPickerOpen(true)}
+            >
+              <span className="truncate">{currentLabel}</span>
+            </button>
+          )}
+
+          {!isInEdit && (
             <PermissionModeControl
               brokerModel={currentModel}
+              brokerEffort={brokerEffort}
               permissionMode={brokerPermissionMode}
               onChange={(mode) => {
                 updateBrokerPreferences(
@@ -771,6 +795,14 @@ function InputToolbar(props: InputToolbarProps) {
                   brokerSpeed,
                   hasReasoningEnabled,
                   mode,
+                );
+              }}
+              onEffortChange={(effort) => {
+                updateBrokerPreferences(
+                  currentModel,
+                  brokerSubagent ?? "auto",
+                  effort,
+                  brokerSpeed,
                 );
               }}
             />

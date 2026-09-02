@@ -4,7 +4,10 @@ import { renderWithProviders } from "../../util/test/render";
 import { ModelPickerModal } from "./ModelPickerModal";
 import { getElementByText } from "../../util/test/utils";
 import { setMode } from "../../redux/slices/sessionSlice";
-import { setBrokerPermissionMode } from "../../redux/slices/sessionSlice";
+import {
+  setBrokerModelScope,
+  setBrokerPermissionMode,
+} from "../../redux/slices/sessionSlice";
 
 describe("ModelPickerModal", () => {
   it("renders vendors and models, selects a model and persists it", async () => {
@@ -15,6 +18,7 @@ describe("ModelPickerModal", () => {
 
     await act(async () => {
       store.dispatch(setMode("broker"));
+      store.dispatch(setBrokerModelScope("all"));
     });
 
     // The single Claude-style list keeps vendor headings visible.
@@ -69,6 +73,7 @@ describe("ModelPickerModal", () => {
 
     await act(async () => {
       store.dispatch(setMode("broker"));
+      store.dispatch(setBrokerModelScope("all"));
     });
 
     const disabledModel = await getElementByText("V4 Pro (soon)");
@@ -81,7 +86,13 @@ describe("ModelPickerModal", () => {
   });
 
   it("renders compact monochrome SVG milk ratings with one accessible label", async () => {
-    await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
+    const { store } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+
+    await act(async () => {
+      store.dispatch(setBrokerModelScope("all"));
+    });
 
     const rating = await screen.findByTestId("cukii-capability-rating-fable-5");
     expect(rating).toHaveAttribute(
@@ -96,5 +107,53 @@ describe("ModelPickerModal", () => {
     expect(rating.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
       "true",
     );
+  });
+
+  it("defaults to the Best scope and hides non-curated models", async () => {
+    await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
+
+    // Curated routes stay visible in the default scope.
+    await getElementByText("GPT-5.6 Sol");
+    await getElementByText("Fable 5.1");
+    await getElementByText("Kimi K3");
+    // Full-catalog-only entries must not leak into Best.
+    expect(screen.queryByText("Fable 5")).toBeNull();
+    expect(screen.queryByText("Grok 4.5")).toBeNull();
+    expect(screen.queryByText("V4 Pro (soon)")).toBeNull();
+  });
+
+  it("toggles Best/All and keeps the choice in per-session state", async () => {
+    const { store, user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+
+    expect(store.getState().session.brokerModelScope).toBe("best");
+    const allButton = await screen.findByTestId("cukii-scope-toggle-all");
+    await user.click(allButton);
+    expect(store.getState().session.brokerModelScope).toBe("all");
+    await getElementByText("Fable 5");
+    await getElementByText("Grok 4.5");
+
+    const bestButton = await screen.findByTestId("cukii-scope-toggle-best");
+    await user.click(bestButton);
+    expect(store.getState().session.brokerModelScope).toBe("best");
+    expect(screen.queryByText("Fable 5")).toBeNull();
+  });
+
+  it("lists vendors alphabetically, matching account management", async () => {
+    const { store } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+    await act(async () => {
+      store.dispatch(setBrokerModelScope("all"));
+    });
+
+    const headings = Array.from(
+      document.querySelectorAll(".cukii-model-picker section > div:first-child"),
+    ).map((node) => node.textContent);
+    expect(headings).toEqual([...headings].sort((a, b) =>
+      (a ?? "").localeCompare(b ?? "", "en", { sensitivity: "base" }),
+    ));
+    expect(headings).toContain("MoonshotAI");
   });
 });

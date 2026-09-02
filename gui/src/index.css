@@ -1173,6 +1173,14 @@ button.cukii-submit-button--stop:active {
 .cukii-assistant-bubble .wmde-markdown,
 .cukii-assistant-bubble .wmde-markdown-var {
   background-color: transparent !important;
+  min-width: 0;
+}
+
+/* The capsule hugs its content (fit-content); a wide code block must scroll
+   inside the bubble instead of forcing it past the column edge. */
+.cukii-assistant-bubble .wmde-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Inline code (paths, guids) ships its own dark square too; inside the
@@ -1267,14 +1275,21 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
+/* MAX-style grouping: adjacent user turns sit almost flush; only groups get
+   the breathing margin. */
+.cukii-user-row--grouped {
+  margin-top: 3px;
+}
+
 /* MAX-style message bubble: user turns own the right lane while the timeline
-   for assistant/tool/thinking remains untouched on the left. */
+   for assistant/tool/thinking remains untouched on the left. The lane is
+   noticeably narrower than the column; agent answers keep full width. */
 .cukii-user-message {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  max-width: min(100%, 640px);
+  max-width: min(78%, 640px);
   margin-left: auto;
 }
 
@@ -1289,7 +1304,41 @@ button.cukii-submit-button--stop:active {
      send/stop buttons; dark ink inside (see `.cukii-user-metadata` below). */
   background: var(--cukii-primary-action-background, #e3a867);
   border: 1px solid var(--cukii-primary-action-background-hover, #c9873f);
-  border-radius: 6px;
+  /* MAX geometry: large outer corners by default; group modifiers tighten the
+     corner that faces an adjacent user bubble on the same side. */
+  border-radius: 16px;
+}
+
+.cukii-user-bubble--group-start {
+  border-bottom-right-radius: 6px;
+}
+
+.cukii-user-bubble--group-middle {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.cukii-user-bubble--group-end {
+  border-top-right-radius: 6px;
+}
+
+/* MAX inline metadata: short single-line messages carry time/checks on the
+   last text line instead of reserving a dedicated bottom row. */
+.cukii-user-bubble--inline-meta {
+  display: flex;
+  align-items: flex-end;
+}
+
+.cukii-user-bubble--inline-meta .cukii-input-box {
+  padding-bottom: 0;
+}
+
+.cukii-user-bubble--inline-meta .cukii-user-metadata {
+  position: static;
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  margin: 0 2px 1px 8px;
 }
 
 .cukii-user-message-bubble > .cukii-user-bubble {

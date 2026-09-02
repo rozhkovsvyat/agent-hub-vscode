@@ -37,6 +37,7 @@ import { findUriInDirs, getUriPathBasename } from "core/util/uri";
 import type {
   BrokerEffort,
   BrokerModel,
+  BrokerModelScope,
   BrokerSpeed,
   BrokerSubagent,
   CukiiPermissionMode,
@@ -346,6 +347,8 @@ type SessionState = {
   brokerSubagent?: BrokerSubagent;
   brokerEffort: BrokerEffort;
   brokerSpeed: BrokerSpeed;
+  /** Model picker scope; preserved per session so Best/All survives reloads. */
+  brokerModelScope: BrokerModelScope;
   brokerPermissionMode: CukiiPermissionMode;
   /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */
   pendingClaudePermissions: Record<string, CukiiClaudePermissionRequest>;
@@ -365,6 +368,7 @@ type SessionState = {
 export type {
   BrokerEffort,
   BrokerModel,
+  BrokerModelScope,
   BrokerSpeed,
   BrokerSubagent,
   CukiiPermissionMode,
@@ -392,6 +396,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   brokerSubagent: "auto",
   brokerEffort: "high",
   brokerSpeed: "standard",
+  brokerModelScope: "best",
   brokerPermissionMode: "bypass",
   pendingClaudePermissions: {},
   hasReasoningEnabled: true,
@@ -1060,6 +1065,8 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = payload.brokerSubagent ?? "auto";
         state.brokerEffort = payload.brokerEffort ?? "high";
         state.brokerSpeed = payload.brokerSpeed ?? "standard";
+        state.brokerModelScope =
+          payload.brokerModelScope === "all" ? "all" : "best";
         state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
         // Restored vendors normally keep their saved draft while live
         // discovery is pending. Kimi is the exception: its only verified
@@ -1083,6 +1090,7 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = "auto";
         state.brokerEffort = "high";
         state.brokerSpeed = "standard";
+        state.brokerModelScope = "best";
         state.brokerPermissionMode = "bypass";
         state.hasReasoningEnabled = true;
       }
@@ -1392,6 +1400,9 @@ export const sessionSlice = createSlice({
     setBrokerSpeed: (state, action: PayloadAction<BrokerSpeed>) => {
       state.brokerSpeed = action.payload;
     },
+    setBrokerModelScope: (state, action: PayloadAction<BrokerModelScope>) => {
+      state.brokerModelScope = action.payload;
+    },
     setIsInEdit: (state, action: PayloadAction<boolean>) => {
       state.isInEdit = action.payload;
     },
@@ -1551,6 +1562,7 @@ export const {
   setBrokerSubagent,
   setBrokerEffort,
   setBrokerSpeed,
+  setBrokerModelScope,
   setIsSessionLoading,
   setIsSessionMetadataLoading,
   setAllSessionMetadata,

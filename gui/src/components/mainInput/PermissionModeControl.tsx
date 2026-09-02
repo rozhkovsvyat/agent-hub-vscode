@@ -7,13 +7,80 @@ import {
   visiblePermissionModes,
   type CukiiPermissionMode,
 } from "core/cukiiPermissionModes";
-import type { BrokerModel, BrokerVendorId } from "core/protocol/ideWebview";
+import type {
+  BrokerEffort,
+  BrokerModel,
+  BrokerVendorId,
+} from "core/protocol/ideWebview";
 import { useContext, useEffect, useMemo, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import {
+  effortLevelsForModel,
+  normalizeEffortForModel,
+} from "../modelSelection/vendors";
 import { Popover, PopoverButton, PopoverPanel } from "../ui";
 
 const modeRowClass =
   "cukii-permission-mode-row flex w-full items-center text-left";
+
+const PERMISSION_EFFORT_LABELS: Record<BrokerEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+/**
+ * The same session effort budget the /-menu slider edits, rendered as a
+ * compact Claude-style bottom row inside the permissions popover.
+ */
+export function PermissionEffortRow({
+  brokerModel,
+  brokerEffort,
+  onEffortChange,
+}: {
+  brokerModel: BrokerModel;
+  brokerEffort: BrokerEffort;
+  onEffortChange: (effort: BrokerEffort) => void;
+}) {
+  const effortLevels = effortLevelsForModel(brokerModel);
+  const visibleEffort = normalizeEffortForModel(brokerModel, brokerEffort);
+  return (
+    <div
+      className="cukii-permission-effort-row flex min-h-[28px] items-center justify-between gap-2 border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)] px-3 py-1"
+      data-testid="cukii-permission-effort-row"
+    >
+      <span className="text-xs text-[var(--vscode-descriptionForeground)]">
+        Effort
+      </span>
+      <span
+        className="cukii-permission-effort-options flex items-center gap-1"
+        role="group"
+        aria-label="Effort level"
+      >
+        {effortLevels.map((level) => (
+          <button
+            key={level}
+            type="button"
+            data-testid={`cukii-permission-effort-${level}`}
+            aria-pressed={level === visibleEffort}
+            title={`${PERMISSION_EFFORT_LABELS[level]} effort`}
+            className={`cukii-permission-effort-option rounded px-1.5 py-[1px] text-[11px] ${
+              level === visibleEffort
+                ? "cukii-permission-effort-option-on bg-[var(--vscode-button-secondaryBackground,var(--vscode-descriptionForeground))] text-[var(--vscode-button-secondaryForeground,var(--vscode-foreground))]"
+                : "text-[var(--vscode-descriptionForeground)] hover:bg-[var(--vscode-list-hoverBackground)]"
+            }`}
+            onClick={() => onEffortChange(level)}
+          >
+            {PERMISSION_EFFORT_LABELS[level]}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
 export function PermissionModeIcon({ mode }: { mode: CukiiPermissionMode }) {
   return (
@@ -87,12 +154,16 @@ export function setPermissionProbeRetryMsForTests(ms: number): void {
 
 export function PermissionModeControl({
   brokerModel,
+  brokerEffort = "high",
   permissionMode,
   onChange,
+  onEffortChange,
 }: {
   brokerModel: BrokerModel;
+  brokerEffort?: BrokerEffort;
   permissionMode: CukiiPermissionMode;
   onChange: (mode: CukiiPermissionMode) => void;
+  onEffortChange?: (effort: BrokerEffort) => void;
 }) {
   const ideMessenger = useContext(IdeMessengerContext);
   const vendor = brokerVendorForModel(brokerModel);
@@ -252,6 +323,13 @@ export function PermissionModeControl({
             Native permission modes could not be verified on this host. The
             selected mode is preserved; Cukii retries discovery automatically.
           </div>
+          {onEffortChange && (
+            <PermissionEffortRow
+              brokerModel={brokerModel}
+              brokerEffort={brokerEffort}
+              onEffortChange={onEffortChange}
+            />
+          )}
         </PopoverPanel>
       </Popover>
     );
@@ -320,6 +398,13 @@ export function PermissionModeControl({
                 </button>
               );
             })}
+            {onEffortChange && (
+              <PermissionEffortRow
+                brokerModel={brokerModel}
+                brokerEffort={brokerEffort}
+                onEffortChange={onEffortChange}
+              />
+            )}
           </>
         )}
       </PopoverPanel>

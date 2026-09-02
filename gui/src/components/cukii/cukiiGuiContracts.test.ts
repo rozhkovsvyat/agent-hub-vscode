@@ -177,7 +177,10 @@ describe("Cukii GUI contracts", () => {
   it("lays a fixed receipt slot inside the bubble without shifting or overlaying content", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-row {");
-    const metadata = css.indexOf(".cukii-user-metadata {");
+    // Line-start anchor: descendant selectors like
+    // `.cukii-user-bubble--inline-meta .cukii-user-metadata {` must not cut
+    // the contract window short of the reserved bottom lane.
+    const metadata = css.indexOf("\n.cukii-user-metadata {");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(metadata).toBeGreaterThan(start);
     const bubbleContract = css.slice(start, metadata);
@@ -189,7 +192,7 @@ describe("Cukii GUI contracts", () => {
     expect(bubbleContract).toContain("align-items: flex-start;");
     expect(bubbleContract).toContain(".cukii-user-message-bubble");
     expect(bubbleContract).toContain("margin-left: auto;");
-    expect(bubbleContract).toContain("max-width: min(100%, 640px);");
+    expect(bubbleContract).toContain("max-width: min(78%, 640px);");
     expect(bubbleContract).toContain("display: inline-block;");
     expect(bubbleContract).toContain("position: relative;");
     expect(bubbleContract).toContain("padding-bottom: 17px;");
@@ -210,7 +213,7 @@ describe("Cukii GUI contracts", () => {
     const proseStart = css.indexOf(".cukii-user-bubble .scroll-container");
     const proseContract = css.slice(proseStart, proseStart + 550);
     expect(contract).toContain("min-width: 0;");
-    expect(contract).toContain("max-width: min(100%, 640px);");
+    expect(contract).toContain("max-width: min(78%, 640px);");
     expect(contract).toContain("width: fit-content;");
     expect(contract).toContain("max-width: 100%;");
     expect(proseContract).toContain("overflow-wrap: anywhere;");

@@ -18,52 +18,9 @@ import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
 import { listBrokerVendorAccounts } from "./bridgeVendorAuth";
+import { resolveCodexHome } from "./codexModelsCacheHeal";
 
 const execFileAsync = promisify(execFile);
-
-const CODEX_MODELS_CACHE = path.join(
-  os.homedir(),
-  ".codex",
-  "models_cache.json",
-);
-
-/**
- * The native Codex binary hard-fails at launch ("missing field
- * `supports_parallel_tool_calls`") when a cached model entry lacks a field
- * its deserializer requires, even though the upstream fetch no longer writes
- * it. Add the missing field before a codex bridge launch so a fresh fetch can
- * never strand the Sol/Terra routes; the CLI tolerates the extra field.
- */
-export function repairCodexModelsCache(
-  cachePath: string = CODEX_MODELS_CACHE,
-): boolean {
-  try {
-    if (!fs.existsSync(cachePath)) return false;
-    const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
-      models?: Array<Record<string, unknown>>;
-    };
-    const models = Array.isArray(parsed.models) ? parsed.models : [];
-    let changed = false;
-    for (const model of models) {
-      if (
-        model &&
-        typeof model === "object" &&
-        !("supports_parallel_tool_calls" in model)
-      ) {
-        model.supports_parallel_tool_calls = true;
-        changed = true;
-      }
-    }
-    if (changed) {
-      fs.writeFileSync(cachePath, `${JSON.stringify(parsed, null, 2)}\n`);
-    }
-    return changed;
-  } catch {
-    // An unreadable cache falls back to the CLI's own error reporting; a
-    // repair attempt must never block the launch itself.
-    return false;
-  }
-}
 
 const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
   claude: [
@@ -537,10 +494,9 @@ async function liveModels(
   if (!canUseMaintainedCatalog) return [];
   try {
     if (vendor === "codex") {
-      if (fs.existsSync(CODEX_MODELS_CACHE))
-        return codexCatalogFromCache(
-          fs.readFileSync(CODEX_MODELS_CACHE, "utf8"),
-        );
+      const cache = path.join(resolveCodexHome(), "models_cache.json");
+      if (fs.existsSync(cache))
+        return codexCatalogFromCache(fs.readFileSync(cache, "utf8"));
       return [];
     }
     if (vendor === "grok")

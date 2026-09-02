@@ -215,4 +215,89 @@ describe("PermissionModeControl route snapshots", () => {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }
   });
+
+  it("keeps the effort row inside the permissions popover on both panels", async () => {
+    setPermissionProbeRetryMsForTests(60_000);
+    try {
+      const messenger = new MockIdeMessenger();
+      messenger.responseHandlers["cukii/getPermissionCapabilities"] = vi.fn(
+        async ({ vendor }) => ({
+          vendor,
+          supportedModes: ["plan", "bypass"] as CukiiPermissionMode[],
+          generation: 1,
+          helpSource: "live qwen",
+        }),
+      );
+      const onEffortChange = vi.fn();
+      const { user } = await renderWithProviders(
+        <PermissionModeControl
+          brokerModel="qwen3.8-max"
+          brokerEffort="high"
+          permissionMode="bypass"
+          onChange={vi.fn()}
+          onEffortChange={onEffortChange}
+        />,
+        { mockIdeMessenger: messenger },
+      );
+
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Toggle permission mode",
+        }),
+      );
+      expect(
+        await screen.findByTestId("cukii-permission-effort-row"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("cukii-permission-effort-high"),
+      ).toHaveAttribute("aria-pressed", "true");
+
+      await user.click(screen.getByTestId("cukii-permission-effort-low"));
+      expect(onEffortChange).toHaveBeenCalledWith("low");
+    } finally {
+      setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
+    }
+  });
+
+  it("still offers effort while permission discovery is degraded", async () => {
+    setPermissionProbeRetryMsForTests(60_000);
+    try {
+      const messenger = new MockIdeMessenger();
+      messenger.responseHandlers["cukii/getPermissionCapabilities"] = vi.fn(
+        async ({ vendor }) => ({
+          vendor,
+          supportedModes: [] as CukiiPermissionMode[],
+          generation: 1,
+          helpSource: "unavailable-route",
+        }),
+      );
+      const onEffortChange = vi.fn();
+      const { user } = await renderWithProviders(
+        <PermissionModeControl
+          brokerModel="qwen3.8-max"
+          brokerEffort="medium"
+          permissionMode="bypass"
+          onChange={vi.fn()}
+          onEffortChange={onEffortChange}
+        />,
+        { mockIdeMessenger: messenger },
+      );
+
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Toggle permission mode",
+        }),
+      );
+      expect(
+        await screen.findByTestId("cukii-permission-degraded-note"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("cukii-permission-effort-row"),
+      ).toBeInTheDocument();
+      await user.click(screen.getByTestId("cukii-permission-effort-high"));
+      expect(onEffortChange).toHaveBeenCalledWith("high");
+    } finally {
+      setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
+    }
+  });
 });

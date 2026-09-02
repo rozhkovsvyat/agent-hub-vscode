@@ -152,17 +152,26 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
   },
 ];
 
-export const VENDORS: VendorInfo[] = CUKII_VENDOR_REGISTRY.map((registered) => {
-  const vendor = FALLBACK_VENDORS.find(
-    (candidate) => candidate.id === registered.id,
+/** Alphabetical vendor order, matching the Manage accounts screen. */
+function sortVendorsByLabel(vendors: VendorInfo[]): VendorInfo[] {
+  return [...vendors].sort((left, right) =>
+    left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
   );
-  if (!vendor) throw new Error(`Missing Cukii vendor ${registered.id}`);
-  return {
-    ...vendor,
-    label: registered.label,
-    models: presentVendorModels(vendor.models),
-  };
-});
+}
+
+export const VENDORS: VendorInfo[] = sortVendorsByLabel(
+  CUKII_VENDOR_REGISTRY.map((registered) => {
+    const vendor = FALLBACK_VENDORS.find(
+      (candidate) => candidate.id === registered.id,
+    );
+    if (!vendor) throw new Error(`Missing Cukii vendor ${registered.id}`);
+    return {
+      ...vendor,
+      label: registered.label,
+      models: presentVendorModels(vendor.models),
+    };
+  }),
+);
 
 export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
 
@@ -205,17 +214,19 @@ export function applyRuntimeVendorCatalog(
   catalog: BrokerVendorModelCatalog[],
 ): void {
   const byId = new Map(catalog.map((vendor) => [vendor.id, vendor]));
-  const next = CUKII_VENDOR_REGISTRY.map((registered) => {
-    const live = byId.get(registered.id);
-    const fallback = FALLBACK_VENDORS.find(
-      (vendor) => vendor.id === registered.id,
-    );
-    return {
-      id: registered.id,
-      label: registered.label,
-      models: presentVendorModels(live?.models ?? fallback?.models ?? []),
-    };
-  }).filter((vendor) => vendor.models.length > 0);
+  const next = sortVendorsByLabel(
+    CUKII_VENDOR_REGISTRY.map((registered) => {
+      const live = byId.get(registered.id);
+      const fallback = FALLBACK_VENDORS.find(
+        (vendor) => vendor.id === registered.id,
+      );
+      return {
+        id: registered.id,
+        label: registered.label,
+        models: presentVendorModels(live?.models ?? fallback?.models ?? []),
+      };
+    }).filter((vendor) => vendor.models.length > 0),
+  );
   if (next.length === 0) return;
   VENDORS.splice(0, VENDORS.length, ...next);
   ALL_MODELS.splice(0, ALL_MODELS.length, ...VENDORS.flatMap((v) => v.models));
@@ -310,6 +321,17 @@ const FULL_EFFORT_LEVELS: readonly BrokerEffort[] = [
   "max",
   "ultra",
 ];
+
+/** Display copy for every broker effort tier; shared by the "/" menu slider
+ * and the permissions menu's bottom effort row. */
+export const EFFORT_LABELS: Record<BrokerEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra",
+};
 
 /** Levels the selected route can express without silently clamping a dot. */
 export function effortLevelsForModel(

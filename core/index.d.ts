@@ -291,6 +291,8 @@ export interface Session {
   brokerEffort?: import("./protocol/ideWebview").BrokerEffort;
   /** Cukii service speed preserved independently for every session/tab. */
   brokerSpeed?: import("./protocol/ideWebview").BrokerSpeed;
+  /** Model picker scope ("best" curated list or full catalog) per session. */
+  brokerModelScope?: import("./protocol/ideWebview").BrokerModelScope;
   /** Native reasoning enablement preserved independently for every session/tab. */
   hasReasoningEnabled?: boolean;
   /** Cukii permission mode preserved independently for every session/tab. */

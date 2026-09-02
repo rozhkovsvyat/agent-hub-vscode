@@ -46,9 +46,13 @@ import {
 import {
   claudeProgram,
   ensureCursorCatalogVariants,
-  repairCodexModelsCache,
   resolveCursorCatalogModel,
 } from "./bridgeModelCatalog";
+import {
+  ensureCodexModelsCacheCompatible,
+  isCodexModelsCacheFailure,
+  resolveCodexHome,
+} from "./codexModelsCacheHeal";
 import {
   ClaudePermissionBroker,
   type ClaudePermissionRequest,
@@ -858,7 +862,7 @@ export function routeForModel(
   if (claudeModel) {
     return {
       label: displayBridgeModel(model),
-      program: "claude",
+      program: claudeProgram(),
       args: [
         "--model",
         claudeModel,
@@ -972,7 +976,7 @@ export function routeForModel(
     case "opus-5":
       return {
         label: displayBridgeModel(model),
-        program: "claude",
+        program: claudeProgram(),
         args: [
           "--model",
           "claude-opus-5",
@@ -989,7 +993,7 @@ export function routeForModel(
     case "fable-5":
       return {
         label: displayBridgeModel(model),
-        program: "claude",
+        program: claudeProgram(),
         args: [
           "--model",
           "claude-fable-5",
@@ -1006,7 +1010,7 @@ export function routeForModel(
     case "fable-5-1":
       return {
         label: displayBridgeModel(model),
-        program: "claude",
+        program: claudeProgram(),
         args: [
           "--model",
           "claude-fable-5-1",
@@ -1023,7 +1027,7 @@ export function routeForModel(
     case "sonnet-5":
       return {
         label: displayBridgeModel(model),
-        program: "claude",
+        program: claudeProgram(),
         args: [
           "--model",
           "claude-sonnet-5",
@@ -1343,16 +1347,6 @@ async function* streamBridgeChatWithSteer(
   // The model picker fills this cache in the normal path. A restored saved
   // session may send before that picker opens, so rebuild it on demand.
   await ensureCursorCatalogVariants(args.brokerModel);
-  // The native codex binary aborts at launch when a cached model entry lacks
-  // a field its deserializer requires (`supports_parallel_tool_calls`), even
-  // though upstream no longer writes it. Repair before any codex route starts.
-  if (
-    brokerVendorForModel(args.brokerModel) === "codex" ||
-    (args.brokerSubagent !== "auto" &&
-      brokerVendorForModel(args.brokerSubagent) === "codex")
-  ) {
-    repairCodexModelsCache();
-  }
   const permissionVendors = new Set([
     brokerVendorForModel(args.brokerModel),
     ...(args.brokerSubagent === "auto"
@@ -1444,11 +1438,6 @@ async function* streamBridgeChatWithSteer(
         ? "Auto routing may choose the strongest available native worker.\n"
         : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),
   };
-  if (brokerAgentId(args.brokerModel) === "codex") {
-    // A fresh upstream cache fetch can drop fields the binary's deserializer
-    // requires; heal it right before launch so Sol/Terra never exit code 1.
-    repairCodexModelsCache();
-  }
   let command: ResolvedCommand;
   try {
     command = ensureProgramAvailable(route);
@@ -1465,11 +1454,94 @@ async function* streamBridgeChatWithSteer(
     content: `Launching native command: ${describeBridgeLaunch(command.program, command.args)}\n`,
   };
 
+  // A codex startup crash caused by its models cache is repaired and the
+  // launch retried exactly once; every other failure surfaces untouched.
+  const launchOptions = {
+    command,
+    route,
+    cwd,
+    prompt,
+    messages: args.messages,
+    brokerModel: args.brokerModel,
+    brokerSubagent: args.brokerSubagent,
+    queuedFollowUpMessageId: args.queuedFollowUpMessageId,
+    permissionTransport,
+    canary,
+    permissionBroker,
+  };
+  let codexCacheRetried = false;
+  for (;;) {
+    try {
+      return yield* launchBridgeChild(launchOptions);
+    } catch (err) {
+      const failureMessage = err instanceof Error ? err.message : String(err);
+      if (
+        route.program !== "codex" ||
+        !isCodexModelsCacheFailure(failureMessage)
+      ) {
+        throw err;
+      }
+      if (codexCacheRetried) {
+        throw new Error(
+          `${route.label} bridge still cannot start after a cache repair: the Codex CLI keeps rejecting ${path.join(resolveCodexHome(), "models_cache.json")}. Another installed Codex/ChatGPT extension shares that file and rewrites it without \`supports_parallel_tool_calls\`. Update that extension or delete the cache file, then retry. (${failureMessage})`,
+        );
+      }
+      codexCacheRetried = true;
+      yield {
+        role: "thinking",
+        content:
+          "Codex rejected its models cache at launch; Cukii healed the file and retries the bridge once.\n",
+      };
+    }
+  }
+}
+
+/**
+ * One full bridge child lifecycle: spawn, stream, and teardown. Heals the
+ * shared codex models cache immediately before the spawn so a stale writer
+ * (another installed Codex/ChatGPT extension) cannot strand the launch.
+ */
+async function* launchBridgeChild(options: {
+  command: ResolvedCommand;
+  route: BridgeRoute;
+  cwd: string;
+  prompt: string;
+  messages: ChatMessage[];
+  brokerModel: BrokerModel;
+  brokerSubagent: BrokerSubagent;
+  queuedFollowUpMessageId?: string;
+  permissionTransport?: ClaudePermissionTransport;
+  canary?: RuntimeCanaryAttestation;
+  permissionBroker?: ClaudePermissionBroker;
+}): AsyncGenerator<ChatMessage, PromptLog> {
+  const {
+    command,
+    route,
+    cwd,
+    prompt,
+    messages,
+    brokerModel,
+    brokerSubagent,
+    queuedFollowUpMessageId,
+    permissionTransport,
+    canary,
+    permissionBroker,
+  } = options;
+  if (
+    brokerVendorForModel(brokerModel) === "codex" ||
+    (brokerSubagent !== "auto" &&
+      brokerVendorForModel(brokerSubagent) === "codex")
+  ) {
+    // Another installed Codex/ChatGPT extension shares CODEX_HOME and keeps
+    // rewriting the models cache without `supports_parallel_tool_calls`; heal
+    // right before the spawn so Sol/Terra never exit with code 1 at startup.
+    ensureCodexModelsCacheCompatible();
+  }
   const child = childProcess.spawn(command.program, command.args, {
     cwd,
     env: {
-      ...bridgeEnv(args.brokerModel, args.brokerSubagent),
-      ...(await alibabaSpawnEnv(args.brokerModel)),
+      ...bridgeEnv(brokerModel, brokerSubagent),
+      ...(await alibabaSpawnEnv(brokerModel)),
     },
     shell: false,
     windowsHide: true,
@@ -1487,8 +1559,8 @@ async function* streamBridgeChatWithSteer(
     for (const event of events) {
       if (event.kind === "userEcho") {
         const queuedMessageId = queuedFollowUpEchoMessageId(
-          args.messages,
-          args.queuedFollowUpMessageId,
+          messages,
+          queuedFollowUpMessageId,
           event.text,
           false,
         );
@@ -1545,7 +1617,7 @@ async function* streamBridgeChatWithSteer(
   if (!route.noStdin && !cancelled) {
     child.stdin.write(
       route.stdinFormat === "claude-stream-json"
-        ? claudeStreamingInput(claudeInitialContent(prompt, args.messages))
+        ? claudeStreamingInput(claudeInitialContent(prompt, messages))
         : prompt,
     );
     if (!route.stdinFormat) child.stdin.end();
@@ -1585,7 +1657,7 @@ async function* streamBridgeChatWithSteer(
   // event instead of immediately: a launch failure must leave the bubble
   // deferred so the durable outbox drain replays it, never consume it with a
   // read receipt for a process that never ran.
-  const ackFollowUpMessageId = args.queuedFollowUpMessageId;
+  const ackFollowUpMessageId = queuedFollowUpMessageId;
   if (ackFollowUpMessageId && !cancelled) {
     child.once("spawn", () => {
       if (queuedFollowUpRead || cancelled) return;
@@ -1640,13 +1712,24 @@ async function* streamBridgeChatWithSteer(
     enqueueVisibleEvents(parser.flush());
     if (!cancelled && code && code !== 0) {
       const detail = stderr.trim() || stdoutTail.trim();
-      error = new Error(
-        `${route.label} bridge exited with code ${code}.` +
-          (detail
-            ? ` ${detail}`
-            : " Native CLI stopped before returning a normal response.") +
-          (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
+      // Name the real cause instead of letting a raw Rust panic read like a
+      // quota/limit failure: an incompatible models cache is a startup crash,
+      // and Cukii repairs known missing fields before the next launch.
+      const cacheField = detail.match(
+        /failed to load models cache: missing field `([^`]+)`/,
       );
+      error = cacheField
+        ? new Error(
+            `${route.label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
+              (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
+          )
+        : new Error(
+            `${route.label} bridge exited with code ${code}.` +
+              (detail
+                ? ` ${detail}`
+                : " Native CLI stopped before returning a normal response.") +
+              (route.logFile ? ` Bridge log: ${route.logFile}` : ""),
+          );
     }
     if (!cancelled) {
       canary?.record("vendor_completed", {

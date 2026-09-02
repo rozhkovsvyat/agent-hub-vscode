@@ -345,6 +345,7 @@ export const saveCurrentSession = createAsyncThunk<
       brokerSubagent: session.brokerSubagent,
       brokerEffort: session.brokerEffort,
       brokerSpeed: session.brokerSpeed,
+      brokerModelScope: session.brokerModelScope,
       hasReasoningEnabled: session.hasReasoningEnabled,
       brokerPermissionMode: session.brokerPermissionMode,
       titleManuallySet: titleManuallySet || undefined,

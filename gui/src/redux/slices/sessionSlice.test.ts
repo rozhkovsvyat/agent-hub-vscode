@@ -92,6 +92,7 @@ describe("sessionSlice streamUpdate", () => {
     mode: "chat" as const,
     brokerEffort: "high" as const,
     brokerSpeed: "standard" as const,
+    brokerModelScope: "best" as const,
     brokerPermissionMode: "manual" as const,
     hasReasoningEnabled: true,
     isInEdit: false,
@@ -117,12 +118,14 @@ describe("sessionSlice streamUpdate", () => {
         brokerSubagent: "auto",
         brokerEffort: "medium",
         brokerSpeed: "fast",
+        brokerModelScope: "all",
         brokerPermissionMode: "auto",
         hasReasoningEnabled: false,
       }),
     );
     expect(restored.brokerEffort).toBe("medium");
     expect(restored.brokerSpeed).toBe("fast");
+    expect(restored.brokerModelScope).toBe("all");
     expect(restored.brokerPermissionMode).toBe("auto");
     expect(restored.hasReasoningEnabled).toBe(false);
     expect(restored.titleManuallySet).toBe(false);
@@ -130,6 +133,7 @@ describe("sessionSlice streamUpdate", () => {
     const blank = sessionSlice.reducer(restored, newSession(undefined));
     expect(blank.brokerEffort).toBe("high");
     expect(blank.brokerSpeed).toBe("standard");
+    expect(blank.brokerModelScope).toBe("best");
     expect(blank.brokerPermissionMode).toBe("bypass");
     expect(blank.hasReasoningEnabled).toBe(true);
   });

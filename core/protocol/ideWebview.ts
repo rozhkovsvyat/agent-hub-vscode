@@ -27,6 +27,9 @@ export type BrokerEffort =
 
 export type BrokerSpeed = "standard" | "fast";
 
+/** Picker scope: curated live routes only ("best") or the full catalog. */
+export type BrokerModelScope = "best" | "all";
+
 export type CukiiPermissionMode =
   "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
 

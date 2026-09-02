@@ -82,11 +82,11 @@ describe("Cukii model context labels", () => {
     expect(VENDORS.map((vendor) => vendor.label)).toEqual([
       "Alibaba",
       "Anthropic",
+      "Cursor",
+      "DeepSeek",
+      "MoonshotAI",
       "OpenAI",
       "xAI",
-      "Cursor",
-      "MoonshotAI",
-      "DeepSeek",
     ]);
     expect(VENDORS[0]?.id).toBe("qwen");
     expect(ALL_MODELS[0]?.value).toBe("qwen-3-8-max");

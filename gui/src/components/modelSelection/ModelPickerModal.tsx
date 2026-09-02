@@ -1,15 +1,16 @@
 import { CheckIcon } from "@heroicons/react/24/outline";
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import {
   switchBrokerModel,
   setBrokerPermissionMode,
+  setBrokerModelScope,
   setBrokerSubagent,
   type BrokerModel,
   type BrokerSubagent,
 } from "../../redux/slices/sessionSlice";
-import { applyRuntimeVendorCatalog, VENDORS } from "./vendors";
+import { applyRuntimeVendorCatalog, isBestModel, VENDORS } from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
 import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
 
@@ -28,7 +29,25 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   const thinkingEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
-  const [, setCatalogVersion] = useState(0);
+  const [catalogVersion, setCatalogVersion] = useState(0);
+  const scope = useAppSelector(
+    (state) => state.session.brokerModelScope ?? "best",
+  );
+
+  /** Vendors are alphabetical (account-management order) and the Best scope
+   * keeps only curated live routes; vendors left empty disappear entirely. */
+  const visibleVendors = useMemo(() => {
+    const ordered = [...VENDORS].sort((left, right) =>
+      left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
+    );
+    if (scope === "all") return ordered;
+    return ordered
+      .map((vendor) => ({
+        ...vendor,
+        models: vendor.models.filter((model) => isBestModel(model.value)),
+      }))
+      .filter((vendor) => vendor.models.length > 0);
+  }, [scope, catalogVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,11 +109,35 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
         className="cukii-model-picker cukii-menu-surface absolute bottom-[86px] left-[18px] right-[18px] max-h-[min(64vh,570px)] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 bg-[var(--vscode-menu-background)] px-3 pb-2 pt-3 text-xs text-[var(--vscode-descriptionForeground)]">
-          Select a model
+        <div className="sticky top-0 z-10 flex items-center justify-between bg-[var(--vscode-menu-background)] px-3 pb-2 pt-3">
+          <span className="text-xs text-[var(--vscode-descriptionForeground)]">
+            Select a model
+          </span>
+          <span
+            className="cukii-scope-toggle flex items-center rounded-full border border-[var(--vscode-widget-border)] p-[2px]"
+            role="group"
+            aria-label="Model list scope"
+          >
+            {(["best", "all"] as const).map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                data-testid={`cukii-scope-toggle-${candidate}`}
+                aria-pressed={scope === candidate}
+                className={`cukii-scope-toggle-option rounded-full px-2 py-[1px] text-[11px] ${
+                  scope === candidate
+                    ? "cukii-scope-toggle-option-on bg-[var(--vscode-button-secondaryBackground,var(--vscode-descriptionForeground))] text-[var(--vscode-button-secondaryForeground,var(--vscode-foreground))]"
+                    : "text-[var(--vscode-descriptionForeground)] hover:bg-[var(--vscode-list-hoverBackground)]"
+                }`}
+                onClick={() => dispatch(setBrokerModelScope(candidate))}
+              >
+                {candidate === "best" ? "Best" : "All"}
+              </button>
+            ))}
+          </span>
         </div>
 
-        {VENDORS.map((vendor) => (
+        {visibleVendors.map((vendor) => (
           <section key={vendor.id}>
             <div className="cursor-default select-none px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
               {vendor.label}
