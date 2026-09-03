@@ -814,12 +814,15 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
    button face: every control owns its background explicitly. */
 .cukii-model-pill,
 .cukii-permission-button,
-.cukii-scope-toggle button {
+.cukii-scope-toggle button:not(.cukii-scope-switch) {
   background: transparent;
 }
 
+/* 1:1 with the live Claude "Switch model" pill: no border, a 10% foreground
+   tint fill, 9999px radius, 4px 16px padding, 13px text (measured 26.2px). */
 .cukii-model-pill {
-  border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+  border: 0;
+  background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 }
 
 .cukii-model-pill:hover {
@@ -1418,7 +1421,12 @@ button.cukii-submit-button--stop:active {
   display: block;
 }
 
+/* The ContinueInputBox root must not form a block box inside the capsule:
+   it would give the prose its own block and strand the receipt span (its
+   sibling) on a line below. Collapsing it into the contents chain lets the
+   receipt ride the last text line exactly as in MAX. */
 .cukii-user-message-bubble > .cukii-user-bubble {
+  display: contents !important;
   min-width: 0;
   max-width: 100%;
 }

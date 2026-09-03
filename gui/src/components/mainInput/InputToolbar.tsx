@@ -625,7 +625,7 @@ function InputToolbar(props: InputToolbarProps) {
             <button
               type="button"
               data-testid="cukii-model-pill"
-              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full border border-[var(--vscode-widget-border)] bg-transparent px-4 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full px-4 text-[13px] text-[var(--vscode-foreground)]"
               title={`Model: ${currentLabel}. Click to switch`}
               aria-label={`Selected model: ${currentLabel}`}
               onClick={() => setModelPickerOpen(true)}
