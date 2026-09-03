@@ -1404,7 +1404,7 @@ button.cukii-submit-button--stop:active {
    between the bubble and the prose is display:contents, so the receipt span
    (a direct bubble child) shares one inline formatting context with the
    paragraphs and rises to line level whenever it fits. */
-.cukii-user-bubble > div.relative,
+.cukii-user-bubble div.relative,
 .cukii-user-bubble .cukii-input-box,
 .cukii-user-bubble .cukii-editor-stack,
 .cukii-user-bubble .scroll-container,
