@@ -562,25 +562,19 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
-                    {showAction("Fast mode") && (
+                    {/* A route without a native accelerated tier shows no row
+                        at all instead of a permanently disabled one. */}
+                    {nativeFastAvailable && showAction("Fast mode") && (
                       <button
                         data-testid="cukii-speed-toggle"
                         {...commandActionProps("Fast mode")}
                         type="button"
                         role="switch"
-                        aria-checked={
-                          nativeFastAvailable && brokerSpeed === "fast"
-                        }
-                        disabled={!nativeFastAvailable}
-                        title={
-                          nativeFastAvailable
-                            ? "Use the vendor's native accelerated service tier"
-                            : "This model has no native accelerated service tier"
-                        }
+                        aria-checked={brokerSpeed === "fast"}
+                        title="Use the vendor's native accelerated service tier"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          if (!nativeFastAvailable) return;
                           updateBrokerPreferences(
                             currentModel,
                             brokerSubagent ?? "auto",
@@ -590,18 +584,12 @@ function InputToolbar(props: InputToolbarProps) {
                         }}
                       >
                         <span>Fast mode</span>
-                        {nativeFastAvailable ? (
-                          <span
-                            data-testid="cukii-speed-track"
-                            className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
-                          >
-                            <span className="cukii-toggle-thumb" />
-                          </span>
-                        ) : (
-                          <span className="text-[var(--vscode-descriptionForeground)]">
-                            Unavailable
-                          </span>
-                        )}
+                        <span
+                          data-testid="cukii-speed-track"
+                          className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                        >
+                          <span className="cukii-toggle-thumb" />
+                        </span>
                       </button>
                     )}
                     {showAction("Manage accounts") && (

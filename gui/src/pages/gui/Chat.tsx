@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -147,6 +148,10 @@ export function Chat() {
   const bridgeWait = useAppSelector((state) => state.session.bridgeWait);
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
+  const mainInputShellRef = useRef<HTMLDivElement>(null);
+  /** Distance-from-bottom snapshot taken before "Load earlier messages"
+   * prepends older rows, so the viewport can be re-pinned afterwards. */
+  const loadEarlierAnchorRef = useRef<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const history = useAppSelector((state) => state.session.history);
   const sessionId = useAppSelector((state) => state.session.id);
@@ -174,6 +179,53 @@ export function Chat() {
   );
 
   useAutoScroll(stepsDivRef, history, isStreaming, sessionId);
+
+  // Loading earlier messages prepends rows at the top of the transcript.
+  // Re-pin the viewport by its distance from the bottom so the reading
+  // position does not jump, matching Claude's load-earlier behavior.
+  useLayoutEffect(() => {
+    const element = stepsDivRef.current;
+    const anchor = loadEarlierAnchorRef.current;
+    if (!element || anchor === null) return;
+    loadEarlierAnchorRef.current = null;
+    element.scrollTop = element.scrollHeight - anchor;
+  }, [transcriptStart]);
+
+  // Claude parity: wheeling over the composer's own chrome — the padding
+  // left/right of the editor, the toolbar backing zone below it — scrolls
+  // the transcript. A nested scrollable (long editor, code block, popover)
+  // keeps the wheel for itself, and Ctrl+wheel stays with the platform.
+  useEffect(() => {
+    const shell = mainInputShellRef.current;
+    const transcript = stepsDivRef.current;
+    if (!shell || !transcript) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      let node: Element | null =
+        event.target instanceof Element ? event.target : null;
+      while (node && node !== shell) {
+        const overflowY = getComputedStyle(node).overflowY;
+        if (
+          (overflowY === "auto" || overflowY === "scroll") &&
+          node.scrollHeight > node.clientHeight + 1
+        ) {
+          return;
+        }
+        node = node.parentElement;
+      }
+      const maxScroll = transcript.scrollHeight - transcript.clientHeight;
+      if (maxScroll <= 0) return;
+      const next = Math.max(
+        0,
+        Math.min(transcript.scrollTop + event.deltaY, maxScroll),
+      );
+      if (next === transcript.scrollTop) return;
+      event.preventDefault();
+      transcript.scrollTop = next;
+    };
+    shell.addEventListener("wheel", onWheel, { passive: false });
+    return () => shell.removeEventListener("wheel", onWheel);
+  }, [isSessionLoading]);
 
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
@@ -670,13 +722,18 @@ export function Chat() {
               <button
                 type="button"
                 className="cukii-load-earlier mx-auto my-3"
-                onClick={() =>
+                onClick={() => {
+                  const element = stepsDivRef.current;
+                  if (element) {
+                    loadEarlierAnchorRef.current =
+                      element.scrollHeight - element.scrollTop;
+                  }
                   setTranscriptWindow({
                     sessionId,
                     visibleCount:
                       visibleTranscriptCount + INITIAL_TRANSCRIPT_WINDOW,
-                  })
-                }
+                  });
+                }}
               >
                 Load earlier messages
               </button>
@@ -700,7 +757,10 @@ export function Chat() {
           ) : null)}
       </StepsDiv>
       {!isSessionLoading && (
-        <div className={"cukii-main-input-shell relative shrink-0"}>
+        <div
+          ref={mainInputShellRef}
+          className={"cukii-main-input-shell relative shrink-0"}
+        >
           <ContinueInputBox
             isMainInput
             isLastUserInput={false}
