@@ -1,6 +1,9 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { stripImages } from "core/util/messageContent";
-import type { ChatHistoryItemWithMessageId } from "../slices/sessionSlice";
+import {
+  setSteerStatus,
+  type ChatHistoryItemWithMessageId,
+} from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 import { saveCurrentSession } from "./session";
 import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
@@ -44,7 +47,7 @@ export const continueIfTrailingSteer = createAsyncThunk<
   void,
   void,
   ThunkApiType
->("chat/continueIfTrailingSteer", async (_, { dispatch, getState }) => {
+>("chat/continueIfTrailingSteer", async (_, { dispatch, getState, extra }) => {
   const sessionId = getState().session.id;
   if (drainingSessions.has(sessionId)) return;
   drainingSessions.add(sessionId);
@@ -56,6 +59,34 @@ export const continueIfTrailingSteer = createAsyncThunk<
       const followUp = nextQueuedSteerMessage(session);
       const messageId = followUp?.message.id;
       if (!messageId) return;
+
+      // The vendor may already have claimed this bubble mid-run through
+      // broker_inbox; launching it again would hand the agent a duplicate of
+      // an instruction it is acting on. A missing/erroring receipt (old host
+      // build) conservatively falls through to the normal delivery.
+      try {
+        const inboxReceipt = await extra.ideMessenger.request(
+          "cukii/steerInboxReceipt",
+          { sessionId, messageId },
+        );
+        if (
+          inboxReceipt.status === "success" &&
+          inboxReceipt.content.status === "read"
+        ) {
+          dispatch(setSteerStatus({ messageId, status: "read" }));
+          unwrapResult(
+            await dispatch(
+              saveCurrentSession({
+                openNewSession: false,
+                generateTitle: false,
+              }),
+            ),
+          );
+          continue;
+        }
+      } catch {
+        // Receipt unavailable: keep the durable delivery path.
+      }
 
       // Persist the still-pending outbox before launch. Do not claim delivery:
       // a crash between save and vendor activity must remain replayable.

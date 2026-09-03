@@ -436,6 +436,7 @@ function buildPrompt(
           "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
         ]
       : []),
+    ...brokerInboxDirective(brokerModel),
     ...(steerInterrupt
       ? [
           "The latest user message was injected while you were mid-task; the previous turn was interrupted so you would see it promptly. Address this newest message first, then resume the task you were working on, taking it into account. Do not discard your prior work unless the new message changes the task.",
@@ -455,6 +456,26 @@ export function isClaudeNativeModel(model: BrokerModel): boolean {
   return ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(
     model,
   );
+}
+
+/**
+ * Live pull-steering through the broker inbox needs the cukii-broker MCP
+ * server loaded by the vendor CLI. R1: qwen carries it in its user config;
+ * codex/grok/cursor get spawn-time injection in R2, kimi has no MCP surface.
+ */
+export function supportsBrokerInbox(model: BrokerModel): boolean {
+  return brokerVendorForModel(model) === "qwen";
+}
+
+/** Broker-prompt lines for inbox pull-steering; empty where unsupported. */
+export function brokerInboxDirective(model: BrokerModel): string[] {
+  if (isClaudeNativeModel(model) || !supportsBrokerInbox(model)) return [];
+  return [
+    "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
+      " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call mcp__cukii-broker__broker_inbox." +
+      " If it returns messages, treat them as immediate user instructions: address them first, then resume your task taking them into account." +
+      " Empty results are normal; never call it more than once per step boundary.",
+  ];
 }
 
 /** Имя worker-а в enum broker_delegate, а не витринная подпись модели. */
@@ -1462,6 +1483,7 @@ async function* streamBridgeChatWithSteer(
     cwd,
     prompt,
     messages: args.messages,
+    sessionId: args.sessionId,
     brokerModel: args.brokerModel,
     brokerSubagent: args.brokerSubagent,
     queuedFollowUpMessageId: args.queuedFollowUpMessageId,
@@ -1507,6 +1529,7 @@ async function* launchBridgeChild(options: {
   cwd: string;
   prompt: string;
   messages: ChatMessage[];
+  sessionId?: string;
   brokerModel: BrokerModel;
   brokerSubagent: BrokerSubagent;
   queuedFollowUpMessageId?: string;
@@ -1520,6 +1543,7 @@ async function* launchBridgeChild(options: {
     cwd,
     prompt,
     messages,
+    sessionId,
     brokerModel,
     brokerSubagent,
     queuedFollowUpMessageId,
@@ -1542,6 +1566,9 @@ async function* launchBridgeChild(options: {
     env: {
       ...bridgeEnv(brokerModel, brokerSubagent),
       ...(await alibabaSpawnEnv(brokerModel)),
+      // Vendor MCP servers inherit this env: broker_inbox resolves which
+      // session's inbox it serves from it. Absent for probe spawns.
+      ...(sessionId ? { CUKII_SESSION_ID: sessionId } : {}),
     },
     shell: false,
     windowsHide: true,

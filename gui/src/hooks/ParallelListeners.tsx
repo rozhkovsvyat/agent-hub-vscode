@@ -18,6 +18,7 @@ import {
   setIsSessionLoading,
   setIsSessionMetadataLoading,
   setMode,
+  setSteerStatus,
   setTitleManuallySet,
   updateSessionTitle,
 } from "../redux/slices/sessionSlice";
@@ -98,6 +99,20 @@ function ParallelListeners() {
       if (titleManuallySet) {
         dispatch(setTitleManuallySet(true));
       }
+    },
+    [dispatch, sessionId],
+  );
+
+  // The vendor agent claimed a queued steer bubble through broker_inbox while
+  // the run was still live: paint the messenger-style read receipt right away
+  // instead of holding the bubble at one checkmark until the turn settles.
+  useWebviewListener(
+    "cukii/steerInboxRead",
+    async ({ sessionId: readSessionId, messageId }) => {
+      if (readSessionId !== sessionId) {
+        return;
+      }
+      dispatch(setSteerStatus({ messageId, status: "read" }));
     },
     [dispatch, sessionId],
   );

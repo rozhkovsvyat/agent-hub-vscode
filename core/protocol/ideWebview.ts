@@ -74,6 +74,13 @@ export type CukiiSteerReceipt = {
   status: "delivered" | "deferred";
 };
 
+/** Read receipt of one broker-inbox entry; see bridgeInbox.ts on the host. */
+export type CukiiInboxReceipt = {
+  messageId: string;
+  sessionId: string;
+  status: "read" | "pending" | "absent";
+};
+
 export type CukiiCancelReceipt = {
   requestId: string;
   sessionId: string;
@@ -236,6 +243,11 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     },
     CukiiSteerReceipt,
   ];
+  /** Drain dedup: was the queued bubble already claimed through broker_inbox? */
+  "cukii/steerInboxReceipt": [
+    { sessionId: string; messageId: string },
+    CukiiInboxReceipt,
+  ];
   "cukii/cancelBridgeRun": [
     { requestId: string; sessionId: string },
     CukiiCancelReceipt,
@@ -321,6 +333,8 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
     },
     void,
   ];
+  /** The vendor agent claimed the queued steer bubble through broker_inbox. */
+  "cukii/steerInboxRead": [{ sessionId: string; messageId: string }, void];
   setTheme: [{ theme: any }, void];
   setColors: [{ [key: string]: string }, void];
   "jetbrains/editorInsetRefresh": [undefined, void];

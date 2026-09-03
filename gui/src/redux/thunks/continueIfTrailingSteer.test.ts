@@ -109,6 +109,97 @@ describe("hasTrailingSteerMessage", () => {
     expect(store.getState().session.history[1].steerStatus).toBe("cancelled");
   });
 
+  it("skips redelivery of a bubble the vendor already claimed through broker_inbox", async () => {
+    const messenger = new MockIdeMessenger();
+    const dispatched: string[] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof messenger.streamRequest;
+    const claimed = item("user", "claimed mid-run", true);
+    claimed.steerStatus = "queued";
+    const fresh = item("user", "still queued", true);
+    fresh.steerStatus = "queued";
+    messenger.responseHandlers["cukii/steerInboxReceipt"] = vi.fn(
+      async (data) => ({
+        sessionId: data.sessionId,
+        messageId: data.messageId,
+        status: (data.messageId === claimed.message.id
+          ? "read"
+          : "pending") as "read" | "pending",
+      }),
+    );
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "inbox-dedup",
+        title: "Inbox dedup",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [claimed, fresh],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(dispatched).toEqual([fresh.message.id]);
+    expect(
+      store
+        .getState()
+        .session.history.filter((entry) => entry.isSteer)
+        .map((entry) => entry.steerStatus),
+    ).toEqual(["read", "read"]);
+  });
+
+  it("delivers normally when the inbox receipt says pending", async () => {
+    const messenger = new MockIdeMessenger();
+    const dispatched: string[] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(data.queuedFollowUpMessageId);
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof messenger.streamRequest;
+    const pending = item("user", "not claimed yet", true);
+    pending.steerStatus = "queued";
+    messenger.responseHandlers["cukii/steerInboxReceipt"] = vi.fn(
+      async (data) => ({
+        sessionId: data.sessionId,
+        messageId: data.messageId,
+        status: "pending" as const,
+      }),
+    );
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "inbox-pending",
+        title: "Inbox pending",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [pending],
+        mode: "broker",
+        brokerModel: "qwen-3-8-max",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(dispatched).toEqual([pending.message.id]);
+    expect(store.getState().session.history[0].steerStatus).toBe("read");
+  });
+
   it("drains two messages FIFO once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[] = [];

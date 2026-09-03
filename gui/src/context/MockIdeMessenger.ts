@@ -134,6 +134,11 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     sessionId: "mock-session",
     status: "delivered",
   },
+  "cukii/steerInboxReceipt": {
+    messageId: "mock-steer",
+    sessionId: "mock-session",
+    status: "pending",
+  },
   "cukii/cancelBridgeRun": {
     requestId: "mock-cancel",
     sessionId: "mock-session",

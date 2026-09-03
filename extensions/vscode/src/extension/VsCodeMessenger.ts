@@ -18,6 +18,7 @@ import type {
   BrokerVendorId,
   CukiiBridgeRunCompletion,
   CukiiCancelReceipt,
+  CukiiInboxReceipt,
   CukiiPermissionMode,
   CukiiSteerReceipt,
 } from "core/protocol/ideWebview";
@@ -50,8 +51,15 @@ import { VsCodeExtension } from "./VsCodeExtension";
 import {
   isClaudeNativeModel,
   streamBridgeChat,
+  supportsBrokerInbox,
   type ClaudePermissionTransport,
 } from "./bridgeChatAdapter";
+import {
+  BridgeInboxWatch,
+  bridgeInboxMessageStatus,
+  purgeUnreadBridgeInboxMessages,
+  writeBridgeInboxMessage,
+} from "./bridgeInbox";
 import type { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { listBrokerModelCatalog } from "./bridgeModelCatalog";
 import {
@@ -942,6 +950,20 @@ export class VsCodeMessenger {
         msg.data.sessionId,
         isClaudeNativeModel(msg.data.brokerModel),
       );
+      // Vendors without a live stdin channel can still pull follow-ups from
+      // the broker inbox mid-run; the watch surfaces the vendor's claim as a
+      // read receipt instead of leaving the bubble "queued" until turn end.
+      const inboxWatch =
+        !isClaudeNativeModel(msg.data.brokerModel) &&
+        supportsBrokerInbox(msg.data.brokerModel)
+          ? new BridgeInboxWatch(msg.data.sessionId, (messageId) => {
+              protocol.send("cukii/steerInboxRead", {
+                sessionId: msg.data.sessionId,
+                messageId,
+              });
+            })
+          : undefined;
+      inboxWatch?.start();
       const cancellation = new BridgeRunCancellation(
         () => controller.abort(),
         done.then(() => undefined),
@@ -1023,6 +1045,7 @@ export class VsCodeMessenger {
       })();
       void done.finally(() => {
         steering.close();
+        inboxWatch?.close();
       });
       return wrapped;
     });
@@ -1038,7 +1061,30 @@ export class VsCodeMessenger {
             status: "deferred",
           };
         }
+        if (!run.steering.supportsLiveSteering) {
+          // Fast path for stdin-less vendors: the agent can claim this mid-run
+          // through broker_inbox. The durable GUI outbox stays the fallback and
+          // dedups itself against the inbox read mark at the turn boundary.
+          writeBridgeInboxMessage(
+            run.sessionId,
+            msg.data.messageId,
+            stripImages(msg.data.content),
+          );
+        }
         return run.steering.deliver(msg.data);
+      },
+    );
+    this.onWebview(
+      "cukii/steerInboxReceipt",
+      async (msg): Promise<CukiiInboxReceipt> => {
+        return {
+          sessionId: msg.data.sessionId,
+          messageId: msg.data.messageId,
+          status: bridgeInboxMessageStatus(
+            msg.data.sessionId,
+            msg.data.messageId,
+          ),
+        };
       },
     );
     this.onWebview(
@@ -1054,6 +1100,10 @@ export class VsCodeMessenger {
             interrupted: "turn",
           };
         }
+        // Explicit Stop cancels the queued bubbles on the GUI side; unread
+        // inbox entries must die with them or the next run would resurrect
+        // stale instructions the user already withdrew.
+        purgeUnreadBridgeInboxMessages(msg.data.sessionId);
         return this.cancelBridgeRun(protocol, run, msg.data.requestId);
       },
     );
