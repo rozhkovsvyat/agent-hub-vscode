@@ -216,7 +216,7 @@ describe("steerDuringStream", () => {
     );
   });
 
-  it("interrupts an in-flight run to redeliver when the vendor defers steering", async () => {
+  it("keeps the run alive and queues the follow-up when the vendor cannot steer live", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/steerDuringStream"] = vi.fn(
       async () => ({
@@ -231,18 +231,18 @@ describe("steerDuringStream", () => {
 
     await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
 
-    // The vendor cannot accept the steer live, so the run is interrupted to
-    // redeliver it promptly instead of waiting for the turn to end on its own.
+    // Non-live vendors are fed through the durable outbox at the turn
+    // boundary. The running turn must never be interrupted for this, so no
+    // cancellation request may go out; only an explicit user Stop kills runs.
     expect(
       request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
-    ).toBe(true);
-    // The durable follow-up must survive the interrupt; only an explicit user
-    // Stop may cancel it. Leaving it deferred keeps it eligible for redelivery.
+    ).toBe(false);
     const steer = sessionOf(store).history.find((item) => item.isSteer);
-    expect(steer?.steerStatus).not.toBe("cancelled");
+    expect(steer?.steerStatus).toBe("queued");
+    expect(steer?.messageReceipt?.status).toBe("queued");
   });
 
-  it("redelivers through a fresh turn when the live run disappears during steering", async () => {
+  it("keeps a follow-up whose transport died and drains it once the turn settles", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     mockIdeMessenger.responseHandlers["cukii/steerDuringStream"] = vi.fn(
       async () => {
@@ -270,14 +270,26 @@ describe("steerDuringStream", () => {
 
     await store.dispatch(steerDuringStream({ editorState, modifiers }) as any);
 
-    await vi.waitFor(() => expect(redelivered).toHaveLength(1));
+    // Transport loss must not interrupt the (possibly still healthy) run,
+    // and the bubble must stay drainable instead of parking on "failed".
     expect(
       request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
-    ).toBe(true);
+    ).toBe(false);
     const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(steer?.steerStatus).toBe("queued");
+    // The turn is still marked streaming, so nothing may redeliver yet.
+    expect(redelivered).toHaveLength(0);
+
+    // The run settles; the outbox drain delivers the bubble as a fresh turn.
+    store.dispatch(setInactive());
+    await store.dispatch(continueIfTrailingSteer() as any);
+
     expect(redelivered).toEqual([steer?.message.id]);
-    expect(steer?.steerStatus).toBe("read");
-    expect(steer?.messageReceipt?.status).toBe("read");
+    const delivered = sessionOf(store).history.find(
+      (item) => item.message.id === steer?.message.id,
+    );
+    expect(delivered?.steerStatus).toBe("read");
+    expect(delivered?.messageReceipt?.status).toBe("read");
   });
 
   it("does not interrupt when the vendor accepts the steer live", async () => {
@@ -386,7 +398,7 @@ describe("steerDuringStream during an edit run", () => {
     ).toBe(true);
   });
 
-  it("carries a model-switched steer through interrupt and cancel to the new vendor", async () => {
+  it("carries a model-switched steer through the outbox to the new vendor", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     // The extension refuses live injection once the run's brokerModel no
     // longer matches the selected one; the GUI only sees the deferred receipt.
@@ -423,14 +435,25 @@ describe("steerDuringStream during an edit run", () => {
     expect(
       request.mock.calls.some(([type]) => type === "cukii/steerDuringStream"),
     ).toBe(true);
+    // The deferred steer must not cancel the live run; it queues and rides
+    // the next turn boundary instead of forcing an interrupt.
     expect(
       request.mock.calls.some(([type]) => type === "cukii/cancelBridgeRun"),
-    ).toBe(true);
-    await vi.waitFor(() => expect(streams).toHaveLength(1));
+    ).toBe(false);
     const steer = sessionOf(store).history.find((item) => item.isSteer);
+    expect(steer?.steerStatus).toBe("queued");
+    expect(streams).toHaveLength(0);
+
+    // The stale run settles; the drain redelivers through the new vendor.
+    store.dispatch(setInactive());
+    await store.dispatch(continueIfTrailingSteer() as any);
+
+    expect(streams).toHaveLength(1);
     expect(streams[0].brokerModel).toBe("codex-5-6-sol");
     expect(streams[0].queuedFollowUpMessageId).toBe(steer?.message.id);
-    expect(streams[0].steerInterrupt).toBe(true);
-    expect(steer?.steerStatus).toBe("read");
+    const delivered = sessionOf(store).history.find(
+      (item) => item.message.id === steer?.message.id,
+    );
+    expect(delivered?.steerStatus).toBe("read");
   });
 });

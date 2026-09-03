@@ -5,11 +5,9 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
 import {
   appendUserSteerMessage,
-  requestSteerInterrupt,
   setSteerStatus,
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
-import { cancelStream } from "./cancelStream";
 import { saveCurrentSession } from "./session";
 import { streamResponseThunk } from "./streamResponse";
 
@@ -112,7 +110,7 @@ export const steerDuringStream = createAsyncThunk<
         saveCurrentSession({ openNewSession: false, generateTitle: false }),
       ),
     );
-    let deferredByVendor = false;
+    let acceptedLive = false;
     try {
       const response = await extra.ideMessenger.request(
         "cukii/steerDuringStream",
@@ -123,16 +121,17 @@ export const steerDuringStream = createAsyncThunk<
           brokerModel: currentSession.brokerModel,
         },
       );
-      const status =
-        response.status === "success" ? response.content.status : "failed";
-      deferredByVendor = status === "deferred";
-      dispatch(setSteerStatus({ messageId, status }));
+      acceptedLive =
+        response.status === "success" &&
+        response.content.status === "delivered";
+      dispatch(
+        setSteerStatus({ messageId, status: acceptedLive ? "delivered" : "queued" }),
+      );
     } catch {
       // The persisted bubble stays retryable if the live bridge disappeared.
-      // Treat transport loss like an explicit deferred receipt: settle any
-      // stale GUI run and drain the durable outbox through a fresh turn.
-      deferredByVendor = true;
-      dispatch(setSteerStatus({ messageId, status: "deferred" }));
+      // Transport loss is just another "not accepted live": the outbox keeps
+      // the message until a turn boundary delivers it.
+      dispatch(setSteerStatus({ messageId, status: "queued" }));
     }
     unwrapResult(
       await dispatch(
@@ -140,20 +139,27 @@ export const steerDuringStream = createAsyncThunk<
       ),
     );
 
-    // The vendor cannot accept live steering (e.g. Qwen runs a single
-    // non-interactive turn with closed stdin). Instead of leaving the bubble
-    // queued until the current turn finishes on its own, interrupt the run so
-    // the follow-up is redelivered as a fresh turn right away. Claude is not
-    // affected: its receipt comes back "delivered", never "deferred".
-    if (deferredByVendor) {
+    // Vendors without a live steer channel (e.g. Qwen runs a single
+    // non-interactive turn with closed stdin) get the message through the
+    // durable outbox instead of an interrupt: the old stop-and-restart path
+    // raced its own teardown, leaked parallel bridge processes, and lost the
+    // follow-up receipt while the cold restart had nothing to show. The
+    // running turn stays alive; the drain delivers the bubble as the very
+    // next turn the moment this one settles, so the agent continues its work
+    // and reads the new instruction in context — the same outcome Claude's
+    // live injection gives, minus the kill. Claude is unaffected: its
+    // receipt arrives "delivered" and nothing is queued. The nudge also
+    // covers the race where the run settled while the request was in flight:
+    // without it the bubble would wait for a lifecycle event that may never
+    // come. The drain itself re-checks streaming state, so this is a no-op
+    // while the turn is still live.
+    if (!acceptedLive) {
       const current = getState().session;
-      if (
-        current.id === sessionId &&
-        current.isStreaming &&
-        !current.isCancelling
-      ) {
-        dispatch(requestSteerInterrupt());
-        await dispatch(cancelStream({ source: "steer" }));
+      if (current.id === sessionId) {
+        const { continueIfTrailingSteer } = await import(
+          "./continueIfTrailingSteer"
+        );
+        void dispatch(continueIfTrailingSteer());
       }
     }
   },
