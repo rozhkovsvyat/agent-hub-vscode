@@ -10,7 +10,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
@@ -67,10 +66,6 @@ import {
   CukiiWaitingReceipt,
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
-import {
-  CukiiMessageContextMenu,
-  type CukiiMessageContextMenuState,
-} from "../../components/cukii/CukiiMessageContextMenu";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
@@ -399,16 +394,8 @@ export function Chat() {
   // a tool call. A tool may be quiet for seconds while the stream is alive.
   const shouldRenderStreamingToolbar = isStreaming && !isInEdit && !bridgeWait;
 
-  const [messageMenu, setMessageMenu] =
-    useState<CukiiMessageContextMenuState | null>(null);
-  const openMessageMenu = useCallback(
-    (e: ReactMouseEvent, text: string) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setMessageMenu({ x: e.clientX, y: e.clientY, text });
-    },
-    [],
-  );
+  // Right-click on capsules uses the native webview context menu; session
+  // commands reach it through the extension's webview/context contribution.
 
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
     const transcriptHistory = history.slice(transcriptStart);
@@ -493,11 +480,10 @@ export function Chat() {
           >
             <div className="cukii-user-message">
               <div
-                className={`cukii-user-message-bubble ${groupClass}`}
+                className={`cukii-user-message-bubble ${groupClass} ${
+                  sentTime ? "cukii-user-bubble--with-receipt" : ""
+                } ${visualReceiptStatus ? "cukii-user-bubble--receipt-checks" : ""}`}
                 data-testid={`cukii-user-bubble-${message.id}`}
-                onContextMenu={(e) =>
-                  openMessageMenu(e, renderChatMessage(message))
-                }
               >
                 {errorBoundary(
                   <ContinueInputBox
@@ -612,9 +598,6 @@ export function Chat() {
             <div
               key={`${message.id}-text`}
               className={`cukii-assistant-row shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
-              onContextMenu={(e) =>
-                openMessageMenu(e, renderChatMessage(item.message))
-              }
             >
               {errorBoundary(
                 <div className="thread-message">
@@ -686,12 +669,13 @@ export function Chat() {
     isStreaming,
     activeTimelineToolId,
     latestSummaryIndex,
-    openMessageMenu,
     sendInput,
     transcriptStart,
   ]);
 
-  const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
+  // Claude ships no transcript scrollbar styling — the native webview bar is
+  // the parity target. Only an explicit legacy setting opts into thin mode.
+  const showScrollbar = Boolean(showChatScrollbar);
 
   return (
     <>
@@ -702,7 +686,7 @@ export function Chat() {
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`cukii-transcript ${isStreaming ? "cukii-transcript-streaming" : ""} flex min-h-0 min-w-0 flex-1 flex-col overflow-y-scroll ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"}`}
+        className={`cukii-transcript ${isStreaming ? "cukii-transcript-streaming" : ""} flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${showScrollbar ? "thin-scrollbar" : ""}`}
       >
         {highlights}
         {isSessionLoading ? (
@@ -780,10 +764,6 @@ export function Chat() {
           </div>
         </div>
       )}
-      <CukiiMessageContextMenu
-        state={messageMenu}
-        onClose={() => setMessageMenu(null)}
-      />
     </>
   );
 }

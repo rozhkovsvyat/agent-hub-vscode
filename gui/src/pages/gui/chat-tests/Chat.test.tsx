@@ -300,17 +300,10 @@ test("assistant capsule shows the corner time, backfills legacy turns and copies
     rows[1]?.querySelector(".cukii-assistant-metadata time")?.textContent,
   ).toMatch(/^\d{2}:\d{2}$/);
 
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText },
-    configurable: true,
-  });
+  // Right-click stays with the native webview context menu: session commands
+  // reach it through the extension's webview/context contribution, so the
+  // GUI must not mount a custom overlay.
   fireEvent.contextMenu(rows[0] as HTMLElement);
-  const copyItem = await getElementByTestId("cukii-copy-message");
-  await act(async () => {
-    fireEvent.click(copyItem);
-  });
-  expect(writeText).toHaveBeenCalledWith("pong.");
   expect(container.querySelector('[data-testid="cukii-copy-message"]')).toBeNull();
 });
 

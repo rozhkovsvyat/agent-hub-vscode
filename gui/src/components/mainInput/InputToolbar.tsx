@@ -85,7 +85,7 @@ interface InputToolbarProps {
 }
 
 const menuItemClass =
-  "cukii-menu-item flex w-full min-w-0 items-center justify-between gap-3 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+  "cukii-menu-item flex w-full min-w-0 items-center justify-between gap-3 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
 
 const commandSectionHeaderClass =
   "cukii-command-section-header px-3 pb-1 pt-2 text-xs font-normal leading-4 text-[var(--vscode-descriptionForeground)]";
@@ -386,7 +386,9 @@ function InputToolbar(props: InputToolbarProps) {
         }`}
         style={{ fontSize: smallFont }}
       >
-        <div className="flex min-w-0 items-center gap-1">
+        {/* Claude fit-stage parity: controls never overlap — the pill wraps
+            to its own line inside the left group when the width runs out. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 gap-y-[3px]">
           {!isInEdit && (
             <Popover className="relative">
               <PopoverButton
@@ -520,7 +522,7 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Effort") && (
                       <CukiiEffortRow
-                        className={menuItemClass}
+                        className={`${menuItemClass} cukii-effort-menu-row`}
                         model={currentModel}
                         effort={brokerEffort}
                         onEffortChange={(nextEffort) =>

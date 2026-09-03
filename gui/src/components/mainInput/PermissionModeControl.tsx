@@ -272,7 +272,7 @@ export function PermissionModeControl({
           data-testid="cukii-permission-popover"
         >
           <div className="cukii-permission-header flex items-center justify-between text-[var(--vscode-descriptionForeground)]">
-            <span>Modes</span>
+            <span className="cukii-permission-header-title">Modes</span>
           </div>
           <div
             className="cukii-permission-degraded-note"
@@ -283,10 +283,11 @@ export function PermissionModeControl({
           </div>
           {onEffortChange && (
             <div
-              className="cukii-permission-effort-row border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)] px-1 py-1"
+              className="cukii-permission-effort-row border-0"
               data-testid="cukii-permission-effort-row"
             >
               <CukiiEffortRow
+                className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
                 model={brokerModel}
                 effort={brokerEffort}
                 onEffortChange={onEffortChange}
@@ -326,8 +327,13 @@ export function PermissionModeControl({
         {({ close }) => (
           <>
             <div className="cukii-permission-header flex items-center justify-between text-[var(--vscode-descriptionForeground)]">
-              <span>Modes</span>
-              <span aria-label="Shift+Tab">⇧ + tab to switch</span>
+              <span className="cukii-permission-header-title">Modes</span>
+              <span
+                aria-label="Shift+Tab"
+                className="cukii-permission-header-hint"
+              >
+                ⇧ + tab to switch
+              </span>
             </div>
             {visibleModes.map((mode) => {
               const copy = CUKII_PERMISSION_MODE_COPY[mode];
@@ -356,17 +362,18 @@ export function PermissionModeControl({
                     </span>
                   </span>
                   {selected && (
-                    <CheckIcon className="cukii-permission-mode-check h-4 w-4 shrink-0" />
+                    <CheckIcon className="cukii-permission-mode-check shrink-0" />
                   )}
                 </button>
               );
             })}
             {onEffortChange && (
               <div
-                className="cukii-permission-effort-row border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)] px-1 py-1"
+                className="cukii-permission-effort-row border-0"
                 data-testid="cukii-permission-effort-row"
               >
                 <CukiiEffortRow
+                  className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
                   model={brokerModel}
                   effort={brokerEffort}
                   onEffortChange={onEffortChange}

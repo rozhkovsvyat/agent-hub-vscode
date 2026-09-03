@@ -174,38 +174,42 @@ describe("Cukii GUI contracts", () => {
     expect(contract).not.toContain("min-height: 78px");
   });
 
-  it("flows the receipt inline after the prose like MAX: no reserved footer, no absolute slot", () => {
+  it("anchors the receipt in the bubble corner and reserves it with an inline spacer like MAX", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-user-row {");
     const metadata = css.indexOf("\n.cukii-user-metadata {");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(metadata).toBeGreaterThan(start);
     const bubbleContract = css.slice(start, metadata);
-    const metadataContract = css.slice(metadata, metadata + 600);
+    const metadataContract = css.slice(metadata, metadata + 700);
     expect(bubbleContract).toContain("display: flex;");
     expect(bubbleContract).toContain("justify-content: flex-end;");
-    expect(bubbleContract).toContain("display: inline-flex;");
     expect(bubbleContract).toContain("flex-direction: column;");
-    expect(bubbleContract).toContain("align-items: flex-start;");
-    expect(bubbleContract).toContain(".cukii-user-message-bubble");
     expect(bubbleContract).toContain("margin-left: auto;");
-    expect(bubbleContract).toContain("max-width: min(75%, 640px);");
-    expect(bubbleContract).toContain("display: inline-block;");
+    expect(bubbleContract).toContain("max-width: 70%;");
+    expect(bubbleContract).toContain(".cukii-user-message-bubble");
     expect(bubbleContract).toContain("position: relative;");
-    // Shared capsule inset: text never hugs either wall.
-    expect(bubbleContract).toContain("padding: 7px 12px 6px;");
-    // The wrappers between bubble and prose are display:contents so the
-    // receipt span shares one inline formatting context with the paragraphs
-    // and rises to the last text line whenever it fits.
-    expect(bubbleContract).toContain("display: contents !important;");
-    expect(bubbleContract).toContain(".cukii-user-bubble .ProseMirror p {");
-    expect(bubbleContract).toContain("display: inline;");
-    expect(bubbleContract).not.toContain("padding-bottom: 17px;");
-    expect(metadataContract).toContain("display: inline-flex;");
-    expect(metadataContract).toContain("vertical-align: bottom;");
-    expect(metadataContract).toContain("font-size: 10px;");
-    expect(metadataContract).toContain("line-height: 12px;");
-    expect(metadataContract).not.toContain("position: absolute;");
+    expect(bubbleContract).toContain("padding: 8px 10px 10px;");
+    expect(bubbleContract).toContain("border-radius: 16px;");
+    // MAX mechanism: the meta sits absolutely in the bottom-right corner
+    // while an inline ::after spacer at the end of the prose reserves its
+    // width, so the meta rides the last text line whenever it fits and
+    // drops below the text when it does not.
+    expect(bubbleContract).toContain("--cukii-meta-reserve: 31px;");
+    expect(bubbleContract).toContain("--cukii-meta-reserve: 49px;");
+    expect(bubbleContract).toContain(
+      ".cukii-user-message-bubble .ProseMirror p:last-child::after",
+    );
+    expect(bubbleContract).toContain("display: inline-block;");
+    expect(bubbleContract).toContain("height: 14px;");
+    // The fragile display:contents chain is gone for good.
+    expect(bubbleContract).not.toContain("display: contents !important;");
+    expect(metadataContract).toContain("position: absolute;");
+    expect(metadataContract).toContain("right: 10px;");
+    expect(metadataContract).toContain("bottom: 4px;");
+    expect(metadataContract).toContain("align-items: flex-end;");
+    expect(metadataContract).toContain("font-size: 11px;");
+    expect(metadataContract).toContain("line-height: 14px;");
   });
 
   it("keeps right-lane bubbles responsive and leaves the agent timeline left", () => {
@@ -216,7 +220,7 @@ describe("Cukii GUI contracts", () => {
     const proseStart = css.indexOf(".cukii-user-bubble .scroll-container");
     const proseContract = css.slice(proseStart, proseStart + 550);
     expect(contract).toContain("min-width: 0;");
-    expect(contract).toContain("max-width: min(75%, 640px);");
+    expect(contract).toContain("max-width: 70%;");
     expect(contract).toContain("width: fit-content;");
     expect(contract).toContain("max-width: 100%;");
     expect(proseContract).toContain("overflow-wrap: anywhere;");
@@ -231,16 +235,19 @@ describe("Cukii GUI contracts", () => {
     const css = source("index.css");
     const chat = source("pages/gui/Chat.tsx");
 
-    // Lane: right-aligned, noticeably narrower than the column.
+    // Lane: right-aligned, MAX measures the sent bubble at 70% of the column.
     const laneStart = css.indexOf(".cukii-user-message {");
     const laneContract = css.slice(laneStart, laneStart + 320);
-    expect(laneContract).toContain("max-width: min(75%, 640px);");
+    expect(laneContract).toContain("max-width: 70%;");
     expect(laneContract).toContain("margin-left: auto;");
 
     // Bubbles: 16px outer corners; the corner facing an adjacent same-side
     // bubble tightens to 6px. Solo bubbles keep every corner large.
-    const bubbleStart = css.indexOf(".cukii-user-message-bubble {");
-    const bubbleContract = css.slice(bubbleStart, bubbleStart + 800);
+    // Comment-stripped slice: prose comments must never push a pinned
+    // declaration out of the contract window.
+    const flatGroup = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const bubbleStart = flatGroup.indexOf(".cukii-user-message-bubble {");
+    const bubbleContract = flatGroup.slice(bubbleStart, bubbleStart + 600);
     expect(bubbleContract).toContain("border-radius: 16px;");
     expect(css).toContain(".cukii-user-bubble--group-start {");
     expect(css).toContain(".cukii-user-bubble--group-middle {");
@@ -258,10 +265,14 @@ describe("Cukii GUI contracts", () => {
     expect(css).toContain(".cukii-user-row--grouped {");
     expect(css).toContain("margin-top: 3px;");
 
-    // Receipt flow is pure CSS: no per-message heuristic class, the meta is
-    // an inline run-on of the prose for every turn.
+    // Receipt flow stays stylesheet-driven: Chat only flags which receipts
+    // exist (time, ticks); the absolute-meta + inline-spacer layout is pure
+    // CSS. The old per-message inline-meta heuristic class must never return.
     expect(css).not.toContain(".cukii-user-bubble--inline-meta");
     expect(chat).not.toContain("cukii-user-bubble--inline-meta");
+    expect(css).toContain("--cukii-meta-reserve");
+    expect(chat).toContain("cukii-user-bubble--with-receipt");
+    expect(chat).toContain("cukii-user-bubble--receipt-checks");
 
     // Chat derives group position from the transcript.
     expect(chat).toContain("cukii-user-bubble--group-middle");
@@ -269,18 +280,22 @@ describe("Cukii GUI contracts", () => {
     expect(chat).toContain("cukii-user-bubble--group-end");
     expect(chat).toContain("cukii-user-row--grouped");
 
-    // Agent capsules keep shrink-wrapping: short answers hug their content,
-    // long ones may fill the column, never exceed it.
+    // Agent capsules share the user-capsule geometry (16px corners, MAX
+    // insets) and keep shrink-wrapping within the 70% lane; only longread
+    // answers may take the full column, never more.
     // Comment-stripped slice: prose comments must never shift the contract
     // window away from the declarations it pins.
     const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
     const agentStart = flat.indexOf(".cukii-assistant-bubble {");
-    const agentContract = flat.slice(agentStart, agentStart + 320);
+    const agentContract = flat.slice(agentStart, agentStart + 330);
+    expect(agentContract).toContain("border-radius: 16px;");
+    expect(agentContract).toContain("padding: 8px 10px 10px !important;");
     expect(agentContract).toContain("width: fit-content;");
-    expect(agentContract).toContain("max-width: 100%;");
+    expect(agentContract).toContain("max-width: 70%;");
     expect(agentContract.replace(/max-width/g, "")).not.toContain(
       "width: 100%",
     );
+    expect(css).toContain(".cukii-assistant-bubble--longread {");
   });
 
   it("mounts the model pill, Milky scope toggle and permissions effort row", () => {
@@ -373,12 +388,13 @@ describe("Cukii GUI contracts", () => {
       /\.cukii-user-bubble \.ProseMirror\s*\{[\s\S]*?color: var\(--cukii-text/,
     );
 
-    // The assistant wears the slate capsule the user turns used to have.
+    // The assistant wears the slate capsule with the same MAX geometry the
+    // user capsule uses (16px corners), only left-aligned and slate-filled.
     const botStart = css.indexOf(".cukii-assistant-bubble {");
     expect(botStart).toBeGreaterThanOrEqual(0);
     const botContract = css.slice(botStart, botStart + 400);
     expect(botContract).toContain("--vscode-input-background");
-    expect(botContract).toContain("border-radius: 6px;");
+    expect(botContract).toContain("border-radius: 16px;");
     expect(botContract).toContain("width: fit-content;");
 
     // The capsule keeps its own background and padding: the generic
@@ -411,8 +427,16 @@ describe("Cukii GUI contracts", () => {
     expect(receipt).toContain('d="M2 5L5 8L11 2"');
     expect(receipt).toContain('d="M9 8L15 2"');
 
-    // Capsules answer to a right-click copy menu instead of action icons.
-    expect(css).toContain(".cukii-message-context-menu {");
+    // Right-click uses the native webview context menu: the extension
+    // contributes session commands through webview/context, and the GUI keeps
+    // no custom overlay.
+    const manifest = readFileSync(
+      join(process.cwd(), "..", "extensions", "vscode", "package.json"),
+      "utf8",
+    );
+    expect(manifest).toContain('"webview/context"');
+    expect(manifest).toContain("webviewId == 'cukii.fullScreenChat'");
+    expect(chat).not.toContain("CukiiMessageContextMenu");
     expect(source("components/StepContainer/StepContainer.tsx")).not.toContain(
       "ResponseActions",
     );
@@ -446,10 +470,17 @@ describe("Cukii GUI contracts", () => {
     expect(panelContract).toContain(
       "background: var(--vscode-menu-background, #252526) !important;",
     );
-    expect(panelContract).toContain("min-height: 52px;");
+    // Claude metrics: content-sized rows (no fixed min-height), and the
+    // selected mode wears the theme's active-selection tokens, not a
+    // hardcoded blue.
+    expect(panelContract).not.toContain("min-height: 52px;");
     expect(panelContract).toContain("background: transparent !important;");
-    expect(panelContract).toContain("background: rgb(4, 57, 94) !important;");
-    expect(panelContract).toContain("color: #ffffff !important;");
+    expect(panelContract).toContain(
+      "background: var(--vscode-list-activeSelectionBackground, #04395e) !important;",
+    );
+    expect(panelContract).toContain(
+      "color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;",
+    );
     expect(panelContract).toContain('html[data-cukii-panel-tone="light"]');
     expect(panelContract).toContain("#ffffff) !important;");
     expect(panelContract).toContain(".cukii-permission-mode-row:focus-visible");

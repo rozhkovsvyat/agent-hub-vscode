@@ -564,6 +564,16 @@
           "group": "0_acontinue"
         }
       ],
+      "webview/context": [
+        {
+          "command": "continue.newSession",
+          "when": "webviewId == 'continue.continueGUIView' || webviewId == 'cukii.fullScreenChat'"
+        },
+        {
+          "command": "cukii.renameChatPanel",
+          "when": "webviewId == 'cukii.fullScreenChat'"
+        }
+      ],
       "editor/title/run": [
         {
           "command": "continue.rejectDiff",
