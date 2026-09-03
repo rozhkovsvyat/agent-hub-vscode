@@ -95,41 +95,39 @@ export function canonicalCukiiModelDescription(
   return "Model available through the vendor CLI";
 }
 
-/** Product-level capability tier shown as Cukii bottles in the model picker. */
+/**
+ * Product-level capability tier shown as Cukii bottles in the model picker.
+ * Only the curated top group ("Milky") carries bottles: 3 for the flagships,
+ * 2 for the strong seconds, 1 for the remaining curated routes. Every other
+ * model rates 0 and renders no bottles at all.
+ */
 export function cukiiCapabilityRating(
   model: Pick<CukiiModelPresentation, "value" | "label">,
-): 1 | 2 | 3 | 4 {
+): 0 | 1 | 2 | 3 {
   const stableId = model.value.toLowerCase().replace(/^cursor:/, "");
   const fallbackLabel = model.label.toLowerCase();
   const matches = (pattern: RegExp) =>
     pattern.test(stableId) || pattern.test(fallbackLabel);
 
-  if (matches(/(?:^|[-\s])fable(?:[-\s]|$)/)) return 4;
-  if (matches(/gpt[-\s]?5[.-]4[-\s]mini/)) return 1;
   if (
-    matches(/(?:^|[-\s])opus(?:[-\s]|$)/) ||
-    matches(/gpt[-\s]?5[.-]6[-\s]sol/) ||
-    matches(/gpt[-\s]?5[.-]5/) ||
-    matches(/(?:^|[-\s])kimi[-\s]?k3(?:[-\s]|$)/) ||
-    matches(/qwen[-\s]?3[.-]8[-\s]max/) ||
-    matches(/qwen[-\s]?3[.-]7[-\s]max/)
+    matches(/fable[-\s]?5[.-]1/) ||
+    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]sol/) ||
+    matches(/qwen[-\s]?3[.-]8[-\s]max/)
   ) {
     return 3;
   }
-  // DeepSeek V4 Pro sits with the everyday tier-2 peers (GPT-5.4, Sonnet,
-  // Grok, GLM 5.2); three bottles overstated it against that class.
-  if (
-    matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/) ||
-    matches(/gpt[-\s]?5[.-]6[-\s]terra/) ||
-    matches(/gpt[-\s]?5[.-]4/) ||
-    matches(/(?:^|[-\s])grok(?:[-\s]|$)/) ||
-    matches(/qwen[-\s]?3[.-]7[-\s]plus/) ||
-    matches(/glm[-\s]?5[.-]2/) ||
-    matches(/deepseek[-\s]?v4[-\s]?pro/)
-  ) {
+  if (matches(/(?:^|[-\s.])opus(?:[-\s.]|$)/) || matches(/kimi[-\s]?k3/)) {
     return 2;
   }
-  return 1;
+  if (
+    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]terra/) ||
+    matches(/grok[-\s]?4[.-]6/) ||
+    matches(/composer[-\s]?2[.-]5/) ||
+    matches(/qwen[-\s]?deepseek[-\s]?v4[-\s]?pro[-\s]?0813/)
+  ) {
+    return 1;
+  }
+  return 0;
 }
 
 /** The compact second line shared by every Cukii model picker option. */

@@ -6,6 +6,8 @@ const { listAccounts, execFile } = vi.hoisted(() => ({
 }));
 vi.mock("./bridgeVendorAuth", () => ({
   listBrokerVendorAccounts: listAccounts,
+  resolveNativeCli: (vendor: string) =>
+    vendor === "cursor" ? "agent" : undefined,
 }));
 vi.mock("child_process", () => ({ execFile }));
 

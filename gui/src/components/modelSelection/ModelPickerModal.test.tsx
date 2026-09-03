@@ -94,19 +94,23 @@ describe("ModelPickerModal", () => {
       store.dispatch(setBrokerModelScope("all"));
     });
 
-    const rating = await screen.findByTestId("cukii-capability-rating-fable-5");
+    const rating = await screen.findByTestId(
+      "cukii-capability-rating-fable-5-1",
+    );
     expect(rating).toHaveAttribute(
       "aria-label",
-      "Cukii capability rating: 4 of 4",
+      "Cukii capability rating: 3 of 3",
     );
-    expect(rating).toHaveAttribute("title", "Cukii capability rating: 4 of 4");
+    expect(rating).toHaveAttribute("title", "Cukii capability rating: 3 of 3");
     expect(
       rating.querySelectorAll('svg[data-cukii-capability-milk="true"]'),
-    ).toHaveLength(4);
+    ).toHaveLength(3);
     expect(rating.textContent).toBe("");
     expect(rating.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
       "true",
     );
+    // Non-top models carry no bottles at all.
+    expect(screen.queryByTestId("cukii-capability-rating-sonnet-5")).toBeNull();
   });
 
   it("defaults to the Best scope and hides non-curated models", async () => {
@@ -122,20 +126,24 @@ describe("ModelPickerModal", () => {
     expect(screen.queryByText("V4 Pro (soon)")).toBeNull();
   });
 
-  it("toggles Best/All and keeps the choice in per-session state", async () => {
+  it("toggles Milky/All and keeps the choice in per-session state", async () => {
     const { store, user } = await renderWithProviders(
       <ModelPickerModal onClose={vi.fn()} />,
     );
 
     expect(store.getState().session.brokerModelScope).toBe("best");
-    const allButton = await screen.findByTestId("cukii-scope-toggle-all");
-    await user.click(allButton);
+    const milkyLabel = await screen.findByTestId("cukii-scope-toggle-milky");
+    expect(milkyLabel).toHaveAttribute("aria-pressed", "true");
+    const milkySwitch = await screen.findByTestId("cukii-scope-switch");
+    expect(milkySwitch).toHaveAttribute("aria-checked", "true");
+    expect(milkySwitch.className).toContain("cukii-scope-switch-on");
+
+    await user.click(milkySwitch);
     expect(store.getState().session.brokerModelScope).toBe("all");
     await getElementByText("Fable 5");
     await getElementByText("Grok 4.5");
 
-    const bestButton = await screen.findByTestId("cukii-scope-toggle-best");
-    await user.click(bestButton);
+    await user.click(milkyLabel);
     expect(store.getState().session.brokerModelScope).toBe("best");
     expect(screen.queryByText("Fable 5")).toBeNull();
   });

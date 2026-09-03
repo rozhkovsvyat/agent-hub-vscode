@@ -39,8 +39,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     (state) => state.session.brokerPermissionMode,
   );
 
-  /** Vendors are alphabetical (account-management order) and the Best scope
-   * keeps only curated live routes; vendors left empty disappear entirely. */
+  /** Vendors are alphabetical (account-management order) and the Milky
+   * (best) scope keeps only rated live routes; vendors left empty disappear
+   * entirely. */
   const visibleVendors = useMemo(() => {
     const ordered = [...VENDORS].sort((left, right) =>
       left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
@@ -49,7 +50,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     return ordered
       .map((vendor) => ({
         ...vendor,
-        models: vendor.models.filter((model) => isBestModel(model.value)),
+        models: vendor.models.filter((model) => isBestModel(model)),
       }))
       .filter((vendor) => vendor.models.length > 0);
   }, [scope, catalogVersion]);
@@ -119,46 +120,37 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
             Select a model
           </span>
           <span
-            className="cukii-scope-toggle flex items-center gap-1"
+            className="cukii-scope-toggle flex items-center gap-[6px]"
             role="group"
             aria-label="Model list scope"
           >
             <button
               type="button"
-              data-testid="cukii-scope-toggle-best"
+              data-testid="cukii-scope-toggle-milky"
               aria-pressed={scope === "best"}
               className={`cukii-scope-label ${
                 scope === "best" ? "cukii-scope-label-on" : ""
               }`}
-              onClick={() => dispatch(setBrokerModelScope("best"))}
+              onClick={() =>
+                dispatch(setBrokerModelScope(scope === "best" ? "all" : "best"))
+              }
             >
-              Best
+              Milky
             </button>
             <button
               type="button"
               data-testid="cukii-scope-switch"
               role="switch"
-              aria-checked={scope === "all"}
-              aria-label="Toggle between Best and All models"
+              aria-checked={scope === "best"}
+              aria-label="Show only Milky-rated models"
               className={`cukii-scope-switch ${
-                scope === "all" ? "cukii-scope-switch-on" : ""
+                scope === "best" ? "cukii-scope-switch-on" : ""
               }`}
               onClick={() =>
-                dispatch(setBrokerModelScope(scope === "all" ? "best" : "all"))
+                dispatch(setBrokerModelScope(scope === "best" ? "all" : "best"))
               }
             >
               <span className="cukii-scope-switch-knob" />
-            </button>
-            <button
-              type="button"
-              data-testid="cukii-scope-toggle-all"
-              aria-pressed={scope === "all"}
-              className={`cukii-scope-label ${
-                scope === "all" ? "cukii-scope-label-on" : ""
-              }`}
-              onClick={() => dispatch(setBrokerModelScope("all"))}
-            >
-              All
             </button>
           </span>
         </div>

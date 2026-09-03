@@ -347,7 +347,7 @@ type SessionState = {
   brokerSubagent?: BrokerSubagent;
   brokerEffort: BrokerEffort;
   brokerSpeed: BrokerSpeed;
-  /** Model picker scope; preserved per session so Best/All survives reloads. */
+  /** Model picker scope; preserved per session so Milky/All survives reloads. */
   brokerModelScope: BrokerModelScope;
   brokerPermissionMode: CukiiPermissionMode;
   /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */

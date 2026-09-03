@@ -17,7 +17,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
-import { listBrokerVendorAccounts } from "./bridgeVendorAuth";
+import { listBrokerVendorAccounts, resolveNativeCli } from "./bridgeVendorAuth";
 import { resolveCodexHome } from "./codexModelsCacheHeal";
 
 const execFileAsync = promisify(execFile);
@@ -499,22 +499,29 @@ async function liveModels(
         return codexCatalogFromCache(fs.readFileSync(cache, "utf8"));
       return [];
     }
+    // The Remote-SSH extension host inherits the SSH login PATH, which may
+    // not contain the vendor CLI directory; resolve the known product
+    // location instead of relying on a bare command name.
     if (vendor === "grok")
-      return grokCatalogFromOutput(await run("grok", ["models"]));
+      return grokCatalogFromOutput(
+        await run(resolveNativeCli(vendor) ?? "grok", ["models"]),
+      );
     if (vendor === "kimi")
       return kimiCatalogFromJson(
-        await run("kimi", ["provider", "list", "--json"]),
+        await run(resolveNativeCli(vendor) ?? "kimi", [
+          "provider",
+          "list",
+          "--json",
+        ]),
       );
     if (vendor === "cursor") {
-      const result = await execFileAsync(
-        process.platform === "win32" ? "agent" : "cursor-agent",
-        ["models"],
-        {
-          timeout: 12_000,
-          windowsHide: true,
-          maxBuffer: 1024 * 1024,
-        },
-      );
+      const executable = resolveNativeCli(vendor);
+      if (!executable) return [];
+      const result = await execFileAsync(executable, ["models"], {
+        timeout: 12_000,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+      });
       return cursorCatalogFromOutput(result.stdout);
     }
     return [];

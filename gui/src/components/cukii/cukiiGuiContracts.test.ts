@@ -283,7 +283,7 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
-  it("mounts the model pill, Best/All scope toggle and permissions effort row", () => {
+  it("mounts the model pill, Milky scope toggle and permissions effort row", () => {
     const toolbar = source("components/mainInput/InputToolbar.tsx");
     const modal = source("components/modelSelection/ModelPickerModal.tsx");
     const permissions = source("components/mainInput/PermissionModeControl.tsx");
@@ -297,14 +297,15 @@ describe("Cukii GUI contracts", () => {
     expect(toolbar).toContain("px-4");
     expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
 
-    // Scope toggle: a compact knob switch between Best and All labels (not a
-    // pair of chunky buttons); Best is the default and the choice lives in
-    // session state so every picker entry point and reload shares it.
+    // Scope toggle: the single Milky (-0) knob switch pinned to the right
+    // edge, symmetric with the "Select a model" title; ON (orange) is the
+    // default and shows only Milky-rated models. The choice lives in session
+    // state so every picker entry point and reload shares it.
     expect(modal).toContain("cukii-scope-toggle");
     expect(modal).toContain('data-testid="cukii-scope-switch"');
     expect(modal).toContain("cukii-scope-switch-knob");
-    expect(modal).toContain('data-testid="cukii-scope-toggle-best"');
-    expect(modal).toContain('data-testid="cukii-scope-toggle-all"');
+    expect(modal).toContain('data-testid="cukii-scope-toggle-milky"');
+    expect(modal).toContain("Milky");
     expect(modal).toContain("setBrokerModelScope");
     expect(modal).toContain("isBestModel");
     expect(slice).toContain("brokerModelScope: BrokerModelScope;");

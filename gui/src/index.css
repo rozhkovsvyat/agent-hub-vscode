@@ -829,8 +829,10 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
 }
 
-/* Best (o-) All: a compact knob switch between the two scope labels, not a
-   pair of chunky buttons. */
+/* Milky (-0): one label + knob switch pinned to the picker's right edge,
+   symmetric with the "Select a model" title. ON (orange) is the default and
+   shows only Milky-rated models. The label keeps a constant weight — only
+   its color shifts — so the switch never jumps when toggled. */
 .cukii-scope-label {
   padding: 1px 2px;
   border: 0;
@@ -843,7 +845,6 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 
 .cukii-scope-label-on {
   color: var(--vscode-foreground, #cccccc);
-  font-weight: 600;
 }
 
 .cukii-scope-switch {

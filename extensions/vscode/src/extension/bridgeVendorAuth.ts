@@ -521,7 +521,7 @@ export function nativeCliCandidates(
   ];
 }
 
-function resolveNativeCli(vendor: VendorWithCli): string | undefined {
+export function resolveNativeCli(vendor: VendorWithCli): string | undefined {
   return nativeCliCandidates(vendor).find(
     (candidate) => !path.isAbsolute(candidate) || fs.existsSync(candidate),
   );

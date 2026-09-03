@@ -125,10 +125,10 @@ describe("Cukii Claude-parity input toolbar", () => {
 
     await user.click(pill);
 
-    // The same picker as "Switch model…" opens, with the Best/All toggle.
+    // The same picker as "Switch model…" opens, with the Milky toggle on.
     expect(await getElementByText("Select a model")).toBeDefined();
-    const bestToggle = await getElementByTestId("cukii-scope-toggle-best");
-    expect(bestToggle).toHaveAttribute("aria-pressed", "true");
+    const milkyToggle = await getElementByTestId("cukii-scope-toggle-milky");
+    expect(milkyToggle).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens the Cukii permission popover with exact copy and cycles with Shift+Tab", async () => {
