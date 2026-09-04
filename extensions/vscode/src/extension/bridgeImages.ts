@@ -24,7 +24,6 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   "image/svg+xml": ".svg",
 };
 
-export const MAX_BRIDGE_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_STORED_ATTACHMENTS = 256;
 
 export function bridgeAttachmentDir(): string {
@@ -64,7 +63,6 @@ function prune(dir: string): void {
 
 type Materialized =
   | { kind: "file"; filePath: string }
-  | { kind: "too-large"; megabytes: number }
   | { kind: "unsupported" };
 
 function materializeDataUrl(url: string, dir: string): Materialized {
@@ -74,12 +72,6 @@ function materializeDataUrl(url: string, dir: string): Materialized {
   }
   const mime = matched[1].toLowerCase();
   const bytes = Buffer.from(matched[2].replace(/\s/g, ""), "base64");
-  if (bytes.length > MAX_BRIDGE_IMAGE_BYTES) {
-    return {
-      kind: "too-large",
-      megabytes: Math.round(bytes.length / (1024 * 1024)),
-    };
-  }
   const extension = EXTENSION_BY_MIME[mime] ?? ".img";
   const digest = createHash("sha256").update(bytes).digest("hex");
   const filePath = path.join(dir, `${digest}${extension}`);
@@ -111,10 +103,6 @@ function renderImageReference(
     return inline
       ? `@${materialized.filePath}`
       : `[image saved at ${materialized.filePath}]`;
-  }
-  if (materialized.kind === "too-large") {
-    const limitMb = MAX_BRIDGE_IMAGE_BYTES / (1024 * 1024);
-    return `[image omitted: ${materialized.megabytes} MB exceeds the ${limitMb} MB native bridge limit]`;
   }
   return "[image attached]";
 }

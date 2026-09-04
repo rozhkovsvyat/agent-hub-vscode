@@ -64,6 +64,26 @@ describe("materializeBridgeImages", () => {
     expect(stored.byteLength).toBe(original.byteLength);
   });
 
+  it("preserves original bytes above the former 20 MiB cutoff", () => {
+    const original = Buffer.alloc(20 * 1024 * 1024 + 1, 0xab);
+    const rendered = materializeBridgeMessageContent(
+      [
+        {
+          type: "imageUrl",
+          imageUrl: {
+            url: `data:image/png;base64,${original.toString("base64")}`,
+          },
+        },
+      ],
+      dir,
+    );
+
+    expect(rendered).toMatch(/^@/);
+    const stored = fs.readFileSync(rendered.slice(1));
+    expect(stored.byteLength).toBe(original.byteLength);
+    expect(stored.equals(original)).toBe(true);
+  });
+
   it("keeps older turns as plain path references so replays stay cheap", () => {
     const [older] = materializeBridgeImages(
       [

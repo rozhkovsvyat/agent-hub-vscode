@@ -30,6 +30,10 @@ describe("broker inbox steering gate", () => {
       const lines = brokerInboxDirective(model);
       expect(lines).toHaveLength(2);
       expect(lines[0]).toContain("mcp__cukii-broker__broker_inbox");
+      expect(lines[0]).toContain("mcp__cukii-broker__broker_inbox_ack");
+      expect(lines[0]).toContain(
+        "If you fail before ack, the batch must be delivered again",
+      );
       expect(lines[0]).toContain(
         "never call it more than once per step boundary",
       );

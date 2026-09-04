@@ -487,6 +487,7 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
     "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
       " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call mcp__cukii-broker__broker_inbox." +
       " If it returns messages, that array is the complete accumulated FIFO batch: read and address every item together as immediate input before resuming your task." +
+      " Only after the entire batch is understood and every referenced @file is accessible, call mcp__cukii-broker__broker_inbox_ack with all exact messageId values; this acknowledgement is what permits read receipts and deduplication. If you fail before ack, the batch must be delivered again." +
       " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
       " Empty results are normal; never call it more than once per step boundary." +
       " Classify every incoming item by intent: an addition or correction augments the current task, so continue the same work after incorporating it; an explicit replacement switches the task; only an explicit stop/cancel request ends the run without another tool call. A normal follow-up must never stop the run." +
