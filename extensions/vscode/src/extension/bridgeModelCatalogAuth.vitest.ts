@@ -68,9 +68,12 @@ describe("account-scoped model discovery", () => {
       ensureCursorCatalogVariants("cursor:restored-family"),
     ).rejects.toThrow(/no longer exposes/);
 
+    // Through the command processor, like grok and kimi: the real Cursor CLI
+    // resolves to a .cmd, which Node refuses to spawn directly since the
+    // batch-injection fix.
     expect(execFile).toHaveBeenCalledWith(
-      "agent",
-      ["models"],
+      process.env.ComSpec ?? "cmd.exe",
+      ["/d", "/c", "agent", "models"],
       expect.objectContaining({ windowsHide: true }),
       expect.any(Function),
     );
