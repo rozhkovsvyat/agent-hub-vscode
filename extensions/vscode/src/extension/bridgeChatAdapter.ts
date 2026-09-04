@@ -22,6 +22,7 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
+import { ensureBrokerVendorIntegration } from "./bridgeVendorMcp";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import { hasImageAttachment, materializeBridgeImages } from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
@@ -460,11 +461,18 @@ export function isClaudeNativeModel(model: BrokerModel): boolean {
 
 /**
  * Live pull-steering through the broker inbox needs the cukii-broker MCP
- * server loaded by the vendor CLI. R1: qwen carries it in its user config;
- * codex/grok/cursor get spawn-time injection in R2, kimi has no MCP surface.
+ * server loaded by the vendor CLI. Every MCP-capable vendor is wired by
+ * `ensureBrokerVendorIntegration` at spawn time; kimi has no MCP surface,
+ * claude has the stronger native stdin channel.
  */
 export function supportsBrokerInbox(model: BrokerModel): boolean {
-  return brokerVendorForModel(model) === "qwen";
+  const vendor = brokerVendorForModel(model);
+  return (
+    vendor === "qwen" ||
+    vendor === "codex" ||
+    vendor === "grok" ||
+    vendor === "cursor"
+  );
 }
 
 /** Broker-prompt lines for inbox pull-steering; empty where unsupported. */
@@ -473,8 +481,12 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
   return [
     "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
       " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call mcp__cukii-broker__broker_inbox." +
-      " If it returns messages, treat them as immediate user instructions: address them first, then resume your task taking them into account." +
-      " Empty results are normal; never call it more than once per step boundary.",
+      " If it returns messages, treat them as immediate input: address them first, then resume your task taking them into account." +
+      " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
+      " Empty results are normal; never call it more than once per step boundary." +
+      " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue.",
+    "To coordinate with parallel sessions, the same channel is bidirectional: mcp__cukii-broker__broker_sessions lists live sessions and mcp__cukii-broker__broker_send writes one of them a message" +
+      " (status or fact requests, handoff notes). Sending new work to a worker is still broker_delegate, never broker_send.",
   ];
 }
 
@@ -1561,6 +1573,10 @@ async function* launchBridgeChild(options: {
     // right before the spawn so Sol/Terra never exit with code 1 at startup.
     ensureCodexModelsCacheCompatible();
   }
+  // Idempotent, fail-open wiring of the broker inbox channel for the vendor
+  // about to spawn (MCP registration + strict delivery gate). Failures only
+  // degrade to the turn-end drain fallback.
+  ensureBrokerVendorIntegration(brokerModel);
   const child = childProcess.spawn(command.program, command.args, {
     cwd,
     env: {
