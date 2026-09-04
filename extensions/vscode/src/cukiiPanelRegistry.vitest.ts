@@ -9,6 +9,7 @@ import {
   listOpenCukiiPanels,
   syncCukiiPanelTitleForSession,
 } from "./cukiiPanelRegistry";
+import { CukiiSessionAttentionRegistry } from "./extension/cukiiSessionAttention";
 
 describe("CukiiPanelRegistry", () => {
   it("keeps unlimited blank panels independent", () => {
@@ -57,6 +58,7 @@ describe("CukiiPanelRegistry", () => {
         panelId: "saved",
         sessionId: "session-1",
         title: "Ship sidebar parity",
+        attention: "none",
       },
     ]);
   });
@@ -78,8 +80,42 @@ describe("CukiiPanelRegistry", () => {
     registry.updateTitle("new-title", "New Session");
 
     expect(listOpenCukiiPanels(registry)).toEqual([
-      { panelId: "cukii-title", sessionId: "s1", title: "Cukii" },
-      { panelId: "new-title", sessionId: "s2", title: "New Session" },
+      {
+        panelId: "cukii-title",
+        sessionId: "s1",
+        title: "Cukii",
+        attention: "none",
+      },
+      {
+        panelId: "new-title",
+        sessionId: "s2",
+        title: "New Session",
+        attention: "none",
+      },
+    ]);
+  });
+
+  it("reports each panel's own attention, so the drawer can count Active", () => {
+    const registry = new CukiiPanelRegistry<{ panel: { title: string } }>();
+    registry.add("a", { panel: { title: "Streaming run" } }, "s1");
+    registry.updateTitle("a", "Streaming run");
+    registry.add("b", { panel: { title: "Waiting on me" } }, "s2");
+    registry.updateTitle("b", "Waiting on me");
+    registry.add("c", { panel: { title: "Idle" } }, "s3");
+    registry.updateTitle("c", "Idle");
+
+    const attention = new CukiiSessionAttentionRegistry();
+    attention.runStarted("s1", "run-1");
+    attention.promptsChanged("s2", ["req-1"]);
+
+    expect(
+      listOpenCukiiPanels(registry, (sessionId) =>
+        attention.attentionFor(sessionId),
+      ).map((panel) => [panel.sessionId, panel.attention]),
+    ).toEqual([
+      ["s1", "streaming"],
+      ["s2", "pending-permission"],
+      ["s3", "none"],
     ]);
   });
 

@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { renderWithProviders } from "../../util/test/render";
 import CukiiSessionNavigator, {
   formatSessionAge,
 } from "./CukiiSessionNavigator";
+import type { CukiiOpenChatPanel } from "core/protocol/ideWebview";
 import type { SessionGroupState } from "./sessionGroups";
 
 describe("CukiiSessionNavigator Claude parity", () => {
@@ -708,6 +709,399 @@ describe("CukiiSessionNavigator Claude parity", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CukiiSessionNavigator Claude filter parity", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    // Filters persist by design; without this, a selection made here would
+    // silently narrow the sessions the next describe block renders.
+    localStorage.removeItem("cukii.session-filters.v1");
+  });
+
+  // Four sessions covering every cell of Claude's Status x Tabs matrix:
+  //   needs-input/open, working/open, done/open (attention "ready"),
+  //   archived-ish closed session with no panel at all.
+  const SESSIONS = [
+    {
+      sessionId: "waiting",
+      title: "Waiting session",
+      dateCreated: "2026-08-27T12:00:00Z",
+      workspaceDirectory: "D:/Brain/vault",
+    },
+    {
+      sessionId: "running",
+      title: "Running session",
+      dateCreated: "2026-08-27T12:00:00Z",
+      workspaceDirectory: "D:/Brain/vault",
+    },
+    {
+      sessionId: "done",
+      title: "Done session",
+      dateCreated: "2026-08-27T12:00:00Z",
+      workspaceDirectory: "D:/Brain/vault",
+    },
+    {
+      sessionId: "closed",
+      title: "Closed session",
+      dateCreated: "2026-08-27T12:00:00Z",
+      workspaceDirectory: "D:/Brain/vault",
+    },
+  ];
+  // Typed against the wire contract on purpose: an attention value the host
+  // cannot actually send must fail here, not silently widen to string.
+  const PANELS: CukiiOpenChatPanel[] = [
+    {
+      panelId: "p-waiting",
+      sessionId: "waiting",
+      title: "Waiting session",
+      attention: "pending-permission",
+    },
+    {
+      panelId: "p-running",
+      sessionId: "running",
+      title: "Running session",
+      attention: "streaming",
+    },
+    {
+      panelId: "p-done",
+      sessionId: "done",
+      title: "Done session",
+      attention: "none",
+    },
+  ];
+
+  const mountNavigator = async (settledTitle = "Waiting session") => {
+    const messenger = new MockIdeMessenger();
+    messenger.responses["history/list"] = SESSIONS;
+    messenger.responses["cukii/listOpenChatPanels"] = PANELS;
+    const rendered = await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+    await screen.findByTitle(settledTitle);
+    return rendered;
+  };
+
+  const rowTitles = () =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>(".cukii-session-button"),
+    ).map((node) => node.title);
+
+  const openFilterMenu = () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Filter by status/ }));
+    return screen.getByRole("menu", { name: "Filter by status" });
+  };
+
+  it("shows the lightning Active chip counting needs-input plus working", async () => {
+    const { container } = await mountNavigator();
+
+    const chip = screen.getByRole("button", { name: "Active · 2" });
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    expect(chip).toHaveAttribute(
+      "title",
+      "Show only sessions that need input or are working",
+    );
+    // Claude's own bolt glyph (heroicons 16/solid BoltIcon), not a text emoji.
+    expect(chip.querySelector("svg")?.getAttribute("viewBox")).toBe(
+      "0 0 16 16",
+    );
+    expect(container.textContent).toContain("Active · 2");
+  });
+
+  it("filters to needs-input plus working when the Active chip is pressed", async () => {
+    await mountNavigator();
+    expect(rowTitles()).toHaveLength(4);
+
+    const chip = screen.getByRole("button", { name: "Active · 2" });
+    fireEvent.click(chip);
+    expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
+    expect(screen.getByRole("button", { name: "Active · 2" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // Clicking the pressed chip clears it again.
+    fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+    expect(rowTitles()).toHaveLength(4);
+  });
+
+  it("uses Claude's exact status and tabs menu, labels, counts and order", async () => {
+    await mountNavigator();
+    const menu = openFilterMenu();
+
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitemcheckbox"]')).map(
+        (item) => item.textContent,
+      ),
+    ).toEqual([
+      "Needs input · 1",
+      "Working · 1",
+      "Completed · 2",
+      "Open · 3",
+      "Closed · 1",
+    ]);
+    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
+    expect(
+      Array.from(menu.querySelectorAll('[role="presentation"]')).map(
+        (item) => item.textContent,
+      ),
+    ).toEqual(["Status", "Tabs"]);
+    for (const item of menu.querySelectorAll('[role="menuitemcheckbox"]')) {
+      expect(item).toHaveAttribute("aria-checked", "false");
+    }
+  });
+
+  it("cuts the list down to each picked status and stays open across picks", async () => {
+    await mountNavigator();
+    openFilterMenu();
+
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    );
+    expect(rowTitles()).toEqual(["Waiting session"]);
+    // keepOpen: the menu survives a pick so a second one needs no re-open.
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("button", { name: "Filter by status, 1 selected" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Working/ }));
+    expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
+
+    // Toggling a picked status off restores it.
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    );
+    expect(rowTitles()).toEqual(["Running session"]);
+
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /^Completed/ }),
+    );
+    expect(rowTitles()).toEqual([
+      "Running session",
+      "Done session",
+      "Closed session",
+    ]);
+  });
+
+  it("cuts the list to Open and to Closed tabs independently of status", async () => {
+    await mountNavigator();
+    openFilterMenu();
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
+    expect(rowTitles()).toEqual([
+      "Waiting session",
+      "Running session",
+      "Done session",
+    ]);
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Closed/ }));
+    // Both picked means "no constraint", exactly as Claude's empty-set rule.
+    expect(rowTitles()).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
+    expect(rowTitles()).toEqual(["Closed session"]);
+    expect(
+      screen.getByRole("button", { name: "Filter by status, 1 selected" }),
+    ).toBeInTheDocument();
+  });
+
+  it("intersects status and tabs picks instead of unioning them", async () => {
+    await mountNavigator();
+    openFilterMenu();
+
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /^Completed/ }),
+    );
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
+    expect(rowTitles()).toEqual(["Done session"]);
+    expect(
+      screen.getByRole("button", { name: "Filter by status, 2 selected" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stacks the filters on top of the substring search", async () => {
+    await mountNavigator();
+    openFilterMenu();
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /^Completed/ }),
+    );
+    expect(rowTitles()).toEqual(["Done session", "Closed session"]);
+
+    fireEvent.change(screen.getByLabelText("Search sessions"), {
+      target: { value: "closed" },
+    });
+    expect(rowTitles()).toEqual(["Closed session"]);
+
+    // The search alone would keep "Closed session"; the status alone would
+    // keep both. Only the conjunction produces this pair of results.
+    fireEvent.change(screen.getByLabelText("Search sessions"), {
+      target: { value: "session" },
+    });
+    expect(rowTitles()).toEqual(["Done session", "Closed session"]);
+  });
+
+  it("keeps counts on the unfiltered list so a chip never reports its own result", async () => {
+    await mountNavigator();
+    fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+    expect(rowTitles()).toHaveLength(2);
+    // Two rows visible, but the counts still describe all four sessions.
+    expect(
+      screen.getByRole("button", { name: "Active · 2" }),
+    ).toBeInTheDocument();
+    openFilterMenu();
+    expect(
+      Array.from(
+        screen
+          .getByRole("menu", { name: "Filter by status" })
+          .querySelectorAll('[role="menuitemcheckbox"]'),
+      ).map((item) => item.textContent),
+    ).toEqual([
+      "Needs input · 1",
+      "Working · 1",
+      "Completed · 2",
+      "Open · 3",
+      "Closed · 1",
+    ]);
+  });
+
+  it("opens and closes the filter menu on real pointer clicks of the funnel", async () => {
+    // fireEvent.click skips mousedown; a real click fires it first, so the
+    // outside-click guard and the button's own toggle must not fight.
+    const { user } = await mountNavigator();
+    const funnel = screen.getByRole("button", { name: "Filter by status" });
+    expect(funnel).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(funnel);
+    expect(
+      screen.getByRole("menu", { name: "Filter by status" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
+    // keepOpen: picking an entry leaves the menu up.
+    expect(
+      screen.getByRole("menu", { name: "Filter by status" }),
+    ).toBeInTheDocument();
+    expect(rowTitles()).toEqual([
+      "Waiting session",
+      "Running session",
+      "Done session",
+    ]);
+
+    await user.click(
+      screen.getByRole("button", { name: "Filter by status, 1 selected" }),
+    );
+    expect(
+      screen.queryByRole("menu", { name: "Filter by status" }),
+    ).not.toBeInTheDocument();
+    // Closing the menu keeps the pick; only the entry itself clears it.
+    expect(rowTitles()).toHaveLength(3);
+  });
+
+  it("says so instead of going blank when a filter cuts everything", async () => {
+    await mountNavigator();
+    openFilterMenu();
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    );
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Closed/ }));
+
+    expect(rowTitles()).toEqual([]);
+    expect(screen.getByTestId("cukii-session-empty-state")).toHaveTextContent(
+      "No sessions found",
+    );
+  });
+
+  it("persists the filter selection across a remount", async () => {
+    const first = await mountNavigator();
+    fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+    openFilterMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Working/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
+    expect(rowTitles()).toEqual(["Running session"]);
+
+    expect(
+      JSON.parse(localStorage.getItem("cukii.session-filters.v1") ?? "{}"),
+    ).toEqual({
+      activeOnly: true,
+      statuses: ["working"],
+      tabStates: ["open"],
+    });
+
+    first.unmount();
+    // The restored filters hide every other row, so the remounted navigator
+    // settles on the one session that survives them.
+    await mountNavigator("Running session");
+    expect(rowTitles()).toEqual(["Running session"]);
+    expect(screen.getByRole("button", { name: "Active · 2" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "Filter by status, 2 selected" }),
+    ).toBeInTheDocument();
+  });
+
+  it("survives a localStorage that throws on read and on write", async () => {
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation((key: string) => {
+        if (key === "cukii.session-filters.v1") throw new Error("denied");
+        return null;
+      });
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation((key: string) => {
+        if (key === "cukii.session-filters.v1") throw new Error("denied");
+      });
+    try {
+      await mountNavigator();
+      expect(rowTitles()).toHaveLength(4);
+      fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+      expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
+  });
+
+  // Negative control. Nothing here asserts an incidental detail: every
+  // expectation below is false the moment the status predicate stops
+  // discriminating (returns true for everything, or ignores its input).
+  it("NEGATIVE CONTROL: a predicate that stops discriminating breaks this", async () => {
+    await mountNavigator();
+    const all = [
+      "Waiting session",
+      "Running session",
+      "Done session",
+      "Closed session",
+    ];
+    expect(rowTitles()).toEqual(all);
+
+    openFilterMenu();
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    );
+    // A predicate stuck on "true" would leave all four here.
+    expect(rowTitles()).toEqual(["Waiting session"]);
+    expect(rowTitles()).not.toEqual(all);
+
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /Needs input/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: /^Completed/ }),
+    );
+    // A predicate stuck on "false" would leave none here, and one that
+    // ignores the picked set would not move the result between the two picks.
+    expect(rowTitles()).toEqual(["Done session", "Closed session"]);
+    expect(rowTitles()).not.toEqual(all);
+    expect(rowTitles()).not.toEqual([]);
   });
 });
 

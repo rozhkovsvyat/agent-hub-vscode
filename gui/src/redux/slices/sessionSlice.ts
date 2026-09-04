@@ -35,6 +35,7 @@ import {
 import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { findUriInDirs, getUriPathBasename } from "core/util/uri";
 import type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerModelScope,
@@ -106,7 +107,8 @@ export function handleToolCallsInMessage(
     // Update the message's toolCalls array to reflect the processed tool calls
     // We can safely cast because we verified the role above
     const curMessage = lastItem.message as
-      AssistantChatMessage | ThinkingChatMessage;
+      | AssistantChatMessage
+      | ThinkingChatMessage;
     curMessage.toolCalls = lastItem.toolCallStates.map(
       (state) => state.toolCall,
     );
@@ -222,7 +224,12 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   messageReceipt?: {
     sentAt: number;
     status:
-      "queued" | "delivered" | "read" | "deferred" | "failed" | "cancelled";
+      | "queued"
+      | "delivered"
+      | "read"
+      | "deferred"
+      | "failed"
+      | "cancelled";
   };
   isSteer?: boolean;
   /**
@@ -233,7 +240,12 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
    * transport frame may revive it.
    */
   steerStatus?:
-    "queued" | "delivered" | "read" | "deferred" | "failed" | "cancelled";
+    | "queued"
+    | "delivered"
+    | "read"
+    | "deferred"
+    | "failed"
+    | "cancelled";
   /** Epoch milliseconds captured at send time and persisted with history. */
   steerSentAt?: number;
   /** Epoch milliseconds of the assistant placeholder; drives the capsule
@@ -347,6 +359,12 @@ type SessionState = {
   brokerSubagent?: BrokerSubagent;
   brokerEffort: BrokerEffort;
   brokerSpeed: BrokerSpeed;
+  /**
+   * Share of the context window at which the thread auto-compacts.
+   * Owned by the plugin so every vendor reads one value instead of restating
+   * the rule in its own agent contract.
+   */
+  brokerAutocompact: BrokerAutocompact;
   /** Model picker scope; preserved per session so Best/All survives reloads. */
   brokerModelScope: BrokerModelScope;
   brokerPermissionMode: CukiiPermissionMode;
@@ -366,6 +384,7 @@ type SessionState = {
 };
 
 export type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerModelScope,
@@ -396,6 +415,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   brokerSubagent: "auto",
   brokerEffort: "high",
   brokerSpeed: "standard",
+  brokerAutocompact: "50",
   brokerModelScope: "best",
   brokerPermissionMode: "bypass",
   pendingClaudePermissions: {},
@@ -1065,6 +1085,7 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = payload.brokerSubagent ?? "auto";
         state.brokerEffort = payload.brokerEffort ?? "high";
         state.brokerSpeed = payload.brokerSpeed ?? "standard";
+        state.brokerAutocompact = payload.brokerAutocompact ?? "50";
         state.brokerModelScope =
           payload.brokerModelScope === "all" ? "all" : "best";
         state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
@@ -1090,6 +1111,7 @@ export const sessionSlice = createSlice({
         state.brokerSubagent = "auto";
         state.brokerEffort = "high";
         state.brokerSpeed = "standard";
+        state.brokerAutocompact = "50";
         state.brokerModelScope = "best";
         state.brokerPermissionMode = "bypass";
         state.hasReasoningEnabled = true;
@@ -1400,6 +1422,9 @@ export const sessionSlice = createSlice({
     setBrokerSpeed: (state, action: PayloadAction<BrokerSpeed>) => {
       state.brokerSpeed = action.payload;
     },
+    setBrokerAutocompact: (state, action: PayloadAction<BrokerAutocompact>) => {
+      state.brokerAutocompact = action.payload;
+    },
     setBrokerModelScope: (state, action: PayloadAction<BrokerModelScope>) => {
       state.brokerModelScope = action.payload;
     },
@@ -1562,6 +1587,7 @@ export const {
   setBrokerSubagent,
   setBrokerEffort,
   setBrokerSpeed,
+  setBrokerAutocompact,
   setBrokerModelScope,
   setIsSessionLoading,
   setIsSessionMetadataLoading,

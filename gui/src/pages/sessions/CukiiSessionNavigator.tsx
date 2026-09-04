@@ -1,4 +1,10 @@
 import {
+  BoltIcon,
+  CheckIcon,
+  ChevronDownIcon as ChevronDownIcon16,
+  FunnelIcon,
+} from "@heroicons/react/16/solid";
+import {
   ChevronDownIcon,
   MagnifyingGlassIcon,
   PencilIcon,
@@ -27,6 +33,22 @@ import {
   mergeSessionsWithOpenPanels,
   type CukiiNavigatorSession,
 } from "./cukiiSessionMerge";
+import {
+  countSelectedSessionFilters,
+  countSessionFilters,
+  matchesSessionFilters,
+  readSessionFilters,
+  SESSION_STATUS_LABELS,
+  SESSION_STATUS_SECTION,
+  SESSION_STATUSES,
+  SESSION_TAB_STATE_LABELS,
+  SESSION_TAB_STATES,
+  SESSION_TABS_SECTION,
+  toggleStatusFilter,
+  toggleTabStateFilter,
+  writeSessionFilters,
+  type SessionFilters,
+} from "./cukiiSessionFilters";
 
 const STORAGE_KEY = "cukii.session-groups.v1";
 // Survives remounts: once this window has touched the journal-side copy,
@@ -66,10 +88,29 @@ const Tools = styled.div`
   gap: 8px;
   margin: 10px 12px 8px;
 `;
+/* 1:1 with Claude's `.searchRow_OOQiHg`: one wrapping flex row so the filter
+   chips drop below the input instead of squeezing it in a narrow sidebar. */
+const SearchRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 2px;
+  margin: 10px 12px 8px;
+`;
+/* `.searchBox_OOQiHg` */
 const SearchWrap = styled.label`
   position: relative;
-  display: block;
+  display: flex;
+  flex: auto;
+  min-width: min(150px, 100%);
+`;
+/* `.searchRowActions_OOQiHg` */
+const SearchRowActions = styled.div`
+  display: flex;
   min-width: 0;
+  flex: 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
 `;
 const SearchIcon = styled(MagnifyingGlassIcon)`
   position: absolute;
@@ -120,6 +161,52 @@ const SmallButton = styled.button`
     background: var(--vscode-list-hoverBackground);
   }
 `;
+/* 1:1 with Claude's `.newGroupButton_OOQiHg`, the shared geometry of every
+   control in the search row (Active chip, status funnel, New group). */
+const ToolButton = styled.button`
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9em;
+  &:hover,
+  &:focus {
+    outline: none;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+  }
+`;
+/* `.filterToggleOn_OOQiHg` */
+const ToolButtonOn = styled(ToolButton)`
+  &,
+  &:hover,
+  &:focus {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+  }
+  &:focus-visible {
+    outline: 1px solid var(--vscode-list-activeSelectionForeground);
+    outline-offset: -1px;
+  }
+`;
+/* `.activeFilterToggle_OOQiHg`: the count must not jitter as it changes. */
+const activeChipStyle = { fontVariantNumeric: "tabular-nums" } as const;
+/* `.statusFilterMenuButton_OOQiHg` */
+const funnelButtonStyle = { gap: 2, paddingRight: 6 } as const;
+/* `.newGroupIcon_OOQiHg` */
+const toolIconStyle = { width: 16, height: 16, flexShrink: 0 } as const;
+/* `.statusFilterCaret_OOQiHg` */
+const caretIconStyle = { width: 14, height: 14, flexShrink: 0 } as const;
 const GroupHeader = styled.button`
   display: grid;
   width: calc(100% - 16px);
@@ -241,37 +328,70 @@ const RowAction = styled.button`
     color: var(--vscode-foreground);
   }
 `;
+/* 1:1 with Claude's `.contextMenu__ozcbg`, down to the token each of its own
+   `--app-*` aliases resolves to. One shell for all three menus here, as in the
+   reference client: the status filter menu must not be dressed differently
+   from the session and group menus it opens beside. */
+const CONTEXT_MENU_MAX_WIDTH = 260;
 const ContextMenu = styled.div`
   position: fixed;
   z-index: 10000;
-  width: min(240px, calc(100vw - 16px));
-  padding: 4px 0;
-  border: 1px solid var(--vscode-widget-border);
-  border-radius: 7px;
+  min-width: 140px;
+  width: max-content;
+  max-width: min(${CONTEXT_MENU_MAX_WIDTH}px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 0;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 6px;
   background: var(--vscode-menu-background);
   color: var(--vscode-menu-foreground);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 `;
+/* `.menuItem__ozcbg`: one line, clipped rather than wrapped, and selection
+   wears the menu tokens — never the list ones. */
 const MenuItem = styled.button`
   display: block;
   width: 100%;
-  min-height: 31px;
-  padding: 6px 16px;
+  max-width: ${CONTEXT_MENU_MAX_WIDTH}px;
+  overflow: hidden;
+  padding: 6px 12px;
   border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--vscode-menu-foreground);
+  white-space: nowrap;
+  text-overflow: ellipsis;
   cursor: pointer;
   font: inherit;
   text-align: left;
   &:hover,
   &:focus-visible {
-    background: var(--vscode-list-hoverBackground);
+    background: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground);
   }
 `;
+/* `.separator__ozcbg` */
 const MenuSeparator = styled.div`
   height: 1px;
-  margin: 4px 0;
-  background: var(--vscode-menu-separatorBackground);
+  margin: 2px 0;
+  background: var(--vscode-menu-separatorBackground, var(--vscode-menu-border));
+`;
+/* 1:1 with Claude's `.sectionHeader_G_S7FQ` used by its context menu. */
+const MenuSectionHeader = styled.div`
+  padding: 4px 12px;
+  color: var(--vscode-foreground);
+  opacity: 0.5;
+  font-size: 0.9em;
+`;
+/* `.menuItemCheck__ozcbg`: a fixed gutter so ticked and unticked rows align. */
+const MenuCheck = styled.span`
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: -3px;
 `;
 
 export function formatSessionAge(date: string) {
@@ -294,6 +414,7 @@ type ContextPosition = {
 type ContextState =
   | ({ kind: "session"; session: CukiiNavigatorSession } & ContextPosition)
   | ({ kind: "group"; groupId: string; groupName: string } & ContextPosition)
+  | ({ kind: "statusFilter" } & ContextPosition)
   | null;
 
 export default function CukiiSessionNavigator() {
@@ -301,6 +422,7 @@ export default function CukiiSessionNavigator() {
   const [sessions, setSessions] = useState<BaseSessionMetadata[]>([]);
   const [openPanels, setOpenPanels] = useState<CukiiOpenChatPanel[]>([]);
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<SessionFilters>(readSessionFilters);
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [assignNewGroupTo, setAssignNewGroupTo] = useState<string | null>(null);
@@ -313,6 +435,7 @@ export default function CukiiSessionNavigator() {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
+  const funnelRef = useRef<HTMLButtonElement | null>(null);
   const renameSavingRef = useRef(false);
   const loadSequenceRef = useRef(0);
   const renameSequenceRef = useRef(0);
@@ -551,7 +674,11 @@ export default function CukiiSessionNavigator() {
   useEffect(() => {
     if (!context) return;
     const close = (event: MouseEvent) => {
-      if (!contextRef.current?.contains(event.target as Node)) setContext(null);
+      const target = event.target as Node;
+      // The funnel button is its own toggle: letting the outside-click guard
+      // close the menu first would make the button re-open it on click.
+      if (funnelRef.current?.contains(target)) return;
+      if (!contextRef.current?.contains(target)) setContext(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setContext(null);
@@ -568,17 +695,57 @@ export default function CukiiSessionNavigator() {
     () => mergeSessionsWithOpenPanels(sessions, openPanels),
     [openPanels, sessions],
   );
-  const visible = useMemo(
+  // Counts are taken over the whole list, before search and before the
+  // filters themselves, exactly as Claude does (`HG0(l5.map(a1))`).
+  const filterCounts = useMemo(
+    () =>
+      countSessionFilters(
+        combinedSessions.map((session) => ({
+          attention: session.attention,
+          isOpen: session.openPanelId !== undefined,
+        })),
+      ),
+    [combinedSessions],
+  );
+  const selectedFilterCount = countSelectedSessionFilters(filters);
+  const searched = useMemo(
     () =>
       combinedSessions.filter((session) =>
         session.title.toLowerCase().includes(query.trim().toLowerCase()),
       ),
     [combinedSessions, query],
   );
+  const visible = useMemo(
+    () =>
+      searched.filter((session) =>
+        matchesSessionFilters(filters, {
+          attention: session.attention,
+          isOpen: session.openPanelId !== undefined,
+        }),
+      ),
+    [searched, filters],
+  );
   const buckets = useMemo(
     () => groupSessions(visible, groups),
     [visible, groups],
   );
+  useEffect(() => {
+    writeSessionFilters(filters);
+  }, [filters]);
+  const toggleActiveOnly = () =>
+    setFilters((state) => ({ ...state, activeOnly: !state.activeOnly }));
+  const openStatusFilterMenu = () => {
+    if (context?.kind === "statusFilter") {
+      setContext(null);
+      return;
+    }
+    const anchor = funnelRef.current?.getBoundingClientRect();
+    setContext({
+      kind: "statusFilter",
+      x: anchor?.left ?? 0,
+      y: (anchor?.bottom ?? 0) + 2,
+    });
+  };
 
   const assignSession = (sessionId: string, groupId: string) => {
     setGroups((state) => ({
@@ -795,7 +962,7 @@ export default function CukiiSessionNavigator() {
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    const menuWidth = Math.min(240, window.innerWidth - 16);
+    const menuWidth = Math.min(CONTEXT_MENU_MAX_WIDTH, window.innerWidth - 16);
     const x = Math.max(
       8,
       Math.min(event.clientX, window.innerWidth - menuWidth - 8),
@@ -813,7 +980,7 @@ export default function CukiiSessionNavigator() {
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    const menuWidth = Math.min(240, window.innerWidth - 16);
+    const menuWidth = Math.min(CONTEXT_MENU_MAX_WIDTH, window.innerWidth - 16);
     const x = Math.max(
       8,
       Math.min(event.clientX, window.innerWidth - menuWidth - 8),
@@ -842,7 +1009,7 @@ export default function CukiiSessionNavigator() {
       >
         <PlusIcon width={16} height={16} /> New session
       </Action>
-      <Tools>
+      <SearchRow>
         <SearchWrap>
           <SearchIcon />
           <Search
@@ -852,13 +1019,53 @@ export default function CukiiSessionNavigator() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </SearchWrap>
-        <SmallButton
-          className="cukii-session-action"
-          onClick={() => setAddingGroup(true)}
-        >
-          <PlusIcon width={15} height={15} /> New group
-        </SmallButton>
-      </Tools>
+        <SearchRowActions>
+          {(() => {
+            const ActiveChip = filters.activeOnly ? ToolButtonOn : ToolButton;
+            return (
+              <ActiveChip
+                className="cukii-session-action cukii-session-filter-active"
+                style={activeChipStyle}
+                title="Show only sessions that need input or are working"
+                aria-pressed={filters.activeOnly}
+                onClick={toggleActiveOnly}
+              >
+                <BoltIcon style={toolIconStyle} />
+                {`Active · ${filterCounts.active}`}
+              </ActiveChip>
+            );
+          })()}
+          {(() => {
+            const FunnelButton =
+              selectedFilterCount > 0 ? ToolButtonOn : ToolButton;
+            return (
+              <FunnelButton
+                ref={funnelRef}
+                className="cukii-session-action cukii-session-filter-status"
+                style={funnelButtonStyle}
+                title="Filter by status"
+                aria-label={
+                  selectedFilterCount > 0
+                    ? `Filter by status, ${selectedFilterCount} selected`
+                    : "Filter by status"
+                }
+                aria-haspopup="menu"
+                aria-expanded={context?.kind === "statusFilter"}
+                onClick={openStatusFilterMenu}
+              >
+                <FunnelIcon style={toolIconStyle} />
+                <ChevronDownIcon16 style={caretIconStyle} />
+              </FunnelButton>
+            );
+          })()}
+          <ToolButton
+            className="cukii-session-action"
+            onClick={() => setAddingGroup(true)}
+          >
+            <PlusIcon style={toolIconStyle} /> New group
+          </ToolButton>
+        </SearchRowActions>
+      </SearchRow>
       {addingGroup && (
         <Tools>
           <GroupInput
@@ -999,11 +1206,78 @@ export default function CukiiSessionNavigator() {
         );
       })}
       {visible.length === 0 && (
+        // Claude's `.emptyState_OOQiHg` / "No sessions found": the same line
+        // covers an empty history and a search or filter that matched nothing,
+        // so a filtered-out list never reads as a broken sidebar.
         <div
-          style={{ padding: 12, color: "var(--vscode-descriptionForeground)" }}
+          data-testid="cukii-session-empty-state"
+          style={{
+            padding: 20,
+            color: "var(--vscode-descriptionForeground)",
+            opacity: 0.7,
+            fontSize: "0.9em",
+            textAlign: "center",
+          }}
         >
           No sessions found
         </div>
+      )}
+      {context?.kind === "statusFilter" && (
+        // 1:1 with Claude's `BG0`: a "Status" section of three checkboxes,
+        // then a separator and a "Tabs" section of two, each labelled
+        // "<name> · <count>" and each staying open on click (`keepOpen:!0`).
+        <ContextMenu
+          ref={contextRef}
+          role="menu"
+          aria-label="Filter by status"
+          style={{ left: context.x, top: context.y }}
+        >
+          <MenuSectionHeader role="presentation">
+            {SESSION_STATUS_SECTION}
+          </MenuSectionHeader>
+          {SESSION_STATUSES.map((status) => {
+            const selected = filters.statuses.has(status);
+            return (
+              <MenuItem
+                key={status}
+                className="cukii-session-menu-button"
+                role="menuitemcheckbox"
+                aria-checked={selected}
+                onClick={() =>
+                  setFilters((state) => toggleStatusFilter(state, status))
+                }
+              >
+                <MenuCheck aria-hidden="true">
+                  {selected && <CheckIcon style={toolIconStyle} />}
+                </MenuCheck>
+                {`${SESSION_STATUS_LABELS[status]} · ${filterCounts.byStatus[status]}`}
+              </MenuItem>
+            );
+          })}
+          <MenuSeparator role="separator" />
+          <MenuSectionHeader role="presentation">
+            {SESSION_TABS_SECTION}
+          </MenuSectionHeader>
+          {SESSION_TAB_STATES.map((tabState) => {
+            const selected = filters.tabStates.has(tabState);
+            return (
+              <MenuItem
+                key={tabState}
+                className="cukii-session-menu-button"
+                role="menuitemcheckbox"
+                aria-checked={selected}
+                onClick={() =>
+                  setFilters((state) => toggleTabStateFilter(state, tabState))
+                }
+              >
+                <MenuCheck aria-hidden="true">
+                  {selected && <CheckIcon style={toolIconStyle} />}
+                </MenuCheck>
+                {`${SESSION_TAB_STATE_LABELS[tabState]} · ${filterCounts.byTabState[tabState]}`}
+              </MenuItem>
+            );
+          })}
+        </ContextMenu>
       )}
       {context?.kind === "session" && (
         <ContextMenu

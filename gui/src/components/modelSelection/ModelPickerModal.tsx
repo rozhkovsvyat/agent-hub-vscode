@@ -28,6 +28,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     useAppSelector((state) => state.session.brokerModel) ?? "qwen-3-8-max";
   const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
   const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
+  const brokerAutocompact = useAppSelector(
+    (state) => state.session.brokerAutocompact,
+  );
   const thinkingEnabled = useAppSelector(
     (state) => state.session.hasReasoningEnabled,
   );
@@ -94,6 +97,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
         brokerSubagent: nextSubagent,
         brokerEffort,
         brokerSpeed,
+        brokerAutocompact,
         thinkingEnabled,
         brokerPermissionMode: "bypass",
         mode: "broker",
@@ -218,6 +222,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
                 brokerSubagent: "auto",
                 brokerEffort: nextEffort,
                 brokerSpeed,
+                brokerAutocompact,
                 thinkingEnabled,
                 brokerPermissionMode,
                 mode: "broker",

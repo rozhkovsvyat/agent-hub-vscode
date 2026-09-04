@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import {
   newSession,
+  setBrokerAutocompact,
+  setBrokerEffort,
+  setBrokerModel,
   setBrokerPermissionMode,
+  setBrokerSpeed,
 } from "../../redux/slices/sessionSlice";
 import { setupStore } from "../../redux/store";
 import { renderWithProviders } from "../../util/test/render";
@@ -113,7 +117,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     const pill = await getElementByTestId("cukii-model-pill");
     expect(pill).toHaveAttribute(
       "aria-label",
-      "Selected model: Qwen 3.8 Max",
+      "Selected model: Qwen 3.8 Max, High 50%",
     );
     // Claude pill geometry: ~26px capsule with 16px horizontal padding.
     expect(pill.className).toContain("h-[26px]");
@@ -129,6 +133,90 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByText("Select a model")).toBeDefined();
     const bestToggle = await getElementByTestId("cukii-scope-toggle-best");
     expect(bestToggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("composes the pill as model, effort, Fast, autocompact — model plain, the rest muted", async () => {
+    const store = setupStore({ ideMessenger: new MockIdeMessenger() });
+    await act(async () => {
+      store.dispatch(setBrokerModel("codex-5-6-sol"));
+      store.dispatch(setBrokerEffort("max"));
+      store.dispatch(setBrokerSpeed("fast"));
+      store.dispatch(setBrokerAutocompact("75"));
+    });
+    await renderWithProviders(<InputToolbar {...props} />, { store });
+
+    const pill = await getElementByTestId("cukii-model-pill");
+    const detail = await getElementByTestId("cukii-model-pill-detail");
+
+    // Exactly the owner's example shape: "GPT-5.6 Sol Max Fast 75%".
+    expect(pill.textContent).toBe("GPT-5.6 SolMax Fast 75%");
+    expect(detail.textContent).toBe("Max Fast 75%");
+    // The model name keeps the foreground colour; the detail is muted.
+    expect(detail.className).toContain("--vscode-descriptionForeground");
+    const name = pill.firstElementChild as HTMLElement;
+    expect(name.textContent).toBe("GPT-5.6 Sol");
+    expect(name.className).not.toContain("descriptionForeground");
+  });
+
+  it("drops Fast when the route has no accelerated tier and drops autocompact at Default", async () => {
+    const store = setupStore({ ideMessenger: new MockIdeMessenger() });
+    await act(async () => {
+      // Kimi has no native accelerated tier, so "fast" must not be advertised
+      // even when the stored preference says fast.
+      store.dispatch(setBrokerModel("kimi-k3"));
+      store.dispatch(setBrokerEffort("medium"));
+      store.dispatch(setBrokerSpeed("fast"));
+      store.dispatch(setBrokerAutocompact("default"));
+    });
+    await renderWithProviders(<InputToolbar {...props} />, { store });
+
+    const detail = await getElementByTestId("cukii-model-pill-detail");
+    expect(detail.textContent).toBe("Medium");
+    expect(detail.textContent).not.toContain("Fast");
+    expect(detail.textContent).not.toContain("Default");
+  });
+
+  it("offers Autocompact directly above Effort in the slash menu and stores the pick", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      store,
+    });
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    const menu = await getElementByTestId("cukii-slash-menu");
+
+    const autocompact = await getElementByTestId("cukii-autocompact-slider");
+    const effort = await getElementByTestId("cukii-effort-slider");
+    expect(menu.contains(autocompact)).toBe(true);
+    // Order matters: Autocompact sits above Effort, as asked.
+    expect(
+      autocompact.compareDocumentPosition(effort) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Four stops, default 50% — the middle-left notch.
+    expect(autocompact).toHaveAttribute("aria-valuemax", "3");
+    expect(autocompact).toHaveAttribute("aria-valuetext", "50%");
+
+    // jsdom reports a zero-width track, so a click lands on the first stop.
+    await user.click(autocompact);
+    expect(store.getState().session.brokerAutocompact).toBe("25");
+  });
+
+  it("aligns the effort and autocompact sliders with the plain toggles on the right edge", async () => {
+    const { user } = await renderWithProviders(<InputToolbar {...props} />);
+    await user.click(await getElementByTestId("broker-menu-button"));
+
+    // Both rows use the shared menu row, whose justify-between pins the control
+    // to the right edge; the slider itself must carry no extra side margin or
+    // it reads as misaligned against the toggle tracks.
+    for (const id of ["cukii-autocompact-slider", "cukii-effort-slider"]) {
+      const slider = await getElementByTestId(id);
+      const row = slider.parentElement as HTMLElement;
+      expect(row.className).toContain("justify-between");
+      expect(slider.className).toContain("cukii-effort-slider");
+    }
   });
 
   it("opens the Cukii permission popover with exact copy and cycles with Shift+Tab", async () => {

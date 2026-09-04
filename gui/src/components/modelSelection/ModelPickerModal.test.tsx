@@ -39,6 +39,7 @@ describe("ModelPickerModal", () => {
       brokerSubagent: "auto",
       brokerEffort: "high",
       brokerSpeed: "standard",
+      brokerAutocompact: "50",
       thinkingEnabled: true,
       brokerPermissionMode: "bypass",
       mode: "broker",
@@ -168,11 +169,15 @@ describe("ModelPickerModal", () => {
     });
 
     const headings = Array.from(
-      document.querySelectorAll(".cukii-model-picker section > div:first-child"),
+      document.querySelectorAll(
+        ".cukii-model-picker section > div:first-child",
+      ),
     ).map((node) => node.textContent);
-    expect(headings).toEqual([...headings].sort((a, b) =>
-      (a ?? "").localeCompare(b ?? "", "en", { sensitivity: "base" }),
-    ));
+    expect(headings).toEqual(
+      [...headings].sort((a, b) =>
+        (a ?? "").localeCompare(b ?? "", "en", { sensitivity: "base" }),
+      ),
+    );
     expect(headings).toContain("MoonshotAI");
   });
 });

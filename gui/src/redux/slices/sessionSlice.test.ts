@@ -92,6 +92,7 @@ describe("sessionSlice streamUpdate", () => {
     mode: "chat" as const,
     brokerEffort: "high" as const,
     brokerSpeed: "standard" as const,
+    brokerAutocompact: "50" as const,
     brokerModelScope: "best" as const,
     brokerPermissionMode: "manual" as const,
     hasReasoningEnabled: true,

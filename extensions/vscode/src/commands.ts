@@ -47,6 +47,7 @@ import {
   syncCukiiPanelTitleForSession,
   type CukiiPanelHost,
 } from "./cukiiPanelRegistry";
+import { cukiiSessionAttention } from "./extension/cukiiSessionAttention";
 import { processDiff } from "./diff/processDiff";
 import { VerticalDiffManager } from "./diff/vertical/manager";
 import EditDecorationManager from "./quickEdit/EditDecorationManager";
@@ -162,8 +163,13 @@ function attachFullScreenPanel(
 
   panel.onDidDispose(
     () => {
+      // Closing the tab kills the run and denies the prompts, but neither
+      // teardown is guaranteed to report back; drop the session's attention
+      // here so a closed tab can never leave the drawer counting it as Active.
+      const closedSessionId = fullScreenPanels.get(panelId)?.sessionId;
       protocol.dispose();
       fullScreenPanels.remove(panelId);
+      if (closedSessionId) cukiiSessionAttention.forgetSession(closedSessionId);
       notifyPanelList();
     },
     null,
@@ -189,7 +195,8 @@ export function registerFullScreenPanelSerializer(
       async deserializeWebviewPanel(
         panel: vscode.WebviewPanel,
         state:
-          { sessionId?: string; title?: string; panelId?: string } | undefined,
+          | { sessionId?: string; title?: string; panelId?: string }
+          | undefined,
       ) {
         panel.webview.options = { enableScripts: true };
         // A restored tab keeps its own panel id so its persisted GUI state

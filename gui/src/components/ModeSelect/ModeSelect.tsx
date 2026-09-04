@@ -27,6 +27,9 @@ export function ModeSelect() {
   );
   const brokerEffort = useAppSelector((store) => store.session.brokerEffort);
   const brokerSpeed = useAppSelector((store) => store.session.brokerSpeed);
+  const brokerAutocompact = useAppSelector(
+    (store) => store.session.brokerAutocompact,
+  );
   const thinkingEnabled = useAppSelector(
     (store) => store.session.hasReasoningEnabled,
   );
@@ -55,6 +58,7 @@ export function ModeSelect() {
         brokerSubagent: brokerSubagent ?? "auto",
         brokerEffort,
         brokerSpeed,
+        brokerAutocompact,
         thinkingEnabled,
         mode: nextMode,
       });
@@ -63,6 +67,7 @@ export function ModeSelect() {
       brokerEffort,
       brokerModel,
       brokerSpeed,
+      brokerAutocompact,
       brokerSubagent,
       dispatch,
       ideMessenger,

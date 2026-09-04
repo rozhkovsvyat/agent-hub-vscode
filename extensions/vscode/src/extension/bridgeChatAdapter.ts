@@ -11,6 +11,7 @@ import {
 } from "core/cukiiAlibabaCatalog";
 import { brokerVendorForModel } from "core/cukiiPermissionModes";
 import type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerSpeed,
@@ -122,6 +123,8 @@ export type ClaudePermissionTransport = {
   panelId: string;
   sessionId: string;
   onRequest: (request: ClaudePermissionRequest) => Promise<void> | void;
+  /** Every change to the set of prompts still awaiting the user's answer. */
+  onPendingChanged?: (requestIds: string[]) => void;
   onBrokerCreated?: (broker: ClaudePermissionBroker) => void;
   onBrokerDisposed?: (broker: ClaudePermissionBroker) => void;
   steering?: BridgeSteeringController;
@@ -1356,6 +1359,7 @@ export async function* streamBridgeChat(
     brokerSubagent: BrokerSubagent;
     brokerEffort: BrokerEffort;
     brokerSpeed: BrokerSpeed;
+    brokerAutocompact?: BrokerAutocompact;
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
@@ -1377,6 +1381,7 @@ async function* streamBridgeChatWithSteer(
     brokerSubagent: BrokerSubagent;
     brokerEffort: BrokerEffort;
     brokerSpeed: BrokerSpeed;
+    brokerAutocompact?: BrokerAutocompact;
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
@@ -1405,6 +1410,7 @@ async function* streamBridgeChatWithSteer(
     args.brokerEffort,
     args.brokerSpeed,
     args.thinkingEnabled,
+    args.brokerAutocompact,
   );
   const prompt = buildPrompt(
     materializeBridgeImages(args.messages),
@@ -1460,6 +1466,7 @@ async function* streamBridgeChatWithSteer(
       sessionId: args.sessionId || permissionTransport.sessionId,
       mode: args.brokerPermissionMode,
       onRequest: permissionTransport.onRequest,
+      onPendingChanged: permissionTransport.onPendingChanged,
     });
     await permissionBroker.start();
     attachClaudePermissionTransport(route, permissionBroker);

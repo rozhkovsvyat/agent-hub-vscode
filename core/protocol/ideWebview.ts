@@ -23,15 +23,34 @@ export type BrokerModel = string;
 export type BrokerSubagent = "auto" | BrokerModel;
 
 export type BrokerEffort =
-  "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra";
 
 export type BrokerSpeed = "standard" | "fast";
+
+/**
+ * Share of the context window at which the thread auto-compacts.
+ * "default" leaves the decision to the host/agent instead of forcing a share —
+ * it is the only value the pill does not advertise.
+ *
+ * Owned by the plugin, not by the agent instructions: the rule used to live in
+ * the agent contract, where every vendor had to restate it and they drifted.
+ */
+export type BrokerAutocompact = "25" | "50" | "75" | "default";
 
 /** Picker scope: curated live routes only ("best") or the full catalog. */
 export type BrokerModelScope = "best" | "all";
 
 export type CukiiPermissionMode =
-  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
+  | "manual"
+  | "editAutomatically"
+  | "plan"
+  | "auto"
+  | "bypass";
 
 export type BrokerVendorAuthAction = "install" | "login" | "logout";
 
@@ -62,10 +81,23 @@ export type BrokerVendorAuthStatus = {
   actions: BrokerVendorAuthAction[];
 };
 
+/**
+ * What the host currently owes the user for one session.
+ *
+ * The sidebar and the panel that owns a session are two different webviews, so
+ * the sidebar cannot read the panel's own store. Only the extension host sees
+ * both the live bridge run and the outstanding permission prompts, so it is the
+ * host that classifies a session — anything else would make the drawer's
+ * "Active" count a guess.
+ */
+export type CukiiSessionAttention = "none" | "streaming" | "pending-permission";
+
 export type CukiiOpenChatPanel = {
   panelId: string;
   sessionId?: string;
   title: string;
+  /** Absent from an older host; the sidebar then reads the session as idle. */
+  attention?: CukiiSessionAttention;
 };
 
 export type CukiiSteerReceipt = {
@@ -145,6 +177,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerSubagent: BrokerSubagent;
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
+      brokerAutocompact: BrokerAutocompact;
       thinkingEnabled: boolean;
       brokerPermissionMode?: CukiiPermissionMode;
       mode?: "chat" | "plan" | "agent" | "broker";
@@ -156,6 +189,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerSubagent: BrokerSubagent;
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
+      brokerAutocompact: BrokerAutocompact;
       thinkingEnabled: boolean;
       brokerPermissionMode?: CukiiPermissionMode;
       mode?: "chat" | "plan" | "agent" | "broker";
@@ -223,6 +257,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerSubagent: BrokerSubagent;
       brokerEffort: BrokerEffort;
       brokerSpeed: BrokerSpeed;
+      brokerAutocompact: BrokerAutocompact;
       thinkingEnabled: boolean;
       brokerPermissionMode: CukiiPermissionMode;
       /**

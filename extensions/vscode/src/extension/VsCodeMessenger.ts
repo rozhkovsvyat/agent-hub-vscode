@@ -10,6 +10,7 @@ import { ToWebviewFromCoreProtocol } from "core/protocol/coreWebview";
 import { ToIdeFromWebviewOrCoreProtocol } from "core/protocol/ide";
 import { ToIdeFromCoreProtocol } from "core/protocol/ideCore";
 import type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerSpeed,
@@ -62,6 +63,8 @@ import {
   writeBridgeInboxMessage,
 } from "./bridgeInbox";
 import type { ClaudePermissionBroker } from "./claudePermissionBroker";
+import { exportAutocompactForHarness } from "./cukiiAutocompactExport";
+import { cukiiSessionAttention } from "./cukiiSessionAttention";
 import { listBrokerModelCatalog } from "./bridgeModelCatalog";
 import {
   cancelVoiceRecording,
@@ -71,7 +74,18 @@ import {
 } from "./voiceDictation";
 import { BridgeSteeringController } from "./bridgeSteer";
 import { BridgeRunCancellation } from "./bridgeRunCancellation";
-import { isBridgePidAlive } from "./bridgeChildLifecycle";
+import {
+  isBridgePidAlive,
+  manualTreeKillCommand,
+  retryBridgeTreeKill,
+} from "./bridgeChildLifecycle";
+import {
+  BRIDGE_CANCEL_COMPLETION_MS,
+  BRIDGE_CANCEL_RECEIPT_MS,
+  cancelDecision,
+  settledWithin,
+  TIMED_OUT,
+} from "./bridgeCancelBudget";
 import { retryBridgeTeardownOnDispose } from "./bridgeDisposeTeardown";
 import {
   BridgeRunCoordinator,
@@ -151,27 +165,55 @@ export class VsCodeMessenger {
     requestId: string,
   ): Promise<CukiiCancelReceipt> {
     const { alreadyCancelled, receipt } = run.cancellation.cancel();
-    const result = await receipt;
-    const completion = await run.done;
-    if (!completion.terminationVerified) {
+    // 🔴 Both of these used to be awaited without a bound, and that was the
+    // eternal loader. `receipt` resolves off `run.done`, and `run.done` is
+    // resolved in the stream generator's `finally` — which never runs while
+    // nobody is pulling the generator. So a run that stalled mid-stream made
+    // Stop hang forever, and every later submit found the slot still occupied:
+    // neither stopping nor restarting the session could recover it.
+    //
+    // Timing out here does not mean the vendor is alive. It means we stopped
+    // waiting for a promise that may never settle, and must now decide the
+    // question the hard way — by probing the pid.
+    const result = await settledWithin(receipt, BRIDGE_CANCEL_RECEIPT_MS);
+    const completion =
+      result === TIMED_OUT
+        ? TIMED_OUT
+        : await settledWithin(run.done, BRIDGE_CANCEL_COMPLETION_MS);
+    const {
+      interrupted,
+      terminationVerified,
+      probePid: childPid,
+    } = cancelDecision({
+      receipt: result,
+      completion,
+      runChildPid: run.childPid,
+    });
+    if (!terminationVerified) {
       // The teardown budget expired without a confirmed death, but the tree may
       // have died right after it. Re-probe liveness before declaring the slot
       // unrecoverable: a verified-dead occupant must free the slot instead of
       // blocking every later submit until the panel is closed.
-      if (
-        completion.childPid === undefined ||
-        (await isBridgePidAlive(completion.childPid))
-      ) {
-        throw new Error(
-          `Native bridge run ${run.runId} did not terminate; replacement is blocked`,
-        );
+      //
+      // A run that never reached spawn owns no process, so there is nothing to
+      // outlive it and nothing to justify holding the slot.
+      if (childPid !== undefined && (await isBridgePidAlive(childPid))) {
+        // Last resort before refusing: one forced tree kill, then verify.
+        // Without it a wedged tree kept the panel unusable until it was closed.
+        const reaped = await retryBridgeTreeKill(childPid);
+        if (!reaped) {
+          throw new Error(
+            `Native bridge run ${run.runId} did not terminate; replacement is blocked. ` +
+              `Reap it with: ${manualTreeKillCommand(childPid)}`,
+          );
+        }
       }
       this.bridgeRuns.release(protocol, run);
       return {
         requestId,
         sessionId: run.sessionId,
         status: alreadyCancelled ? "already-cancelled" : "cancelled",
-        interrupted: result.interrupted,
+        interrupted,
         postMortem: true,
       };
     }
@@ -179,7 +221,7 @@ export class VsCodeMessenger {
       requestId,
       sessionId: run.sessionId,
       status: alreadyCancelled ? "already-cancelled" : "cancelled",
-      interrupted: result.interrupted,
+      interrupted,
     };
   }
 
@@ -194,6 +236,27 @@ export class VsCodeMessenger {
     } catch {
       await retryBridgeTeardownOnDispose(run);
     }
+  }
+
+  /**
+   * Publish the autocompact share where the machine's rotation hooks can read
+   * it, and say so out loud when that fails.
+   *
+   * A dropped write is not harmless: the hooks keep using the previous
+   * threshold while the UI shows the new one, and nothing in the window hints
+   * at the disagreement. The export retries on its own; this is the last word.
+   */
+  private publishAutocompact(value: BrokerAutocompact): boolean {
+    return exportAutocompactForHarness(
+      value,
+      undefined,
+      (error) =>
+        void vscode.window.showWarningMessage(
+          `Cukii could not publish the Autocompact setting to the machine's rotation hooks; they keep the previous threshold. ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+    );
   }
 
   private panelIdForProtocol(protocol: VsCodeWebviewProtocol): string {
@@ -420,6 +483,17 @@ export class VsCodeMessenger {
     });
 
     this.onWebview("cukii/listOpenChatPanels", () => listOpenCukiiPanels());
+
+    // A session that starts streaming or raises a permission prompt changes
+    // the drawer's Active count and status chips without any panel list
+    // change, so the sidebar has to be told; the registry only fires on a
+    // transition, never once per stream frame.
+    cukiiSessionAttention.onChange(() => {
+      this.webviewProtocol.send(
+        "cukii/openChatPanelsChanged",
+        listOpenCukiiPanels(),
+      );
+    });
 
     this.onWebview("cukii/renameSession", async ({ data }) =>
       this.enqueueSessionRename(data.sessionId, async () => {
@@ -709,6 +783,14 @@ export class VsCodeMessenger {
         msg.data.agent,
       );
     });
+    // Published once as the messenger is built, so the harness has a value from
+    // the first window rather than only after the owner first moves the toggle.
+    this.publishAutocompact(
+      this.context.globalState.get<BrokerAutocompact>(
+        "cukii.brokerAutocompact",
+        "50",
+      ),
+    );
     this.onWebview("cukii/getBrokerPreferences", () => ({
       brokerModel: this.context.globalState.get<BrokerModel>(
         "cukii.brokerModel",
@@ -725,6 +807,10 @@ export class VsCodeMessenger {
       brokerSpeed: this.context.globalState.get<BrokerSpeed>(
         "cukii.brokerSpeed",
         "standard",
+      ),
+      brokerAutocompact: this.context.globalState.get<BrokerAutocompact>(
+        "cukii.brokerAutocompact",
+        "50",
       ),
       thinkingEnabled: this.context.globalState.get<boolean>(
         "cukii.thinkingEnabled",
@@ -767,6 +853,13 @@ export class VsCodeMessenger {
           "cukii.brokerSpeed",
           msg.data.brokerSpeed,
         ),
+        this.context.globalState.update(
+          "cukii.brokerAutocompact",
+          msg.data.brokerAutocompact,
+        ),
+        // Also published to disk: the machine's rotation hooks are separate
+        // PowerShell processes and cannot read globalState.
+        Promise.resolve(this.publishAutocompact(msg.data.brokerAutocompact)),
         this.context.globalState.update(
           "cukii.thinkingEnabled",
           msg.data.thinkingEnabled,
@@ -936,10 +1029,20 @@ export class VsCodeMessenger {
       this.panelSessionIds.set(protocol, msg.data.sessionId);
       if (isRealPanelSessionTransition(previous, msg.data.sessionId)) {
         await disposePermissionBrokersFor(protocol);
+        // The panel moved on; whatever the old session was waiting for is no
+        // longer this tab's business and must not keep it in Active.
+        if (previous) cukiiSessionAttention.forgetSession(previous);
       }
     });
     this.onWebview("cukii/streamBridgeChat", (msg) => {
       const protocol = sourceProtocol(msg, this.webviewProtocol);
+      // Autocompact is kept per session, but the harness file is one per
+      // machine. Republish here so it always describes the session that is
+      // actually running: without this, two tabs on different shares left the
+      // hooks on whichever tab last touched its preferences.
+      if (msg.data.brokerAutocompact) {
+        this.publishAutocompact(msg.data.brokerAutocompact);
+      }
       const controller = new AbortController();
       let resolveDone!: (result: CukiiBridgeRunCompletion) => void;
       const done = new Promise<CukiiBridgeRunCompletion>((resolve) => {
@@ -984,6 +1087,8 @@ export class VsCodeMessenger {
         onRequest: async (request) => {
           protocol.send("cukii/claudePermissionRequested", request);
         },
+        onPendingChanged: (requestIds) =>
+          cukiiSessionAttention.promptsChanged(msg.data.sessionId, requestIds),
         onBrokerCreated: (broker) => this.addPermissionBroker(protocol, broker),
         onBrokerDisposed: (broker) =>
           this.removePermissionBroker(protocol, broker),
@@ -1035,9 +1140,14 @@ export class VsCodeMessenger {
             runId: run.runId,
           };
         }
+        // From here the session is visibly working in the sidebar drawer. The
+        // marker is dropped in `finally`, so an abort or a thrown stream frees
+        // it just as a clean end does.
+        cukiiSessionAttention.runStarted(run.sessionId, run.runId);
         try {
           return yield* stream;
         } finally {
+          cukiiSessionAttention.runEnded(run.sessionId, run.runId);
           resolveDone({ terminationVerified, childPid });
           if (terminationVerified) {
             messenger.bridgeRuns.release(protocol, run);

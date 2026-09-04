@@ -111,10 +111,7 @@ export function isSameTerminalError(
  */
 function raceNextOrCancellation<T>(
   nextPromise: Promise<
-    IteratorResult<
-      T,
-      PromptLog | CukiiBridgeStreamDisposition | undefined
-    >
+    IteratorResult<T, PromptLog | CukiiBridgeStreamDisposition | undefined>
   >,
   getState: () => RootState,
 ): Promise<RaceResult<T>> {
@@ -182,11 +179,12 @@ function settleObservedToolCalls(
 
 export const streamBrokerBridgeInput = createAsyncThunk<
   void,
-  {
-    /** @deprecated Compatibility with callers built before batch delivery. */
-    queuedFollowUpMessageId?: string;
-    queuedFollowUpMessageIds?: string[];
-  } | undefined,
+  | {
+      /** @deprecated Compatibility with callers built before batch delivery. */
+      queuedFollowUpMessageId?: string;
+      queuedFollowUpMessageIds?: string[];
+    }
+  | undefined,
   ThunkApiType
 >(
   "chat/streamBrokerBridgeInput",
@@ -208,6 +206,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
     const brokerEffort = state.session.brokerEffort;
     const brokerSpeed = state.session.brokerSpeed;
+    const brokerAutocompact = state.session.brokerAutocompact;
     const thinkingEnabled = state.session.hasReasoningEnabled;
     const streamAborter = state.session.streamAborter;
     const initialUserReceiptId = queuedFollowUpMessageId
@@ -338,6 +337,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           brokerSubagent,
           brokerEffort,
           brokerSpeed,
+          brokerAutocompact,
           thinkingEnabled,
           brokerPermissionMode: state.session.brokerPermissionMode,
           queuedFollowUpMessageId,

@@ -46,6 +46,7 @@ const persistedSessionFields = [
   "brokerSubagent",
   "brokerEffort",
   "brokerSpeed",
+  "brokerAutocompact",
   "hasReasoningEnabled",
 
   // higher risk to persist

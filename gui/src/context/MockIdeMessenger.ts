@@ -42,6 +42,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     brokerSubagent: "auto",
     brokerEffort: "high",
     brokerSpeed: "standard",
+    brokerAutocompact: "50",
     thinkingEnabled: true,
     brokerPermissionMode: "bypass",
   },

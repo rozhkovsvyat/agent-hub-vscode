@@ -2,8 +2,14 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 
+// Line endings are normalised so a multi-line contract assertion means the same
+// thing on a CRLF checkout as on an LF one: the working tree here is CRLF, and
+// a `\n` literal in an expectation would otherwise silently never match.
 const source = (relativePath: string) =>
-  readFileSync(join(process.cwd(), "src", relativePath), "utf8");
+  readFileSync(join(process.cwd(), "src", relativePath), "utf8").replace(
+    /\r\n/g,
+    "\n",
+  );
 
 function mountContractRules(pattern: RegExp) {
   const style = document.createElement("style");
@@ -283,10 +289,12 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
-  it("mounts the model pill, Best/All scope toggle and permissions effort row", () => {
+  it("mounts the model pill, Best/All scope toggle and the two shared slider rows", () => {
     const toolbar = source("components/mainInput/InputToolbar.tsx");
     const modal = source("components/modelSelection/ModelPickerModal.tsx");
-    const permissions = source("components/mainInput/PermissionModeControl.tsx");
+    const permissions = source(
+      "components/mainInput/PermissionModeControl.tsx",
+    );
     const slice = source("redux/slices/sessionSlice.ts");
 
     // Pill: Claude-style capsule next to the "/" control showing the current
@@ -310,17 +318,173 @@ describe("Cukii GUI contracts", () => {
     expect(slice).toContain("brokerModelScope: BrokerModelScope;");
     expect(slice).toContain('brokerModelScope: "best",');
 
-    // Effort: ONE shared slider row component rendered in the "/" menu, the
-    // model picker footer and the permissions popover — never a second
-    // from-scratch control.
+    // Effort: ONE shared slider row component rendered in the "/" menu and the
+    // model picker footer — never a second from-scratch control. It is
+    // deliberately absent from the permissions popover: the value already has
+    // two homes plus the pill, and a third copy is how the rows drifted apart.
     const effortRow = source("components/cukii/CukiiEffortRow.tsx");
-    expect(effortRow).toContain('data-testid="cukii-effort-slider"');
+    expect(effortRow).toContain('testId="cukii-effort-slider"');
     expect(effortRow).toContain("normalizeEffortForModel");
     expect(effortRow).toContain("effortLevelsForModel");
     expect(toolbar).toContain("<CukiiEffortRow");
     expect(modal).toContain("<CukiiEffortRow");
-    expect(permissions).toContain("<CukiiEffortRow");
-    expect(permissions).toContain('data-testid="cukii-permission-effort-row"');
+    expect(permissions).not.toContain("CukiiEffortRow");
+    expect(permissions).not.toContain("cukii-permission-effort-row");
+
+    // Autocompact rides the same slider primitive as Effort — same track, same
+    // thumb, same keyboard contract — so the two rows in the "/" menu cannot
+    // drift apart. Both delegate to CukiiLevelSlider rather than re-rolling one.
+    const autocompactRow = source("components/cukii/CukiiAutocompactRow.tsx");
+    const levelSlider = source("components/cukii/CukiiLevelSlider.tsx");
+    expect(effortRow).toContain("CukiiLevelSlider");
+    expect(autocompactRow).toContain("CukiiLevelSlider");
+    expect(autocompactRow).toContain('testId="cukii-autocompact-slider"');
+    // Four stops, in the owner's order, with "default" as the right-hand stop.
+    expect(
+      autocompactRow
+        .slice(
+          autocompactRow.indexOf("AUTOCOMPACT_LEVELS"),
+          autocompactRow.indexOf("AUTOCOMPACT_LABELS"),
+        )
+        .match(/"(?:25|50|75|default)"/g),
+    ).toEqual(['"25"', '"50"', '"75"', '"default"']);
+    expect(levelSlider).toContain("data-testid={testId}");
+    expect(levelSlider).toContain('role="slider"');
+    expect(levelSlider).toContain("aria-valuetext");
+    expect(slice).toContain("brokerAutocompact: BrokerAutocompact;");
+    expect(slice).toContain('brokerAutocompact: "50",');
+
+    // The "/" menu order is Autocompact above Effort, and both rows share the
+    // toggle rows' right edge — the slider track carries no side margin of its
+    // own, which is what used to push Effort left of every other control.
+    expect(toolbar.indexOf("<CukiiAutocompactRow")).toBeGreaterThanOrEqual(0);
+    expect(toolbar.indexOf("<CukiiAutocompactRow")).toBeLessThan(
+      toolbar.indexOf("<CukiiEffortRow"),
+    );
+    const css = source("index.css");
+    const sliderStart = css.indexOf(".cukii-effort-slider {");
+    expect(sliderStart).toBeGreaterThanOrEqual(0);
+    const sliderContract = css.slice(
+      sliderStart,
+      css.indexOf("\n}", sliderStart),
+    );
+    expect(sliderContract).toContain("margin: 0;");
+    expect(sliderContract).not.toContain("margin: 0 5px;");
+
+    // The slider wears the reference client's own values, resolved through the
+    // tokens its `--app-*` aliases point at (`P1HaRA` in claude-parity-spec.md):
+    // 76×18 track on the input border, fill on inputOption-activeBorder, 4px
+    // notches at 40% of the description foreground, 14px thumb inset 2px, 150ms.
+    // Hard-coded hexes here left the control blue-on-grey in every theme.
+    const sliderBlock = css.slice(
+      sliderStart,
+      css.indexOf(".cukii-input-footer", sliderStart),
+    );
+    expect(sliderBlock).toContain("width: 76px;");
+    expect(sliderBlock).toContain("height: 18px;");
+    expect(sliderBlock).toContain("border-radius: 9px;");
+    expect(sliderBlock).toContain("--vscode-inlineChatInput-border");
+    expect(sliderBlock).toContain("--vscode-inputOption-activeBorder");
+    expect(sliderBlock).toContain(
+      "--vscode-descriptionForeground, #cccccc) 40%",
+    );
+    expect(sliderBlock).toContain("transition: width 150ms;");
+    expect(sliderBlock).toContain("transition: left 150ms;");
+    expect(sliderBlock).toContain("box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);");
+    // Thumb geometry: 14px inset 2px inside an 18px track.
+    expect(sliderBlock).toMatch(
+      /\.cukii-effort-thumb \{[\s\S]*?top: 2px;[\s\S]*?width: 14px;[\s\S]*?height: 14px;/,
+    );
+    // No stray hard-coded control colours left in the block.
+    expect(sliderBlock).not.toContain("#007acc;");
+    expect(sliderBlock).not.toContain("rgba(204, 204, 204, 0.2)");
+    expect(sliderBlock).not.toContain("#b180d7");
+    // The top stop recolours the fill, which is what reads at this size.
+    expect(css).toContain(".cukii-effort-fill-ultra");
+    expect(effortRow).toContain("cukii-effort-fill-ultra");
+
+    // Pill composition: model in the foreground colour, then the dimmed detail
+    // run "<Effort> [Fast] [Autocompact unless default]" in that exact order.
+    expect(toolbar).toContain('data-testid="cukii-model-pill-detail"');
+    expect(toolbar).toContain("text-[var(--vscode-descriptionForeground)]");
+    const detailStart = toolbar.indexOf("const pillDetail");
+    expect(detailStart).toBeGreaterThanOrEqual(0);
+    const detail = toolbar.slice(detailStart, detailStart + 400);
+    expect(detail.indexOf("EFFORT_LABELS")).toBeLessThan(
+      detail.indexOf('"Fast"'),
+    );
+    expect(detail.indexOf('"Fast"')).toBeLessThan(
+      detail.indexOf("autocompactPillLabel"),
+    );
+    expect(detail).toMatch(/\.filter\(Boolean\)\s*\.join\(" "\)/);
+    // "default" contributes nothing to the pill.
+    expect(autocompactRow).toContain(
+      'value === AUTOCOMPACT_DEFAULT ? "" : AUTOCOMPACT_LABELS[value]',
+    );
+  });
+
+  it("dresses the session drawer's filter row in Claude's own tokens", () => {
+    // Values read out of the shipped reference bundle
+    // (anthropic.claude-code-2.1.260): `.newGroupButton_OOQiHg`,
+    // `.filterToggleOn_OOQiHg`, `.activeFilterToggle_OOQiHg`,
+    // `.statusFilterMenuButton_OOQiHg`, `.statusFilterCaret_OOQiHg`, with each
+    // of its `--app-*` aliases resolved to the `--vscode-*` token it maps to.
+    const navigator = source("pages/sessions/CukiiSessionNavigator.tsx");
+
+    // Shared chip geometry.
+    expect(navigator).toContain("gap: 4px;");
+    expect(navigator).toContain("margin-left: 4px;");
+    expect(navigator).toContain("padding: 4px 8px;");
+    expect(navigator).toContain("font-size: 0.9em;");
+    expect(navigator).toContain("color: var(--vscode-descriptionForeground);");
+    expect(navigator).toContain(
+      "background: var(--vscode-toolbar-hoverBackground);",
+    );
+
+    // "On" state uses the list-active pair, and only here.
+    expect(navigator).toContain(
+      "background: var(--vscode-list-activeSelectionBackground);",
+    );
+    expect(navigator).toContain(
+      "color: var(--vscode-list-activeSelectionForeground);",
+    );
+    expect(navigator).toContain(
+      "outline: 1px solid var(--vscode-list-activeSelectionForeground);",
+    );
+    expect(navigator).toContain("outline-offset: -1px;");
+
+    // The count must not jitter, the caret is 14px and the icons are 16px.
+    expect(navigator).toContain('fontVariantNumeric: "tabular-nums"');
+    expect(navigator).toContain("{ gap: 2, paddingRight: 6 }");
+    expect(navigator).toContain("{ width: 16, height: 16, flexShrink: 0 }");
+    expect(navigator).toContain("{ width: 14, height: 14, flexShrink: 0 }");
+
+    // Labels: "Active · N" on the chip, "<name> · N" on every menu entry.
+    expect(navigator).toContain("`Active · ${filterCounts.active}`");
+    expect(navigator).toContain(
+      "`${SESSION_STATUS_LABELS[status]} · ${filterCounts.byStatus[status]}`",
+    );
+    expect(navigator).toContain(
+      "`${SESSION_TAB_STATE_LABELS[tabState]} · ${filterCounts.byTabState[tabState]}`",
+    );
+
+    // Menus wear the menu tokens, never the list ones — one shell for the
+    // status filter, session and group menus, as in the reference client.
+    expect(navigator).toContain(
+      "background: var(--vscode-menu-selectionBackground);",
+    );
+    expect(navigator).toContain(
+      "color: var(--vscode-menu-selectionForeground);",
+    );
+    const menuItem = navigator.slice(
+      navigator.indexOf("const MenuItem = styled.button`"),
+      navigator.indexOf("const MenuSeparator"),
+    );
+    expect(menuItem).not.toContain("--vscode-list-hoverBackground");
+    expect(navigator).toContain("border-radius: 6px;");
+    expect(navigator).toContain("padding: 6px 12px;");
+    expect(navigator).toContain("padding: 4px 12px;");
+    expect(navigator).toContain("box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);");
   });
 
   it("uses the exact shared Claude toggle accent and transition", () => {

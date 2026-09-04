@@ -26,6 +26,7 @@ import { selectUseActiveFile } from "../../redux/selectors";
 import {
   newSession,
   reconcileRestoredPermissionMode,
+  setBrokerAutocompact,
   setBrokerEffort,
   setBrokerModel,
   switchBrokerModel,
@@ -36,6 +37,7 @@ import {
   setHasReasoningEnabled,
 } from "../../redux/slices/sessionSlice";
 import type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerModelScope,
@@ -53,6 +55,7 @@ import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
 import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
 import {
   displayModelLabel,
+  EFFORT_LABELS,
   modelInfo,
   normalizeEffortForModel,
   supportsNativeSpeed,
@@ -61,6 +64,10 @@ import {
 import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
 import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
+import {
+  autocompactPillLabel,
+  CukiiAutocompactRow,
+} from "../cukii/CukiiAutocompactRow";
 import { PermissionModeControl } from "./PermissionModeControl";
 
 export interface ToolbarOptions {
@@ -149,6 +156,9 @@ function InputToolbar(props: InputToolbarProps) {
   );
   const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
   const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
+  const brokerAutocompact = useAppSelector(
+    (state) => state.session.brokerAutocompact,
+  );
   const brokerModelScope = useAppSelector(
     (state) => state.session.brokerModelScope ?? "best",
   );
@@ -199,6 +209,7 @@ function InputToolbar(props: InputToolbarProps) {
     nextEffort: BrokerEffort = brokerEffort,
     nextSpeed: BrokerSpeed = brokerSpeed,
     nextThinking: boolean = hasReasoningEnabled,
+    nextAutocompact: BrokerAutocompact = brokerAutocompact,
     nextPermissionMode: CukiiPermissionMode = brokerPermissionMode,
   ) => {
     const resolvedEffort = normalizeEffortForModel(nextModel, nextEffort);
@@ -232,6 +243,7 @@ function InputToolbar(props: InputToolbarProps) {
     dispatch(setBrokerSubagent(nextSubagent));
     dispatch(setBrokerEffort(resolvedEffort));
     dispatch(setBrokerSpeed(nextSpeed));
+    dispatch(setBrokerAutocompact(nextAutocompact));
     dispatch(setHasReasoningEnabled(nextThinking));
     dispatch(setBrokerPermissionMode(resolvedPermissionMode));
     // VS Code webview state is scoped to this panel/tab. It deliberately
@@ -244,6 +256,7 @@ function InputToolbar(props: InputToolbarProps) {
         brokerSubagent: nextSubagent,
         brokerEffort: resolvedEffort,
         brokerSpeed: nextSpeed,
+        brokerAutocompact: nextAutocompact,
         brokerModelScope,
         thinkingEnabled: nextThinking,
         brokerPermissionMode: resolvedPermissionMode,
@@ -255,6 +268,7 @@ function InputToolbar(props: InputToolbarProps) {
         brokerSubagent: nextSubagent,
         brokerEffort: resolvedEffort,
         brokerSpeed: nextSpeed,
+        brokerAutocompact: nextAutocompact,
         thinkingEnabled: nextThinking,
         brokerPermissionMode: resolvedPermissionMode,
         mode: "broker",
@@ -274,6 +288,7 @@ function InputToolbar(props: InputToolbarProps) {
           brokerSubagent: BrokerSubagent;
           brokerEffort: BrokerEffort;
           brokerSpeed: BrokerSpeed;
+          brokerAutocompact: BrokerAutocompact;
           brokerModelScope: BrokerModelScope;
           thinkingEnabled: boolean;
           brokerPermissionMode: CukiiPermissionMode;
@@ -285,6 +300,9 @@ function InputToolbar(props: InputToolbarProps) {
     if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
     if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
     if (draft.brokerSpeed) dispatch(setBrokerSpeed(draft.brokerSpeed));
+    if (draft.brokerAutocompact) {
+      dispatch(setBrokerAutocompact(draft.brokerAutocompact));
+    }
     if (draft.brokerModelScope === "all" || draft.brokerModelScope === "best") {
       dispatch(setBrokerModelScope(draft.brokerModelScope));
     }
@@ -317,6 +335,20 @@ function InputToolbar(props: InputToolbarProps) {
     : "Opus 5 (1M)";
   const nativeFastAvailable = supportsNativeSpeed(currentModel);
   const nativeThinkingAvailable = supportsNativeThinking(currentModel);
+  /**
+   * Everything the pill says after the model name: effort, then "Fast" only
+   * when the route actually has an accelerated tier and it is on, then the
+   * autocompact share unless it is left at Default. Absent facts are dropped
+   * rather than rendered as placeholders — a pill reading "Fast" when fast is
+   * unavailable would be a lie, and "Default" adds nothing.
+   */
+  const pillDetail = [
+    EFFORT_LABELS[normalizeEffortForModel(currentModel, brokerEffort)],
+    nativeFastAvailable && brokerSpeed === "fast" ? "Fast" : "",
+    autocompactPillLabel(brokerAutocompact),
+  ]
+    .filter(Boolean)
+    .join(" ");
   const smallFont = useFontSize(-2);
   const showAction = (label: string) =>
     label.toLowerCase().includes(actionQuery.trim().toLowerCase());
@@ -518,6 +550,22 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
+                    {showAction("Autocompact") && (
+                      <CukiiAutocompactRow
+                        className={menuItemClass}
+                        autocompact={brokerAutocompact}
+                        onAutocompactChange={(nextAutocompact) =>
+                          updateBrokerPreferences(
+                            currentModel,
+                            brokerSubagent ?? "auto",
+                            brokerEffort,
+                            brokerSpeed,
+                            undefined,
+                            nextAutocompact,
+                          )
+                        }
+                      />
+                    )}
                     {showAction("Effort") && (
                       <CukiiEffortRow
                         className={menuItemClass}
@@ -625,12 +673,23 @@ function InputToolbar(props: InputToolbarProps) {
             <button
               type="button"
               data-testid="cukii-model-pill"
-              className="cukii-model-pill flex h-[26px] max-w-[190px] shrink-0 items-center rounded-full px-4 text-[13px] text-[var(--vscode-foreground)]"
-              title={`Model: ${currentLabel}. Click to switch`}
-              aria-label={`Selected model: ${currentLabel}`}
+              className="cukii-model-pill flex h-[26px] max-w-[280px] shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] text-[var(--vscode-foreground)]"
+              title={`Model: ${currentLabel}${pillDetail ? ` · ${pillDetail}` : ""}. Click to switch`}
+              aria-label={`Selected model: ${currentLabel}${pillDetail ? `, ${pillDetail}` : ""}`}
               onClick={() => setModelPickerOpen(true)}
             >
-              <span className="truncate">{currentLabel}</span>
+              {/* Model name carries the foreground colour; everything after it
+                  is a detail and stays muted, the way the reference client
+                  renders its own pill. */}
+              <span className="min-w-0 truncate">{currentLabel}</span>
+              {pillDetail && (
+                <span
+                  data-testid="cukii-model-pill-detail"
+                  className="shrink-0 whitespace-nowrap text-[var(--vscode-descriptionForeground)]"
+                >
+                  {pillDetail}
+                </span>
+              )}
             </button>
           )}
 
@@ -650,9 +709,11 @@ function InputToolbar(props: InputToolbarProps) {
 
         <div className="flex shrink-0 items-center gap-2">
           {!isInEdit && (
+            /* Effort lives in the "/" menu and in the model pill; the copy that
+               used to sit inside this popover was a third place to change one
+               value and is gone. */
             <PermissionModeControl
               brokerModel={currentModel}
-              brokerEffort={brokerEffort}
               permissionMode={brokerPermissionMode}
               onChange={(mode) => {
                 updateBrokerPreferences(
@@ -661,15 +722,8 @@ function InputToolbar(props: InputToolbarProps) {
                   brokerEffort,
                   brokerSpeed,
                   hasReasoningEnabled,
+                  brokerAutocompact,
                   mode,
-                );
-              }}
-              onEffortChange={(effort) => {
-                updateBrokerPreferences(
-                  currentModel,
-                  brokerSubagent ?? "auto",
-                  effort,
-                  brokerSpeed,
                 );
               }}
             />
@@ -729,6 +783,7 @@ function InputToolbar(props: InputToolbarProps) {
               brokerEffort,
               brokerSpeed,
               hasReasoningEnabled,
+              brokerAutocompact,
               "bypass",
             )
           }

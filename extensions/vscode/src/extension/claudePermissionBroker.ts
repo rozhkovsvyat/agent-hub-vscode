@@ -31,6 +31,14 @@ export type ClaudePermissionBrokerOptions = {
   sessionId: string;
   mode: Exclude<CukiiPermissionMode, "bypass">;
   onRequest: (request: ClaudePermissionRequest) => Promise<void> | void;
+  /**
+   * The complete set of prompts still awaiting an answer, emitted after every
+   * change. Reported as a set rather than as open/close events because the
+   * broker also settles requests by itself — on its own timeout and on
+   * denyAll() — and a listener that saw only the openings would believe a
+   * session is still waiting on the user long after it stopped.
+   */
+  onPendingChanged?: (requestIds: string[]) => void;
   timeoutMs?: number;
   workerPath?: string;
   /** Test seam; production always uses the owner-only platform implementation. */
@@ -108,6 +116,11 @@ export class ClaudePermissionBroker {
   private authenticationConsumed = false;
   private authenticatedSocket?: net.Socket;
   constructor(private readonly options: ClaudePermissionBrokerOptions) {}
+
+  /** Single notification point for every mutation of `this.pending`. */
+  private notifyPending(): void {
+    this.options.onPendingChanged?.([...this.pending.keys()]);
+  }
 
   async start(): Promise<void> {
     if (this.server || this.disposed)
@@ -189,10 +202,12 @@ export class ClaudePermissionBroker {
     pending.settled = true;
     clearTimeout(pending.timer);
     this.pending.delete(response.requestId);
+    this.notifyPending();
     pending.resolve(response.decision);
     return true;
   }
   denyAll(): void {
+    const had = this.pending.size > 0;
     for (const request of this.pending.values())
       if (!request.settled) {
         request.settled = true;
@@ -200,6 +215,7 @@ export class ClaudePermissionBroker {
         request.resolve("deny");
       }
     this.pending.clear();
+    if (had) this.notifyPending();
   }
   async dispose(): Promise<void> {
     if (this.disposed) return;
@@ -347,10 +363,12 @@ export class ClaudePermissionBroker {
         timer: setTimeout(() => {
           this.pending.delete(requestId);
           pending.settled = true;
+          this.notifyPending();
           resolve("deny");
         }, this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       };
       this.pending.set(requestId, pending);
+      this.notifyPending();
       Promise.resolve(this.options.onRequest(request)).catch(() =>
         this.respond({ ...request, decision: "deny" }),
       );

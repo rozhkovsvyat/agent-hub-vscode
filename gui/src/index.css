@@ -474,12 +474,23 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   flex: 0 0 auto;
   width: 76px;
   height: 18px;
-  margin: 0 5px;
+  /* Flush with the toggle tracks in the same menu: .cukii-toggle-track carries
+     no margin, so the old `0 5px` pushed Effort 5px off the right edge and it
+     read as misaligned against every other row. */
+  margin: 0;
   padding: 0;
   overflow: hidden;
   border: 0;
   border-radius: 9px;
-  background: rgba(204, 204, 204, 0.2);
+  /* Track, fill, notch and thumb below are the reference client's own values,
+     resolved through the tokens its `--app-*` aliases point at (`P1HaRA` in
+     `claude-parity-spec.md`). They were hard-coded hexes here, so the control
+     stayed blue-on-grey in every theme while everything around it followed the
+     theme. */
+  background: var(
+    --vscode-inlineChatInput-border,
+    var(--vscode-input-border, var(--vscode-widget-border, #7f7f7f66))
+  );
   color: var(--vscode-foreground, #bfbfbf);
   cursor: pointer;
   box-shadow: none;
@@ -494,8 +505,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: #007acc;
-  transition: width 160ms cubic-bezier(0.2, 0, 0, 1);
+  background: var(--vscode-inputOption-activeBorder, #007acc);
+  transition: width 150ms;
 }
 
 .cukii-effort-notch {
@@ -504,12 +515,26 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(204, 204, 204, 0.28);
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #cccccc) 40%,
+    transparent
+  );
   transform: translate(-50%, -50%);
 }
 
+/* The reference paints the ultra stop on the fill, not on the notch: at 4px a
+   notch cannot carry a colour meaning. */
+.cukii-effort-fill-ultra {
+  background: var(--vscode-charts-purple, #a855f7);
+}
+
 .cukii-effort-notch-ultra {
-  background: #b180d7;
+  background: color-mix(
+    in srgb,
+    var(--vscode-charts-purple, #a855f7) 70%,
+    transparent
+  );
 }
 
 .cukii-effort-thumb {
@@ -520,8 +545,8 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   border-radius: 50%;
   background: var(--vscode-foreground, #cccccc);
   transform: translateX(-50%);
-  transition: left 160ms cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  transition: left 150ms;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .cukii-input-footer {

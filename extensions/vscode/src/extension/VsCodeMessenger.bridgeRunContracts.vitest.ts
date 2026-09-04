@@ -3,7 +3,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const source = fs.readFileSync(path.join(__dirname, "VsCodeMessenger.ts"), "utf8");
+const source = fs.readFileSync(
+  path.join(__dirname, "VsCodeMessenger.ts"),
+  "utf8",
+);
 
 describe("VsCodeMessenger native bridge run contract", () => {
   it("uses one coalescing coordinator instead of a previous.done chain", () => {
@@ -13,7 +16,12 @@ describe("VsCodeMessenger native bridge run contract", () => {
   });
 
   it("blocks replacement when process-tree termination is unverified", () => {
-    expect(source).toContain("if (!completion.terminationVerified)");
+    // The verdict no longer comes from awaiting `run.done` outright — that await
+    // is what wedged the panel when nobody pulled the generator, so both waits
+    // are budgeted now and `cancelDecision` folds a timeout into "unverified".
+    // The guard itself must stay: an unverified teardown may not free the slot.
+    expect(source).toContain("} = cancelDecision({");
+    expect(source).toContain("if (!terminationVerified)");
     expect(source).toContain("replacement is blocked");
     expect(source).toContain("onTerminationResult: (terminated)");
     expect(source).toMatch(

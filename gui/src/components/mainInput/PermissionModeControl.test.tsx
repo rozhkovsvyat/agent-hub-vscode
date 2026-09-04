@@ -216,7 +216,11 @@ describe("PermissionModeControl route snapshots", () => {
     }
   });
 
-  it("keeps the effort row inside the permissions popover on both panels", async () => {
+  // Effort deliberately left this popover: it is reachable from the "/" menu and
+  // from the model picker footer, and its current value is visible in the model
+  // pill. These two tests are the guard against it creeping back in — they are
+  // the previous "keeps the effort row" pair, inverted on purpose.
+  it("does not render an effort row inside the permissions popover", async () => {
     setPermissionProbeRetryMsForTests(60_000);
     try {
       const messenger = new MockIdeMessenger();
@@ -228,14 +232,11 @@ describe("PermissionModeControl route snapshots", () => {
           helpSource: "live qwen",
         }),
       );
-      const onEffortChange = vi.fn();
       const { user } = await renderWithProviders(
         <PermissionModeControl
           brokerModel="qwen3.8-max"
-          brokerEffort="high"
           permissionMode="bypass"
           onChange={vi.fn()}
-          onEffortChange={onEffortChange}
         />,
         { mockIdeMessenger: messenger },
       );
@@ -245,22 +246,23 @@ describe("PermissionModeControl route snapshots", () => {
           name: "Toggle permission mode",
         }),
       );
+      // The popover itself must still open — otherwise this test would pass for
+      // the wrong reason (nothing rendered at all).
       expect(
-        await screen.findByTestId("cukii-permission-effort-row"),
+        await screen.findByTestId("cukii-permission-mode-bypass"),
       ).toBeInTheDocument();
-      // The permissions row reuses the exact /-menu slider component.
-      const slider = screen.getByTestId("cukii-effort-slider");
-      expect(slider).toHaveAttribute("aria-valuetext", "High");
-
-      // jsdom reports a zero-width track, so a click lands on the first level.
-      await user.click(slider);
-      expect(onEffortChange).toHaveBeenCalledWith("low");
+      expect(
+        screen.queryByTestId("cukii-permission-effort-row"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("cukii-effort-slider"),
+      ).not.toBeInTheDocument();
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }
   });
 
-  it("still offers effort while permission discovery is degraded", async () => {
+  it("does not render an effort row while permission discovery is degraded", async () => {
     setPermissionProbeRetryMsForTests(60_000);
     try {
       const messenger = new MockIdeMessenger();
@@ -272,14 +274,11 @@ describe("PermissionModeControl route snapshots", () => {
           helpSource: "unavailable-route",
         }),
       );
-      const onEffortChange = vi.fn();
       const { user } = await renderWithProviders(
         <PermissionModeControl
           brokerModel="qwen3.8-max"
-          brokerEffort="medium"
           permissionMode="bypass"
           onChange={vi.fn()}
-          onEffortChange={onEffortChange}
         />,
         { mockIdeMessenger: messenger },
       );
@@ -293,10 +292,11 @@ describe("PermissionModeControl route snapshots", () => {
         await screen.findByTestId("cukii-permission-degraded-note"),
       ).toBeInTheDocument();
       expect(
-        screen.getByTestId("cukii-permission-effort-row"),
-      ).toBeInTheDocument();
-      await user.click(screen.getByTestId("cukii-effort-slider"));
-      expect(onEffortChange).toHaveBeenCalledWith("low");
+        screen.queryByTestId("cukii-permission-effort-row"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("cukii-effort-slider"),
+      ).not.toBeInTheDocument();
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }

@@ -1,4 +1,5 @@
 import type {
+  BrokerAutocompact,
   BrokerEffort,
   BrokerModel,
   BrokerSpeed,
@@ -21,6 +22,12 @@ export type BridgeControlResolution = {
   requestedThinking: boolean;
   effectiveThinking: boolean;
   thinkingTransport: "native" | "unavailable";
+  /**
+   * Autocompact threshold chosen in the plugin. It used to be restated in each
+   * vendor's own agent contract, where the numbers drifted; the plugin owns it
+   * now and hands it to the vendor with every run.
+   */
+  autocompact: BrokerAutocompact;
 };
 
 function isCodexModel(model: BrokerModel): boolean {
@@ -87,6 +94,7 @@ export function resolveBridgeControls(
   effort: BrokerEffort,
   speed: BrokerSpeed,
   thinkingEnabled = true,
+  autocompact: BrokerAutocompact = "50",
 ): BridgeControlResolution {
   const nativeThinking = supportsNativeThinking(model);
   const effectiveThinking = nativeThinking ? thinkingEnabled : true;
@@ -106,6 +114,7 @@ export function resolveBridgeControls(
     requestedThinking: thinkingEnabled,
     effectiveThinking,
     thinkingTransport: nativeThinking ? "native" : "unavailable",
+    autocompact,
   };
 }
 
@@ -134,6 +143,11 @@ export function bridgeControlPrompt(
     controls.thinkingTransport === "native"
       ? `Cukii thinking: ${controls.effectiveThinking ? "on" : "off"} (native vendor control).`
       : "Cukii thinking: on. This vendor exposes no verified native on/off control.",
+    // 🔴 Single source of truth for the compaction threshold. Do not restate it
+    // in a vendor's own agent contract: two copies is how the numbers drifted.
+    controls.autocompact === "default"
+      ? "Cukii autocompact: default. Use the host's own compaction policy; Cukii forces no share."
+      : `Cukii autocompact: ${controls.autocompact}%. Compact the thread once it reaches ${controls.autocompact}% of the context window — this value comes from the plugin, not from your agent instructions, and overrides any threshold stated there.`,
   ];
 }
 
@@ -154,7 +168,11 @@ export function bridgeControlSummary(
     controls.thinkingTransport === "native"
       ? `${controls.effectiveThinking ? "on" : "off"} (native)`
       : "on (toggle unavailable for this vendor)";
-  return `Effort: ${effort}. Speed: ${speed}. Thinking: ${thinking}.`;
+  const autocompact =
+    controls.autocompact === "default"
+      ? "default (host policy)"
+      : `${controls.autocompact}%`;
+  return `Effort: ${effort}. Speed: ${speed}. Thinking: ${thinking}. Autocompact: ${autocompact}.`;
 }
 
 export function claudeControlArgs(controls: BridgeControlResolution): string[] {

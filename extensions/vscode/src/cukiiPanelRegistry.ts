@@ -1,4 +1,6 @@
 import type * as vscode from "vscode";
+import type { CukiiSessionAttention } from "core/protocol/ideWebview";
+import { cukiiSessionAttention } from "./extension/cukiiSessionAttention";
 import type { VsCodeWebviewProtocol } from "./webviewProtocol";
 
 // Must not read like a saved session title: a blank tab titled after the
@@ -119,6 +121,9 @@ export function isPersistableCukiiTitle(title?: string): title is string {
 
 export function listOpenCukiiPanels<TPanel extends CukiiPanelTitleHost>(
   registry?: CukiiPanelRegistry<TPanel>,
+  /** Injected so the registry itself stays free of run/permission state. */
+  attentionFor: (sessionId: string) => CukiiSessionAttention = (sessionId) =>
+    cukiiSessionAttention.attentionFor(sessionId),
 ) {
   const panelRegistry =
     registry ?? (cukiiPanelRegistry as unknown as CukiiPanelRegistry<TPanel>);
@@ -131,6 +136,7 @@ export function listOpenCukiiPanels<TPanel extends CukiiPanelTitleHost>(
       panelId: entry.id,
       sessionId: entry.sessionId!,
       title: entry.displayTitle!.trim(),
+      attention: attentionFor(entry.sessionId!),
     }));
 }
 
