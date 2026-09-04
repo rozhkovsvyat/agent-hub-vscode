@@ -31,6 +31,12 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
       })
       .catch(() => undefined);
   };
+  /** A failed recording must not stay a silent red button: keep the inline
+   * state AND surface a native toast explaining what went wrong. */
+  const raiseError = (message: string) => {
+    setError(message);
+    ideMessenger.post("showToast", ["error", message]);
+  };
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -72,7 +78,7 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         if (response.content.state !== "listening") {
           operation.current = undefined;
           cancel(active);
-          setError(
+          raiseError(
             response.content.message ?? "Voice recording ended unexpectedly.",
           );
           setState("idle");
@@ -111,12 +117,14 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
       }
       if (response.status === "error") {
         operation.current = undefined;
-        setError(response.error);
+        raiseError(response.error);
         setState("idle");
       } else if (response.content.recordingId !== requestedId) {
         operation.current = undefined;
         cancel({ ...active, recordingId: response.content.recordingId });
-        setError("Voice recorder returned an unexpected recording identifier.");
+        raiseError(
+          "Voice recorder returned an unexpected recording identifier.",
+        );
         setState("idle");
       } else {
         active.phase = "listening";
@@ -125,7 +133,7 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
     } catch (caught) {
       if (mounted.current && operation.current === active) {
         operation.current = undefined;
-        setError(caught instanceof Error ? caught.message : String(caught));
+        raiseError(caught instanceof Error ? caught.message : String(caught));
         setState("idle");
       }
     }
@@ -152,13 +160,13 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         if (text) {
           onTranscript(text);
           setError(undefined);
-        } else setError("No speech was recognized.");
-      } else setError(response.error);
+        } else raiseError("No speech was recognized.");
+      } else raiseError(response.error);
       setState("idle");
     } catch (caught) {
       if (mounted.current && operation.current === active) {
         operation.current = undefined;
-        setError(caught instanceof Error ? caught.message : String(caught));
+        raiseError(caught instanceof Error ? caught.message : String(caught));
         setState("idle");
       }
     }

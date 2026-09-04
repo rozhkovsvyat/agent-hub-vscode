@@ -92,7 +92,7 @@ interface InputToolbarProps {
 }
 
 const menuItemClass =
-  "cukii-menu-item flex w-full min-w-0 items-center justify-between gap-3 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+  "cukii-menu-item flex w-full min-w-0 items-center justify-between gap-3 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
 
 const commandSectionHeaderClass =
   "cukii-command-section-header px-3 pb-1 pt-2 text-xs font-normal leading-4 text-[var(--vscode-descriptionForeground)]";
@@ -418,7 +418,9 @@ function InputToolbar(props: InputToolbarProps) {
         }`}
         style={{ fontSize: smallFont }}
       >
-        <div className="flex min-w-0 items-center gap-1">
+        {/* Claude fit-stage parity: controls never overlap — the pill wraps
+            to its own line inside the left group when the width runs out. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 gap-y-[3px]">
           {!isInEdit && (
             <Popover className="relative">
               <PopoverButton
@@ -568,7 +570,7 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {showAction("Effort") && (
                       <CukiiEffortRow
-                        className={menuItemClass}
+                        className={`${menuItemClass} cukii-effort-menu-row`}
                         model={currentModel}
                         effort={brokerEffort}
                         onEffortChange={(nextEffort) =>
@@ -610,25 +612,19 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
-                    {showAction("Fast mode") && (
+                    {/* A route without a native accelerated tier shows no row
+                        at all instead of a permanently disabled one. */}
+                    {nativeFastAvailable && showAction("Fast mode") && (
                       <button
                         data-testid="cukii-speed-toggle"
                         {...commandActionProps("Fast mode")}
                         type="button"
                         role="switch"
-                        aria-checked={
-                          nativeFastAvailable && brokerSpeed === "fast"
-                        }
-                        disabled={!nativeFastAvailable}
-                        title={
-                          nativeFastAvailable
-                            ? "Use the vendor's native accelerated service tier"
-                            : "This model has no native accelerated service tier"
-                        }
+                        aria-checked={brokerSpeed === "fast"}
+                        title="Use the vendor's native accelerated service tier"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          if (!nativeFastAvailable) return;
                           updateBrokerPreferences(
                             currentModel,
                             brokerSubagent ?? "auto",
@@ -638,18 +634,12 @@ function InputToolbar(props: InputToolbarProps) {
                         }}
                       >
                         <span>Fast mode</span>
-                        {nativeFastAvailable ? (
-                          <span
-                            data-testid="cukii-speed-track"
-                            className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
-                          >
-                            <span className="cukii-toggle-thumb" />
-                          </span>
-                        ) : (
-                          <span className="text-[var(--vscode-descriptionForeground)]">
-                            Unavailable
-                          </span>
-                        )}
+                        <span
+                          data-testid="cukii-speed-track"
+                          className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                        >
+                          <span className="cukii-toggle-thumb" />
+                        </span>
                       </button>
                     )}
                     {showAction("Manage accounts") && (

@@ -129,10 +129,10 @@ describe("Cukii Claude-parity input toolbar", () => {
 
     await user.click(pill);
 
-    // The same picker as "Switch model…" opens, with the Best/All toggle.
+    // The same picker as "Switch model…" opens, with the Milky toggle on.
     expect(await getElementByText("Select a model")).toBeDefined();
-    const bestToggle = await getElementByTestId("cukii-scope-toggle-best");
-    expect(bestToggle).toHaveAttribute("aria-pressed", "true");
+    const milkyToggle = await getElementByTestId("cukii-scope-toggle-milky");
+    expect(milkyToggle).toHaveAttribute("aria-pressed", "true");
   });
 
   it("composes the pill as model, effort, Fast, autocompact — model plain, the rest muted", async () => {
@@ -277,10 +277,13 @@ describe("Cukii Claude-parity input toolbar", () => {
     }
     const css = canonicalCss();
     expect(css).toContain("width: 300px;");
-    expect(css).toContain("min-height: 52px;");
+    // Claude metrics: content-sized rows and theme-driven selection colors.
+    expect(css).not.toContain("min-height: 52px;");
     expect(css).toContain("padding: 4px 8px;");
     expect(css).toContain("gap: 10px;");
-    expect(css).toContain("background: rgb(4, 57, 94) !important;");
+    expect(css).toContain(
+      "background: var(--vscode-list-activeSelectionBackground, #04395e) !important;",
+    );
   });
 
   it("keeps the preserved mode visible when live capabilities are empty", async () => {

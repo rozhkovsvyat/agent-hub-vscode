@@ -365,7 +365,7 @@ type SessionState = {
    * the rule in its own agent contract.
    */
   brokerAutocompact: BrokerAutocompact;
-  /** Model picker scope; preserved per session so Best/All survives reloads. */
+  /** Model picker scope; preserved per session so Milky/All survives reloads. */
   brokerModelScope: BrokerModelScope;
   brokerPermissionMode: CukiiPermissionMode;
   /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */

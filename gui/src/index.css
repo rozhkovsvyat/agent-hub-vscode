@@ -367,12 +367,14 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder, #be1100) !important;
 }
 
+/* Claude textarea metrics: 10px top/bottom, 14px left, 36px right (the
+   right band is reserved for the mic button). */
 .cukii-main-input-shell .cukii-editor-stack {
   position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 8px 0 0 !important;
+  padding: 10px 0 !important;
 }
 
 .cukii-main-input-shell .cukii-editor-stack > .scroll-container {
@@ -468,6 +470,9 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   background: var(--vscode-descriptionForeground, #8b8b8b);
 }
 
+/* Claude effort slider metrics: 76×18 track (9px radius), 14px thumb,
+   theme-driven colors — the fill is inputOption-activeBorder and the track
+   is the shared input border, never a hardcoded blue. */
 .cukii-effort-slider {
   position: relative;
   display: block;
@@ -658,16 +663,27 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-permission-header {
   box-sizing: border-box;
+  display: flex;
   width: 100%;
-  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
   padding: 4px 12px;
-  font-size: 13px;
+}
+
+.cukii-permission-header-title {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11.05px; /* .85em of the 13px chat font */
+}
+
+.cukii-permission-header-hint {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 9.75px; /* .75em */
+  opacity: 0.7;
 }
 
 .cukii-permission-mode-row {
   box-sizing: border-box;
   width: calc(100% - 8px);
-  min-height: 52px;
   margin: 0 4px;
   padding: 4px 8px;
   gap: 10px;
@@ -677,8 +693,9 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   color: var(--vscode-menu-foreground, #cccccc) !important;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 11.7px;
+  font-size: 11.7px; /* .9em, Claude's mode-item size */
   line-height: normal;
+  cursor: pointer;
   transition:
     background-color 120ms ease,
     color 120ms ease;
@@ -719,16 +736,28 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 .cukii-permission-mode-row.cukii-permission-mode-selected,
 .cukii-permission-mode-row.cukii-permission-mode-selected:hover,
 .cukii-permission-mode-row.cukii-permission-mode-selected:focus-visible {
-  background: rgb(4, 57, 94) !important;
-  color: #ffffff !important;
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
 }
 
 .cukii-permission-mode-check {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   margin-left: auto;
 }
 
 .cukii-permission-mode-selected .cukii-permission-mode-description {
-  color: rgba(255, 255, 255, 0.9);
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* Claude's effort row is a regular list item that never wraps: label left,
+   slider right, 12px apart. */
+.cukii-permission-effort-row {
+  border-top: 1px solid var(--vscode-widget-border, rgba(204, 204, 204, 0.2));
+  margin: 4px 0 0;
+  padding: 4px 0 0;
 }
 
 html[data-cukii-panel-tone="light"] .cukii-permission-popover {
@@ -844,18 +873,23 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 }
 
 /* 1:1 with the live Claude "Switch model" pill: no border, a 10% foreground
-   tint fill, 9999px radius, 4px 16px padding, 13px text (measured 26.2px). */
+   tint fill (18% on hover), 9999px radius, 4px 16px padding, 13px text,
+   pointer cursor and a 6px gap to its left neighbour (measured 26.2px). */
 .cukii-model-pill {
   border: 0;
+  cursor: pointer;
+  margin-left: 6px;
   background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 }
 
 .cukii-model-pill:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
 }
 
-/* Best (o-) All: a compact knob switch between the two scope labels, not a
-   pair of chunky buttons. */
+/* Milky (-0): one label + knob switch pinned to the picker's right edge,
+   symmetric with the "Select a model" title. ON (orange) is the default and
+   shows only Milky-rated models. The label keeps a constant weight — only
+   its color shifts — so the switch never jumps when toggled. */
 .cukii-scope-label {
   padding: 1px 2px;
   border: 0;
@@ -868,7 +902,6 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 
 .cukii-scope-label-on {
   color: var(--vscode-foreground, #cccccc);
-  font-weight: 600;
 }
 
 .cukii-scope-switch {
@@ -915,18 +948,22 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   min-width: 0;
 }
 
+/* Claude list-item metrics shared by the "/" command menu, the model
+   picker and the permissions popover: 4px 8px padding, 4px side margin,
+   4px corners, pointer cursor. */
 .cukii-menu-item {
-  min-height: 28px;
-  padding: 6px 12px !important;
+  margin: 0 4px !important;
+  padding: 4px 8px !important;
   border: 0 !important;
-  border-radius: 5px !important;
+  border-radius: 4px !important;
   background: transparent !important;
   color: var(--vscode-menu-foreground, #cccccc) !important;
   box-shadow: none !important;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
   font-size: 13px !important;
-  line-height: 1.35 !important;
+  line-height: 1.2 !important;
+  cursor: pointer;
 }
 
 .cukii-menu-item:hover:not(:disabled) {
@@ -1045,9 +1082,63 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   opacity: 0.45;
 }
 
+/* Claude marks the current model with the right-hand check column only —
+   the selected row keeps the plain background shared by every row. */
 .cukii-model-option-selected {
-  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
-  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+  background: transparent !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+}
+
+/* Claude model-picker internals: a column-scrolled list capped at 300px,
+   .9em half-opacity section headers, .85em half-opacity descriptions and a
+   constant 24px check column on every row. */
+.cukii-model-picker {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.cukii-model-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+.cukii-picker-section-header {
+  padding: 4px 12px;
+  color: var(--vscode-menu-foreground, #cccccc);
+  font-size: 11.7px; /* .9em of the 13px chat font */
+  opacity: 0.5;
+}
+
+.cukii-model-description {
+  color: var(--vscode-menu-foreground, #cccccc);
+  font-size: 11.05px; /* .85em */
+  opacity: 0.5;
+}
+
+.cukii-model-check-col {
+  display: flex;
+  width: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.cukii-model-check-col svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* The shared effort row renders at Claude's .9em and never wraps. */
+.cukii-effort-menu-row {
+  gap: 12px;
+  font-size: 11.7px !important;
+  white-space: nowrap;
 }
 
 .cukii-capability-rating {
@@ -1248,18 +1339,23 @@ button.cukii-submit-button--stop:active {
 
 /* Messenger capsules: the assistant answers in the slate capsule the user
    turns used to wear, while the user moved to cookie-orange (see
-   `.cukii-user-bubble`). Left edge sits on the shared timeline axis. */
+   `.cukii-user-bubble`). Geometry is unified with the user capsule (MAX
+   bubble metrics); only the fill and the left alignment differ. A longread
+   answer may use the full transcript width. */
 .cukii-assistant-bubble {
   background: var(--vscode-input-background, var(--cukii-shell)) !important;
   border: 1px solid var(--vscode-input-border, var(--cukii-line));
-  border-radius: 6px;
-  /* Same inset token as the user capsule: both texts sit 12px from their
-     outer walls. */
-  padding: 8px 12px;
+  border-radius: 16px;
+  padding: 8px 10px 10px !important;
   width: fit-content;
   min-width: 0;
-  max-width: 100%;
+  max-width: 70%;
   color: var(--vscode-foreground, var(--cukii-on-dark));
+}
+
+.cukii-assistant-bubble--longread {
+  width: 100%;
+  max-width: 100%;
 }
 
 /* The markdown surface ships its own canvas fill; inside the capsule it
@@ -1288,16 +1384,16 @@ button.cukii-submit-button--stop:active {
   border: 0 !important;
 }
 
-/* Reply time in the capsule's bottom-right corner, on the same 6px right
+/* Reply time in the capsule's bottom-right corner, on the same 10px right
    inset as the user checks. No reserved slot: it flows after the prose. */
 .cukii-assistant-metadata {
   display: flex;
   justify-content: flex-end;
   margin: 2px 0 0;
   color: var(--vscode-descriptionForeground, #a0a0a0);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 12px;
+  line-height: 14px;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
@@ -1313,22 +1409,11 @@ button.cukii-submit-button--stop:active {
   margin: 10px 0;
 }
 
-/* Right-click menu on capsules; mirrors the Claude Code "Copy Message"
-   entry the owner uses as reference. */
-.cukii-message-context-menu {
-  position: fixed;
-  z-index: 70;
-  min-width: 190px;
-  padding: 4px;
-  border: 1px solid var(--vscode-menu-border, var(--cukii-line));
-  border-radius: 6px;
-  background: var(--vscode-menu-background, #252526);
-  box-shadow: var(--cukii-shadow);
-}
-
-/* Geometry copied from Claude Code webview `.messagesContainer` / `.timelineMessage`. */
+/* Geometry copied from Claude Code webview `.messagesContainer`: 20px top
+   and side padding, 40px bottom — the backing zone under the composer. The
+   scrollbar itself is the native webview one; Claude adds no custom rules. */
 .cukii-transcript {
-  padding: 20px 20px 8px;
+  padding: 20px 20px 40px;
 }
 
 /* Claude-style transcript pagination is a quiet secondary action. Keep every
@@ -1379,15 +1464,14 @@ button.cukii-submit-button--stop:active {
 }
 
 /* MAX-style message bubble: user turns own the right lane while the timeline
-   for assistant/tool/thinking remains untouched on the left. The lane is
-   noticeably narrower than the column (~75%); agent answers may fill the
-   column only when their content is large. */
+   for assistant/tool/thinking remains untouched on the left. MAX measures
+   the sent bubble at 70% of the chat column. */
 .cukii-user-message {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  max-width: min(75%, 640px);
+  max-width: 70%;
   margin-left: auto;
 }
 
@@ -1398,9 +1482,9 @@ button.cukii-submit-button--stop:active {
   min-width: 54px;
   max-width: 100%;
   overflow: hidden;
-  /* Single inset token shared with the assistant capsule: text never hugs
-     the capsule wall on either side. */
-  padding: 7px 12px 6px;
+  /* Measured MAX bubble inset: 8px top, 10px sides, 10px bottom. The bottom
+     band doubles as the home of the absolutely positioned receipt. */
+  padding: 8px 10px 10px;
   /* Messenger recolor: the sent capsule wears the same cookie-orange as the
      send/stop buttons; dark ink inside (see `.cukii-user-metadata` below). */
   background: var(--cukii-primary-action-background, #e3a867);
@@ -1423,40 +1507,42 @@ button.cukii-submit-button--stop:active {
   border-top-right-radius: 6px;
 }
 
-/* MAX receipt flow: time/checks are an inline run-on of the message text —
-   they ride the last text line while it has room and wrap to the next line
-   only when they do not. No reserved footer, no absolute slot: every wrapper
-   between the bubble and the prose is display:contents, so the receipt span
-   (a direct bubble child) shares one inline formatting context with the
-   paragraphs and rises to line level whenever it fits. */
-.cukii-user-bubble div.relative,
-.cukii-user-bubble .cukii-input-box,
-.cukii-user-bubble .cukii-editor-stack,
-.cukii-user-bubble .scroll-container,
-.cukii-user-bubble .ProseMirror {
-  display: contents !important;
+/* MAX receipt layout (measured on web.max.ru): the meta (time + ticks) is
+   absolutely positioned in the bubble's bottom-right corner, while an inline
+   ::after spacer at the end of the prose reserves its width. While the last
+   text line has room, the spacer sits on that line and the meta visually
+   rides it; when it does not fit, the spacer wraps to its own line and the
+   meta drops below the text, right-aligned. The bubble's bottom padding is
+   the meta's band — no reserved footer, no centered gluing, no stolen space
+   beside short lines. */
+.cukii-user-message-bubble {
+  --cukii-meta-reserve: 0px;
 }
 
-.cukii-user-bubble .ProseMirror p {
-  display: inline;
+/* "21:45" at 11px tabular numerals. */
+.cukii-user-bubble--with-receipt {
+  --cukii-meta-reserve: 31px;
 }
 
-.cukii-user-bubble .ProseMirror p + p::before {
+/* Time + 2px gap + the 16px tick column. */
+.cukii-user-bubble--with-receipt.cukii-user-bubble--receipt-checks {
+  --cukii-meta-reserve: 49px;
+}
+
+.cukii-user-message-bubble .ProseMirror p:last-child::after {
   content: "";
-  display: block;
-}
-
-/* The ContinueInputBox root must not form a block box inside the capsule:
-   it would give the prose its own block and strand the receipt span (its
-   sibling) on a line below. Collapsing it into the contents chain lets the
-   receipt ride the last text line exactly as in MAX. */
-.cukii-user-message-bubble > .cukii-user-bubble {
-  display: contents !important;
-  min-width: 0;
-  max-width: 100%;
+  display: inline-block;
+  width: calc(var(--cukii-meta-reserve) + 4px);
+  height: 14px;
 }
 
 .cukii-user-message-bubble .cukii-input-box {
+  /* The capsule itself (.cukii-user-message-bubble) owns the orange fill and
+     geometry; the inner editor box must stay a plain transparent block and
+     never paint a second capsule. */
+  display: block !important;
+  width: auto;
+  max-width: 100%;
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -1464,22 +1550,24 @@ button.cukii-submit-button--stop:active {
   min-height: 0;
 }
 
-/* The receipt is an inline run-on of the prose (see the display:contents
-   chain above): it rides the last text line and wraps only when it must. */
+/* The receipt lives absolutely in the bubble's bottom-right corner (see the
+   spacer mechanism above). */
 .cukii-user-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
   display: inline-flex;
   align-items: flex-end;
   gap: 2px;
-  margin: 0 0 1px 6px;
+  margin: 0;
   padding: 0;
   color: var(--vscode-descriptionForeground, #a0a0a0);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 12px;
+  line-height: 14px;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
-  vertical-align: bottom;
 }
 
 /* Dark ink on the orange capsule: time and checks inherit the brand text

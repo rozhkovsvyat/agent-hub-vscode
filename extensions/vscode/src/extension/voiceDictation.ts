@@ -26,10 +26,12 @@ const WHISPER_MODEL_ROOT = path.join(
 );
 /** SHA-256 of the exact packaged bytes under the pinned Xenova revision. */
 export const PACKAGED_WHISPER_FILES: Readonly<Record<string, string>> = {
+  // Canonical bytes of the pinned Xenova revision (verified against
+  // huggingface.co/Xenova/whisper-base at that exact commit).
   "config.json":
-    "9d3d599f186a7bca5524326c4164a11a4327d5dce2a47f1e33a8494a0d55cc69",
+    "d1d347fdb422e6347c2f843a90d375aa67ea3f4b3e20d2c3075f9a9f6243685b",
   "generation_config.json":
-    "6f3c718280313752065a69861408eb248e1af08d66c0ca0e214ea571499fc0ea",
+    "3bba359e33fdd6dc1c10f71846a477d339b0242f462f70ea1dd73274caa38d05",
   "preprocessor_config.json":
     "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d",
   "tokenizer_config.json":

@@ -19,7 +19,8 @@ function MilkMark() {
 
 export function ModelCapabilityRating({ model }: { model: ModelInfo }) {
   const rating = cukiiCapabilityRating(model);
-  const accessibleLabel = `Cukii capability rating: ${rating} of 4`;
+  if (rating === 0) return null;
+  const accessibleLabel = `Cukii capability rating: ${rating} of 3`;
 
   return (
     <span

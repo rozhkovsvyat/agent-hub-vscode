@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.98",
+  "version": "2.0.99",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -562,6 +562,16 @@
         {
           "submenu": "continue.continueSubMenu",
           "group": "0_acontinue"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "continue.newSession",
+          "when": "webviewId == 'continue.continueGUIView' || webviewId == 'cukii.fullScreenChat'"
+        },
+        {
+          "command": "cukii.renameChatPanel",
+          "when": "webviewId == 'cukii.fullScreenChat'"
         }
       ],
       "editor/title/run": [

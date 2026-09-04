@@ -178,25 +178,29 @@ export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
 export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
 
 /**
- * The curated default scope of the model picker ("Best"). Every entry must be
- * a live, selectable route; a model without a connected bridge belongs in the
- * full catalog only.
+ * The static routes of the model picker's Milky scope. Every entry must be a
+ * live, selectable route; a model without a connected bridge belongs in the
+ * full catalog only. Bottle ratings (cukiiCapabilityRating) are the source of
+ * truth for scope membership, so vendor-routed models of the same families
+ * join the Milky scope automatically.
  */
 export const BEST_MODELS: readonly BrokerModel[] = [
   "qwen-3-8-max",
   "qwen-deepseek-v4-pro-0813",
   "fable-5-1",
   "opus-5",
-  "sonnet-5",
   "codex-5-6-sol",
   "codex-5-6-terra",
   "grok-4-6",
   "composer-2-5",
   "kimi-k3",
+  "kimi-k3-256k",
 ];
 
-export function isBestModel(model: BrokerModel): boolean {
-  return BEST_MODELS.includes(model);
+export function isBestModel(
+  model: Pick<ModelInfo, "value" | "label">,
+): boolean {
+  return cukiiCapabilityRating(model) > 0;
 }
 
 export const BROKER_SUBAGENT_OPTIONS: Array<{

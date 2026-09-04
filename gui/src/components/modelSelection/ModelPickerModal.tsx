@@ -42,8 +42,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     (state) => state.session.brokerPermissionMode,
   );
 
-  /** Vendors are alphabetical (account-management order) and the Best scope
-   * keeps only curated live routes; vendors left empty disappear entirely. */
+  /** Vendors are alphabetical (account-management order) and the Milky
+   * (best) scope keeps only rated live routes; vendors left empty disappear
+   * entirely. */
   const visibleVendors = useMemo(() => {
     const ordered = [...VENDORS].sort((left, right) =>
       left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
@@ -52,7 +53,7 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
     return ordered
       .map((vendor) => ({
         ...vendor,
-        models: vendor.models.filter((model) => isBestModel(model.value)),
+        models: vendor.models.filter((model) => isBestModel(model)),
       }))
       .filter((vendor) => vendor.models.length > 0);
   }, [scope, catalogVersion]);
@@ -115,104 +116,99 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
       onMouseDown={onClose}
     >
       <div
-        className="cukii-model-picker cukii-menu-surface absolute bottom-[86px] left-[18px] right-[18px] max-h-[min(64vh,570px)] overflow-y-auto rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl"
+        className="cukii-model-picker cukii-menu-surface absolute bottom-[86px] left-[18px] right-[18px] max-h-[min(50vh,570px)] rounded-lg border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between bg-[var(--vscode-menu-background)] px-3 pb-2 pt-3">
-          <span className="text-xs text-[var(--vscode-descriptionForeground)]">
+        <div className="flex items-center justify-between px-3 pb-1 pt-2">
+          <span className="text-[11.7px] text-[var(--vscode-menu-foreground)] opacity-50">
             Select a model
           </span>
           <span
-            className="cukii-scope-toggle flex items-center gap-1"
+            className="cukii-scope-toggle flex items-center gap-[6px]"
             role="group"
             aria-label="Model list scope"
           >
             <button
               type="button"
-              data-testid="cukii-scope-toggle-best"
+              data-testid="cukii-scope-toggle-milky"
               aria-pressed={scope === "best"}
               className={`cukii-scope-label ${
                 scope === "best" ? "cukii-scope-label-on" : ""
               }`}
-              onClick={() => dispatch(setBrokerModelScope("best"))}
+              onClick={() =>
+                dispatch(setBrokerModelScope(scope === "best" ? "all" : "best"))
+              }
             >
-              Best
+              Milky
             </button>
             <button
               type="button"
               data-testid="cukii-scope-switch"
               role="switch"
-              aria-checked={scope === "all"}
-              aria-label="Toggle between Best and All models"
+              aria-checked={scope === "best"}
+              aria-label="Show only Milky-rated models"
               className={`cukii-scope-switch ${
-                scope === "all" ? "cukii-scope-switch-on" : ""
+                scope === "best" ? "cukii-scope-switch-on" : ""
               }`}
               onClick={() =>
-                dispatch(setBrokerModelScope(scope === "all" ? "best" : "all"))
+                dispatch(setBrokerModelScope(scope === "best" ? "all" : "best"))
               }
             >
               <span className="cukii-scope-switch-knob" />
             </button>
-            <button
-              type="button"
-              data-testid="cukii-scope-toggle-all"
-              aria-pressed={scope === "all"}
-              className={`cukii-scope-label ${
-                scope === "all" ? "cukii-scope-label-on" : ""
-              }`}
-              onClick={() => dispatch(setBrokerModelScope("all"))}
-            >
-              All
-            </button>
           </span>
         </div>
 
-        {visibleVendors.map((vendor) => (
-          <section key={vendor.id}>
-            <div className="cursor-default select-none px-3 pb-1 pt-2 text-xs text-[var(--vscode-descriptionForeground)]">
-              {vendor.label}
-            </div>
-            {vendor.models.map((model) => {
-              const selected = model.value === currentModel;
-              return (
-                <button
-                  key={model.value}
-                  type="button"
-                  disabled={model.disabled}
-                  onClick={() => selectModel(model.value)}
-                  className={`cukii-menu-item flex w-full items-center justify-between rounded px-3 py-2 text-left hover:bg-[var(--vscode-list-hoverBackground)] ${
-                    selected ? "cukii-model-option-selected" : ""
-                  } ${model.disabled ? "cursor-not-allowed opacity-45" : ""}`}
-                >
-                  <span className="min-w-0">
-                    <span className="flex min-w-0 items-center gap-[5px] text-[15px] text-[var(--vscode-foreground)]">
-                      <span className="truncate">
-                        {model.label}
-                        {model.disabled ? " (soon)" : ""}
+        <div className="cukii-model-picker-list">
+          {visibleVendors.map((vendor) => (
+            <section key={vendor.id}>
+              <div className="cukii-picker-section-header cursor-default select-none">
+                {vendor.label}
+              </div>
+              {vendor.models.map((model) => {
+                const selected = model.value === currentModel;
+                return (
+                  <button
+                    key={model.value}
+                    type="button"
+                    disabled={model.disabled}
+                    onClick={() => selectModel(model.value)}
+                    className={`cukii-menu-item flex w-full items-center justify-between text-left hover:bg-[var(--vscode-list-hoverBackground)] ${
+                      selected ? "cukii-model-option-selected" : ""
+                    } ${model.disabled ? "cursor-not-allowed opacity-45" : ""}`}
+                  >
+                    <span className="flex min-w-0 flex-1 flex-col leading-[1.2]">
+                      <span className="flex min-w-0 items-center gap-[5px] text-[13px] text-[var(--vscode-foreground)]">
+                        <span className="truncate">
+                          {model.label}
+                          {model.disabled ? " (soon)" : ""}
+                        </span>
+                        <ModelCapabilityRating model={model} />
                       </span>
-                      <ModelCapabilityRating model={model} />
+                      <span className="cukii-model-description block truncate">
+                        {formatCukiiModelSubtitle(
+                          model.contextWindowLabel,
+                          model.description,
+                        )}
+                      </span>
                     </span>
-                    <span className="block truncate text-xs text-[var(--vscode-descriptionForeground)]">
-                      {formatCukiiModelSubtitle(
-                        model.contextWindowLabel,
-                        model.description,
+                    <span className="cukii-model-check-col">
+                      {selected && (
+                        <CheckIcon className="text-[var(--vscode-foreground)]" />
                       )}
                     </span>
-                  </span>
-                  {selected && (
-                    <CheckIcon className="ml-3 h-5 w-5 shrink-0 text-[var(--vscode-foreground)]" />
-                  )}
-                </button>
-              );
-            })}
-          </section>
-        ))}
+                  </button>
+                );
+              })}
+            </section>
+          ))}
+        </div>
 
         {/* Claude keeps its effort control as the last row of the model menu;
             the shared slider row gives Cukii the same footer. */}
-        <div className="sticky bottom-0 z-10 border-t border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] px-1 pb-1 pt-1">
+        <div className="border-t border-[var(--vscode-widget-border)] px-1 pb-1 pt-1">
           <CukiiEffortRow
-            className="flex w-full min-w-0 items-center justify-between gap-3 rounded px-3 py-2 text-left text-[13px] text-[var(--vscode-foreground)]"
+            className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
             model={currentModel}
             effort={brokerEffort}
             onEffortChange={(nextEffort) => {

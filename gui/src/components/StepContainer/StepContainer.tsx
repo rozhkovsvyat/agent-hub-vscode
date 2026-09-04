@@ -16,6 +16,10 @@ interface StepContainerProps {
   latestSummaryIndex?: number;
 }
 
+/** An assistant answer beyond this many characters is a longread: it may use
+ * the full transcript width instead of the user-capsule lane limit. */
+export const ASSISTANT_LONGREAD_CHARS = 800;
+
 function StepContainer(props: StepContainerProps) {
   const uiConfig = useAppSelector(selectUIConfig);
 
@@ -25,15 +29,19 @@ function StepContainer(props: StepContainerProps) {
     latestSummaryIndex !== -1 && props.index <= latestSummaryIndex;
   const isLatestSummary =
     latestSummaryIndex !== -1 && props.index === latestSummaryIndex;
+  const proseText = renderChatMessage(props.item.message);
+  const isLongRead = proseText.length > ASSISTANT_LONGREAD_CHARS;
 
   return (
     <div>
       <div
-        className={`cukii-assistant-bubble bg-background p-1 px-1.5 ${isBeforeLatestSummary ? "opacity-35" : ""}`}
+        className={`cukii-assistant-bubble bg-background ${
+          isLongRead ? "cukii-assistant-bubble--longread" : ""
+        } ${isBeforeLatestSummary ? "opacity-35" : ""}`}
       >
         {uiConfig?.displayRawMarkdown ? (
           <pre className="text-2xs max-w-full overflow-x-auto whitespace-pre-wrap break-words p-4">
-            {renderChatMessage(props.item.message)}
+            {proseText}
           </pre>
         ) : (
           <>

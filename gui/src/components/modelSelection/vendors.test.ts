@@ -93,26 +93,27 @@ describe("Cukii model context labels", () => {
     expect(BROKER_MODEL_OPTIONS[0]?.value).toBe("qwen-3-8-max");
   });
 
-  it("keeps the curated Best scope live and selectable", () => {
+  it("keeps the curated Milky scope live and selectable", () => {
     expect(BEST_MODELS).toEqual([
       "qwen-3-8-max",
       "qwen-deepseek-v4-pro-0813",
       "fable-5-1",
       "opus-5",
-      "sonnet-5",
       "codex-5-6-sol",
       "codex-5-6-terra",
       "grok-4-6",
       "composer-2-5",
       "kimi-k3",
+      "kimi-k3-256k",
     ]);
     for (const value of BEST_MODELS) {
       const model = ALL_MODELS.find((entry) => entry.value === value);
       expect(model, value).toBeDefined();
       expect(model?.disabled, value).toBeFalsy();
-      expect(isBestModel(value), value).toBe(true);
+      if (model) expect(isBestModel(model), value).toBe(true);
     }
-    expect(isBestModel("haiku-4-5")).toBe(false);
+    expect(isBestModel({ value: "haiku-4-5", label: "Haiku 4.5" })).toBe(false);
+    expect(isBestModel({ value: "sonnet-5", label: "Sonnet 5" })).toBe(false);
   });
 
   it("does not put Alibaba image/audio/video capabilities in the chat picker", () => {
@@ -134,13 +135,13 @@ describe("Cukii model context labels", () => {
 
   it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
     const expectedModelOrderByVendor = {
-      claude: ["fable-5-1", "fable-5", "opus-5", "sonnet-5", "haiku-4-5"],
+      claude: ["fable-5-1", "opus-5", "sonnet-5", "fable-5", "haiku-4-5"],
       codex: [
         "codex-5-6-sol",
-        "codex-5-5",
         "codex-5-6-terra",
-        "codex-5-4",
         "codex-5-6-luna",
+        "codex-5-5",
+        "codex-5-4",
         "codex-5-4-mini",
       ],
       grok: ["grok-4-6", "grok-4-5"],
@@ -148,14 +149,14 @@ describe("Cukii model context labels", () => {
       kimi: ["kimi-k3", "kimi-k3-256k", "kimi-k2", "kimi-k2-highspeed"],
       qwen: [
         "qwen-3-8-max",
-        "qwen-3-7-max",
-        "qwen-3-7-plus",
         "qwen-deepseek-v4-pro-0813",
-        "qwen-deepseek-v4-pro",
-        "qwen-glm-5-2",
         "qwen-3-8-flash",
+        "qwen-3-7-plus",
+        "qwen-3-7-max",
         "qwen-3-6-flash",
+        "qwen-deepseek-v4-pro",
         "qwen-deepseek-v4-flash-0731",
+        "qwen-glm-5-2",
       ],
       deepseek: ["deepseek-v4-pro"],
     } as const;
@@ -204,9 +205,9 @@ describe("Cukii model context labels", () => {
 
     expect(presented.map((model) => model.value)).toEqual([
       "codex-5-6-sol",
-      "codex-5-5",
-      "codex-5-4",
       "codex-5-6-terra",
+      "codex-5-4",
+      "codex-5-5",
     ]);
     expect(isNonIncreasing(presented)).toBe(true);
     expect(
@@ -290,37 +291,46 @@ describe("Cukii model context labels", () => {
   });
 
   it.each([
-    ["fable-5", "irrelevant", 4],
-    ["cursor:claude-fable-5", "Dynamic Cursor model", 4],
-    ["opus-5", "Opus 5", 3],
-    ["cursor:claude-opus-4-8", "Dynamic Cursor model", 3],
+    ["fable-5-1", "Fable 5.1", 3],
+    ["cursor:claude-fable-5-1", "Dynamic Cursor model", 3],
     ["codex-5-6-sol", "GPT-5.6 Sol", 3],
     ["cursor:gpt-5.6-sol", "Dynamic Cursor model", 3],
-    ["codex-5-5", "GPT-5.5", 3],
-    ["kimi-k3-256k", "K3-256K", 3],
     ["qwen-3-8-max", "Qwen 3.8 Max", 3],
-    ["sonnet-5", "Sonnet 5", 2],
-    ["cursor:claude-4.6-sonnet", "Dynamic Cursor model", 2],
-    ["codex-5-6-terra", "GPT-5.6 Terra", 2],
-    ["codex-5-4", "GPT-5.4", 2],
-    ["cursor:cursor-grok-4.7", "Dynamic Cursor model", 2],
-    ["codex-5-6-luna", "GPT-5.6 Luna", 1],
-    ["codex-5-4-mini", "GPT-5.4 Mini", 1],
-    ["cursor:gemini-3.7-flash", "Gemini 3.7 Flash", 1],
+    ["opus-5", "Opus 5", 2],
+    ["cursor:claude-opus-4-8", "Dynamic Cursor model", 2],
+    ["kimi-k3", "Kimi K3", 2],
+    ["kimi-k3-256k", "Kimi K3-256K", 2],
+    ["codex-5-6-terra", "GPT-5.6 Terra", 1],
+    ["grok-4-6", "Grok 4.6", 1],
+    ["cursor:grok-4.6", "Dynamic Cursor model", 1],
+    ["composer-2-5", "Composer 2.5", 1],
+    ["qwen-deepseek-v4-pro-0813", "DeepSeek V4 Pro 0813", 1],
+    ["fable-5", "Fable 5", 0],
+    ["sonnet-5", "Sonnet 5", 0],
+    ["cursor:claude-4.6-sonnet", "Dynamic Cursor model", 0],
+    ["haiku-4-5", "Haiku 4.5", 0],
+    ["codex-5-5", "GPT-5.5", 0],
+    ["codex-5-4", "GPT-5.4", 0],
+    ["codex-5-6-luna", "GPT-5.6 Luna", 0],
+    ["grok-4-5", "Grok 4.5", 0],
+    ["cursor:cursor-grok-4.7", "Dynamic Cursor model", 0],
+    ["qwen-3-7-max", "Qwen 3.7 Max", 0],
+    ["deepseek-v4-pro", "V4 Pro", 0],
+    ["cursor:gemini-3.7-flash", "Gemini 3.7 Flash", 0],
   ] as const)(
-    "rates %s with its canonical capability tier",
+    "rates %s with its curated Milky tier",
     (value, label, expected) => {
       expect(cukiiCapabilityRating({ value, label })).toBe(expected);
     },
   );
 
-  it("keeps the requested GPT-5.5 and GPT-5.4 bottle tiers", () => {
+  it("keeps every non-top model at zero bottles", () => {
     expect(
       cukiiCapabilityRating({ value: "codex-5-5", label: "GPT-5.5" }),
-    ).toBe(3);
+    ).toBe(0);
     expect(
-      cukiiCapabilityRating({ value: "codex-5-4", label: "GPT-5.4" }),
-    ).toBe(2);
+      cukiiCapabilityRating({ value: "sonnet-5", label: "Sonnet 5" }),
+    ).toBe(0);
   });
 
   it("uses distinct Grok positioning and avoids tautological version tokens", () => {
@@ -430,10 +440,10 @@ describe("Cukii model context labels", () => {
       ),
     ).toEqual([
       "codex-5-6-sol",
-      "codex-5-5",
       "codex-5-6-terra",
-      "codex-5-4",
       "codex-5-6-luna",
+      "codex-5-5",
+      "codex-5-4",
       "codex:custom",
     ]);
   });
