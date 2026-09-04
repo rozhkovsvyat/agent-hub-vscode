@@ -515,12 +515,13 @@ async function liveModels(
     if (vendor === "cursor") {
       const executable = resolveNativeCli(vendor);
       if (!executable) return [];
-      const result = await execFileAsync(executable, ["models"], {
-        timeout: 12_000,
-        windowsHide: true,
-        maxBuffer: 1024 * 1024,
-      });
-      return cursorCatalogFromOutput(result.stdout);
+      // Through `run` like every other vendor, not execFile directly: the
+      // resolved Cursor CLI is `agent.cmd`, and since the batch-injection fix
+      // Node refuses to spawn a .cmd without a shell (`spawn EINVAL`). The
+      // catch below turned that into an empty catalog, which is exactly how
+      // Cursor's models disappeared from the picker while its CLI was
+      // installed and logged in.
+      return cursorCatalogFromOutput(await run(executable, ["models"]));
     }
     return [];
   } catch {

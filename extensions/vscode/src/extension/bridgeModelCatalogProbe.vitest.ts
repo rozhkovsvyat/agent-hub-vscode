@@ -6,8 +6,10 @@ const { listAccounts, execFile } = vi.hoisted(() => ({
 }));
 vi.mock("./bridgeVendorAuth", () => ({
   listBrokerVendorAccounts: listAccounts,
+  // What the Windows resolver actually returns: the Cursor CLI ships as a
+  // batch wrapper, which is the whole reason the probe route matters.
   resolveNativeCli: (vendor: string) =>
-    vendor === "cursor" ? "agent" : undefined,
+    vendor === "cursor" ? "agent.cmd" : undefined,
 }));
 vi.mock("child_process", () => ({ execFile }));
 
@@ -118,5 +120,49 @@ describe("Claude catalog refresh probe", () => {
     const catalog = await listBrokerModelCatalog();
     expect(claudeModels(catalog)).toEqual([]);
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("runs the Cursor CLI through the command processor, not as a bare program", async () => {
+    // The resolved Cursor CLI on Windows is `agent.cmd`, and since Node's
+    // batch-injection fix a .cmd cannot be spawned without a shell: execFile
+    // throws `spawn EINVAL`, the probe's catch turns that into an empty
+    // catalog, and Cursor's models vanish from the picker while its CLI is
+    // installed and logged in. Every other vendor already goes through the
+    // command processor; this pins Cursor to the same route.
+    listAccounts.mockResolvedValue([{ id: "cursor", state: "connected" }]);
+    execFile.mockImplementation(
+      (
+        program: string,
+        args: string[],
+        _options: unknown,
+        callback: (error: Error | null, result?: { stdout: string }) => void,
+      ) => {
+        if (/\.(cmd|bat)$/i.test(program)) {
+          const failure = new Error("spawn EINVAL") as Error & {
+            code?: string;
+          };
+          failure.code = "EINVAL";
+          callback(failure);
+          return;
+        }
+        if (args.includes("models")) {
+          callback(null, {
+            stdout: "Available models\n\ncomposer-2.5 - Composer 2.5\n",
+          });
+          return;
+        }
+        callback(new Error(`unexpected probe args: ${args.join(" ")}`));
+      },
+    );
+
+    const catalog = await listBrokerModelCatalog();
+    const cursor = catalog.find((vendor) => vendor.id === "cursor");
+    expect(cursor?.models).toContainEqual(
+      expect.objectContaining({ label: "Composer 2.5" }),
+    );
+    const probe = execFile.mock.calls.find((call: unknown[]) =>
+      (call[1] as string[]).includes("models"),
+    );
+    expect(probe?.[1]).toEqual(["/d", "/c", "agent.cmd", "models"]);
   });
 });
