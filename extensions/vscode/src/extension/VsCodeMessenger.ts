@@ -48,6 +48,7 @@ import { VsCodeIde } from "../VsCodeIde";
 import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
+import { materializeBridgeMessageContent } from "./bridgeImages";
 import {
   isClaudeNativeModel,
   streamBridgeChat,
@@ -1068,7 +1069,7 @@ export class VsCodeMessenger {
           writeBridgeInboxMessage(
             run.sessionId,
             msg.data.messageId,
-            stripImages(msg.data.content),
+            materializeBridgeMessageContent(msg.data.content),
           );
         }
         return run.steering.deliver(msg.data);

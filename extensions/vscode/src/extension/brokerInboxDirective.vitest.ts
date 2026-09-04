@@ -35,6 +35,8 @@ describe("broker inbox steering gate", () => {
       );
       // The strict gate is part of the contract the model is told about.
       expect(lines[0]).toContain("force-delivered");
+      expect(lines[0]).toContain("A normal follow-up must never stop the run");
+      expect(lines[0]).toContain("only an explicit stop/cancel request ends the run");
       // Inter-agent channel rides the same rails.
       expect(lines[1]).toContain("mcp__cukii-broker__broker_send");
       expect(lines[1]).toContain("mcp__cukii-broker__broker_sessions");

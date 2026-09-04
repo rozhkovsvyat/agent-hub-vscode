@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { ChatMessage, MessagePart } from "core";
+import { ChatMessage, MessageContent, MessagePart } from "core";
 import { getContinueGlobalPath } from "core/util/paths";
 
 /**
@@ -157,4 +157,28 @@ export function materializeBridgeImages(
     );
     return { ...message, content };
   });
+}
+
+/**
+ * Materialize one live follow-up for the text-only inbox transport. Image
+ * bytes are written exactly as decoded from the original data URL: there is
+ * no resize, recompression, re-encoding, or format conversion. The returned
+ * text points the native vendor at that original file.
+ */
+export function materializeBridgeMessageContent(
+  content: MessageContent,
+  dir: string = bridgeAttachmentDir(),
+): string {
+  if (typeof content === "string") return content;
+  const [message] = materializeBridgeImages(
+    [{ role: "user", content }],
+    dir,
+  );
+  if (typeof message.content === "string") return message.content;
+  return message.content
+    .filter((part): part is Extract<MessagePart, { type: "text" }> =>
+      part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("\n");
 }

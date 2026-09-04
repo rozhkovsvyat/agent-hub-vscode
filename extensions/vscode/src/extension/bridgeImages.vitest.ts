@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { hasImageAttachment, materializeBridgeImages } from "./bridgeImages";
+import {
+  hasImageAttachment,
+  materializeBridgeImages,
+  materializeBridgeMessageContent,
+} from "./bridgeImages";
 
 // 1x1 red PNG.
 const PIXEL =
@@ -41,6 +45,23 @@ describe("materializeBridgeImages", () => {
     expect(fs.existsSync(referenced)).toBe(true);
     expect(referenced.endsWith(".png")).toBe(true);
     expect(fs.readFileSync(referenced).toString("base64")).toBe(PIXEL);
+  });
+
+  it("materializes a live inbox follow-up byte-for-byte without resizing or recompression", () => {
+    const rendered = materializeBridgeMessageContent(
+      [
+        { type: "text", text: "inspect this" },
+        { type: "imageUrl", imageUrl: { url: DATA_URL } },
+      ],
+      dir,
+    );
+
+    expect(rendered).toMatch(/^inspect this\n@/);
+    const referenced = rendered.split("\n@")[1];
+    const original = Buffer.from(PIXEL, "base64");
+    const stored = fs.readFileSync(referenced);
+    expect(stored.equals(original)).toBe(true);
+    expect(stored.byteLength).toBe(original.byteLength);
   });
 
   it("keeps older turns as plain path references so replays stay cheap", () => {

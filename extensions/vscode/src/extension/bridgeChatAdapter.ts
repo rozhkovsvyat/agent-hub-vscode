@@ -489,7 +489,8 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
       " If it returns messages, that array is the complete accumulated FIFO batch: read and address every item together as immediate input before resuming your task." +
       " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
       " Empty results are normal; never call it more than once per step boundary." +
-      " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue.",
+      " Classify every incoming item by intent: an addition or correction augments the current task, so continue the same work after incorporating it; an explicit replacement switches the task; only an explicit stop/cancel request ends the run without another tool call. A normal follow-up must never stop the run." +
+      " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue unless that message explicitly told you to stop.",
     "To coordinate with parallel sessions, the same channel is bidirectional: mcp__cukii-broker__broker_sessions lists live sessions and mcp__cukii-broker__broker_send writes one of them a message" +
       " (status or fact requests, handoff notes). Sending new work to a worker is still broker_delegate, never broker_send.",
   ];
