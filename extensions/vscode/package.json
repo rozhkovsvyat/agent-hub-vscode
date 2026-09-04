@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.97",
+  "version": "2.0.98",
   "repository": {
     "type": "git",
     "url": "https://github.com/continuedev/continue"
@@ -620,7 +620,7 @@
         {
           "id": "cukii",
           "title": "Cukii",
-          "icon": "media/cukii-activity.svg"
+          "icon": "$(circle-large-filled)"
         }
       ],
       "panel": [
@@ -637,7 +637,7 @@
           "type": "webview",
           "id": "continue.continueGUIView",
           "name": "Cukii",
-          "icon": "media/cukii-activity.svg",
+          "icon": "$(circle-large-filled)",
           "visibility": "visible"
         }
       ],
