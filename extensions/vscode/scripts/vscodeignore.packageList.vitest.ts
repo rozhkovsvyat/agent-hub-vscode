@@ -12,6 +12,11 @@ afterEach(() => {
 });
 
 describe("VSIX package list", () => {
+  // This case shells out to `vsce ls`, which cold-starts a second Node process
+  // and walks the fixture tree. Alone it lands in ~2s, but inside the full
+  // parallel suite it has been measured at 27s — well past the 5s default, so
+  // the whole suite went red for a reason that had nothing to do with the
+  // ignore rules under test.
   it("keeps deep native/runtime payloads while excluding source maps", () => {
     fs.copyFileSync(
       path.join(extensionRoot, ".vscodeignore"),
@@ -64,5 +69,5 @@ describe("VSIX package list", () => {
       ]),
     );
     expect(packageList.filter((file) => file.endsWith(".map"))).toEqual([]);
-  });
+  }, 60_000);
 });

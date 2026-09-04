@@ -141,6 +141,12 @@ const esbuildConfig = {
     "sharp",
     "./xhr-sync-worker.js",
     "./voiceDictation",
+    // jsdom's optional canvas backend. It is reached only after a
+    // `require.resolve("canvas")` that fails in the bundle, so the require
+    // never runs; without this esbuild refuses to resolve it and the whole
+    // package build dies. `./xhr-sync-worker.js` above is here for the same
+    // reason — jsdom pulls both in and needs neither for our use.
+    "canvas",
   ],
   format: "cjs",
   platform: "node",

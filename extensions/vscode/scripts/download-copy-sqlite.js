@@ -56,10 +56,18 @@ async function downloadSqlite(target, targetDir) {
 async function installAndCopySqlite(target) {
   // Replace the installed with pre-built
   console.log("[info] Downloading pre-built sqlite3 binary");
-  rimrafSync("../../core/node_modules/sqlite3/build");
-  await downloadSqlite(target, "../../core/node_modules/sqlite3/build.tar.gz");
-  execCmdSync("cd ../../core/node_modules/sqlite3 && tar -xvzf build.tar.gz");
-  fs.unlinkSync("../../core/node_modules/sqlite3/build.tar.gz");
+  // pnpm installs `core/node_modules/sqlite3` as a symlink into the store, and
+  // GNU tar refuses to write through one ("Cannot extract through symlink"),
+  // which failed the whole prepackage. Resolve to the real store directory
+  // first; on a plain npm tree realpath is a no-op.
+  const sqliteDir = fs.realpathSync("../../core/node_modules/sqlite3");
+  rimrafSync(path.join(sqliteDir, "build"));
+  const archive = path.join(sqliteDir, "build.tar.gz");
+  await downloadSqlite(target, archive);
+  // `-C` rather than `cd &&`: the store may sit on another drive, where a bare
+  // `cd` in cmd.exe changes nothing and the extraction lands in the wrong tree.
+  execCmdSync(`tar -xvzf "${archive}" -C "${sqliteDir}"`);
+  fs.unlinkSync(archive);
 }
 
 async function installAndCopyEsbuild(target) {
