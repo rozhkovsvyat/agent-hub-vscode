@@ -265,18 +265,16 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(captured[0].steerInterrupt).toBe(false);
   });
 
-  it("dispatches exactly one claimed queued follow-up as the final FIFO user turn", async () => {
+  it("dispatches all claimed queued follow-ups together as final FIFO user turns", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: any[] = [];
     ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
       captured.push(data);
-      yield [
-        {
-          role: "assistant",
-          content: "",
-          cukiiSteerReadMessageId: "follow-up-1",
-        },
-      ];
+      yield data.queuedFollowUpMessageIds.map((messageId: string) => ({
+        role: "assistant",
+        content: "",
+        cukiiSteerReadMessageId: messageId,
+      }));
       yield [{ role: "assistant", content: "accepted", cukiiTerminal: true }];
     }) as typeof ideMessenger.streamRequest;
     const history: ChatHistoryItemWithMessageId[] = [
@@ -327,20 +325,37 @@ describe("streamBrokerBridgeInput controls", () => {
     );
 
     await store.dispatch(
-      streamBrokerBridgeInput({ queuedFollowUpMessageId: "follow-up-1" }),
+      streamBrokerBridgeInput({
+        queuedFollowUpMessageIds: ["follow-up-1", "follow-up-2"],
+      }),
     );
 
     expect(captured).toHaveLength(1);
     expect(captured[0].queuedFollowUpMessageId).toBe("follow-up-1");
+    expect(captured[0].queuedFollowUpMessageIds).toEqual([
+      "follow-up-1",
+      "follow-up-2",
+    ]);
     expect(
       captured[0].messages.map(
         (message: ChatMessage & { id?: string }) => message.id,
       ),
-    ).toEqual(["original", "old-assistant", "follow-up-1"]);
+    ).toEqual([
+      "original",
+      "old-assistant",
+      "follow-up-1",
+      "follow-up-2",
+    ]);
     expect(
       store
         .getState()
         .session.history.find((item) => item.message.id === "follow-up-1")
+        ?.steerStatus,
+    ).toBe("read");
+    expect(
+      store
+        .getState()
+        .session.history.find((item) => item.message.id === "follow-up-2")
         ?.steerStatus,
     ).toBe("read");
   });

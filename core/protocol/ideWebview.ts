@@ -225,8 +225,13 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       brokerSpeed: BrokerSpeed;
       thinkingEnabled: boolean;
       brokerPermissionMode: CukiiPermissionMode;
-      /** Durable user follow-up being dispatched as this fresh vendor turn. */
+      /**
+       * Durable user follow-up being dispatched as this fresh vendor turn.
+       * @deprecated Use queuedFollowUpMessageIds for batch delivery.
+       */
       queuedFollowUpMessageId?: string;
+      /** All durable follow-ups dispatched together in this fresh vendor turn. */
+      queuedFollowUpMessageIds?: string[];
       /** The follow-up above interrupted an in-flight turn because the vendor
        * cannot accept live steering. The broker must resume the prior task. */
       steerInterrupt?: boolean;

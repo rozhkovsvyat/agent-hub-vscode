@@ -11,6 +11,7 @@ import {
   continueIfTrailingSteer,
   hasTrailingSteerMessage,
   nextQueuedSteerMessage,
+  queuedSteerMessages,
 } from "./continueIfTrailingSteer";
 
 function item(
@@ -25,6 +26,21 @@ function item(
   };
 }
 
+function queuedIds(data: any): string[] {
+  return (
+    data.queuedFollowUpMessageIds ??
+    (data.queuedFollowUpMessageId ? [data.queuedFollowUpMessageId] : [])
+  );
+}
+
+function readReceipts(data: any) {
+  return queuedIds(data).map((messageId) => ({
+    role: "assistant" as const,
+    content: "",
+    cukiiSteerReadMessageId: messageId,
+  }));
+}
+
 describe("hasTrailingSteerMessage", () => {
   it.each([
     ["turn", "turn"],
@@ -35,19 +51,13 @@ describe("hasTrailingSteerMessage", () => {
     "preserves and drains queued steer FIFO after %s cancellation cleanup",
     async (_source, interrupted) => {
       const messenger = new MockIdeMessenger();
-      const dispatched: string[] = [];
+      const dispatched: string[][] = [];
       messenger.streamRequest = vi.fn(async function* (
         _messageType,
         data: any,
       ) {
-        dispatched.push(data.queuedFollowUpMessageId);
-        yield [
-          {
-            role: "assistant",
-            content: "",
-            cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
-          },
-        ];
+        dispatched.push(queuedIds(data));
+        yield readReceipts(data);
         yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
       }) as typeof messenger.streamRequest;
       const first = item("user", "first after cancel", true);
@@ -74,7 +84,7 @@ describe("hasTrailingSteerMessage", () => {
       store.dispatch(clearDanglingMessages(interrupted));
       await store.dispatch(continueIfTrailingSteer());
 
-      expect(dispatched).toEqual([first.message.id, second.message.id]);
+      expect(dispatched).toEqual([[first.message.id, second.message.id]]);
       expect(
         store
           .getState()
@@ -111,22 +121,18 @@ describe("hasTrailingSteerMessage", () => {
 
   it("skips redelivery of a bubble the vendor already claimed through broker_inbox", async () => {
     const messenger = new MockIdeMessenger();
-    const dispatched: string[] = [];
+    const dispatched: string[][] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
-      dispatched.push(data.queuedFollowUpMessageId);
-      yield [
-        {
-          role: "assistant",
-          content: "",
-          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
-        },
-      ];
+      dispatched.push(queuedIds(data));
+      yield readReceipts(data);
       yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
     }) as typeof messenger.streamRequest;
     const claimed = item("user", "claimed mid-run", true);
     claimed.steerStatus = "queued";
     const fresh = item("user", "still queued", true);
     fresh.steerStatus = "queued";
+    const freshSecond = item("user", "also still queued", true);
+    freshSecond.steerStatus = "deferred";
     messenger.responseHandlers["cukii/steerInboxReceipt"] = vi.fn(
       async (data) => ({
         sessionId: data.sessionId,
@@ -142,7 +148,7 @@ describe("hasTrailingSteerMessage", () => {
         sessionId: "inbox-dedup",
         title: "Inbox dedup",
         workspaceDirectory: "D:/Brain/vault",
-        history: [claimed, fresh],
+        history: [claimed, fresh, freshSecond],
         mode: "broker",
         brokerModel: "qwen-3-8-max",
       }),
@@ -150,27 +156,21 @@ describe("hasTrailingSteerMessage", () => {
 
     await store.dispatch(continueIfTrailingSteer());
 
-    expect(dispatched).toEqual([fresh.message.id]);
+    expect(dispatched).toEqual([[fresh.message.id, freshSecond.message.id]]);
     expect(
       store
         .getState()
         .session.history.filter((entry) => entry.isSteer)
         .map((entry) => entry.steerStatus),
-    ).toEqual(["read", "read"]);
+    ).toEqual(["read", "read", "read"]);
   });
 
   it("delivers normally when the inbox receipt says pending", async () => {
     const messenger = new MockIdeMessenger();
-    const dispatched: string[] = [];
+    const dispatched: string[][] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
-      dispatched.push(data.queuedFollowUpMessageId);
-      yield [
-        {
-          role: "assistant",
-          content: "",
-          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
-        },
-      ];
+      dispatched.push(queuedIds(data));
+      yield readReceipts(data);
       yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
     }) as typeof messenger.streamRequest;
     const pending = item("user", "not claimed yet", true);
@@ -196,22 +196,16 @@ describe("hasTrailingSteerMessage", () => {
 
     await store.dispatch(continueIfTrailingSteer());
 
-    expect(dispatched).toEqual([pending.message.id]);
+    expect(dispatched).toEqual([[pending.message.id]]);
     expect(store.getState().session.history[0].steerStatus).toBe("read");
   });
 
-  it("drains two messages FIFO once per live session gate", async () => {
+  it("drains the whole FIFO batch in one vendor turn once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
-    const dispatched: string[] = [];
+    const dispatched: string[][] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
-      dispatched.push(data.queuedFollowUpMessageId);
-      yield [
-        {
-          role: "assistant",
-          content: "",
-          cukiiSteerReadMessageId: data.queuedFollowUpMessageId,
-        },
-      ];
+      dispatched.push(queuedIds(data));
+      yield readReceipts(data);
       yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
     }) as typeof messenger.streamRequest;
     const first = item("user", "first", true);
@@ -235,7 +229,7 @@ describe("hasTrailingSteerMessage", () => {
       store.dispatch(continueIfTrailingSteer()),
     ]);
 
-    expect(dispatched).toEqual([first.message.id, second.message.id]);
+    expect(dispatched).toEqual([[first.message.id, second.message.id]]);
     expect(
       store
         .getState()
@@ -300,9 +294,9 @@ describe("hasTrailingSteerMessage", () => {
 
   it("stops FIFO after a terminal bridge error instead of dispatching the next item", async () => {
     const messenger = new MockIdeMessenger();
-    const dispatched: string[] = [];
+    const dispatched: string[][] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
-      dispatched.push(data.queuedFollowUpMessageId);
+      dispatched.push(queuedIds(data));
       yield [
         {
           role: "assistant",
@@ -329,7 +323,7 @@ describe("hasTrailingSteerMessage", () => {
 
     await store.dispatch(continueIfTrailingSteer());
 
-    expect(dispatched).toEqual([first.message.id]);
+    expect(dispatched).toEqual([[first.message.id, second.message.id]]);
     expect(
       store
         .getState()
@@ -348,9 +342,9 @@ describe("hasTrailingSteerMessage", () => {
     const messenger = new MockIdeMessenger();
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => (release = resolve));
-    const dispatched: string[] = [];
+    const dispatched: string[][] = [];
     messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
-      dispatched.push(data.queuedFollowUpMessageId);
+      dispatched.push(queuedIds(data));
       await blocked;
       yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
     }) as typeof messenger.streamRequest;
@@ -370,7 +364,9 @@ describe("hasTrailingSteerMessage", () => {
       }),
     );
     const drain = store.dispatch(continueIfTrailingSteer());
-    await vi.waitFor(() => expect(dispatched).toEqual([first.message.id]));
+    await vi.waitFor(() =>
+      expect(dispatched).toEqual([[first.message.id, second.message.id]]),
+    );
 
     store.dispatch(
       newSession({
@@ -385,7 +381,7 @@ describe("hasTrailingSteerMessage", () => {
     release();
     await drain;
 
-    expect(dispatched).toEqual([first.message.id]);
+    expect(dispatched).toEqual([[first.message.id, second.message.id]]);
     expect(store.getState().session.id).toBe("new-session");
   });
 
@@ -526,6 +522,9 @@ describe("hasTrailingSteerMessage", () => {
       isInEdit: false,
     };
     expect(nextQueuedSteerMessage(session)?.message.id).toBe(first.message.id);
+    expect(
+      queuedSteerMessages(session).map((entry) => entry.message.id),
+    ).toEqual([first.message.id, second.message.id]);
     first.steerStatus = "delivered";
     expect(nextQueuedSteerMessage(session)?.message.id).toBe(second.message.id);
   });

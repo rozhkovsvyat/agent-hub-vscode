@@ -90,28 +90,32 @@ export type BridgeRoute = {
 
 export function queuedFollowUpEchoMessageId(
   messages: ChatMessage[],
-  queuedFollowUpMessageId: string | undefined,
+  queuedFollowUpMessageIds: string[],
   vendorEcho: string,
-  alreadyRead: boolean,
+  alreadyRead: ReadonlySet<string>,
 ): string | undefined {
-  if (!queuedFollowUpMessageId || alreadyRead) return undefined;
-  const content = messages.find(
-    (message) =>
-      (message as ChatMessage & { id?: string }).id === queuedFollowUpMessageId,
-  )?.content;
-  const text =
-    typeof content === "string"
-      ? content
-      : content
-          ?.filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("\n");
-  const expected = text?.trim();
   const echoed = vendorEcho.trim();
-  return expected &&
-    (echoed === expected || echoed.endsWith(`USER:\n${expected}`))
-    ? queuedFollowUpMessageId
-    : undefined;
+  for (const messageId of queuedFollowUpMessageIds) {
+    if (alreadyRead.has(messageId)) continue;
+    const content = messages.find(
+      (message) => (message as ChatMessage & { id?: string }).id === messageId,
+    )?.content;
+    const text =
+      typeof content === "string"
+        ? content
+        : content
+            ?.filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n");
+    const expected = text?.trim();
+    if (
+      expected &&
+      (echoed === expected || echoed.endsWith(`USER:\n${expected}`))
+    ) {
+      return messageId;
+    }
+  }
+  return undefined;
 }
 
 export type ClaudePermissionTransport = {
@@ -482,7 +486,7 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
   return [
     "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
       " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call mcp__cukii-broker__broker_inbox." +
-      " If it returns messages, treat them as immediate input: address them first, then resume your task taking them into account." +
+      " If it returns messages, that array is the complete accumulated FIFO batch: read and address every item together as immediate input before resuming your task." +
       " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
       " Empty results are normal; never call it more than once per step boundary." +
       " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue.",
@@ -1353,6 +1357,7 @@ export async function* streamBridgeChat(
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
+    queuedFollowUpMessageIds?: string[];
     steerInterrupt?: boolean;
   },
   permissionTransport?: ClaudePermissionTransport,
@@ -1373,6 +1378,7 @@ async function* streamBridgeChatWithSteer(
     thinkingEnabled: boolean;
     brokerPermissionMode: CukiiPermissionMode;
     queuedFollowUpMessageId?: string;
+    queuedFollowUpMessageIds?: string[];
     steerInterrupt?: boolean;
   },
   cwd: string,
@@ -1500,6 +1506,7 @@ async function* streamBridgeChatWithSteer(
     brokerModel: args.brokerModel,
     brokerSubagent: args.brokerSubagent,
     queuedFollowUpMessageId: args.queuedFollowUpMessageId,
+    queuedFollowUpMessageIds: args.queuedFollowUpMessageIds,
     permissionTransport,
     canary,
     permissionBroker,
@@ -1546,6 +1553,7 @@ async function* launchBridgeChild(options: {
   brokerModel: BrokerModel;
   brokerSubagent: BrokerSubagent;
   queuedFollowUpMessageId?: string;
+  queuedFollowUpMessageIds?: string[];
   permissionTransport?: ClaudePermissionTransport;
   canary?: RuntimeCanaryAttestation;
   permissionBroker?: ClaudePermissionBroker;
@@ -1560,6 +1568,9 @@ async function* launchBridgeChild(options: {
     brokerModel,
     brokerSubagent,
     queuedFollowUpMessageId,
+    queuedFollowUpMessageIds = queuedFollowUpMessageId
+      ? [queuedFollowUpMessageId]
+      : [],
     permissionTransport,
     canary,
     permissionBroker,
@@ -1598,27 +1609,26 @@ async function* launchBridgeChild(options: {
   let done = false;
   const queue: BridgeEvent[] = [];
   let canaryResponse = "";
-  let queuedFollowUpRead = false;
+  const queuedFollowUpRead = new Set<string>();
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "userEcho") {
         const queuedMessageId = queuedFollowUpEchoMessageId(
           messages,
-          queuedFollowUpMessageId,
+          queuedFollowUpMessageIds,
           event.text,
-          false,
+          new Set(),
         );
-        if (queuedMessageId && queuedFollowUpRead) {
-          // Already acknowledged at the prompt handoff. The vendor echo of
-          // the same follow-up must be swallowed, never leak into the
-          // visible transcript as a second user message.
+        if (queuedMessageId && queuedFollowUpRead.has(queuedMessageId)) {
+          // Spawn already acknowledged this exact batch member. Its later
+          // vendor echo is private transport noise, never a second user turn.
           continue;
         }
         const messageId = queuedMessageId
           ? queuedMessageId
           : permissionTransport?.steering?.consumeVendorEcho(event.text);
         if (messageId) {
-          if (queuedMessageId) queuedFollowUpRead = true;
+          if (queuedMessageId) queuedFollowUpRead.add(queuedMessageId);
           queue.push({ kind: "steerRead", messageId });
         } else {
           // Existing non-meta `user` frames (for example human hook text)
@@ -1701,12 +1711,14 @@ async function* launchBridgeChild(options: {
   // event instead of immediately: a launch failure must leave the bubble
   // deferred so the durable outbox drain replays it, never consume it with a
   // read receipt for a process that never ran.
-  const ackFollowUpMessageId = queuedFollowUpMessageId;
-  if (ackFollowUpMessageId && !cancelled) {
+  if (queuedFollowUpMessageIds.length > 0 && !cancelled) {
     child.once("spawn", () => {
-      if (queuedFollowUpRead || cancelled) return;
-      queuedFollowUpRead = true;
-      queue.push({ kind: "steerRead", messageId: ackFollowUpMessageId });
+      if (cancelled) return;
+      for (const messageId of queuedFollowUpMessageIds) {
+        if (queuedFollowUpRead.has(messageId)) continue;
+        queuedFollowUpRead.add(messageId);
+        queue.push({ kind: "steerRead", messageId });
+      }
     });
   }
 

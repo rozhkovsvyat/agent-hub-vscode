@@ -8,7 +8,7 @@ import { ThunkApiType } from "../store";
 import { saveCurrentSession } from "./session";
 import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
 
-const MAX_QUEUED_FOLLOW_UP_TURNS = 8;
+const MAX_QUEUED_FOLLOW_UP_BATCH_TURNS = 8;
 const drainingSessions = new Set<string>();
 
 function hasSupportedPayload(item: ChatHistoryItemWithMessageId): boolean {
@@ -24,10 +24,20 @@ export function nextQueuedSteerMessage(session: {
   isInEdit: boolean;
   isCancelling?: boolean;
 }): ChatHistoryItemWithMessageId | undefined {
+  return queuedSteerMessages(session)[0];
+}
+
+/** One stable snapshot: every deliverable bubble goes into the same turn. */
+export function queuedSteerMessages(session: {
+  history: ChatHistoryItemWithMessageId[];
+  isStreaming: boolean;
+  isInEdit: boolean;
+  isCancelling?: boolean;
+}): ChatHistoryItemWithMessageId[] {
   if (session.isStreaming || session.isInEdit || session.isCancelling) {
-    return undefined;
+    return [];
   }
-  return session.history.find(
+  return session.history.filter(
     (item) =>
       item.isSteer &&
       item.message.role === "user" &&
@@ -53,43 +63,42 @@ export const continueIfTrailingSteer = createAsyncThunk<
   drainingSessions.add(sessionId);
 
   try {
-    for (let i = 0; i < MAX_QUEUED_FOLLOW_UP_TURNS; i++) {
+    for (let i = 0; i < MAX_QUEUED_FOLLOW_UP_BATCH_TURNS; i++) {
       const session = getState().session;
       if (session.id !== sessionId) return;
-      const followUp = nextQueuedSteerMessage(session);
-      const messageId = followUp?.message.id;
-      if (!messageId) return;
+      const batch = queuedSteerMessages(session);
+      if (batch.length === 0) return;
+      const pendingMessageIds: string[] = [];
+      let receiptStateChanged = false;
 
-      // The vendor may already have claimed this bubble mid-run through
-      // broker_inbox; launching it again would hand the agent a duplicate of
-      // an instruction it is acting on. A missing/erroring receipt (old host
-      // build) conservatively falls through to the normal delivery.
-      try {
-        const inboxReceipt = await extra.ideMessenger.request(
-          "cukii/steerInboxReceipt",
-          { sessionId, messageId },
-        );
-        if (
-          inboxReceipt.status === "success" &&
-          inboxReceipt.content.status === "read"
-        ) {
-          dispatch(setSteerStatus({ messageId, status: "read" }));
-          unwrapResult(
-            await dispatch(
-              saveCurrentSession({
-                openNewSession: false,
-                generateTitle: false,
-              }),
-            ),
+      for (const followUp of batch) {
+        const messageId = followUp.message.id;
+        // The vendor may already have claimed a bubble mid-run through
+        // broker_inbox. Exclude only that bubble; the rest of the snapshot is
+        // still dispatched together. A missing/erroring receipt (old host)
+        // conservatively keeps the durable delivery path.
+        try {
+          const inboxReceipt = await extra.ideMessenger.request(
+            "cukii/steerInboxReceipt",
+            { sessionId, messageId },
           );
-          continue;
+          if (
+            inboxReceipt.status === "success" &&
+            inboxReceipt.content.status === "read"
+          ) {
+            dispatch(setSteerStatus({ messageId, status: "read" }));
+            receiptStateChanged = true;
+            continue;
+          }
+        } catch {
+          // Receipt unavailable: keep the durable delivery path.
         }
-      } catch {
-        // Receipt unavailable: keep the durable delivery path.
+        pendingMessageIds.push(messageId);
       }
 
-      // Persist the still-pending outbox before launch. Do not claim delivery:
-      // a crash between save and vendor activity must remain replayable.
+      // Persist the reconciled snapshot before launch. Do not claim the
+      // remaining messages delivered: a crash before vendor activity must
+      // leave the entire batch replayable.
       unwrapResult(
         await dispatch(
           saveCurrentSession({
@@ -98,12 +107,18 @@ export const continueIfTrailingSteer = createAsyncThunk<
           }),
         ),
       );
+      if (pendingMessageIds.length === 0) {
+        if (!receiptStateChanged) return;
+        continue;
+      }
 
       try {
         const historyLengthAtDispatch = getState().session.history.length;
         unwrapResult(
           await dispatch(
-            streamBrokerBridgeInput({ queuedFollowUpMessageId: messageId }),
+            streamBrokerBridgeInput({
+              queuedFollowUpMessageIds: pendingMessageIds,
+            }),
           ),
         );
         const terminalErrorArrived = getState()
@@ -152,13 +167,12 @@ export const continueIfTrailingSteer = createAsyncThunk<
           }),
         ),
       );
-      const delivered = getState().session.history.find(
-        (item) => item.message.id === messageId,
+      const anyStillPending = getState().session.history.some(
+        (item) =>
+          pendingMessageIds.includes(item.message.id) &&
+          (item.steerStatus === "queued" || item.steerStatus === "deferred"),
       );
-      if (
-        delivered?.steerStatus === "queued" ||
-        delivered?.steerStatus === "deferred"
-      ) {
+      if (anyStillPending) {
         // A clean terminal without positive acceptance is not delivery.
         return;
       }

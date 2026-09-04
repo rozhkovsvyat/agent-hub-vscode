@@ -81,24 +81,48 @@ describe("native bridge argv", () => {
     const messages: Array<ChatMessage & { id: string }> = [
       { role: "user", content: "original", id: "original" },
       { role: "user", content: "follow me", id: "follow-up" },
+      { role: "user", content: "and this too", id: "follow-up-2" },
     ];
     expect(
-      queuedFollowUpEchoMessageId(messages, "follow-up", "follow me", false),
+      queuedFollowUpEchoMessageId(
+        messages,
+        ["follow-up"],
+        "follow me",
+        new Set(),
+      ),
     ).toBe("follow-up");
     expect(
       queuedFollowUpEchoMessageId(
         messages,
-        "follow-up",
+        ["follow-up"],
         "bridge instructions\n\nUSER:\nfollow me",
-        false,
+        new Set(),
       ),
     ).toBe("follow-up");
     expect(
-      queuedFollowUpEchoMessageId(messages, "follow-up", "original", false),
+      queuedFollowUpEchoMessageId(
+        messages,
+        ["follow-up"],
+        "original",
+        new Set(),
+      ),
     ).toBeUndefined();
     expect(
-      queuedFollowUpEchoMessageId(messages, "follow-up", "follow me", true),
+      queuedFollowUpEchoMessageId(
+        messages,
+        ["follow-up", "follow-up-2"],
+        "follow me",
+        new Set(["follow-up"]),
+      ),
     ).toBeUndefined();
+    expect(
+      queuedFollowUpEchoMessageId(
+        messages,
+        ["follow-up", "follow-up-2"],
+        "and this too",
+        new Set(["follow-up"]),
+      ),
+    ).toBe("follow-up-2");
   });
   it("marks only factual vendor stdout as receipt activity", () => {
     expect(
@@ -933,7 +957,8 @@ describe("native bridge argv", () => {
     const handoffAt = source.indexOf("child.stdin.write(");
     const spawnListenerAt = source.indexOf('child.once("spawn"');
     const ackAt = source.indexOf(
-      'queue.push({ kind: "steerRead", messageId: ackFollowUpMessageId });',
+      'queue.push({ kind: "steerRead", messageId });',
+      spawnListenerAt,
     );
     const parserAt = source.indexOf(
       "const parser = new BridgeEventParser(route.format);",
@@ -943,9 +968,12 @@ describe("native bridge argv", () => {
     expect(ackAt).toBeGreaterThan(spawnListenerAt);
     expect(parserAt).toBeGreaterThan(ackAt);
     // A launch failure must leave the bubble deferred and replayable, so the
-    // ack stays gated on the spawn event plus the cancellation/read flags.
+    // Every batch member is acknowledged only after spawn, unless already
+    // acknowledged by an exact vendor echo.
     const ackBlock = source.slice(spawnListenerAt, ackAt);
-    expect(ackBlock).toContain("queuedFollowUpRead || cancelled");
+    expect(ackBlock).toContain("if (cancelled) return");
+    expect(ackBlock).toContain("for (const messageId of queuedFollowUpMessageIds)");
+    expect(ackBlock).toContain("queuedFollowUpRead.has(messageId)");
   });
 
   it("swallows a vendor echo of an already-acknowledged follow-up", () => {
@@ -954,7 +982,7 @@ describe("native bridge argv", () => {
       "utf8",
     );
     const swallowAt = source.indexOf(
-      "if (queuedMessageId && queuedFollowUpRead) {",
+      "if (queuedMessageId && queuedFollowUpRead.has(queuedMessageId)) {",
     );
     expect(swallowAt).toBeGreaterThan(-1);
     const swallowBlock = source.slice(

@@ -182,14 +182,28 @@ function settleObservedToolCalls(
 
 export const streamBrokerBridgeInput = createAsyncThunk<
   void,
-  { queuedFollowUpMessageId?: string } | undefined,
+  {
+    /** @deprecated Compatibility with callers built before batch delivery. */
+    queuedFollowUpMessageId?: string;
+    queuedFollowUpMessageIds?: string[];
+  } | undefined,
   ThunkApiType
 >(
   "chat/streamBrokerBridgeInput",
   async (options, { dispatch, extra, getState }) => {
     const state = getState();
     const sessionId = state.session.id;
-    const queuedFollowUpMessageId = options?.queuedFollowUpMessageId;
+    const queuedFollowUpMessageIds = Array.from(
+      new Set(
+        (
+          options?.queuedFollowUpMessageIds ??
+          (options?.queuedFollowUpMessageId
+            ? [options.queuedFollowUpMessageId]
+            : [])
+        ).filter(Boolean),
+      ),
+    );
+    const queuedFollowUpMessageId = queuedFollowUpMessageIds[0];
     const brokerModel = state.session.brokerModel ?? "fable-5";
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
     const brokerEffort = state.session.brokerEffort;
@@ -202,14 +216,15 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           (item) => item.message.role === "user" && !item.isSteer,
         )?.message.id;
 
-    const queuedFollowUp = queuedFollowUpMessageId
-      ? state.session.history.find(
-          (item) => item.isSteer && item.message.id === queuedFollowUpMessageId,
-        )
-      : undefined;
-    if (queuedFollowUpMessageId && !queuedFollowUp) {
+    const queuedFollowUps = queuedFollowUpMessageIds.map((messageId) =>
+      state.session.history.find(
+        (item) => item.isSteer && item.message.id === messageId,
+      ),
+    );
+    const missingFollowUpIndex = queuedFollowUps.findIndex((item) => !item);
+    if (missingFollowUpIndex >= 0) {
       throw new Error(
-        `Queued follow-up ${queuedFollowUpMessageId} is absent from session ${state.session.id}.`,
+        `Queued follow-up ${queuedFollowUpMessageIds[missingFollowUpIndex]} is absent from session ${state.session.id}.`,
       );
     }
     // A steer that the vendor could not accept live interrupted the previous
@@ -217,7 +232,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     // prompt asks the model to resume the interrupted task instead of reading
     // the follow-up as a brand-new request.
     const steerInterrupt =
-      Boolean(queuedFollowUpMessageId) &&
+      queuedFollowUpMessageIds.length > 0 &&
       Boolean(state.session.steerInterruptPending);
     if (state.session.steerInterruptPending) {
       dispatch(clearSteerInterrupt());
@@ -228,7 +243,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       .filter(
         (item) =>
           !item.modelSwitch &&
-          item.message.id !== queuedFollowUpMessageId &&
+          !queuedFollowUpMessageIds.includes(item.message.id) &&
           !(
             item.isSteer &&
             (item.steerStatus === "queued" ||
@@ -240,7 +255,9 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       )
       .map((item) => item.message)
       .filter((message) => message.role !== "thinking");
-    if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    for (const queuedFollowUp of queuedFollowUps) {
+      if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    }
     const historyLengthAtRunStart = state.session.history.length;
     // Long broker turns must not bet the whole tail on the end-of-turn save:
     // a reload, crash, or Remote-SSH reconnect mid-turn loses everything
@@ -259,20 +276,25 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       }
     };
 
-    const markAcceptedAndPersist = async (messageId: string) => {
+    const markAcceptedAndPersist = async (messageIds: string[]) => {
       const current = getState().session;
       if (current.id !== sessionId) return;
-      const item = current.history.find(
-        (entry) => entry.message.id === messageId,
-      );
-      if (item?.steerStatus === "read") return;
-      if (
-        item?.isSteer &&
-        (item.steerStatus === "queued" || item.steerStatus === "deferred")
-      ) {
-        dispatch(setSteerStatus({ messageId, status: "delivered" }));
+      let changed = false;
+      for (const messageId of messageIds) {
+        const item = current.history.find(
+          (entry) => entry.message.id === messageId,
+        );
+        if (item?.steerStatus === "read") continue;
+        if (
+          item?.isSteer &&
+          (item.steerStatus === "queued" || item.steerStatus === "deferred")
+        ) {
+          dispatch(setSteerStatus({ messageId, status: "delivered" }));
+        }
+        dispatch(markSteerRead({ messageId }));
+        changed = true;
       }
-      dispatch(markSteerRead({ messageId }));
+      if (!changed) return;
       const { saveCurrentSession } = await import("./session");
       unwrapResult(
         await dispatch(
@@ -319,6 +341,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           thinkingEnabled,
           brokerPermissionMode: state.session.brokerPermissionMode,
           queuedFollowUpMessageId,
+          queuedFollowUpMessageIds,
           steerInterrupt,
         },
         streamAborter.signal,
@@ -364,13 +387,23 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           }
 
           let hasTerminalReceipt = false;
-          for (const message of result.value.value as CukiiBridgeMessage[]) {
+          const bridgeMessages = result.value.value as CukiiBridgeMessage[];
+          const batchReceiptIds = Array.from(
+            new Set(
+              bridgeMessages
+                .map((message) => message.cukiiSteerReadMessageId)
+                .filter((messageId): messageId is string => Boolean(messageId)),
+            ),
+          );
+          if (batchReceiptIds.length > 0) {
+            await markAcceptedAndPersist(batchReceiptIds);
+          }
+          for (const message of bridgeMessages) {
             if (isBridgeTerminalMessage(message)) {
               hasTerminalReceipt = true;
               break;
             }
             if (message.cukiiSteerReadMessageId) {
-              await markAcceptedAndPersist(message.cukiiSteerReadMessageId);
               continue;
             }
             if (isBridgeTerminalError(message)) {
@@ -387,8 +420,8 @@ export const streamBrokerBridgeInput = createAsyncThunk<
               continue;
             }
             if (message.cukiiVendorActivity) {
-              if (queuedFollowUpMessageId) {
-                await markAcceptedAndPersist(queuedFollowUpMessageId);
+              if (queuedFollowUpMessageIds.length > 0) {
+                await markAcceptedAndPersist(queuedFollowUpMessageIds);
               } else if (initialUserReceiptId) {
                 dispatch(markSteerRead({ messageId: initialUserReceiptId }));
               }
