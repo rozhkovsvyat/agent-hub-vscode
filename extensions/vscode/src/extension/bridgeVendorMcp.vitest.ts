@@ -11,6 +11,7 @@ import {
   ensureCodexBrokerRegistration,
   ensureCursorBrokerRegistration,
   ensureGrokBrokerRegistration,
+  ensureKimiBrokerRegistration,
   ensureQwenBrokerRegistration,
   resetBrokerIntegrationMemoForTests,
   resolveBrokerDir,
@@ -248,6 +249,50 @@ describe("bridgeVendorMcp", () => {
     });
   });
 
+  describe("kimi registration", () => {
+    const mcpPath = () => path.join(home, ".kimi-code", "mcp.json");
+    const configPath = () => path.join(home, ".kimi-code", "config.toml");
+
+    it("adds the server to mcp.json and appends the gate hook to config.toml", () => {
+      fs.mkdirSync(path.join(home, ".kimi-code"), { recursive: true });
+      fs.writeFileSync(
+        mcpPath(),
+        JSON.stringify({ mcpServers: { memory: { command: "mem" } } }),
+        "utf8",
+      );
+      fs.writeFileSync(configPath(), 'default_model = "kimi-code/k3"\n', "utf8");
+
+      const first = ensureKimiBrokerRegistration(brokerDir, options());
+      expect(first).toMatchObject({ mcpAdded: true, hookAdded: true });
+      const config = JSON.parse(fs.readFileSync(mcpPath(), "utf8"));
+      expect(config.mcpServers.memory).toEqual({ command: "mem" });
+      expect(config.mcpServers[BROKER_MCP_NAME].args[0]).toBe(
+        path.join(brokerDir, "mcp_server.py"),
+      );
+      const body = fs.readFileSync(configPath(), "utf8");
+      expect(body.startsWith('default_model = "kimi-code/k3"\n')).toBe(true);
+      expect(body).toContain('event = "PreToolUse"');
+      expect(body).toContain("-Harness kimi");
+      const backups = fs
+        .readdirSync(path.join(home, ".kimi-code"))
+        .filter((name) => name.startsWith("config.toml.bak-cukii-"));
+      expect(backups).toHaveLength(1);
+
+      const before = fs.readFileSync(configPath(), "utf8");
+      const second = ensureKimiBrokerRegistration(brokerDir, options());
+      expect(second).toMatchObject({ mcpAdded: false, hookAdded: false });
+      expect(fs.readFileSync(configPath(), "utf8")).toBe(before);
+    });
+
+    it("creates mcp.json when absent and survives a missing config.toml", () => {
+      const result = ensureKimiBrokerRegistration(brokerDir, options());
+      expect(result.mcpAdded).toBe(true);
+      expect(result.hookAdded).toBe(false);
+      const config = JSON.parse(fs.readFileSync(mcpPath(), "utf8"));
+      expect(config.mcpServers[BROKER_MCP_NAME]).toBeDefined();
+    });
+  });
+
   describe("ensureBrokerVendorIntegration", () => {
     const seedQwenSettings = () => {
       fs.mkdirSync(path.join(home, ".qwen"), { recursive: true });
@@ -277,15 +322,24 @@ describe("bridgeVendorMcp", () => {
       ).toBe(false);
     });
 
-    it("skips claude and kimi models entirely", () => {
+    it("skips claude models entirely", () => {
       seedQwenSettings();
       expect(
         ensureBrokerVendorIntegration("opus-5", options()),
       ).toBeUndefined();
-      expect(
-        ensureBrokerVendorIntegration("kimi-k2", options()),
-      ).toBeUndefined();
       expect(fs.readdirSync(home)).toEqual([".qwen"]);
+    });
+
+    it("wires kimi through mcp.json and the config.toml gate", () => {
+      seedQwenSettings();
+      fs.mkdirSync(path.join(home, ".kimi-code"), { recursive: true });
+      fs.writeFileSync(
+        path.join(home, ".kimi-code", "config.toml"),
+        "default_model = 'kimi-code/k3'\n",
+        "utf8",
+      );
+      const result = ensureBrokerVendorIntegration("kimi-k2", options());
+      expect(result).toMatchObject({ mcpAdded: true, hookAdded: true });
     });
 
     it("no-ops without a resolved broker package", () => {

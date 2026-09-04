@@ -462,8 +462,8 @@ export function isClaudeNativeModel(model: BrokerModel): boolean {
 /**
  * Live pull-steering through the broker inbox needs the cukii-broker MCP
  * server loaded by the vendor CLI. Every MCP-capable vendor is wired by
- * `ensureBrokerVendorIntegration` at spawn time; kimi has no MCP surface,
- * claude has the stronger native stdin channel.
+ * `ensureBrokerVendorIntegration` at spawn time; claude has the stronger
+ * native stdin channel.
  */
 export function supportsBrokerInbox(model: BrokerModel): boolean {
   const vendor = brokerVendorForModel(model);
@@ -471,7 +471,8 @@ export function supportsBrokerInbox(model: BrokerModel): boolean {
     vendor === "qwen" ||
     vendor === "codex" ||
     vendor === "grok" ||
-    vendor === "cursor"
+    vendor === "cursor" ||
+    vendor === "kimi"
   );
 }
 

@@ -8,14 +8,14 @@ import {
 } from "./bridgeChatAdapter";
 
 describe("broker inbox steering gate", () => {
-  it("covers every MCP-capable vendor; kimi and claude stay out", () => {
+  it("covers every MCP-capable vendor; claude stays out", () => {
     expect(supportsBrokerInbox("qwen-3-8-max")).toBe(true);
     expect(supportsBrokerInbox("codex-5-6-terra")).toBe(true);
     expect(supportsBrokerInbox("grok-4-6")).toBe(true);
     expect(supportsBrokerInbox("composer-2-5")).toBe(true);
-    // Kimi has no MCP surface; claude keeps the stronger native stdin push,
-    // so the pull directive must not double-cover it.
-    expect(supportsBrokerInbox("kimi-k2")).toBe(false);
+    expect(supportsBrokerInbox("kimi-k2")).toBe(true);
+    // Claude keeps the stronger native stdin push, so the pull directive
+    // must not double-cover it.
     expect(supportsBrokerInbox("fable-5")).toBe(false);
   });
 
@@ -25,6 +25,7 @@ describe("broker inbox steering gate", () => {
       "codex-5-6-terra",
       "grok-4-6",
       "composer-2-5",
+      "kimi-k2",
     ] as const) {
       const lines = brokerInboxDirective(model);
       expect(lines).toHaveLength(2);
@@ -41,9 +42,7 @@ describe("broker inbox steering gate", () => {
     }
   });
 
-  it("stays silent for claude and kimi", () => {
-    for (const model of ["fable-5", "kimi-k2"] as const) {
-      expect(brokerInboxDirective(model)).toEqual([]);
-    }
+  it("stays silent for claude", () => {
+    expect(brokerInboxDirective("fable-5")).toEqual([]);
   });
 });

@@ -16,13 +16,12 @@ import { brokerVendorForModel } from "core/cukiiPermissionModes";
  * run — the turn-end drain fallback still delivers queued messages.
  *
  * Claude is deliberately not wired: its stdin channel interrupts the turn
- * live, which is a stronger guarantee than the gate. Kimi has no MCP
- * surface and keeps the plain queue fallback.
+ * live, which is a stronger guarantee than the gate.
  */
 
 export const BROKER_MCP_NAME = "cukii-broker";
 const GATE_MARKER = "inbox_gate.py";
-const CODEX_MANAGED_MARKER = "# cukii-inbox-channel (managed by the Cukii plugin)";
+const MANAGED_MARKER = "# cukii-inbox-channel (managed by the Cukii plugin)";
 const GROK_HOOK_FILENAME = "cukii-inbox.json";
 
 export interface BrokerIntegrationOptions {
@@ -209,7 +208,7 @@ export function ensureCodexBrokerRegistration(
   const backup = path.join(codexDir, `config.toml.bak-cukii-${Date.now()}`);
   if (body) fs.writeFileSync(backup, body, { encoding: "utf8" });
   const py = brokerPythonCommand(options);
-  const block: string[] = ["", CODEX_MANAGED_MARKER];
+  const block: string[] = ["", MANAGED_MARKER];
   if (!hasMcp) {
     block.push(
       "[mcp_servers.cukii-broker]",
@@ -301,6 +300,60 @@ export function ensureGrokBrokerRegistration(
 }
 
 /**
+ * kimi: ~/.kimi-code/mcp.json carries the server (same shape as cursor's),
+ * config.toml gets an append-only [[hooks]] block. Kimi parses the deny
+ * envelope natively on PreToolUse (canary-verified on 0.38.0), so the gate
+ * registers directly, without the prompt-injection adapter.
+ */
+export function ensureKimiBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const kimiDir = path.join(home(options), ".kimi-code");
+  let mcpAdded = false;
+  try {
+    const configPath = path.join(kimiDir, "mcp.json");
+    let config: { mcpServers?: Record<string, unknown> } = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf8")) as typeof config;
+    } catch {
+      config = {};
+    }
+    const servers = config.mcpServers ?? {};
+    if (!servers[BROKER_MCP_NAME]) {
+      config.mcpServers = { ...servers, [BROKER_MCP_NAME]: mcpEntry(brokerDir, options) };
+      fs.mkdirSync(kimiDir, { recursive: true });
+      writeAtomic(configPath, JSON.stringify(config, null, 2));
+      mcpAdded = true;
+    }
+  } catch {
+    mcpAdded = false;
+  }
+  let hookAdded = false;
+  try {
+    const configPath = path.join(kimiDir, "config.toml");
+    const body = fs.readFileSync(configPath, "utf8");
+    if (!body.includes(GATE_MARKER)) {
+      const backup = path.join(kimiDir, `config.toml.bak-cukii-${Date.now()}`);
+      if (body) fs.writeFileSync(backup, body, { encoding: "utf8" });
+      const block: string[] = [
+        "",
+        MANAGED_MARKER,
+        "[[hooks]]",
+        'event = "PreToolUse"',
+        `command = ${tomlLiteral(gateCommand(brokerDir, "kimi", options))}`,
+        "timeout = 15",
+      ];
+      writeAtomic(configPath, body + block.join("\n") + "\n");
+      hookAdded = true;
+    }
+  } catch {
+    hookAdded = false;
+  }
+  return { mcpAdded, hookAdded };
+}
+
+/**
  * Pre-spawn wiring for one broker model. Memoized per vendor+home, safe to
  * call on every launch, and never throws into the run.
  */
@@ -328,8 +381,11 @@ export function ensureBrokerVendorIntegration(
       case "grok":
         result = ensureGrokBrokerRegistration(brokerDir, options);
         break;
+      case "kimi":
+        result = ensureKimiBrokerRegistration(brokerDir, options);
+        break;
       default:
-        result = undefined; // claude (native stdin), kimi (no MCP), deepseek (not connected)
+        result = undefined; // claude (native stdin), deepseek (not connected)
     }
     completed.add(key);
     return result;
