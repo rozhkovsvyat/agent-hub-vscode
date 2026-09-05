@@ -45,9 +45,19 @@ function authHost(email?: string, key?: string) {
   };
 }
 
+/** No env var, no token file: discovery finds nothing. */
+const noMachineToken = {
+  env: {},
+  homedir: () => "C:\\nobody",
+  readFile: () => undefined,
+};
+
 describe("YouGile account row", () => {
   it("offers only sign-in when nothing is stored", async () => {
-    const status = await yougileAccountStatus({ store: store() });
+    const status = await yougileAccountStatus({
+      store: store(),
+      environment: noMachineToken,
+    });
     expect(status).toEqual({
       id: "yougile",
       label: "YouGile",
@@ -63,6 +73,7 @@ describe("YouGile account row", () => {
     const status = await yougileAccountStatus({
       store: store(JSON.stringify({ key: KEY, accountLabel: "a@b.ru" })),
       http: http(200),
+      environment: noMachineToken,
     });
     expect(status.state).toBe("connected");
     expect(status.authenticated).toBe(true);
@@ -74,6 +85,7 @@ describe("YouGile account row", () => {
     const status = await yougileAccountStatus({
       store: store(JSON.stringify({ key: KEY, accountLabel: "a@b.ru" })),
       http: http(401),
+      environment: noMachineToken,
     });
     expect(status.state).toBe("disconnected");
     expect(status.accountLabel).toBeUndefined();
@@ -87,6 +99,7 @@ describe("YouGile account row", () => {
     const offline = await yougileAccountStatus({
       store: store(JSON.stringify({ key: KEY, accountLabel: "a@b.ru" })),
       http: unreachable,
+      environment: noMachineToken,
     });
     expect(offline.state).toBe("unknown");
     expect(offline.accountLabel).toBe("a@b.ru");
@@ -94,6 +107,7 @@ describe("YouGile account row", () => {
     const serverError = await yougileAccountStatus({
       store: store(JSON.stringify({ key: KEY, accountLabel: "a@b.ru" })),
       http: http(503),
+      environment: noMachineToken,
     });
     expect(serverError.state).toBe("unknown");
     expect(serverError.accountLabel).toBe("a@b.ru");
@@ -120,8 +134,62 @@ describe("YouGile account row", () => {
     expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
       key: KEY,
       accountLabel: "owner@company.ru",
+      source: "plugin",
     });
     expect(result.message).toContain("owner@company.ru");
+  });
+
+  it("picks up the machine's own token but never offers to delete it", async () => {
+    // The vault tooling (`yougile-cli.py auth-key`) writes the key to
+    // ~/.claude/yougile-token, and YOUGILE_TOKEN is its documented override.
+    // A row that ignored them would ask an already-authenticated user to
+    // re-enter a key the machine already has.
+    const fromFile = await yougileAccountStatus({
+      store: store(),
+      http: http(200),
+      environment: {
+        env: {},
+        homedir: () => "C:\\Users\\owner",
+        readFile: (file) =>
+          file === "C:\\Users\\owner\\.claude\\yougile-token"
+            ? `${KEY}\n`
+            : undefined,
+      },
+    });
+    expect(fromFile.state).toBe("connected");
+    // No sign-out: the plugin did not write that key and must not delete it.
+    expect(fromFile.actions).toEqual(["login"]);
+    expect(fromFile.accountLabel).toBeUndefined();
+
+    const fromEnv = await yougileAccountStatus({
+      store: store(),
+      http: http(200),
+      environment: {
+        env: { YOUGILE_TOKEN: KEY },
+        homedir: () => "C:\\nobody",
+        readFile: () => undefined,
+      },
+    });
+    expect(fromEnv.state).toBe("connected");
+  });
+
+  it("prefers the key signed in here over the machine's", async () => {
+    const status = await yougileAccountStatus({
+      store: store(
+        JSON.stringify({
+          key: "plugin-owned-key-0123456789",
+          accountLabel: "owner@company.ru",
+        }),
+      ),
+      http: http(200),
+      environment: {
+        env: { YOUGILE_TOKEN: KEY },
+        homedir: () => "C:\\nobody",
+        readFile: () => undefined,
+      },
+    });
+    expect(status.accountLabel).toBe("owner@company.ru");
+    expect(status.actions).toEqual(["logout"]);
   });
 
   it("saves nothing when the key is refused, the flow is cancelled, or the e-mail is junk", async () => {

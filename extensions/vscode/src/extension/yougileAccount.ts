@@ -2,6 +2,9 @@ import type {
   BrokerVendorAuthAction,
   BrokerVendorAuthStatus,
 } from "core/protocol/ideWebview";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 
 /**
@@ -10,11 +13,13 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
  * access to. It wears the same row contract as a vendor — probe, log in, log
  * out, account label — under a separate "Testing" group.
  *
- * There is deliberately no Install action. YouGile publishes no CLI: the npm
- * registry has only the `yougile` SDK (no `bin`) and third-party MCP servers,
- * so an "install the CLI" button would have nothing to install. Authentication
- * is the vendor's own documented one — a personal API key against REST v2,
- * created in the YouGile web UI, which is why login still opens the browser.
+ * There is deliberately no Install action. YouGile ships no CLI to install:
+ * the npm registry has only the `yougile` SDK (no `bin`) and third-party MCP
+ * servers. Authentication is the vendor's own documented one — a personal API
+ * key against REST v2 — which is why login opens the browser and then asks for
+ * the key. The machine's existing `yougile-cli.py auth-key` convention
+ * (`YOUGILE_TOKEN`, then `~/.claude/yougile-token`) is honoured as-is, so an
+ * already-authenticated workstation is not asked to paste a key it has.
  */
 export const YOUGILE_ACCOUNT_ID = "yougile" as const;
 export const YOUGILE_ACCOUNT_LABEL = "YouGile";
@@ -37,6 +42,23 @@ export type YougileHttp = (
 type StoredYougileAccount = {
   key: string;
   accountLabel?: string;
+  /**
+   * "plugin" — signed in here, so the plugin owns the key and can drop it.
+   * "machine" — discovered through the convention the vault tooling already
+   * uses (`YOUGILE_TOKEN`, then `~/.claude/yougile-token`, written by
+   * `yougile-cli.py auth-key`). That key belongs to the machine, not to this
+   * extension, so the row reports it but never offers to delete it.
+   */
+  source: "plugin" | "machine";
+};
+
+export const YOUGILE_TOKEN_ENV = "YOUGILE_TOKEN";
+export const YOUGILE_TOKEN_FILE = ".claude/yougile-token";
+
+export type YougileEnvironment = {
+  env?: Record<string, string | undefined>;
+  homedir?: () => string;
+  readFile?: (file: string) => string | undefined;
 };
 
 const EMAIL_PATTERN =
@@ -75,18 +97,47 @@ function parseStored(
       ...(typeof parsed.accountLabel === "string" && parsed.accountLabel
         ? { accountLabel: parsed.accountLabel }
         : {}),
+      source: "plugin",
     };
   } catch {
     // A key written by an older build was a bare string.
-    return raw.trim() ? { key: raw.trim() } : undefined;
+    return raw.trim() ? { key: raw.trim(), source: "plugin" } : undefined;
   }
 }
 
+function readMachineToken(
+  environment: YougileEnvironment = {},
+): StoredYougileAccount | undefined {
+  const env = environment.env ?? process.env;
+  const fromEnv = env[YOUGILE_TOKEN_ENV]?.trim();
+  if (fromEnv) return { key: fromEnv, source: "machine" };
+  const home = (environment.homedir ?? os.homedir)();
+  const file = path.join(home, ...YOUGILE_TOKEN_FILE.split("/"));
+  const read =
+    environment.readFile ??
+    ((target: string) => {
+      try {
+        return fs.readFileSync(target, "utf8");
+      } catch {
+        return undefined;
+      }
+    });
+  const fromFile = read(file)?.trim();
+  return fromFile ? { key: fromFile, source: "machine" } : undefined;
+}
+
+/**
+ * An explicit sign-in here beats discovery: the plugin's own key is the one
+ * the user last chose, and it is the only one the plugin may delete.
+ */
 export async function readYougileAccount(
   store: ProtectedSecretStore | undefined,
+  environment: YougileEnvironment = {},
 ): Promise<StoredYougileAccount | undefined> {
-  if (!store) return undefined;
-  return parseStored(await store.get(YOUGILE_SECRET_KEY));
+  const stored = store
+    ? parseStored(await store.get(YOUGILE_SECRET_KEY))
+    : undefined;
+  return stored ?? readMachineToken(environment);
 }
 
 /**
@@ -130,9 +181,16 @@ export async function yougileAccountStatus(
     store?: ProtectedSecretStore;
     http?: YougileHttp;
     timeoutMs?: number;
+    environment?: YougileEnvironment;
   } = {},
 ): Promise<BrokerVendorAuthStatus> {
-  const stored = await readYougileAccount(options.store);
+  const stored = await readYougileAccount(
+    options.store,
+    options.environment ?? {},
+  );
+  // A key the plugin did not write is not the plugin's to delete, so no
+  // sign-out is offered for it — signing in here replaces it instead.
+  const clearable = stored?.source === "plugin";
   if (!stored) {
     return {
       id: YOUGILE_ACCOUNT_ID,
@@ -161,7 +219,7 @@ export async function yougileAccountStatus(
       authenticated: false,
       state: "unknown",
       ...(stored.accountLabel ? { accountLabel: stored.accountLabel } : {}),
-      actions: ["logout"],
+      actions: clearable ? ["logout"] : ["login"],
     };
   }
   if (verdict === "rejected") {
@@ -172,7 +230,7 @@ export async function yougileAccountStatus(
       installed: true,
       authenticated: false,
       state: "disconnected",
-      actions: ["login", "logout"],
+      actions: clearable ? ["login", "logout"] : ["login"],
     };
   }
   return {
@@ -183,7 +241,7 @@ export async function yougileAccountStatus(
     authenticated: true,
     state: "connected",
     ...(stored.accountLabel ? { accountLabel: stored.accountLabel } : {}),
-    actions: ["logout"],
+    actions: clearable ? ["logout"] : ["login"],
   };
 }
 
@@ -234,7 +292,11 @@ export async function loginYougile(options: {
   }
   await options.store.store(
     YOUGILE_SECRET_KEY,
-    JSON.stringify({ key, accountLabel: email } satisfies StoredYougileAccount),
+    JSON.stringify({
+      key,
+      accountLabel: email,
+      source: "plugin",
+    } satisfies StoredYougileAccount),
   );
   return { opened: true, message: `Signed in to YouGile as ${email}.` };
 }
