@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-labelledby="title">
+  <title id="title">Stitch concept</title>
+  <!-- Two threads cross but remain distinct. No enclosing ring or central arrow. -->
+  <path d="M7 19C19 19 22 34 32 34C42 34 44 18 57 18" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <path d="M7 46C19 46 22 31 32 31C42 31 45 46 57 46" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 7V24M32 41V57" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="32.5" r="4.5" fill="currentColor"/>
+</svg>
