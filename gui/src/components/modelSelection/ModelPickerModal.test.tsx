@@ -188,4 +188,46 @@ describe("ModelPickerModal", () => {
     );
     expect(headings).toContain("MoonshotAI");
   });
+
+  it("puts Autocompact directly above Effort in the menu footer", async () => {
+    const { store, ideMessenger, user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+    const postSpy = vi.spyOn(ideMessenger, "post");
+
+    const autocompact = await screen.findByTestId("cukii-autocompact-slider");
+    const effort = await screen.findByTestId("cukii-effort-slider");
+    expect(autocompact.closest(".cukii-model-picker")).not.toBeNull();
+    // Same order as the "/" menu: the setting must not move depending on
+    // which surface you opened it from.
+    expect(
+      autocompact.compareDocumentPosition(effort) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    autocompact.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(store.getState().session.brokerAutocompact).toBe("25");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({ brokerAutocompact: "25", mode: "broker" }),
+    );
+  });
+
+  it("keeps the menu in the composer's lane instead of the whole window", async () => {
+    // The composer is a centred 714px column (`.cukii-main-input-shell`); the
+    // menu belongs to it. Pinned to the viewport it grew to the full editor
+    // width on a wide window, which is what the owner reported.
+    await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
+    const menu = document.querySelector(".cukii-model-picker");
+    const lane = menu?.parentElement;
+
+    expect(lane?.className).toContain("max-w-[714px]");
+    expect(lane?.className).toContain("mx-auto");
+    expect(lane?.className).toContain("pl-[17px]");
+    expect(lane?.className).toContain("pr-4");
+    // The strip spans the window, so it must not eat the backdrop's clicks.
+    expect(lane?.className).toContain("pointer-events-none");
+    expect(menu?.className).toContain("pointer-events-auto");
+  });
 });

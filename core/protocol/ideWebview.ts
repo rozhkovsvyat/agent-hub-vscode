@@ -68,9 +68,21 @@ export type BrokerVendorModelCatalog = {
   models: BrokerModelCatalogEntry[];
 };
 
+/**
+ * Accounts the plugin manages that are not model vendors. They share the whole
+ * vendor row contract — probe, login, logout, account label — but never appear
+ * in a model catalog, so they stay out of `BrokerVendorId`.
+ */
+export type BrokerToolAccountId = "yougile";
+
+/** Section of the Accounts dialog a row belongs to. */
+export type BrokerAccountGroup = "vendor" | "testing";
+
 export type BrokerVendorAuthStatus = {
-  id: BrokerVendorId;
+  id: BrokerVendorId | BrokerToolAccountId;
   label: string;
+  /** Absent from an older host, which only ever sent model vendors. */
+  group?: BrokerAccountGroup;
   /** Whether the vendor's native Windows CLI/product was found. */
   installed: boolean;
   /** Result of the current native CLI/local-auth probe. */
@@ -246,7 +258,10 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     },
   ];
   "cukii/runVendorAuthAction": [
-    { vendor: BrokerVendorId; action: BrokerVendorAuthAction },
+    {
+      vendor: BrokerVendorId | BrokerToolAccountId;
+      action: BrokerVendorAuthAction;
+    },
     { opened: boolean; message: string },
   ];
   "cukii/streamBridgeChat": [

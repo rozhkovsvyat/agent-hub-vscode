@@ -100,6 +100,15 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       accountLabel: "Coming soon",
       actions: [],
     },
+    {
+      id: "yougile",
+      label: "YouGile",
+      group: "testing",
+      installed: true,
+      authenticated: false,
+      state: "disconnected",
+      actions: ["login"],
+    },
   ],
   "cukii/listBrokerModelCatalog": [
     {

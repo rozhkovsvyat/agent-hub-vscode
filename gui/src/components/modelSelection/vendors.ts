@@ -11,6 +11,7 @@ import {
   canonicalCukiiModelDescription,
   canonicalCukiiModelLabel,
   cukiiCapabilityRating,
+  cukiiModelUpstreamVendor,
 } from "core/cukiiModelPresentation";
 
 export type VendorId = BrokerVendorId;
@@ -194,7 +195,6 @@ export const BEST_MODELS: readonly BrokerModel[] = [
   "grok-4-6",
   "composer-2-5",
   "kimi-k3",
-  "kimi-k3-256k",
 ];
 
 export function isBestModel(
@@ -227,7 +227,9 @@ export function applyRuntimeVendorCatalog(
       return {
         id: registered.id,
         label: registered.label,
-        models: presentVendorModels(live?.models ?? fallback?.models ?? []),
+        models: presentVendorModels(live?.models ?? fallback?.models ?? [], {
+          groupByUpstreamVendor: registered.id === "cursor",
+        }),
       };
     }).filter((vendor) => vendor.models.length > 0),
   );
@@ -261,9 +263,15 @@ export { cukiiCapabilityRating };
  * Normalizes catalog metadata and orders a vendor's models by Cukii bottle
  * rating. The original catalog index breaks ties, preserving canonical/live
  * vendor order without imposing a name or locale sort.
+ *
+ * `groupByUpstreamVendor` is for a CLI that resells other makers — Cursor
+ * lists Anthropic, OpenAI, xAI, Google and more in one flat catalog. There the
+ * maker leads (alphabetically, unlabelled: one section stays one section) and
+ * bottles order the models inside it.
  */
 export function presentVendorModels(
   models: BootstrapVendorInfo["models"],
+  options: { groupByUpstreamVendor?: boolean } = {},
 ): ModelInfo[] {
   return models
     .map((model) => {
@@ -278,12 +286,25 @@ export function presentVendorModels(
       };
     })
     .map((model, canonicalIndex) => ({ model, canonicalIndex }))
-    .sort(
-      (left, right) =>
+    .sort((left, right) => {
+      if (options.groupByUpstreamVendor) {
+        const leftVendor = cukiiModelUpstreamVendor(left.model);
+        const rightVendor = cukiiModelUpstreamVendor(right.model);
+        if (leftVendor !== rightVendor) {
+          // An unrecognised maker has no place in the alphabet; it goes last.
+          if (!leftVendor) return 1;
+          if (!rightVendor) return -1;
+          return leftVendor.localeCompare(rightVendor, "en", {
+            sensitivity: "base",
+          });
+        }
+      }
+      return (
         cukiiCapabilityRating(right.model) -
           cukiiCapabilityRating(left.model) ||
-        left.canonicalIndex - right.canonicalIndex,
-    )
+        left.canonicalIndex - right.canonicalIndex
+      );
+    })
     .map(({ model }) => model);
 }
 

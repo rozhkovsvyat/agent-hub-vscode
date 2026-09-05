@@ -28,6 +28,35 @@ describe("cukii brand icons", () => {
     expect(activitySvg).not.toContain('width="22"');
   });
 
+  it("wears the cookie in the activity bar, not a stand-in codicon", () => {
+    // 2.0.98 shipped `$(circle-large-filled)` because a URI icon cannot pass
+    // the CSS-mask CORS check in a Remote-SSH window. The owner looked at the
+    // resulting circle and called it broken: the window people actually use
+    // here is local, where the mask is same-origin and the cookie renders.
+    // media/README-activity-icon.md carries the whole analysis; this pins the
+    // decision so it is not quietly reverted a third time.
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, "..", "package.json"), "utf8"),
+    ) as {
+      contributes: {
+        viewsContainers: { activitybar: { id: string; icon: string }[] };
+        views: Record<string, { id: string; icon?: string }[]>;
+      };
+    };
+    const container = manifest.contributes.viewsContainers.activitybar.find(
+      (entry) => entry.id === "cukii",
+    );
+    expect(container?.icon).toBe("media/cukii-activity.svg");
+    expect(manifest.contributes.views.cukii[0]?.icon).toBe(
+      "media/cukii-activity.svg",
+    );
+    // A mask paints the alpha channel, so the shape has to be filled, and the
+    // chip cutouts have to come from the mask rather than from a background.
+    const activitySvg = readMediaIcon("media/cukii-activity.svg");
+    expect(activitySvg).toContain('fill="currentColor"');
+    expect(activitySvg).toContain('mask="url(#cutout-mask)"');
+  });
+
   it("moves the color-mark chips by the same offset without changing their radii", () => {
     const markSvg = readMediaIcon("media/cukii-mark.svg");
 

@@ -122,10 +122,13 @@ describe("Cukii live subscription model catalog", () => {
         "glm-5.2-high - GLM 5.2",
       ].join("\n"),
     );
+    // Cursor's own labels carry the maker's brand ("Claude Opus 5") for models
+    // the rest of the picker calls "Opus 5". The section already names the CLI,
+    // so the prefix is dropped and one model reads one way everywhere.
     expect(models).toEqual([
       {
         value: "cursor:claude-opus-5",
-        label: "Claude Opus 5",
+        label: "Opus 5",
         contextWindowLabel: "1M",
         description: "Best for everyday, complex tasks",
       },
@@ -137,7 +140,7 @@ describe("Cukii live subscription model catalog", () => {
       },
       {
         value: "cursor:claude-4.6-sonnet",
-        label: "Claude Sonnet 4.6",
+        label: "Sonnet 4.6",
         contextWindowLabel: "1M",
         description: "Efficient for routine development tasks",
       },
@@ -204,16 +207,14 @@ describe("claude catalog version gate", () => {
 
   it("hides models the installed CLI build predates and keeps the rest", () => {
     const maintained = staticCatalogForUnavailableDiscovery("claude");
-    const outdated = filterClaudeCatalogByVersion(
-      maintained,
-      "2.1.202",
-    ).map((model) => model.value);
+    const outdated = filterClaudeCatalogByVersion(maintained, "2.1.202").map(
+      (model) => model.value,
+    );
     expect(outdated).not.toContain("fable-5-1");
     expect(outdated).toContain("opus-5");
-    const current = filterClaudeCatalogByVersion(
-      maintained,
-      "2.1.258",
-    ).map((model) => model.value);
+    const current = filterClaudeCatalogByVersion(maintained, "2.1.258").map(
+      (model) => model.value,
+    );
     expect(current).toContain("fable-5-1");
     expect(filterClaudeCatalogByVersion(maintained, undefined)).toEqual(
       maintained,

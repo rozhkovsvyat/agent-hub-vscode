@@ -1347,10 +1347,38 @@ button.cukii-submit-button--stop:active {
   border: 1px solid var(--vscode-input-border, var(--cukii-line));
   border-radius: 16px;
   padding: 8px 10px 10px !important;
+  /* The default here is content-box, under which `width: 100%` on the longread
+     variant means 100% of the row PLUS the 10px sides and the border — the
+     capsule then hung 22px past its row, ate the transcript's right gutter and
+     gave the whole transcript a horizontal scrollbar. The user capsule never
+     showed it because it is `fit-content`. Both capsules now end on the same
+     inset from the right edge as they start from the left. */
+  box-sizing: border-box;
   width: fit-content;
   min-width: 0;
   max-width: 70%;
   color: var(--vscode-foreground, var(--cukii-on-dark));
+}
+
+/* Markdown gives its first block a 1em top margin and its last a 1em bottom
+   one. Both collapse straight through the styled wrapper into the capsule's
+   own 8/10/10 inset, so the answer sat ~13px lower than the user's prose does
+   in its capsule and left a second blank band above the reply time. The
+   capsule's padding is the whole gutter, exactly as on the user side. */
+.cukii-assistant-bubble > * > :first-child {
+  margin-top: 0 !important;
+}
+
+.cukii-assistant-bubble > * > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Prose rhythm measured in the shipped Claude Code webview 2.1.261: a
+   paragraph is `1.3px 0 2.6px` (0.1em/0.2em) against a 19.5px line box, so
+   consecutive paragraphs sit almost as close as wrapped lines. Ours carried a
+   full 1em above and below, which inside a capsule reads as double spacing. */
+.cukii-assistant-bubble p {
+  margin: 1.3px 0 2.6px;
 }
 
 .cukii-assistant-bubble--longread {

@@ -54,8 +54,13 @@ export type SessionFilterCounts = {
   byTabState: Record<SessionTabState, number>;
 };
 
-export const SESSION_FILTERS_STORAGE_KEY = "cukii.session-filters.v1";
-
+/**
+ * Claude holds this in plain component state (`[c,P0]=useState(Ih)`) and never
+ * writes it anywhere, so every reload starts unfiltered. Persisting it looked
+ * like a courtesy and was a trap: an "Active" chip left on in one window came
+ * back after a restart, the whole list filtered itself out, and the sidebar
+ * read as broken rather than as filtered.
+ */
 export function defaultSessionFilters(): SessionFilters {
   return { activeOnly: false, statuses: new Set(), tabStates: new Set() };
 }
@@ -159,65 +164,14 @@ export function countSelectedSessionFilters(filters: SessionFilters): number {
   return filters.statuses.size + filters.tabStates.size;
 }
 
-function isStatus(value: unknown): value is SessionStatus {
-  return SESSION_STATUSES.includes(value as SessionStatus);
-}
-
-function isTabState(value: unknown): value is SessionTabState {
-  return SESSION_TAB_STATES.includes(value as SessionTabState);
-}
-
-export function parseSessionFilters(raw: string | null): SessionFilters {
-  const filters = defaultSessionFilters();
-  if (!raw) return filters;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return filters;
-  }
-  if (!parsed || typeof parsed !== "object") return filters;
-  const record = parsed as Record<string, unknown>;
-  filters.activeOnly = record.activeOnly === true;
-  if (Array.isArray(record.statuses)) {
-    for (const value of record.statuses) {
-      if (isStatus(value)) filters.statuses.add(value);
-    }
-  }
-  if (Array.isArray(record.tabStates)) {
-    for (const value of record.tabStates) {
-      if (isTabState(value)) filters.tabStates.add(value);
-    }
-  }
-  return filters;
-}
-
-export function serializeSessionFilters(filters: SessionFilters): string {
-  return JSON.stringify({
-    activeOnly: filters.activeOnly,
-    statuses: [...filters.statuses],
-    tabStates: [...filters.tabStates],
-  });
-}
-
-/** Storage can throw outright (private modes, a webview with storage denied). */
-export function readSessionFilters(): SessionFilters {
-  try {
-    return parseSessionFilters(
-      localStorage.getItem(SESSION_FILTERS_STORAGE_KEY),
-    );
-  } catch {
-    return defaultSessionFilters();
-  }
-}
-
-export function writeSessionFilters(filters: SessionFilters): void {
-  try {
-    localStorage.setItem(
-      SESSION_FILTERS_STORAGE_KEY,
-      serializeSessionFilters(filters),
-    );
-  } catch {
-    // A dropped preference is better than a sidebar that fails to render.
-  }
+/**
+ * Claude's `Wz0(...)` takes one more argument than the filters and the subject:
+ * the session currently being renamed is shown whatever the filters say, so an
+ * in-progress rename can never make its own row disappear under the caret.
+ */
+export function isSessionFilterExempt(
+  sessionId: string,
+  renamingSessionId: string | null,
+): boolean {
+  return renamingSessionId !== null && sessionId === renamingSessionId;
 }

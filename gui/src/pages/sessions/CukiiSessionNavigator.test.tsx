@@ -716,11 +716,6 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
   beforeEach(() => {
     localStorage.clear();
   });
-  afterEach(() => {
-    // Filters persist by design; without this, a selection made here would
-    // silently narrow the sessions the next describe block renders.
-    localStorage.removeItem("cukii.session-filters.v1");
-  });
 
   // Four sessions covering every cell of Claude's Status x Tabs matrix:
   //   needs-input/open, working/open, done/open (attention "ready"),
@@ -1017,57 +1012,83 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
     );
   });
 
-  it("persists the filter selection across a remount", async () => {
+  it("starts every mount unfiltered and writes no filter state anywhere", async () => {
+    // Claude keeps this in component state alone (`[c,P0]=useState(Ih)`).
+    // Persisting it produced the failure this test exists to prevent: an
+    // "Active" chip left on filtered the whole list out after a restart, and
+    // the sidebar read as broken rather than as filtered.
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
     const first = await mountNavigator();
     fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
     openFilterMenu();
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Working/ }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Open/ }));
     expect(rowTitles()).toEqual(["Running session"]);
-
     expect(
-      JSON.parse(localStorage.getItem("cukii.session-filters.v1") ?? "{}"),
-    ).toEqual({
-      activeOnly: true,
-      statuses: ["working"],
-      tabStates: ["open"],
-    });
+      setItem.mock.calls.filter(([key]) => String(key).includes("filter")),
+    ).toEqual([]);
 
     first.unmount();
-    // The restored filters hide every other row, so the remounted navigator
-    // settles on the one session that survives them.
-    await mountNavigator("Running session");
-    expect(rowTitles()).toEqual(["Running session"]);
+    await mountNavigator();
+    expect(rowTitles()).toEqual([
+      "Waiting session",
+      "Running session",
+      "Done session",
+      "Closed session",
+    ]);
     expect(screen.getByRole("button", { name: "Active · 2" })).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "false",
     );
     expect(
-      screen.getByRole("button", { name: "Filter by status, 2 selected" }),
+      screen.getByRole("button", { name: "Filter by status" }),
     ).toBeInTheDocument();
+    setItem.mockRestore();
   });
 
-  it("survives a localStorage that throws on read and on write", async () => {
-    const getItem = vi
-      .spyOn(Storage.prototype, "getItem")
-      .mockImplementation((key: string) => {
-        if (key === "cukii.session-filters.v1") throw new Error("denied");
-        return null;
-      });
-    const setItem = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation((key: string) => {
-        if (key === "cukii.session-filters.v1") throw new Error("denied");
-      });
-    try {
-      await mountNavigator();
-      expect(rowTitles()).toHaveLength(4);
-      fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
-      expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
-    } finally {
-      getItem.mockRestore();
-      setItem.mockRestore();
-    }
+  it("keeps the row being renamed on screen even when a filter excludes it", async () => {
+    // Claude's `if(q1.sessionId.value===B0)return!0` ahead of the filter pass:
+    // committing a rename must not make the input vanish under the caret.
+    await mountNavigator();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename Done session" }),
+    );
+    const input = screen.getByLabelText("Rename Done session");
+
+    // "Done session" is completed, so the Active chip excludes it — but it is
+    // the row under edit, so it has to stay.
+    fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+    expect(input).toBeInTheDocument();
+    expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
+
+    // Ending the rename hands the row back to the filter that excludes it.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByLabelText("Rename Done session")).toBeNull();
+    expect(rowTitles()).toEqual(["Waiting session", "Running session"]);
+  });
+
+  it("clears search and filters when a group is created", async () => {
+    // Claude's create-group path ends in `O1(""),n5(!1),P0(Ih)` — the group you
+    // just made has to be visible, not hidden behind the narrowing that was on.
+    await mountNavigator();
+    fireEvent.change(screen.getByLabelText("Search sessions"), {
+      target: { value: "running" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Active · 2" }));
+    expect(rowTitles()).toEqual(["Running session"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /New group/ }));
+    fireEvent.change(await screen.findByLabelText("Group name"), {
+      target: { value: "Плагин" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(screen.getByLabelText("Search sessions")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Active · 2" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(rowTitles()).toHaveLength(4);
   });
 
   // Negative control. Nothing here asserts an incidental detail: every

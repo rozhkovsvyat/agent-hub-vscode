@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import type { BrokerVendorAuthStatus } from "core/protocol/ideWebview";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
 import { renderWithProviders } from "../../util/test/render";
@@ -368,6 +368,95 @@ describe("VendorAccountsModal", () => {
     expect(document.body.textContent).not.toMatch(
       /Connected|identity unavailable|Email unavailable/i,
     );
+  });
+
+  it("splits the list into Vendors and Testing and says who is signed in", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "codex",
+        label: "OpenAI",
+        group: "vendor",
+        installed: true,
+        authenticated: false,
+        state: "disconnected",
+        actions: ["login"],
+      },
+      {
+        id: "yougile",
+        label: "YouGile",
+        group: "testing",
+        installed: true,
+        authenticated: true,
+        state: "connected",
+        accountLabel: "owner@company.ru",
+        actions: ["logout"],
+      },
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    const vendors = await screen.findByTestId("cukii-account-group-vendor");
+    const testing = await screen.findByTestId("cukii-account-group-testing");
+    expect(vendors.textContent).toContain("Vendors");
+    expect(vendors.textContent).toContain("OpenAI");
+    // A CLI that is present but signed out says so; only a missing CLI stays
+    // silent, because "not logged in" would be the wrong diagnosis there.
+    expect(vendors.textContent).toContain("Not logged in");
+    expect(testing.textContent).toContain("Testing");
+    expect(testing.textContent).toContain("YouGile");
+    expect(testing.textContent).toContain("owner@company.ru");
+    expect(testing.textContent).not.toContain("OpenAI");
+    // Vendors lead; the non-vendor group follows.
+    expect(
+      vendors.compareDocumentPosition(testing) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("keeps an ungrouped host in Vendors and hides the empty Testing group", async () => {
+    // A host that predates grouping sends no `group` at all.
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      connectedAccount("owner@example.com"),
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("OpenAI");
+    expect(
+      document.querySelector("[data-testid='cukii-account-group-vendor']"),
+    ).not.toBeNull();
+    expect(
+      document.querySelector("[data-testid='cukii-account-group-testing']"),
+    ).toBeNull();
+  });
+
+  it("says it is checking CLIs, without calling them vendor CLIs", async () => {
+    const pending = deferred<unknown>();
+    const ideMessenger = new MockIdeMessenger();
+    const originalRequest = ideMessenger.request.bind(ideMessenger);
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType: string,
+      data: unknown,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") return pending.promise;
+      return originalRequest(messageType as never, data as never);
+    }) as typeof ideMessenger.request);
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("Checking CLIs…");
+    expect(document.body.textContent).not.toContain("vendor CLIs");
+    await act(async () => {
+      pending.resolve({ status: "success", content: [] });
+    });
   });
 
   it("does not rewrite a loaded snapshot without an explicit refresh", async () => {

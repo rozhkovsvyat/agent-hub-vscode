@@ -556,10 +556,30 @@ describe("Cukii GUI contracts", () => {
     // user capsule uses (16px corners), only left-aligned and slate-filled.
     const botStart = css.indexOf(".cukii-assistant-bubble {");
     expect(botStart).toBeGreaterThanOrEqual(0);
-    const botContract = css.slice(botStart, botStart + 400);
+    // The whole rule, not a fixed slice: a comment inside it must not decide
+    // whether a declaration is considered present.
+    const botContract = css.slice(botStart, css.indexOf("}", botStart) + 1);
     expect(botContract).toContain("--vscode-input-background");
     expect(botContract).toContain("border-radius: 16px;");
     expect(botContract).toContain("width: fit-content;");
+    // Without this the longread variant's `width: 100%` measures the content
+    // box and the capsule hangs its padding and border past the row, eating
+    // the transcript's right gutter and adding a horizontal scrollbar.
+    expect(botContract).toContain("box-sizing: border-box;");
+
+    // The capsule's own 8/10/10 inset is the entire gutter: markdown's leading
+    // and trailing block margins collapse into it otherwise, and the answer
+    // sits lower in its capsule than the user's prose does in theirs.
+    expect(css).toMatch(
+      /\.cukii-assistant-bubble > \* > :first-child \{\s*margin-top: 0 !important;/,
+    );
+    expect(css).toMatch(
+      /\.cukii-assistant-bubble > \* > :last-child \{\s*margin-bottom: 0 !important;/,
+    );
+    // Paragraph rhythm measured in the shipped Claude Code webview 2.1.261.
+    expect(css).toMatch(
+      /\.cukii-assistant-bubble p \{\s*margin: 1\.3px 0 2\.6px;/,
+    );
 
     // The capsule keeps its own background and padding: the generic
     // transparency and axis-flush rules must both spare it.

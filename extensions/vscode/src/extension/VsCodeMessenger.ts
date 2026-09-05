@@ -100,10 +100,11 @@ import { runAlibabaAuthAction } from "./alibabaTokenPlan";
 import {
   clearBrokerVendorAccountCache,
   extractAuthFlowAssist,
-  listBrokerVendorAccounts,
+  listCukiiAccounts,
   vendorAuthTerminalCommand,
   watchVendorAuthTransition,
 } from "./bridgeVendorAuth";
+import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
@@ -895,7 +896,7 @@ export class VsCodeMessenger {
       return vendorPermissionCapabilities(data.vendor);
     });
     this.onWebview("cukii/listVendorAccounts", async () => {
-      return listBrokerVendorAccounts();
+      return listCukiiAccounts({ store: this.context.secrets });
     });
     this.onWebview("cukii/listBrokerModelCatalog", async () => {
       return listBrokerModelCatalog();
@@ -927,8 +928,34 @@ export class VsCodeMessenger {
     );
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
       clearBrokerVendorAccountCache();
-      const vendor = msg.data.vendor as BrokerVendorId;
       const action = msg.data.action as BrokerVendorAuthAction;
+      if (isYougileAccountId(msg.data.vendor)) {
+        // Not a CLI account: no terminal is involved, so it returns before the
+        // vendor terminal path below.
+        return runYougileAuthAction(action, {
+          store: this.context.secrets,
+          host: {
+            openExternal: (url) =>
+              vscode.env.openExternal(vscode.Uri.parse(url)),
+            promptEmail: () =>
+              vscode.window.showInputBox({
+                ignoreFocusOut: true,
+                title: "YouGile",
+                prompt: "E-mail of the YouGile account this key belongs to",
+                placeHolder: "name@company.ru",
+              }),
+            promptSecret: () =>
+              vscode.window.showInputBox({
+                password: true,
+                ignoreFocusOut: true,
+                title: "YouGile",
+                prompt:
+                  "Personal API key — YouGile → company settings → API keys",
+              }),
+          },
+        });
+      }
+      const vendor = msg.data.vendor as BrokerVendorId;
       if (vendor === "qwen" && (action === "login" || action === "logout")) {
         const result = await runAlibabaAuthAction(action, {
           host: {

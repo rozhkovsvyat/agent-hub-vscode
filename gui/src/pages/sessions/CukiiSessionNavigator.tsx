@@ -36,8 +36,9 @@ import {
 import {
   countSelectedSessionFilters,
   countSessionFilters,
+  defaultSessionFilters,
+  isSessionFilterExempt,
   matchesSessionFilters,
-  readSessionFilters,
   SESSION_STATUS_LABELS,
   SESSION_STATUS_SECTION,
   SESSION_STATUSES,
@@ -46,7 +47,6 @@ import {
   SESSION_TABS_SECTION,
   toggleStatusFilter,
   toggleTabStateFilter,
-  writeSessionFilters,
   type SessionFilters,
 } from "./cukiiSessionFilters";
 
@@ -422,7 +422,7 @@ export default function CukiiSessionNavigator() {
   const [sessions, setSessions] = useState<BaseSessionMetadata[]>([]);
   const [openPanels, setOpenPanels] = useState<CukiiOpenChatPanel[]>([]);
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<SessionFilters>(readSessionFilters);
+  const [filters, setFilters] = useState<SessionFilters>(defaultSessionFilters);
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [assignNewGroupTo, setAssignNewGroupTo] = useState<string | null>(null);
@@ -717,21 +717,20 @@ export default function CukiiSessionNavigator() {
   );
   const visible = useMemo(
     () =>
-      searched.filter((session) =>
-        matchesSessionFilters(filters, {
-          attention: session.attention,
-          isOpen: session.openPanelId !== undefined,
-        }),
+      searched.filter(
+        (session) =>
+          isSessionFilterExempt(session.sessionId, editingSessionId) ||
+          matchesSessionFilters(filters, {
+            attention: session.attention,
+            isOpen: session.openPanelId !== undefined,
+          }),
       ),
-    [searched, filters],
+    [searched, filters, editingSessionId],
   );
   const buckets = useMemo(
     () => groupSessions(visible, groups),
     [visible, groups],
   );
-  useEffect(() => {
-    writeSessionFilters(filters);
-  }, [filters]);
   const toggleActiveOnly = () =>
     setFilters((state) => ({ ...state, activeOnly: !state.activeOnly }));
   const openStatusFilterMenu = () => {
@@ -768,6 +767,11 @@ export default function CukiiSessionNavigator() {
     setAssignNewGroupTo(null);
     setAddingGroup(false);
     setContext(null);
+    // Claude's create-group path ends in `O1(""),n5(!1),P0(Ih)`: search and
+    // filters are cleared so the group you just made is on screen rather than
+    // hidden behind whatever narrowed the list a moment ago.
+    setQuery("");
+    setFilters(defaultSessionFilters());
   };
   const openSession = (session: CukiiNavigatorSession) =>
     messenger.request("cukii/openChatPanel", {

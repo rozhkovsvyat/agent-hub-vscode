@@ -19,6 +19,19 @@ const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   logout: "Log out",
 };
 
+/**
+ * Model vendors first, then accounts the plugin keeps for its own features.
+ * A group with no rows is not rendered, so a host that predates grouping (all
+ * rows default to "vendor") looks exactly as it did.
+ */
+const ACCOUNT_GROUPS: ReadonlyArray<{
+  id: NonNullable<BrokerVendorAuthStatus["group"]>;
+  label: string;
+}> = [
+  { id: "vendor", label: "Vendors" },
+  { id: "testing", label: "Testing" },
+];
+
 export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const [accounts, setAccounts] = useState<BrokerVendorAuthStatus[]>([]);
@@ -167,54 +180,73 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         <div className="mt-1">
           {loading && accounts.length === 0 ? (
             <div className="py-4 text-[13px] text-[var(--vscode-descriptionForeground)]">
-              Checking vendor CLIs…
+              Checking CLIs…
             </div>
           ) : (
-            accounts.map((account) => (
-              <section
-                key={account.id}
-                data-testid={`cukii-vendor-account-${account.id}`}
-                className="cukii-account-row"
-              >
-                <span
-                  className={`cukii-account-state cukii-vendor-state-${account.state}`}
-                  aria-label={account.state}
-                />
-                <span className="min-w-0 flex-1 leading-[19.5px]">
-                  <span className="block text-[13px] text-[var(--vscode-foreground)]">
-                    {account.label}
-                  </span>
-                  {account.accountLabel && (
-                    <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
-                      {account.accountLabel}
-                    </span>
-                  )}
-                </span>
-                <span className="flex shrink-0 items-center">
-                  {account.actions.map((action) => {
-                    const key = `${account.id}:${action}`;
-                    const isBusy = busy === key;
-                    return (
-                      <button
-                        key={action}
-                        type="button"
-                        disabled={busy !== undefined}
-                        className="cukii-vendor-action"
-                        aria-busy={isBusy}
-                        title={
-                          isBusy
-                            ? "Waiting for the authentication flow to finish"
-                            : undefined
-                        }
-                        onClick={() => void runAction(account, action)}
-                      >
-                        {isBusy ? <CukiiCrumbs /> : ACTION_LABELS[action]}
-                      </button>
-                    );
-                  })}
-                </span>
-              </section>
-            ))
+            ACCOUNT_GROUPS.map(({ id, label }) => {
+              const rows = accounts.filter(
+                (account) => (account.group ?? "vendor") === id,
+              );
+              if (rows.length === 0) return null;
+              return (
+                <div key={id} data-testid={`cukii-account-group-${id}`}>
+                  {/* Same heading as the model picker's vendor sections. */}
+                  <div className="cukii-picker-section-header cursor-default select-none">
+                    {label}
+                  </div>
+                  {rows.map((account) => (
+                    <section
+                      key={account.id}
+                      data-testid={`cukii-vendor-account-${account.id}`}
+                      className="cukii-account-row"
+                    >
+                      <span
+                        className={`cukii-account-state cukii-vendor-state-${account.state}`}
+                        aria-label={account.state}
+                      />
+                      <span className="min-w-0 flex-1 leading-[19.5px]">
+                        <span className="block text-[13px] text-[var(--vscode-foreground)]">
+                          {account.label}
+                        </span>
+                        {/* The identity line always says something once the CLI is
+                      there: the account, or that nobody is signed in. Only a
+                      missing CLI leaves it blank, because "not logged in"
+                      would be the wrong diagnosis. */}
+                        {(account.accountLabel ||
+                          (account.installed && !account.authenticated)) && (
+                          <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
+                            {account.accountLabel ?? "Not logged in"}
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex shrink-0 items-center">
+                        {account.actions.map((action) => {
+                          const key = `${account.id}:${action}`;
+                          const isBusy = busy === key;
+                          return (
+                            <button
+                              key={action}
+                              type="button"
+                              disabled={busy !== undefined}
+                              className="cukii-vendor-action"
+                              aria-busy={isBusy}
+                              title={
+                                isBusy
+                                  ? "Waiting for the authentication flow to finish"
+                                  : undefined
+                              }
+                              onClick={() => void runAction(account, action)}
+                            >
+                              {isBusy ? <CukiiCrumbs /> : ACTION_LABELS[action]}
+                            </button>
+                          );
+                        })}
+                      </span>
+                    </section>
+                  ))}
+                </div>
+              );
+            })
           )}
         </div>
 

@@ -15,7 +15,8 @@ import * as os from "os";
 import * as path from "path";
 import { performance } from "perf_hooks";
 import { promisify } from "util";
-import { alibabaIdentity } from "./alibabaTokenPlan";
+import { alibabaIdentity, type ProtectedSecretStore } from "./alibabaTokenPlan";
+import { yougileAccountStatus } from "./yougileAccount";
 
 const execFileAsync = promisify(execFile);
 // A short allowance avoids hiding a valid local session when the workstation
@@ -1785,6 +1786,25 @@ export async function listBrokerVendorAccounts(): Promise<
     ),
   );
   return sortVendorAccountsByLabel([...live, notSupportedVendorStatus()]);
+}
+
+/**
+ * Everything the Accounts dialog shows: the model vendors, then the non-vendor
+ * accounts that share the same row contract. Kept separate from
+ * `listBrokerVendorAccounts`, which the model catalog reads — a testing
+ * account must never widen what the catalog considers a vendor.
+ */
+export async function listCukiiAccounts(
+  options: { store?: ProtectedSecretStore } = {},
+): Promise<BrokerVendorAuthStatus[]> {
+  const [vendors, yougile] = await Promise.all([
+    listBrokerVendorAccounts(),
+    yougileAccountStatus(options.store ? { store: options.store } : {}),
+  ]);
+  return [
+    ...vendors.map((vendor) => ({ ...vendor, group: "vendor" as const })),
+    yougile,
+  ];
 }
 
 export function vendorAuthTerminalCommand(

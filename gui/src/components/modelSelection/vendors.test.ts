@@ -14,7 +14,11 @@ import {
   supportsNativeThinking,
   VENDORS,
 } from "./vendors";
-import { formatCukiiModelSubtitle } from "core/cukiiModelPresentation";
+import {
+  canonicalCukiiModelLabel,
+  cukiiModelUpstreamVendor,
+  formatCukiiModelSubtitle,
+} from "core/cukiiModelPresentation";
 
 describe("Cukii model context labels", () => {
   it("keeps context out of the first-line display label", () => {
@@ -104,7 +108,6 @@ describe("Cukii model context labels", () => {
       "grok-4-6",
       "composer-2-5",
       "kimi-k3",
-      "kimi-k3-256k",
     ]);
     for (const value of BEST_MODELS) {
       const model = ALL_MODELS.find((entry) => entry.value === value);
@@ -146,7 +149,10 @@ describe("Cukii model context labels", () => {
       ],
       grok: ["grok-4-6", "grok-4-5"],
       cursor: ["cursor:grok-4.6", "composer-2-5"],
-      kimi: ["kimi-k3", "kimi-k3-256k", "kimi-k2", "kimi-k2-highspeed"],
+      // K3-256K lost its bottles (it is a quota-saving sibling, not a Milky
+      // route), so it falls in with the other unrated Kimi models and keeps
+      // catalog order among them.
+      kimi: ["kimi-k3", "kimi-k2", "kimi-k2-highspeed", "kimi-k3-256k"],
       qwen: [
         "qwen-3-8-max",
         "qwen-deepseek-v4-pro-0813",
@@ -297,9 +303,13 @@ describe("Cukii model context labels", () => {
     ["cursor:gpt-5.6-sol", "Dynamic Cursor model", 3],
     ["qwen-3-8-max", "Qwen 3.8 Max", 3],
     ["opus-5", "Opus 5", 2],
-    ["cursor:claude-opus-4-8", "Dynamic Cursor model", 2],
+    ["cursor:claude-opus-5", "Dynamic Cursor model", 2],
     ["kimi-k3", "Kimi K3", 2],
-    ["kimi-k3-256k", "Kimi K3-256K", 2],
+    // Superseded Opus generations Cursor still resells, and the quota-saving
+    // Kimi sibling: present in the full catalog, never in Milky.
+    ["cursor:claude-opus-4-8", "Dynamic Cursor model", 0],
+    ["cursor:claude-opus-4-5", "Dynamic Cursor model", 0],
+    ["kimi-k3-256k", "Kimi K3-256K", 0],
     ["codex-5-6-terra", "GPT-5.6 Terra", 1],
     ["grok-4-6", "Grok 4.6", 1],
     ["cursor:grok-4.6", "Dynamic Cursor model", 1],
@@ -446,5 +456,92 @@ describe("Cukii model context labels", () => {
       "codex-5-4",
       "codex:custom",
     ]);
+  });
+
+  it("drops reseller and maker branding from a model name", () => {
+    // Cursor answers "Claude Opus 5" and "Cursor Grok 4.6" for models the rest
+    // of the picker calls "Opus 5" and "Grok 4.6". The section already names
+    // the CLI, so the prefix only makes one model read two ways.
+    expect(
+      canonicalCukiiModelLabel("cursor:claude-opus-5", "Claude Opus 5"),
+    ).toBe("Opus 5");
+    expect(
+      canonicalCukiiModelLabel("cursor:claude-fable-5-1", "Claude Fable 5.1"),
+    ).toBe("Fable 5.1");
+    expect(canonicalCukiiModelLabel("cursor:grok-4.6", "Cursor Grok 4.6")).toBe(
+      "Grok 4.6",
+    );
+    // Names that merely contain the word keep it, and an already-clean name is
+    // untouched — the rule is a prefix, not a search-and-replace.
+    expect(canonicalCukiiModelLabel("opus-5", "Opus 5")).toBe("Opus 5");
+    expect(canonicalCukiiModelLabel("composer-2-5", "Composer 2.5")).toBe(
+      "Composer 2.5",
+    );
+  });
+
+  it("orders the Cursor catalog by maker, then by bottles inside each maker", () => {
+    applyRuntimeVendorCatalog([
+      {
+        id: "cursor",
+        label: "Cursor",
+        models: [
+          ["cursor:grok-4.6", "Cursor Grok 4.6"],
+          ["cursor:gpt-5.6-terra", "GPT-5.6 Terra"],
+          ["cursor:claude-opus-4-8", "Claude Opus 4.8"],
+          ["cursor:gemini-3.7-flash", "Gemini 3.7 Flash"],
+          ["cursor:gpt-5.6-sol", "GPT-5.6 Sol"],
+          ["composer-2-5", "Composer 2.5"],
+          ["cursor:claude-fable-5-1", "Claude Fable 5.1"],
+        ].map(([value, label]) => ({
+          value,
+          label,
+          contextWindowLabel: "200K",
+          description: "",
+        })),
+      },
+    ]);
+
+    // Anthropic, Cursor, Google, OpenAI, xAI — alphabetical by maker, with no
+    // heading printed for any of them; Fable outranks Opus 4.8 on bottles and
+    // Sol outranks Terra, both inside their own maker.
+    expect(
+      VENDORS.find((vendor) => vendor.id === "cursor")?.models.map(
+        (model) => model.label,
+      ),
+    ).toEqual([
+      "Fable 5.1",
+      "Opus 4.8",
+      "Composer 2.5",
+      "Gemini 3.7 Flash",
+      "GPT-5.6 Sol",
+      "GPT-5.6 Terra",
+      "Grok 4.6",
+    ]);
+  });
+
+  it("NEGATIVE CONTROL: a maker key that stops discriminating breaks the order", () => {
+    // Every assertion above is false if cukiiModelUpstreamVendor returns one
+    // constant: the list would fall back to pure bottle order, which puts
+    // Composer and Sol next to each other instead of under their makers.
+    expect(
+      cukiiModelUpstreamVendor({ value: "cursor:gpt-5.6-sol", label: "" }),
+    ).toBe("OpenAI");
+    expect(
+      cukiiModelUpstreamVendor({
+        value: "composer-2-5",
+        label: "Composer 2.5",
+      }),
+    ).toBe("Cursor");
+    expect(
+      cukiiModelUpstreamVendor({ value: "cursor:claude-opus-5", label: "" }),
+    ).toBe("Anthropic");
+    expect(
+      cukiiModelUpstreamVendor({ value: "cursor:grok-4.6", label: "" }),
+    ).toBe("xAI");
+    // An unknown maker must not collide with a known one, or it would sort
+    // into the middle of the alphabet instead of after it.
+    expect(cukiiModelUpstreamVendor({ value: "cursor:x1", label: "X1" })).toBe(
+      "",
+    );
   });
 });
