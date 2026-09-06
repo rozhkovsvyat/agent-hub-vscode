@@ -349,6 +349,61 @@
         "escape": "закрывает и возвращает лупу",
         "clear_button": "🔴 не просто очищает, а очищает И закрывает — единственный мышиный путь обратно к лупе"
       },
+      "measured_on_installed": {
+        "collapsed": {
+          "toggle": {
+            "w": 24,
+            "h": 24,
+            "padding": "4px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "x": 152.71
+          },
+          "field_exists": false,
+          "newGroup": {
+            "w": 93.83,
+            "padding": "4px 8px",
+            "fontSize": "11.7px",
+            "x": 180.71
+          },
+          "gap_toggle_to_newGroup": 4,
+          "actionsRowWidth": 262.54
+        },
+        "open": {
+          "toggle_exists": false,
+          "field": {
+            "w": 275.2,
+            "h": 28.8,
+            "padding": "8px 28px 8px 32px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "placeholder": "Search sessions…",
+            "focused": true
+          },
+          "clear": {
+            "aria": "Clear search",
+            "w": 20,
+            "h": 20,
+            "borderRadius": "4px"
+          },
+          "actionsRow": "съезжает с y=66 на 98 и сужается с 262.54 до 234.54 — у эталона 258.55 → 234.55"
+        },
+        "behaviour": {
+          "rowsUnfiltered": 12,
+          "afterQuery": { "query": "памя", "rowCount": 1, "rows": ["Память"] },
+          "afterEscape": {
+            "searchOpen": false,
+            "toggleBack": true,
+            "rowCount": 12
+          },
+          "afterClearButton": {
+            "searchOpen": false,
+            "toggleBack": true,
+            "rowCount": 12
+          }
+        },
+        "note": "🔴 Поле сначала вышло 30px/13px против эталонных 28.8px/11.7px — расхождение нашлось именно этим замером на установленной сборке и закрыто в 2.0.109."
+      },
       "measurement_defect_found": "Первый прогон сказал «Escape не закрывает». Он был неверен: проверка стояла в том же тике, что и отправка события, и читала DOM до перерисовки React. Отдельный замер следующим вызовом показал обратное.",
       "deliberate_difference": "Закрытие всегда сбрасывает запрос. У эталона это не удалось подтвердить замером (моя проба строк не находила его разметку), а невидимое поле, оставляющее список молча отфильтрованным, — дефект в любом случае.",
       "tests": [
