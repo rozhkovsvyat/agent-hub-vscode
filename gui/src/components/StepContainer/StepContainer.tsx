@@ -13,6 +13,8 @@ interface StepContainerProps {
   item: ChatHistoryItem & { createdAt?: number };
   index: number;
   isLast: boolean;
+  /** This answer is still arriving, so its last line is still moving. */
+  isSettling?: boolean;
   latestSummaryIndex?: number;
 }
 
@@ -22,6 +24,64 @@ export const ASSISTANT_LONGREAD_CHARS = 800;
 
 /** Breathing room between the last word and the reply time riding its line. */
 const META_INLINE_GAP = 5;
+
+/** Width the reply time needs at the end of a line, gap included. Measured, not
+ * guessed: a 31px constant broke as soon as the clock format changed width. The
+ * same rounded value must feed both the decision and the CSS reserve — comparing
+ * against an unrounded width while reserving a rounded one lets the spacer wrap
+ * on a capsule the measurement called inline, which is the very defect this
+ * whole mechanism exists to avoid. */
+export function assistantMetaReserve(bubble: HTMLElement): number {
+  const time = bubble.querySelector<HTMLElement>(
+    ".cukii-assistant-metadata time",
+  );
+  if (!time) return 0;
+  return Math.ceil(time.getBoundingClientRect().width) + META_INLINE_GAP;
+}
+
+/**
+ * How far right the capsule's content may reach — not where it currently ends.
+ *
+ * 🔴 The capsule is `width: fit-content`, so a short answer's right edge sits on
+ * its last glyph and the space left over is always zero. Measuring against that
+ * edge would answer "is there room in the box the text already shrank to",
+ * which is never, and the reply time would drop to its own row for every short
+ * answer — the commonest case, and exactly where the user capsule keeps it on
+ * the line. The question worth asking is whether it fits if the capsule is
+ * allowed to grow, so the limit is `max-width`, resolved here because Blink
+ * reports a percentage back verbatim.
+ */
+function bubbleContentRight(
+  bubble: HTMLElement,
+  style: CSSStyleDeclaration,
+): number {
+  const rect = bubble.getBoundingClientRect();
+  let limit = rect.width;
+  const declared = style.maxWidth;
+  const parent = bubble.parentElement;
+  const view = bubble.ownerDocument.defaultView;
+  if (declared && declared !== "none" && parent && view) {
+    if (declared.endsWith("%")) {
+      const parentStyle = view.getComputedStyle(parent);
+      const inner =
+        parent.getBoundingClientRect().width -
+        parseFloat(parentStyle.paddingLeft || "0") -
+        parseFloat(parentStyle.paddingRight || "0");
+      const share = (inner * parseFloat(declared)) / 100;
+      if (Number.isFinite(share)) limit = Math.max(limit, share);
+    } else {
+      const px = parseFloat(declared);
+      if (Number.isFinite(px)) limit = Math.max(limit, px);
+    }
+  }
+  // `box-sizing: border-box`, so the limit covers padding and border too.
+  return (
+    rect.left +
+    limit -
+    parseFloat(style.paddingRight || "0") -
+    parseFloat(style.borderRightWidth || "0")
+  );
+}
 
 /**
  * Does the reply time still fit at the end of the answer's last line?
@@ -39,7 +99,10 @@ const META_INLINE_GAP = 5;
  * therefore never part of the text rects this looks at, so turning inline mode
  * on cannot flip the next measurement back off.
  */
-export function assistantMetaFitsOnLastLine(bubble: HTMLElement): boolean {
+export function assistantMetaFitsOnLastLine(
+  bubble: HTMLElement,
+  reserve = assistantMetaReserve(bubble),
+): boolean {
   const prose = bubble.querySelector(".cukii-assistant-prose");
   const meta = bubble.querySelector<HTMLElement>(".cukii-assistant-metadata");
   if (!prose || !meta) return false;
@@ -49,6 +112,7 @@ export function assistantMetaFitsOnLastLine(bubble: HTMLElement): boolean {
   const last = prose.lastElementChild;
   // A code block, table, list or heading cannot host the time on its last line.
   if (!last || last.tagName !== "P") return false;
+  if (reserve <= 0) return false;
 
   const doc = bubble.ownerDocument;
   const range = doc.createRange();
@@ -59,16 +123,9 @@ export function assistantMetaFitsOnLastLine(bubble: HTMLElement): boolean {
   if (!rects.length) return false;
   const lastLine = rects[rects.length - 1]!;
 
-  const time = meta.querySelector("time") ?? meta;
-  const needed = time.getBoundingClientRect().width + META_INLINE_GAP;
-  if (needed <= 0) return false;
-
   const style = doc.defaultView?.getComputedStyle(bubble);
-  const contentRight =
-    bubble.getBoundingClientRect().right -
-    parseFloat(style?.paddingRight || "0") -
-    parseFloat(style?.borderRightWidth || "0");
-  return contentRight - lastLine.right >= needed;
+  if (!style) return false;
+  return bubbleContentRight(bubble, style) - lastLine.right >= reserve;
 }
 
 function StepContainer(props: StepContainerProps) {
@@ -87,29 +144,33 @@ function StepContainer(props: StepContainerProps) {
   // Own row is the safe default: it can never collide with the answer's tail,
   // so a capsule that has not been measured yet is merely a little taller.
   const [metaInline, setMetaInline] = useState(false);
+  // 🔴 While the answer streams, its tail line grows a token at a time and
+  // crosses the fit/no-fit boundary at the end of every visual line. Measuring
+  // then would flip the mode — and the capsule's height with it — several times
+  // per paragraph, so the transcript would twitch under the reader. The
+  // streaming capsule holds the own row and is measured once, when the answer
+  // stops moving.
+  const settling = props.isSettling === true;
   useLayoutEffect(() => {
     const bubble = bubbleRef.current;
     if (!bubble) return;
+    if (settling) {
+      setMetaInline(false);
+      return;
+    }
     const apply = () => {
-      // The reserve is measured, not guessed: a 31px constant broke as soon as
-      // the clock format changed width.
-      const time = bubble.querySelector<HTMLElement>(
-        ".cukii-assistant-metadata time",
-      );
-      if (time) {
-        bubble.style.setProperty(
-          "--cukii-meta-reserve",
-          `${Math.ceil(time.getBoundingClientRect().width) + META_INLINE_GAP}px`,
-        );
+      const reserve = assistantMetaReserve(bubble);
+      if (reserve > 0) {
+        bubble.style.setProperty("--cukii-meta-reserve", `${reserve}px`);
       }
-      setMetaInline(assistantMetaFitsOnLastLine(bubble));
+      setMetaInline(assistantMetaFitsOnLastLine(bubble, reserve));
     };
     apply();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(apply);
     observer.observe(bubble);
     return () => observer.disconnect();
-  }, [proseText, isLongRead]);
+  }, [proseText, isLongRead, settling]);
 
   return (
     <div>

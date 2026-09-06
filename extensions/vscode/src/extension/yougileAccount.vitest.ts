@@ -286,14 +286,139 @@ describe("YouGile account row", () => {
       store: secrets,
       // Explicit: without it the test reads THIS machine's real token file and
       // its result depends on whose laptop runs the suite.
-      environment: {
-        env: {},
-        homedir: () => "C:\\nobody",
-        readFile: () => undefined,
-      },
+      environment: noMachineToken,
     });
-    expect(secrets.delete).toHaveBeenCalledWith(YOUGILE_SECRET_KEY);
+    // The key itself is gone — the record left behind is only the marker.
+    expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
+      suppressed: true,
+    });
+    const after = await yougileAccountStatus({
+      store: secrets,
+      http: http(200),
+      environment: noMachineToken,
+    });
+    expect(after.state).toBe("disconnected");
+    expect(after.accountLabel).toBeUndefined();
+  });
+
+  it("NEGATIVE CONTROL: a token appearing later does not undo the sign-out", async () => {
+    // 🔴 The marker used to be written only when a machine key existed AT THAT
+    // MOMENT. So signing out of a plugin key wrote nothing, and the next
+    // `yougile-cli.py auth-key` — or a VS Code restarted from a shell that
+    // exports YOUGILE_TOKEN — put somebody's account back in the row on its
+    // own and resumed sending that key to the API. An explicit sign-out may not
+    // be undone by an external event.
+    const secrets = store(JSON.stringify({ key: KEY, accountLabel: OWNER }));
+    await runYougileAuthAction("logout", {
+      host: authHost(),
+      store: secrets,
+      environment: noMachineToken,
+    });
+
+    const tokenAppearsLater = {
+      env: {},
+      homedir: () => "C:\\Users\\owner",
+      readFile: (file: string) =>
+        file === "C:\\Users\\owner\\.claude\\yougile-token"
+          ? `${KEY}\n`
+          : undefined,
+    };
+    const after = await yougileAccountStatus({
+      store: secrets,
+      http: http(200),
+      environment: tokenAppearsLater,
+    });
+    expect(after.state).toBe("disconnected");
+    expect(after.accountLabel).toBeUndefined();
+    expect(after.actions).toEqual(["login"]);
+  });
+
+  it("brings the machine key back on the next sign-in, without asking for it", async () => {
+    // The way back matters as much as the sign-out. Without it one "Log out"
+    // would cost the owner the whole point of discovery: he would have to open
+    // ~/.claude/yougile-token and paste by hand a key the machine already has.
+    const machine = {
+      env: {},
+      homedir: () => "C:\\Users\\owner",
+      readFile: (file: string) =>
+        file === "C:\\Users\\owner\\.claude\\yougile-token"
+          ? `${KEY}\n`
+          : undefined,
+    };
+    const secrets = store(JSON.stringify({ suppressed: true }));
+    const host = authHost(KEY);
+
+    const result = await runYougileAuthAction("login", {
+      host,
+      store: secrets,
+      http: http(200),
+      environment: machine,
+    });
+
+    // No browser, no prompt: the key is already here and it works.
+    expect(host.openExternal).not.toHaveBeenCalled();
+    expect(host.promptSecret).not.toHaveBeenCalled();
+    expect(result.message).toContain(OWNER);
     expect(secrets.values.size).toBe(0);
+
+    const after = await yougileAccountStatus({
+      store: secrets,
+      http: http(200),
+      environment: machine,
+    });
+    expect(after.state).toBe("connected");
+    expect(after.accountLabel).toBe(OWNER);
+    expect(after.actions).toEqual(["logout"]);
+  });
+
+  it("falls back to asking when the machine key no longer works", async () => {
+    // A suppressed row plus a stale token must not silently sign the user in;
+    // the normal browser flow has to take over.
+    const machine = {
+      env: { YOUGILE_TOKEN: "stale-key-0123456789abcdef" },
+      homedir: () => "C:\\nobody",
+      readFile: () => undefined,
+    };
+    const secrets = store(JSON.stringify({ suppressed: true }));
+    const host = authHost(KEY);
+    const rejectsStale: YougileHttp = vi.fn(
+      async (_url: string, init?: { headers?: Record<string, string> }) => {
+        const stale = init?.headers?.Authorization?.includes("stale");
+        return {
+          ok: !stale,
+          status: stale ? 401 : 200,
+          json: async () => ({ id: "u1", email: OWNER }),
+        };
+      },
+    );
+
+    await runYougileAuthAction("login", {
+      host,
+      store: secrets,
+      http: rejectsStale,
+      environment: machine,
+    });
+
+    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
+    expect(host.promptSecret).toHaveBeenCalled();
+    expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
+      key: KEY,
+      accountLabel: OWNER,
+      source: "plugin",
+    });
+  });
+
+  it("an explicit key beats the marker even in one record", async () => {
+    // The parser must never let a leftover marker outrank a key the user
+    // actually signed in with — the rule this module is built on is that an
+    // explicit sign-in wins over discovery.
+    const status = await yougileAccountStatus({
+      store: store(JSON.stringify({ key: KEY, suppressed: true })),
+      http: http(200),
+      environment: noMachineToken,
+    });
+    expect(status.state).toBe("connected");
+    expect(status.accountLabel).toBe(OWNER);
   });
 
   it("signing out of a machine key stops using it without deleting the file", async () => {

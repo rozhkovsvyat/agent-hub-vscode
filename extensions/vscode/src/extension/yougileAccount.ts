@@ -101,18 +101,24 @@ function parseStored(raw: string | undefined): StoredRecord | undefined {
     const parsed = JSON.parse(raw) as Partial<StoredYougileAccount> & {
       suppressed?: unknown;
     };
+    // An explicit key is checked FIRST: a record carrying both a key and the
+    // marker means the user signed in after signing out, and the sign-in has to
+    // win — otherwise the parser would quietly contradict the rule this whole
+    // module is built on.
+    if (typeof parsed?.key === "string" && parsed.key) {
+      return {
+        kind: "account",
+        account: {
+          key: parsed.key,
+          ...(typeof parsed.accountLabel === "string" && parsed.accountLabel
+            ? { accountLabel: parsed.accountLabel }
+            : {}),
+          source: "plugin",
+        },
+      };
+    }
     if (parsed?.suppressed === true) return { kind: "suppressed" };
-    if (typeof parsed?.key !== "string" || !parsed.key) return undefined;
-    return {
-      kind: "account",
-      account: {
-        key: parsed.key,
-        ...(typeof parsed.accountLabel === "string" && parsed.accountLabel
-          ? { accountLabel: parsed.accountLabel }
-          : {}),
-        source: "plugin",
-      },
-    };
+    return undefined;
   } catch {
     // A key written by an older build was a bare string.
     return raw.trim()
@@ -296,7 +302,34 @@ export async function loginYougile(options: {
   host: YougileAuthHost;
   store?: ProtectedSecretStore;
   http?: YougileHttp;
+  environment?: YougileEnvironment;
 }): Promise<{ opened: boolean; message: string }> {
+  // 🔴 Signing out records a marker that stops the machine's own key from being
+  // used. Without a way back, one "Log out" would cost the owner the very
+  // convenience discovery exists for — he would have to open
+  // ~/.claude/yougile-token and paste by hand a key the machine already holds.
+  // So "Log in" first offers to resume it: no browser, no prompt, one click.
+  if (options.store) {
+    const record = parseStored(await options.store.get(YOUGILE_SECRET_KEY));
+    if (record?.kind === "suppressed") {
+      const machine = readMachineToken(options.environment ?? {});
+      if (machine) {
+        const resumed = await probeYougileKey(
+          machine.key,
+          options.http ? { http: options.http } : {},
+        );
+        if (resumed.verdict === "valid") {
+          await options.store.delete(YOUGILE_SECRET_KEY);
+          return {
+            opened: false,
+            message: resumed.email
+              ? `Using this machine's YouGile key again, signed in as ${resumed.email}.`
+              : "Using this machine's YouGile key again.",
+          };
+        }
+      }
+    }
+  }
   await options.host.openExternal(YOUGILE_LOGIN_URL);
   const key = (await options.host.promptSecret())?.trim();
   if (!key) {
@@ -353,24 +386,32 @@ export async function logoutYougile(options: {
   store?: ProtectedSecretStore;
   environment?: YougileEnvironment;
 }): Promise<{ opened: boolean; message: string }> {
-  await options.store?.delete(YOUGILE_SECRET_KEY);
+  if (!options.store) {
+    return { opened: true, message: "Signed out of YouGile." };
+  }
   // The machine's token file belongs to the vault tooling, not to this
   // extension, so signing out records the decision instead of deleting it.
   // Without this the discovered key would come straight back on the next
   // status read and the button would look broken.
+  //
+  // 🔴 The marker is written even when no machine key exists right now. Writing
+  // it only for a key found at THIS moment would let a later
+  // `yougile-cli.py auth-key` — or a VS Code restarted from a shell that
+  // exports YOUGILE_TOKEN — silently undo the sign-out and put someone's
+  // account back in the row, which is the same defect from the other side.
+  // One write, not delete-then-write: a failure between the two would leave
+  // "signed out but not suppressed", which is exactly that undo.
+  await options.store.store(
+    YOUGILE_SECRET_KEY,
+    JSON.stringify({ suppressed: true }),
+  );
   const machine = readMachineToken(options.environment ?? {});
-  if (machine && options.store) {
-    await options.store.store(
-      YOUGILE_SECRET_KEY,
-      JSON.stringify({ suppressed: true }),
-    );
-    return {
-      opened: true,
-      message:
-        "Signed out of YouGile. The machine key stays on disk and is ignored until you sign in again.",
-    };
-  }
-  return { opened: true, message: "Signed out of YouGile." };
+  return {
+    opened: true,
+    message: machine
+      ? "Signed out of YouGile. The machine key stays on disk and is ignored until you sign in again."
+      : "Signed out of YouGile.",
+  };
 }
 
 export async function runYougileAuthAction(
@@ -382,7 +423,13 @@ export async function runYougileAuthAction(
     environment?: YougileEnvironment;
   },
 ): Promise<{ opened: boolean; message: string }> {
-  if (action === "login") return loginYougile(options);
+  if (action === "login")
+    return loginYougile({
+      host: options.host,
+      ...(options.store ? { store: options.store } : {}),
+      ...(options.http ? { http: options.http } : {}),
+      ...(options.environment ? { environment: options.environment } : {}),
+    });
   if (action === "logout")
     return logoutYougile({
       ...(options.store ? { store: options.store } : {}),

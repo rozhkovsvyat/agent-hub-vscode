@@ -1,0 +1,252 @@
+{
+  "version": "2.0.104",
+  "vsix_sha256": "d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
+  "commit": "79504973a",
+  "rollback_vsix": "cukii-vscode-2.0.103.vsix sha256 f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64",
+  "measured_at": "2026-09-06T22:30:00+03:00",
+  "scope": "Четыре претензии владельца к 2.0.103: строка YouGile с аккаунтом и кнопкой «Log in» одновременно, великоватая полоса от текста ответа до времени, долгое открытие сессии, крупная пилюля модели.",
+  "how": "Все числа сняты с УСТАНОВЛЕННОГО расширения (cukii.cukii-vscode@2.0.104) в отдельном доверенном инстансе VS Code со своими user-data/extensions под D:\\Scratch\\cukii-parity-2.0.104, CDP 9334, --no-sandbox --disable-gpu --disable-workspace-trust. Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
+  "gate": {
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=8915MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.104 vsix_sha256=d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
+    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls",
+    "suites": "gui 793/793 в 88 файлах (+6 новых на assistantMetaFitsOnLastLine), extension 555 passed / 4 skipped, tsc чист в обоих пакетах"
+  },
+  "adversarial": {
+    "rounds": 1,
+    "verdict_round_1": "rework",
+    "note": "Правка YouGile трогает хранение ключа и вход, поэтому по правилу независимого опровержения ревью обязательно; рецензент — не исполнитель. Первый круг дал rework: два блокирующих дефекта, оба воспроизведены замером и кодом, а не приняты на слово.",
+    "blocking_findings": [
+      {
+        "id": "D1.1",
+        "what": "«Log out» молча отменялся появлением машинного токена: маркер подавления писался только если ключ найден В МОМЕНТ выхода. Выход из плагинного ключа не писал ничего, и следующий `yougile-cli.py auth-key` (или VS Code, запущенный из шелла с YOUGILE_TOKEN) возвращал чужой аккаунт в строку и снова слал этот ключ в API.",
+        "verified": "чтением yougileAccount.ts:361-372 — условие `machine && options.store`",
+        "fix": "маркер пишется безусловно и ОДНОЙ записью вместо delete+store (промежуток между ними давал то же состояние «вышел, но не подавлено»)",
+        "test": "NEGATIVE CONTROL: a token appearing later does not undo the sign-out"
+      },
+      {
+        "id": "D2.1",
+        "what": "Из-за `width: fit-content` у капсулы агента inline-режим был недостижим для КОРОТКОГО однострочного ответа: правый край последней строки совпадает с контентным краем, запас всегда 0. То есть самый частый случай навсегда получал лишнюю строку, тогда как пользовательская капсула держит время на строке.",
+        "verified": "🔴 замером на живой сборке: D:\\Scratch\\expr-shrink-to-fit.js вернул shortSingleLineAssistant=[] — во всей сессии не оказалось ни одного однострочного ответа, значит прежние «13 из 14 inline» этот случай не проверяли вовсе и опровергнуть находку не могли",
+        "fix": "запас считается от предела роста капсулы (max-width, процент резолвится вручную — Blink возвращает его дословно), а не от её сжатого края",
+        "test": "lets a short answer keep the clock on its line, capsule grows to fit — против прежней реализации даёт 290−290=0 и падает"
+      }
+    ],
+    "non_blocking_fixed": [
+      "D1.2 — подавление было необратимо из UI: один «Log out» стоил владельцу всего смысла discovery. «Log in» теперь сначала пробует машинный ключ и при валидном зонде возвращает его без браузера и без ввода.",
+      "D1.3 — парсер ставил маркер выше явного ключа, нарушая правило «явный вход бьёт discovery». Порядок проверок исправлен.",
+      "D2.2 — режим пересчитывался на каждом токене стрима (ThinkingIndicator исчезает с первого токена, поэтому мета сразу становится соседом текста), и высота капсулы прыгала несколько раз на абзац. Стримящая капсула держит собственную строку и меряется один раз, когда текст перестал двигаться.",
+      "D2.3 — резерв округлялся вверх для CSS, а сравнивался неокруглённым: распорка могла перенестись на капсуле, которую замер назвал inline. Теперь одно число на оба применения.",
+      "D3.1 — `history/list` без лимита молча режет список до 100 (core.ts:330), то есть 101-я сессия в навигаторе открывалась бы в никуда. Передан явный лимит.",
+      "D3.2 — `messageCount ?? 0` смешивал «поля нет» и «сообщений нет», а поле необязательное и считает только ответы ассистента. Закрывает дверь только явный ноль.",
+      "D4.1 — комментарий в index.css продолжал утверждать про эталон 13px/4px 16px после приведения пилюли к 11.05px/8px."
+    ],
+    "accepted_risks": [
+      "D2.4 (RTL): решение опирается на физический правый край, в RTL inline-режим не включится. Деградация безопасная — собственная строка; отдельная задача вместе с логическими свойствами всей капсулы.",
+      "D2.6: допущение «псевдоэлемент не попадает в rects диапазона» взято из спецификации CSSOM-View и не запинено тестом, потому что тест подменяет createRange целиком. Живая проверка — отсутствие осцилляции на 14 капсулах установленной сборки.",
+      "D3.3: битое тело сессии теперь не отсекается до создания вкладки (индекс о теле не знает). Владелец увидит вкладку с ошибкой вместо «клик ничего не сделал» — поведение изменилось, но не в худшую сторону.",
+      "D4.2: высота пилюли 18px меньше рекомендованных WCAG 24px. Это цена паритета 1 к 1, который владелец и просил; у эталона ровно столько же."
+    ]
+  },
+  "items": [
+    {
+      "id": "yougile-account-row",
+      "complaint": "рис 1 — странно иметь акк и кнопку логин одновременно",
+      "reference": "вендорские строки в том же диалоге: подключённый аккаунт предлагает только «Log out»",
+      "verdict": "PASS",
+      "before": {
+        "state": "connected",
+        "accountLabel": "rozhkovsvyat@gmail.com",
+        "buttons": ["Log in"],
+        "why_wrong": "зелёная точка и адрес рядом с кнопкой входа читаются как «не вошёл»"
+      },
+      "numbers": {
+        "testid": "cukii-vendor-account-yougile",
+        "group": "Testing",
+        "ariaLabel": "connected",
+        "rowText": "YouGile rozhkovsvyat@gmail.com Log out",
+        "buttons": ["Log out"],
+        "loginButtonPresent": false,
+        "peer_rows_same_shape": [
+          "Alibaba rozhkovsvyat@gmail.com Log out",
+          "Anthropic rozhkovsvyat@gmail.com Log out",
+          "Cursor rozhkovsvyat@gmail.com Log out",
+          "MoonshotAI HR DOT Log out",
+          "OpenAI anabion@tuta.io Log out",
+          "xAI rozhkovsvyat@gmail.com Log out"
+        ]
+      },
+      "cause": "ключ находился на машине (env YOUGILE_TOKEN или ~/.claude/yougile-token), а «Log out» предлагался только для ключа, введённого в плагине: удалять чужой файл плагин не вправе, поэтому кнопки не было вовсе",
+      "fix": "в SecretStorage теперь лежит либо запись аккаунта, либо маркер подавления {suppressed:true}; выход по машинному ключу пишет маркер, readYougileAccount на маркере возвращает undefined и не проваливается в поиск. Файл владельца не трогается.",
+      "note": "🔴 Токен нигде не печатается: ни в диалоге, ни в замерах, ни в этой расписке."
+    },
+    {
+      "id": "assistant-meta-band",
+      "complaint": "рис 2 3 4 — странный отступ от текста к подвалу (время) — большеват почему??",
+      "reference": "механика MAX (web.max.ru): при длинном тексте метаданные уезжают на СОБСТВЕННУЮ КОМПАКТНУЮ строку, а не на строку полной высоты",
+      "verdict": "PASS",
+      "before": {
+        "worstBandFromTailToBottom": 31.4,
+        "mechanism": "inline-режим включался CSS-условием :has(> p:last-child); если время не влезало после последней строки, инлайновый спейсер переносился и открывал line box высотой в полный line-height 19.5px"
+      },
+      "numbers": {
+        "capsulesMeasured": 14,
+        "inline": 13,
+        "ownLine": 1,
+        "bandInline": 11.9,
+        "bandOwnLine": 21.9,
+        "worstBandFromTailToBottom": 21.9,
+        "metaBottomInset": 4.8,
+        "metaRightInset": 10.8,
+        "userMetaBottomInset": 4.8,
+        "userMetaRightInset": 10.8,
+        "totalGlyphCollisions": 0,
+        "measuredReserve": "32px"
+      },
+      "cause": "🔴 CSS этого не умеет в принципе: перенесённый инлайновый ::after всегда открывает строку не ниже line-height блока, и ни line-height, ни vertical-align, ни font-size, ни отрицательный margin на псевдоэлементе её не ужмут. Поэтому режим выбран не селектором, а замером.",
+      "fix": "assistantMetaFitsOnLastLine измеряет реальные прямоугольники последней строки через Range.getClientRects и ширину <time>; класс cukii-assistant-bubble--meta-inline ставится только когда время действительно влезает. Иначе — компактная собственная строка (margin 2px 0 -6px), которая садится в те же 10px нижней полосы капсулы.",
+      "note": "Инсеты меты (низ 4.8, право 10.8) одинаковы в ОБОИХ режимах и совпадают с пользовательской капсулой — переключение режима не видно как скачок."
+    },
+    {
+      "id": "assistant-tail-modes",
+      "complaint": "нет (проверка на регрессию, предсказанную тремя рецензентами первого захода)",
+      "reference": "механика MAX применима только к абзацному хвосту; всё остальное обязано остаться строкой в потоке",
+      "verdict": "PASS",
+      "numbers": {
+        "абзац (контроль)": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2.4,
+          "band": 21.9,
+          "metaBottomInset": 4.8
+        },
+        "заголовок": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3.5,
+          "band": 22.87,
+          "metaBottomInset": 4.8
+        },
+        "плотный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2.4,
+          "band": 21.9,
+          "metaBottomInset": 4.8
+        },
+        "свободный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3,
+          "band": 22.5,
+          "metaBottomInset": 4.8
+        },
+        "таблица": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 5,
+          "band": 24.5,
+          "metaBottomInset": 4.8
+        },
+        "блок кода (виджет)": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 13.5,
+          "band": 32.3,
+          "metaBottomInset": 4.8
+        },
+        "картинка": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2,
+          "band": 20.8,
+          "metaBottomInset": 4.8
+        }
+      },
+      "probe_defect_found_and_fixed": "🔴 Первый прогон D:\\Scratch\\expr-tail-modes.js был НЕДЕЙСТВИТЕЛЕН: он клонирует живую капсулу, а клон наследует класс cukii-assistant-bubble--meta-inline, который ставит React после замера. Проба мерила режим, который для не-абзацного хвоста никогда не наступает, и её «ноль пересечений» ничего не доказывал. Класс с клона снят, прогон повторён — числа выше уже из исправленной пробы.",
+      "stronger_evidence": {
+        "file": "gui/src/components/StepContainer/assistantMetaMode.test.ts",
+        "why": "живая проба принципиально не достаёт до решения React — она подменяет хвост уже отрисованной капсуле. Поэтому решающая функция assistantMetaFitsOnLastLine закреплена юнит-тестом с внедрённой геометрией.",
+        "cases": [
+          "время садится на строку, когда после неё есть место",
+          "время уходит на свою строку, когда последняя строка достаёт до края",
+          "pre, table, ul, ol, h3, blockquote, div — хвост отвергается при заведомо щедрой геометрии",
+          "элемент между текстом и временем (индикатор стрима) — отвергается",
+          "пустой хвост — отвергается, а не угадывается",
+          "НЕГАТИВНЫЙ КОНТРОЛЬ: при одной и той же последней строке (свободно 40px) часы шириной 31px садятся, шириной 65px — нет"
+        ],
+        "result": "6/6"
+      }
+    },
+    {
+      "id": "session-open-latency",
+      "complaint": "каждая сессия при открытии заметно долго открывается против клода — починить",
+      "reference": "Claude Code открывает сессию без заметной паузы",
+      "verdict": "PASS",
+      "how_measured": "D:\\Scratch\\measure-session-open.js: доверенный клик по строке сессии в шторке, ожидание появления НОВОЙ CDP-цели вебвью, затем опрос вебвью до первой отрисованной капсулы. Измеряется то, что ждёт владелец, а не внутренний таймер.",
+      "before": {
+        "clickToFirstBubbleMs": 10557,
+        "newWebviewAppearedAfterMs": 7886,
+        "insideWebviewMs": 2600
+      },
+      "numbers": {
+        "clickToFirstBubbleMs": 4837,
+        "newWebviewAppearedAfterMs": 280,
+        "insideWebviewMs": 4571,
+        "improvement": "−54% полного ожидания; создание панели с 7.9 с до 0.28 с"
+      },
+      "cause": "предпроверка в continue.openInNewWindow звала history/load — то есть грузила ТЕЛО сессии из SQLite только чтобы узнать, что сессия существует и непуста, и делала это ДО создания панели. Дальше вебвью грузил ту же сессию второй раз; второй вызов был почти бесплатным из-за идемпотентности startHookSession (activeHookSessions), поэтому вся цена лежала на первом.",
+      "fix": "предпроверка перешла на history/list — метаданные (sessionId, title, messageCount, revision) без тела. Тело грузит только вебвью, один раз.",
+      "honest_remainder": "внутри вебвью осталось 4.57 с: загрузка бандла index.js (~3.9 МБ) на каждую сессию, настоящий history/load, старт хуков и рендер. Не тронуто в этой поставке — см. remainders."
+    },
+    {
+      "id": "model-pill",
+      "complaint": "размер клодовской пилюли с моделью против нашей меньше и аккуратнее — приведи к такому же виду",
+      "reference": "живой Claude Code, .modelPill_gGYT1w — замер D:\\Scratch\\expr-claude-pill.js",
+      "verdict": "PASS",
+      "before": {
+        "declared": "h-[26px] gap-1.5 px-4 text-[13px]",
+        "note": "здесь объявленные классы, а не замер: до правки пилюля мерилась только у эталона"
+      },
+      "numbers": {
+        "height": 18,
+        "width": 155.11,
+        "fontSize": "11.05px",
+        "lineHeight": "18px",
+        "gap": "4px",
+        "borderRadius": "9999px",
+        "padding": "1px 8px"
+      },
+      "reference_numbers": {
+        "height": 18,
+        "fontSize": "11.05px",
+        "lineHeight": "18px",
+        "gap": "4px",
+        "borderRadius": "9999px",
+        "padding": "0px 8px"
+      },
+      "note": "Единственное расхождение — вертикальный паддинг 1px против 0px. Оно не наблюдаемо: высота задана жёстко 18px и совпадает, содержимое центрируется флексом."
+    }
+  ],
+  "remainders": [
+    {
+      "id": "webview-boot-per-session",
+      "what": "Оставшиеся 4.57 с внутри вебвью. Каждая сессия Cukii — отдельный createWebviewPanel, то есть свежая загрузка бандла index.js (~3.9 МБ) плюс history/load, старт хуков и рендер.",
+      "why_accepted": "Это второй порядок и другой класс правки (переиспользование панели или разделение бандла), а претензия владельца — про полное ожидание, которое сократилось вдвое и больше не упирается в лишний запрос к БД. Тянуть архитектурную правку в ту же поставку значило бы менять модель жизненного цикла панелей без отдельной приёмки.",
+      "next": "мерить долю бандла отдельно (D:\\Scratch\\expr-webview-boot.js) и решать между retainContextWhenHidden с переиспользованием панели и code-splitting"
+    },
+    {
+      "id": "meta-mode-on-first-paint",
+      "what": "Безопасное значение по умолчанию — собственная строка; inline включается после первого layout-замера.",
+      "why_accepted": "Обратный порядок (inline по умолчанию) означал бы, что при неудачном замере время однажды ляжет на глифы. Ошибаться в сторону лишних 10px безопаснее, чем в сторону наложения."
+    }
+  ],
+  "not_verified": [
+    {
+      "id": "remote-runtime-receipt",
+      "what": "Установка на Remote-SSH и receipt ui_submit → bridge_dispatch → vendor_completed",
+      "status": "BLOCKED",
+      "why": "macbook-035 офлайн в tailnet. Слова release/PASS про remote не заявляются."
+    }
+  ]
+}

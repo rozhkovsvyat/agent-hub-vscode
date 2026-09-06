@@ -157,7 +157,12 @@ describe("saved Cukii sidebar session opening", () => {
 
     await open({ sessionId: "saved-session" });
 
-    expect(core.invoke).toHaveBeenCalledWith("history/list", {});
+    // 🔴 The limit is asserted, not incidental: `history/list` defaults to the
+    // 100 newest sessions, so without it the 101st row in the navigator would
+    // find no index entry and its click would become a silent no-op.
+    expect(core.invoke).toHaveBeenCalledWith("history/list", {
+      limit: 1_000_000,
+    });
     // 🔴 The regression this pins: a body load here costs seconds of blank
     // screen and makes the webview's own load a no-op.
     expect(core.invoke).not.toHaveBeenCalledWith(
@@ -180,6 +185,32 @@ describe("saved Cukii sidebar session opening", () => {
       }),
     ).resolves.toBeUndefined();
     expect(state.createWebviewPanel).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE CONTROL: a record that does not state a count is still opened", async () => {
+    // 🔴 `messageCount` is optional on the metadata type and counts ASSISTANT
+    // messages only. Coalescing a missing field to zero would silently refuse
+    // to open a perfectly good session — "this record does not say" is not
+    // "this session is empty". Only an explicit zero closes the door.
+    const created = panel();
+    state.createWebviewPanel.mockReturnValue(created);
+    const core = {
+      invoke: vi.fn((command: string) =>
+        command === "history/list"
+          ? Promise.resolve([
+              { sessionId: "no-count", title: "Imported chat" },
+            ] as Array<{ sessionId: string; title: string }>)
+          : Promise.resolve(undefined),
+      ),
+    };
+    register(core);
+
+    await state.commands.get("continue.openInNewWindow")!({
+      sessionId: "no-count",
+    });
+
+    expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(created.title).toBe("Imported chat");
   });
 
   it("deduplicates a saved sidebar session and focuses its existing tab", async () => {

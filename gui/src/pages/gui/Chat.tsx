@@ -604,6 +604,16 @@ export function Chat() {
                   <StepContainer
                     index={historyIndex}
                     isLast={historyIndex === history.length - 1}
+                    // 🔴 Folded in here, not read from the store inside the
+                    // capsule. A `useSelector` in StepContainer subscribes
+                    // every visible row to the flag, and flipping it then
+                    // re-renders the whole window — 160 markdown leaves on a
+                    // restored transcript, which is precisely what memoising
+                    // that component prevents. As a prop it changes for the one
+                    // row that is actually streaming and for nobody else.
+                    isSettling={
+                      isStreaming && historyIndex === history.length - 1
+                    }
                     item={item}
                     latestSummaryIndex={latestSummaryIndex}
                   />

@@ -207,8 +207,12 @@ describe("Cukii saved-session loading", () => {
     ).toBeNull();
     expect(markdownRenderSpy).not.toHaveBeenCalled();
 
-    // Response actions are gone, so the stream flag no longer feeds any
-    // StepContainer output: flipping it must not re-render saved rows.
+    // The stream flag feeds exactly one row: the live one, which is told to
+    // hold its reply time on its own row while the answer is still growing —
+    // measuring a moving last line would flip the capsule's height at the end
+    // of every visual line. 🔴 Saved rows must not notice. Reading the flag with
+    // a selector inside StepContainer instead of taking it as a prop subscribes
+    // every visible capsule to it and re-renders all 160 of them here.
     await act(async () => {
       store.dispatch(setActive());
       store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
@@ -216,7 +220,7 @@ describe("Cukii saved-session loading", () => {
     expect(
       container.querySelector('[data-testid="cukii-waiting-receipt"]'),
     ).toHaveTextContent("Waiting for bridge");
-    expect(markdownRenderSpy).not.toHaveBeenCalled();
+    expect(renderedStepIds()).toEqual([`assistant-${lastVisibleIndex}`]);
 
     markdownRenderSpy.mockClear();
     await act(async () => {

@@ -928,14 +928,24 @@ const getCommandsMap: (
         // title and message count without touching either.
         let metadata;
         try {
-          metadata = await core.invoke("history/list", {});
+          // 🔴 The explicit limit is not decoration: `history/list` defaults to
+          // the 100 most recent sessions, so without it the 101st session in
+          // the navigator would find no index entry and the click would become
+          // a silent no-op. The old `history/load` was addressed by id and had
+          // no such horizon.
+          metadata = await core.invoke("history/list", { limit: 1_000_000 });
         } catch {
           return;
         }
         const known = metadata?.find(
           (entry) => entry.sessionId === initialSessionId,
         );
-        if (!known || (known.messageCount ?? 0) === 0) {
+        // 🔴 `messageCount` counts ASSISTANT messages only, and the field is
+        // optional on the metadata type. A missing field therefore means "this
+        // record does not say", not "this session is empty" — treating the two
+        // alike would refuse to open a perfectly good session, so only an
+        // explicit zero closes the door.
+        if (!known || known.messageCount === 0) {
           return;
         }
         initialTitle = known.title;

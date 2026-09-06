@@ -872,9 +872,13 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   background: transparent;
 }
 
-/* 1:1 with the live Claude "Switch model" pill: no border, a 10% foreground
-   tint fill (18% on hover), 9999px radius, 4px 16px padding, 13px text,
-   pointer cursor and a 6px gap to its left neighbour (measured 26.2px). */
+/* 1:1 with the live Claude "Switch model" pill (.modelPill_gGYT1w): no border,
+   a 10% foreground tint fill (18% on hover), 9999px radius, pointer cursor and
+   a 6px gap to its left neighbour. Its SIZE lives on the element itself in
+   InputToolbar.tsx — 18px tall, 11.05px text, 8px sides — because Tailwind owns
+   the box there. Both places quote the same measurement of the live pill and
+   must not drift apart: this comment claimed 4px 16px padding and 13px text
+   long after the element had been brought down to Claude's real numbers. */
 .cukii-model-pill {
   border: 0;
   cursor: pointer;
