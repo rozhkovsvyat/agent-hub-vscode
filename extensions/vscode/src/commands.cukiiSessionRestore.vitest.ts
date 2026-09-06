@@ -123,36 +123,75 @@ describe("saved Cukii sidebar session opening", () => {
     expect(sidebar.webviewProtocol.request).not.toHaveBeenCalled();
   });
 
-  it("opens a nonempty saved sidebar session", async () => {
+  /**
+   * Opening a session must cost an index lookup, never a body load. The body
+   * load also starts the SessionStart lifecycle hooks, and because that start
+   * is idempotent per session it made the webview's own load a no-op — the
+   * whole hook cost was paid before the tab existed, on a blank screen
+   * (measured: 7.9s of a 10.5s open on the installed 2.0.103).
+   */
+  function metadataCore(
+    rows: Array<{ sessionId: string; title: string; messageCount: number }>,
+  ) {
+    return {
+      invoke: vi.fn((command: string) =>
+        command === "history/list"
+          ? Promise.resolve(rows)
+          : Promise.resolve(undefined),
+      ),
+    };
+  }
+
+  it("opens a nonempty saved sidebar session from the index, without loading its body", async () => {
     const created = panel();
     state.createWebviewPanel.mockReturnValue(created);
-    const core = {
-      invoke: vi.fn().mockResolvedValue({
-        history: [{ role: "user", content: "saved" }],
+    const core = metadataCore([
+      {
+        sessionId: "saved-session",
         title: "Saved sidebar chat",
-      }),
-    };
+        messageCount: 2,
+      },
+    ]);
     register(core);
     const open = state.commands.get("continue.openInNewWindow")!;
 
     await open({ sessionId: "saved-session" });
 
-    expect(core.invoke).toHaveBeenCalledWith("history/load", {
-      id: "saved-session",
-    });
+    expect(core.invoke).toHaveBeenCalledWith("history/list", {});
+    // 🔴 The regression this pins: a body load here costs seconds of blank
+    // screen and makes the webview's own load a no-op.
+    expect(core.invoke).not.toHaveBeenCalledWith(
+      "history/load",
+      expect.anything(),
+    );
     expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(created.title).toBe("Saved sidebar chat");
+  });
+
+  it("does not create a blank panel for a session the index reports as empty", async () => {
+    const core = metadataCore([
+      { sessionId: "empty-session", title: "", messageCount: 0 },
+    ]);
+    register(core);
+
+    await expect(
+      state.commands.get("continue.openInNewWindow")!({
+        sessionId: "empty-session",
+      }),
+    ).resolves.toBeUndefined();
+    expect(state.createWebviewPanel).not.toHaveBeenCalled();
   });
 
   it("deduplicates a saved sidebar session and focuses its existing tab", async () => {
     const created = panel();
     state.createWebviewPanel.mockReturnValue(created);
-    const core = {
-      invoke: vi.fn().mockResolvedValue({
-        history: [{ role: "user", content: "saved" }],
+    const core = metadataCore([
+      {
+        sessionId: "saved-session",
         title: "Saved sidebar chat",
-      }),
-    };
+        messageCount: 2,
+      },
+    ]);
     register(core);
     const open = state.commands.get("continue.openInNewWindow")!;
 
@@ -167,12 +206,13 @@ describe("saved Cukii sidebar session opening", () => {
   it("focuses the matching panelId without loading or creating another tab", async () => {
     const created = panel();
     state.createWebviewPanel.mockReturnValue(created);
-    const core = {
-      invoke: vi.fn().mockResolvedValue({
-        history: [{ role: "user", content: "saved" }],
+    const core = metadataCore([
+      {
+        sessionId: "saved-session",
         title: "Saved sidebar chat",
-      }),
-    };
+        messageCount: 2,
+      },
+    ]);
     register(core);
     const open = state.commands.get("continue.openInNewWindow")!;
 
@@ -191,14 +231,10 @@ describe("saved Cukii sidebar session opening", () => {
     state.createWebviewPanel
       .mockReturnValueOnce(stale)
       .mockReturnValueOnce(authoritative);
-    const core = {
-      invoke: vi.fn((_command: string, { id }: { id: string }) =>
-        Promise.resolve({
-          history: [{ role: "user", content: id }],
-          title: id === "session-a" ? "Session A" : "Session B",
-        }),
-      ),
-    };
+    const core = metadataCore([
+      { sessionId: "session-a", title: "Session A", messageCount: 2 },
+      { sessionId: "session-b", title: "Session B", messageCount: 2 },
+    ]);
     register(core);
     const open = state.commands.get("continue.openInNewWindow")!;
 
@@ -239,8 +275,8 @@ describe("saved Cukii sidebar session opening", () => {
     ]);
   });
 
-  it("does not create a blank panel when history/load is missing", async () => {
-    const invoke = vi.fn().mockResolvedValue({ history: [], title: "" });
+  it("does not create a blank panel when the session is absent from the index", async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
     register({ invoke });
 
     await expect(
@@ -249,7 +285,7 @@ describe("saved Cukii sidebar session opening", () => {
     expect(state.createWebviewPanel).not.toHaveBeenCalled();
   });
 
-  it("does not create a blank panel when history/load rejects", async () => {
+  it("does not create a blank panel when the index lookup rejects", async () => {
     const invoke = vi.fn().mockRejectedValue(new Error("storage unavailable"));
     register({ invoke });
 

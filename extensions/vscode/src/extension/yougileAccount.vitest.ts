@@ -187,7 +187,7 @@ describe("YouGile account row", () => {
     expect(Object.keys(host)).toEqual(["openExternal", "promptSecret"]);
   });
 
-  it("picks up the machine's own token but never offers to delete it", async () => {
+  it("picks up the machine's own token and offers sign-out, never sign-in beside a live account", async () => {
     // The vault tooling (`yougile-cli.py auth-key`) writes the key to
     // ~/.claude/yougile-token, and YOUGILE_TOKEN is its documented override.
     // A row that ignored them would ask an already-authenticated user to
@@ -205,12 +205,14 @@ describe("YouGile account row", () => {
       },
     });
     expect(fromFile.state).toBe("connected");
-    // No sign-out: the plugin did not write that key and must not delete it.
-    expect(fromFile.actions).toEqual(["login"]);
-    // 🔴 It still has to say WHOSE account it is. Before the probe moved to
-    // /users/me the row showed a bare "YouGile" next to a "Log in" button while
-    // actually being connected — it read as signed out. Caught by measuring the
-    // installed 2.0.101 in a trusted instance, not by this suite.
+    // 🔴 The owner's report: the row showed a green dot and his e-mail next to
+    // a "Log in" button, which reads as "not signed in". A connected row offers
+    // sign-out however the key was found; the plugin still never deletes the
+    // machine's file — `logoutYougile` records the decision instead.
+    expect(fromFile.actions).toEqual(["logout"]);
+    expect(fromFile.actions).not.toContain("login");
+    // It also has to say WHOSE account it is. Before the probe moved to
+    // /users/me the row showed a bare "YouGile" while actually being connected.
     expect(fromFile.accountLabel).toBe(OWNER);
 
     const fromEnv = await yougileAccountStatus({
@@ -282,9 +284,48 @@ describe("YouGile account row", () => {
     await runYougileAuthAction("logout", {
       host: authHost(),
       store: secrets,
+      // Explicit: without it the test reads THIS machine's real token file and
+      // its result depends on whose laptop runs the suite.
+      environment: {
+        env: {},
+        homedir: () => "C:\\nobody",
+        readFile: () => undefined,
+      },
     });
     expect(secrets.delete).toHaveBeenCalledWith(YOUGILE_SECRET_KEY);
     expect(secrets.values.size).toBe(0);
+  });
+
+  it("signing out of a machine key stops using it without deleting the file", async () => {
+    // The plugin may not delete ~/.claude/yougile-token — it belongs to the
+    // vault tooling. But "Log out" has to mean something, otherwise the
+    // discovered key returns on the very next status read and the button looks
+    // broken. So the sign-out is recorded and discovery is suppressed.
+    const machine = {
+      env: {},
+      homedir: () => "C:\\Users\\owner",
+      readFile: (file: string) =>
+        file === "C:\\Users\\owner\\.claude\\yougile-token"
+          ? `${KEY}\n`
+          : undefined,
+    };
+    const secrets = store();
+    const result = await runYougileAuthAction("logout", {
+      host: authHost(),
+      store: secrets,
+      environment: machine,
+    });
+    expect(result.opened).toBe(true);
+    expect(secrets.values.size).toBe(1);
+
+    const after = await yougileAccountStatus({
+      store: secrets,
+      http: http(200),
+      environment: machine,
+    });
+    expect(after.state).toBe("disconnected");
+    expect(after.actions).toEqual(["login"]);
+    expect(after.accountLabel).toBeUndefined();
   });
 
   it("says plainly that there is no CLI to install", async () => {

@@ -315,9 +315,13 @@ describe("Cukii GUI contracts", () => {
     // Pill: Claude-style capsule next to the "/" control showing the current
     // broker model, opening the existing picker.
     expect(toolbar).toContain('data-testid="cukii-model-pill"');
-    expect(toolbar).toContain("h-[26px]");
+    // Measured on the live Claude pill (.modelPill_gGYT1w): 18px tall, 11.05px
+    // text, 8px side padding. The earlier 26px/13px/16px capsule was visibly
+    // heavier than the reference it claimed parity with.
+    expect(toolbar).toContain("h-[18px]");
     expect(toolbar).toContain("rounded-full");
-    expect(toolbar).toContain("px-4");
+    expect(toolbar).toContain("px-2");
+    expect(toolbar).toContain("text-[11.05px]");
     expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
 
     // Scope toggle: the single Milky (-0) knob switch pinned to the right

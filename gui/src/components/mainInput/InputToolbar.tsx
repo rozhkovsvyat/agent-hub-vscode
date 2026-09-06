@@ -663,7 +663,11 @@ function InputToolbar(props: InputToolbarProps) {
             <button
               type="button"
               data-testid="cukii-model-pill"
-              className="cukii-model-pill flex h-[26px] max-w-[280px] shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] text-[var(--vscode-foreground)]"
+              /* Geometry measured on the live Claude Code pill
+                 (.modelPill_gGYT1w): 18px tall, 11.05px text, 0 8px padding,
+                 4px between the name and the dimmed detail. Ours was 26px /
+                 13px / 16px — a visibly heavier capsule than the reference. */
+              className="cukii-model-pill flex h-[18px] max-w-[280px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.05px] leading-[18px] text-[var(--vscode-foreground)]"
               title={`Model: ${currentLabel}${pillDetail ? ` · ${pillDetail}` : ""}. Click to switch`}
               aria-label={`Selected model: ${currentLabel}${pillDetail ? `, ${pillDetail}` : ""}`}
               onClick={() => setModelPickerOpen(true)}

@@ -1467,20 +1467,27 @@ button.cukii-submit-button--stop:active {
    the same way (see `--cukii-meta-reserve` further down). */
 .cukii-assistant-bubble {
   position: relative;
-  /* "21:45" at 11px tabular numerals — the same reserve the user capsule uses
-     for the time half of its receipt. */
+  /* Fallback only. StepContainer measures the rendered <time> and overwrites
+     this per capsule, so a wider clock format cannot push the time under the
+     text the way a hard-coded reserve would. */
   --cukii-meta-reserve: 31px;
 }
 
 /* Reply time in the capsule's bottom-right corner, on the same 10px right
-   inset as the user checks. This is the SAFE default: a row of its own in the
-   flow. An assistant answer may end in a code block, a table, a heading or a
-   list, and none of those can carry a reserved slot for the time — pinning it
-   absolutely there would drop the digits onto the last glyphs. */
+   inset as the user checks. This is the SAFE default: a compact row of its own
+   in the flow. An assistant answer may end in a code block, a table, a heading
+   or a list, and none of those can carry a reserved slot for the time —
+   pinning it absolutely there would drop the digits onto the last glyphs.
+
+   The negative bottom margin is what makes the row compact rather than merely
+   separate: it lets the row sit INSIDE the capsule's own 10px bottom band, so
+   the time lands 4px above the capsule edge — the same place it occupies when
+   it rides the last line. Without it the band cost 31px against the reference's
+   "compact own row"; with it, 20px. */
 .cukii-assistant-metadata {
   display: flex;
   justify-content: flex-end;
-  margin: 2px 0 0;
+  margin: 2px 0 -6px;
   color: var(--vscode-descriptionForeground, #a0a0a0);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -1490,26 +1497,31 @@ button.cukii-submit-button--stop:active {
   white-space: nowrap;
 }
 
-/* MAX mechanism, mirrored from the user capsule: when the answer really does
-   end in a paragraph AND the time is the very next element — during streaming
-   the thinking indicator sits between them — the time rides the last line. An
-   inline ::after spacer holds its width while the time itself is absolute in
-   the bottom-right corner, so the capsule's own 10px bottom band is the time's
-   band and nothing else. That is what brings the assistant's bottom inset to
-   the user's 10.8px instead of the 27.9px a flow row costs. Any other tail
-   falls back to the flow row above, where a collision is impossible. */
-.cukii-assistant-prose:has(> p:last-child) + .cukii-assistant-metadata {
+/* MAX mechanism, mirrored from the user capsule: when the time still fits at
+   the end of the answer's last line, it rides that line. An inline ::after
+   spacer holds its width while the time itself is absolute in the bottom-right
+   corner, so the capsule's 10px bottom band is the time's band and nothing
+   else — bottom inset 11.9px, the user capsule's number.
+
+   The mode is a measured class, not a selector: `:has(> p:last-child)` can
+   tell a paragraph tail from a code block, but it cannot tell whether the time
+   FITS, and a spacer that wraps opens a full 19.5px line box (the paragraph's
+   strut is the floor). That wrapped line is exactly the oversized band the
+   owner reported. StepContainer measures instead — see
+   `assistantMetaFitsOnLastLine`. */
+.cukii-assistant-bubble--meta-inline > .cukii-assistant-metadata {
   position: absolute;
   right: 10px;
   bottom: 4px;
   margin: 0;
 }
 
-.cukii-assistant-prose:has(> p:last-child):has(+ .cukii-assistant-metadata)
+.cukii-assistant-bubble--meta-inline
+  > .cukii-assistant-prose
   > p:last-child::after {
   content: "";
   display: inline-block;
-  width: calc(var(--cukii-meta-reserve) + 4px);
+  width: var(--cukii-meta-reserve);
   height: 14px;
 }
 

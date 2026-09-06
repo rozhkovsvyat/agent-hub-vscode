@@ -85,23 +85,39 @@ export function looksLikeYougileKey(value: string): boolean {
   return !/[\x00-\x1f\x7f\s]/.test(key);
 }
 
-function parseStored(
-  raw: string | undefined,
-): StoredYougileAccount | undefined {
+/**
+ * What the plugin's own secret slot holds. "suppressed" is a deliberate
+ * sign-out recorded against a key the plugin does not own: it may not delete
+ * the machine's token file, but "Log out" has to mean something, so it stops
+ * using the discovered key until the next sign-in.
+ */
+type StoredRecord =
+  | { kind: "account"; account: StoredYougileAccount }
+  | { kind: "suppressed" };
+
+function parseStored(raw: string | undefined): StoredRecord | undefined {
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw) as Partial<StoredYougileAccount>;
+    const parsed = JSON.parse(raw) as Partial<StoredYougileAccount> & {
+      suppressed?: unknown;
+    };
+    if (parsed?.suppressed === true) return { kind: "suppressed" };
     if (typeof parsed?.key !== "string" || !parsed.key) return undefined;
     return {
-      key: parsed.key,
-      ...(typeof parsed.accountLabel === "string" && parsed.accountLabel
-        ? { accountLabel: parsed.accountLabel }
-        : {}),
-      source: "plugin",
+      kind: "account",
+      account: {
+        key: parsed.key,
+        ...(typeof parsed.accountLabel === "string" && parsed.accountLabel
+          ? { accountLabel: parsed.accountLabel }
+          : {}),
+        source: "plugin",
+      },
     };
   } catch {
     // A key written by an older build was a bare string.
-    return raw.trim() ? { key: raw.trim(), source: "plugin" } : undefined;
+    return raw.trim()
+      ? { kind: "account", account: { key: raw.trim(), source: "plugin" } }
+      : undefined;
   }
 }
 
@@ -134,10 +150,14 @@ export async function readYougileAccount(
   store: ProtectedSecretStore | undefined,
   environment: YougileEnvironment = {},
 ): Promise<StoredYougileAccount | undefined> {
-  const stored = store
+  const record = store
     ? parseStored(await store.get(YOUGILE_SECRET_KEY))
     : undefined;
-  return stored ?? readMachineToken(environment);
+  if (record?.kind === "account") return record.account;
+  // A recorded sign-out wins over discovery, otherwise "Log out" would be
+  // undone by the very next status read and the row would never change.
+  if (record?.kind === "suppressed") return undefined;
+  return readMachineToken(environment);
 }
 
 export type YougileProbe = {
@@ -208,9 +228,12 @@ export async function yougileAccountStatus(
     options.store,
     options.environment ?? {},
   );
-  // A key the plugin did not write is not the plugin's to delete, so no
-  // sign-out is offered for it — signing in here replaces it instead.
-  const clearable = stored?.source === "plugin";
+  // A signed-in row offers signing out, whichever way the key was found. The
+  // plugin still never deletes the machine's token file — it records the
+  // sign-out and stops using it (see `logoutYougile`). Before this, a key
+  // discovered on the machine produced a row that showed the account e-mail
+  // and a "Log in" button at the same time, which reads as "not signed in".
+  const clearable = Boolean(stored) && Boolean(options.store);
   if (!stored) {
     return {
       id: YOUGILE_ACCOUNT_ID,
@@ -328,8 +351,25 @@ export async function loginYougile(options: {
 
 export async function logoutYougile(options: {
   store?: ProtectedSecretStore;
+  environment?: YougileEnvironment;
 }): Promise<{ opened: boolean; message: string }> {
   await options.store?.delete(YOUGILE_SECRET_KEY);
+  // The machine's token file belongs to the vault tooling, not to this
+  // extension, so signing out records the decision instead of deleting it.
+  // Without this the discovered key would come straight back on the next
+  // status read and the button would look broken.
+  const machine = readMachineToken(options.environment ?? {});
+  if (machine && options.store) {
+    await options.store.store(
+      YOUGILE_SECRET_KEY,
+      JSON.stringify({ suppressed: true }),
+    );
+    return {
+      opened: true,
+      message:
+        "Signed out of YouGile. The machine key stays on disk and is ignored until you sign in again.",
+    };
+  }
   return { opened: true, message: "Signed out of YouGile." };
 }
 
@@ -339,10 +379,15 @@ export async function runYougileAuthAction(
     host: YougileAuthHost;
     store?: ProtectedSecretStore;
     http?: YougileHttp;
+    environment?: YougileEnvironment;
   },
 ): Promise<{ opened: boolean; message: string }> {
   if (action === "login") return loginYougile(options);
-  if (action === "logout") return logoutYougile({ store: options.store });
+  if (action === "logout")
+    return logoutYougile({
+      ...(options.store ? { store: options.store } : {}),
+      ...(options.environment ? { environment: options.environment } : {}),
+    });
   return {
     opened: false,
     message:

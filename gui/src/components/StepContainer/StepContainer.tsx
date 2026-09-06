@@ -1,6 +1,6 @@
 import { ChatHistoryItem } from "core";
 import { renderChatMessage, stripImages } from "core/util/messageContent";
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { useAppSelector } from "../../redux/hooks";
 import { selectUIConfig } from "../../redux/slices/configSlice";
 import { formatMessageTime } from "../../util/formatMessageTime";
@@ -20,6 +20,57 @@ interface StepContainerProps {
  * the full transcript width instead of the user-capsule lane limit. */
 export const ASSISTANT_LONGREAD_CHARS = 800;
 
+/** Breathing room between the last word and the reply time riding its line. */
+const META_INLINE_GAP = 5;
+
+/**
+ * Does the reply time still fit at the end of the answer's last line?
+ *
+ * MAX puts the time on the last text line when it fits and drops it to a
+ * compact row of its own when it does not. CSS cannot make that choice: the
+ * only pure-CSS way to reserve the slot is an inline `::after` spacer, and when
+ * that spacer wraps it opens a full 19.5px line box — the paragraph's strut is
+ * the floor, so the "compact own row" the reference calls for is unreachable
+ * that way. It also cannot tell a paragraph tail from a code block or a table,
+ * where an absolutely placed time would land on the last glyphs.
+ *
+ * So the mode is measured. The answer is read off the real glyph rectangles,
+ * which is stable under re-measurement: the spacer is a pseudo-element and
+ * therefore never part of the text rects this looks at, so turning inline mode
+ * on cannot flip the next measurement back off.
+ */
+export function assistantMetaFitsOnLastLine(bubble: HTMLElement): boolean {
+  const prose = bubble.querySelector(".cukii-assistant-prose");
+  const meta = bubble.querySelector<HTMLElement>(".cukii-assistant-metadata");
+  if (!prose || !meta) return false;
+  // Anything between the prose and the time — the streaming indicator — means
+  // the time is not the tail of the answer at all.
+  if (prose.nextElementSibling !== meta) return false;
+  const last = prose.lastElementChild;
+  // A code block, table, list or heading cannot host the time on its last line.
+  if (!last || last.tagName !== "P") return false;
+
+  const doc = bubble.ownerDocument;
+  const range = doc.createRange();
+  range.selectNodeContents(last);
+  const rects = Array.from(range.getClientRects()).filter(
+    (r) => r.width > 0 && r.height > 0,
+  );
+  if (!rects.length) return false;
+  const lastLine = rects[rects.length - 1]!;
+
+  const time = meta.querySelector("time") ?? meta;
+  const needed = time.getBoundingClientRect().width + META_INLINE_GAP;
+  if (needed <= 0) return false;
+
+  const style = doc.defaultView?.getComputedStyle(bubble);
+  const contentRight =
+    bubble.getBoundingClientRect().right -
+    parseFloat(style?.paddingRight || "0") -
+    parseFloat(style?.borderRightWidth || "0");
+  return contentRight - lastLine.right >= needed;
+}
+
 function StepContainer(props: StepContainerProps) {
   const uiConfig = useAppSelector(selectUIConfig);
 
@@ -32,12 +83,43 @@ function StepContainer(props: StepContainerProps) {
   const proseText = renderChatMessage(props.item.message);
   const isLongRead = proseText.length > ASSISTANT_LONGREAD_CHARS;
 
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  // Own row is the safe default: it can never collide with the answer's tail,
+  // so a capsule that has not been measured yet is merely a little taller.
+  const [metaInline, setMetaInline] = useState(false);
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    const apply = () => {
+      // The reserve is measured, not guessed: a 31px constant broke as soon as
+      // the clock format changed width.
+      const time = bubble.querySelector<HTMLElement>(
+        ".cukii-assistant-metadata time",
+      );
+      if (time) {
+        bubble.style.setProperty(
+          "--cukii-meta-reserve",
+          `${Math.ceil(time.getBoundingClientRect().width) + META_INLINE_GAP}px`,
+        );
+      }
+      setMetaInline(assistantMetaFitsOnLastLine(bubble));
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(bubble);
+    return () => observer.disconnect();
+  }, [proseText, isLongRead]);
+
   return (
     <div>
       <div
+        ref={bubbleRef}
         className={`cukii-assistant-bubble bg-background ${
           isLongRead ? "cukii-assistant-bubble--longread" : ""
-        } ${isBeforeLatestSummary ? "opacity-35" : ""}`}
+        } ${metaInline ? "cukii-assistant-bubble--meta-inline" : ""} ${
+          isBeforeLatestSummary ? "opacity-35" : ""
+        }`}
       >
         {uiConfig?.displayRawMarkdown ? (
           <pre className="text-2xs max-w-full overflow-x-auto whitespace-pre-wrap break-words p-4">

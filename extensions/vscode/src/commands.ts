@@ -910,21 +910,35 @@ const getCommandsMap: (
       let initialTitle = options.title;
       if (initialSessionId && !options.forceNew) {
         // Do not create a tab merely to discover that its saved session was
-        // deleted/missing. Core.load returns a blank default for that case;
-        // saved Cukii sessions are only navigable after their first history
-        // entry, so the check is both deterministic and side-effect free.
-        let restored;
+        // deleted/missing. Saved Cukii sessions are only navigable after their
+        // first history entry, so presence in the index with a non-zero message
+        // count answers both questions this check asks — does it exist, and
+        // what is its title.
+        //
+        // 🔴 This used to call `history/load`, and that made opening a session
+        // cost seconds of blank screen. That handler is not the cheap lookup
+        // its old comment claimed: it parses the whole session body (37MB on
+        // this machine's largest chat) and then runs `startHookSession`, which
+        // spawns the SessionStart lifecycle hooks. Because the hook start is
+        // idempotent per session, the webview's own `history/load` right
+        // afterwards became a no-op — so the entire hook cost was paid HERE,
+        // before the tab even existed, with nothing on screen. Measured on the
+        // installed 2.0.103: 7.9s of the 10.5s click-to-first-capsule went to
+        // this line, and the session body was parsed twice. The index carries
+        // title and message count without touching either.
+        let metadata;
         try {
-          restored = await core.invoke("history/load", {
-            id: initialSessionId,
-          });
+          metadata = await core.invoke("history/list", {});
         } catch {
           return;
         }
-        if (!restored || restored.history.length === 0) {
+        const known = metadata?.find(
+          (entry) => entry.sessionId === initialSessionId,
+        );
+        if (!known || (known.messageCount ?? 0) === 0) {
           return;
         }
-        initialTitle = restored.title;
+        initialTitle = known.title;
       }
 
       const panel = vscode.window.createWebviewPanel(

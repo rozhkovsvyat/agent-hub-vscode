@@ -119,10 +119,12 @@ describe("Cukii Claude-parity input toolbar", () => {
       "aria-label",
       "Selected model: Qwen 3.8 Max, High 50%",
     );
-    // Claude pill geometry: ~26px capsule with 16px horizontal padding.
-    expect(pill.className).toContain("h-[26px]");
+    // Claude pill geometry, measured on the live client: an 18px capsule with
+    // 8px horizontal padding and 11.05px text.
+    expect(pill.className).toContain("h-[18px]");
     expect(pill.className).toContain("rounded-full");
-    expect(pill.className).toContain("px-4");
+    expect(pill.className).toContain("px-2");
+    expect(pill.className).toContain("text-[11.05px]");
     // It rides directly next to the "/" command control in the left cluster.
     const slashControl = await getElementByTestId("broker-menu-button");
     expect(slashControl.closest(".relative")?.nextElementSibling).toBe(pill);
