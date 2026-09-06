@@ -110,21 +110,28 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
   };
 
   return (
-    <div
-      className="cukii-model-picker-backdrop fixed inset-0 z-[100000] bg-black/15"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Select a model"
-      onMouseDown={onClose}
-    >
-      {/* The menu belongs to the composer, so it takes the composer's lane:
-          `.cukii-main-input-shell` is a centred 714px column with 17px/16px
-          side padding. Pinning the panel to the viewport instead let it grow
-          to the full window width on a wide editor. The strip itself must not
-          swallow the backdrop's close-on-click, hence pointer-events. */}
-      <div className="pointer-events-none absolute bottom-[86px] left-0 right-0 mx-auto w-full max-w-[714px] pl-[17px] pr-4">
+    <>
+      {/* Close-on-click-outside only. It used to be the panel's parent too,
+          which is what put the menu 86px above the *window* instead of above
+          the composer: `fixed inset-0` made the viewport the containing block,
+          so the panel overlapped a 103px composer by 17px. */}
+      <div
+        className="cukii-model-picker-backdrop fixed inset-0 z-[100000]"
+        onMouseDown={onClose}
+      />
+      {/* The menu belongs to the composer and now hangs off its top edge:
+          `.cukii-model-picker-lane` is `bottom: 100%` against the composer's
+          own positioned box, so the gap is constant whatever the composer's
+          height. Measured 1:1 against Claude Code 2.1.261, whose menu is
+          `position: absolute; bottom: 100%; margin-bottom: 8px` on its input
+          fieldset. The lane must not swallow the backdrop's close-on-click,
+          hence pointer-events. */}
+      <div className="cukii-model-picker-lane pointer-events-none">
         <div
           className="cukii-model-picker cukii-menu-surface pointer-events-auto max-h-[min(50vh,570px)] rounded-lg border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Select a model"
           onMouseDown={(event) => event.stopPropagation()}
         >
           <div className="flex items-center justify-between px-3 pb-1 pt-2">
@@ -259,6 +266,6 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

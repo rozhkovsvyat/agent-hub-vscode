@@ -54,7 +54,14 @@ function StepContainer(props: StepContainerProps) {
               />
             )}
 
+            {/* The markdown wrapper ships an 8px side padding of its own, so
+                the answer started 8px further in than the user's prose does in
+                its capsule. The capsule owns the whole gutter; this class is
+                the stable handle for zeroing that inner wall (the styled
+                component's own class is a build hash) and the anchor the
+                reply-time spacer keys off. */}
             <StyledMarkdownPreview
+              className="cukii-assistant-prose"
               isRenderingInStepContainer
               useParentBackgroundColor
               source={stripImages(props.item.message.content)}

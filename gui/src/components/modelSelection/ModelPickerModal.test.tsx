@@ -214,19 +214,27 @@ describe("ModelPickerModal", () => {
     );
   });
 
-  it("keeps the menu in the composer's lane instead of the whole window", async () => {
-    // The composer is a centred 714px column (`.cukii-main-input-shell`); the
-    // menu belongs to it. Pinned to the viewport it grew to the full editor
-    // width on a wide window, which is what the owner reported.
+  it("hangs the menu off the composer's top edge, not off the window", async () => {
+    // The menu belongs to the composer and must start directly above it. It
+    // used to live inside the `fixed inset-0` backdrop at `bottom-[86px]`,
+    // which measures from the WINDOW: a 103px composer was overlapped by 17px,
+    // and every extra line of input made the overlap worse. The lane is now a
+    // plain `absolute` box anchored on the composer itself (`bottom: 100%` in
+    // `.cukii-model-picker-lane`), the way Claude Code anchors its own menu.
     await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
     const menu = document.querySelector(".cukii-model-picker");
     const lane = menu?.parentElement;
+    const backdrop = document.querySelector(".cukii-model-picker-backdrop");
 
-    expect(lane?.className).toContain("max-w-[714px]");
-    expect(lane?.className).toContain("mx-auto");
-    expect(lane?.className).toContain("pl-[17px]");
-    expect(lane?.className).toContain("pr-4");
-    // The strip spans the window, so it must not eat the backdrop's clicks.
+    expect(lane?.className).toContain("cukii-model-picker-lane");
+    // No magic offset from the window may come back.
+    expect(lane?.className).not.toContain("bottom-[");
+    expect(lane?.className).not.toContain("fixed");
+    // The backdrop is now a sibling click-catcher, not the panel's ancestor —
+    // otherwise the viewport becomes the containing block again.
+    expect(backdrop).not.toBeNull();
+    expect(backdrop?.contains(menu ?? null)).toBe(false);
+    // The lane spans the composer, so it must not eat the backdrop's clicks.
     expect(lane?.className).toContain("pointer-events-none");
     expect(menu?.className).toContain("pointer-events-auto");
   });

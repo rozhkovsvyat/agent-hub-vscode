@@ -1089,6 +1089,30 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   color: var(--vscode-menu-foreground, #cccccc) !important;
 }
 
+/* The menu hangs off the composer's top edge, exactly as in Claude Code
+   2.1.261 (`position: absolute; bottom: 100%; margin-bottom: 8px` on its input
+   fieldset). It used to sit `bottom: 86px` from the *viewport* inside the
+   `fixed inset-0` backdrop, which overlapped a 103px composer by 17px and grew
+   worse with every extra line of input.
+
+   The containing block is the composer's own positioned box
+   (`.cukii-editor-stack`, measured `position: relative`, top identical to
+   `.cukii-main-input-shell`, no clipping ancestor between them), and the ±1px
+   cancels the input field's 1px border so the panel keeps the exact width of
+   the field — the lane contract closed in 2.0.101.
+
+   z-index beats the backdrop's 100000: both are now siblings inside the
+   composer's stacking context (`.cukii-main-input-shell` is `isolation:
+   isolate`), and the panel must stay above the click catcher. */
+.cukii-model-picker-lane {
+  position: absolute;
+  right: -1px;
+  bottom: 100%;
+  left: -1px;
+  z-index: 100001;
+  margin-bottom: 8px;
+}
+
 /* Claude model-picker internals: a column-scrolled list capped at 300px,
    .9em half-opacity section headers, .85em half-opacity descriptions and a
    constant 24px check column on every row. */
@@ -1106,6 +1130,18 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   max-height: 300px;
   overflow-y: auto;
   padding-bottom: 8px;
+}
+
+/* Rows carry the shared 4px side margin AND Tailwind's `w-full`: the 100% is
+   measured from the list's content width, then margin-left pushes the box 4px
+   right, so its right edge overhangs by exactly 4px. Declaring `overflow-y:
+   auto` alone computes `overflow-x` to `auto` as well, and that overhang
+   became a real horizontal scrollbar which also ate 15px of list height.
+   `width: auto` would NOT do: Chromium sizes a `<button>` at max-content even
+   with `display: flex`, so the rows would collapse to their text and the check
+   column would leave the right edge. */
+.cukii-model-picker-list .cukii-menu-item {
+  width: calc(100% - 8px) !important;
 }
 
 .cukii-picker-section-header {
@@ -1412,8 +1448,35 @@ button.cukii-submit-button--stop:active {
   border: 0 !important;
 }
 
+/* The markdown wrapper (StyledMarkdownPreview's styled div) declares
+   `padding: 0 8px` of its own, one level above `.wmde-markdown` whose padding
+   is already zeroed. That inner wall put the answer's glyphs 18.8px from the
+   capsule edge while the user's prose sits at 10.8px — the left/bottom
+   mismatch the owner reported. Two classes on purpose: styled-components
+   injects its sheet AFTER index.css and matches with a single class, so a
+   one-class rule here would lose the cascade and change nothing. */
+.cukii-assistant-bubble > .cukii-assistant-prose {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* A second block on purpose: the geometry contract in cukiiGuiContracts.test.ts
+   pins a fixed 330-character window from the first `.cukii-assistant-bubble {`
+   and has 16 characters of slack left, so anything added above would push
+   `max-width: 70%;` out of it. The user capsule splits its own declarations
+   the same way (see `--cukii-meta-reserve` further down). */
+.cukii-assistant-bubble {
+  position: relative;
+  /* "21:45" at 11px tabular numerals — the same reserve the user capsule uses
+     for the time half of its receipt. */
+  --cukii-meta-reserve: 31px;
+}
+
 /* Reply time in the capsule's bottom-right corner, on the same 10px right
-   inset as the user checks. No reserved slot: it flows after the prose. */
+   inset as the user checks. This is the SAFE default: a row of its own in the
+   flow. An assistant answer may end in a code block, a table, a heading or a
+   list, and none of those can carry a reserved slot for the time — pinning it
+   absolutely there would drop the digits onto the last glyphs. */
 .cukii-assistant-metadata {
   display: flex;
   justify-content: flex-end;
@@ -1425,6 +1488,29 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
+}
+
+/* MAX mechanism, mirrored from the user capsule: when the answer really does
+   end in a paragraph AND the time is the very next element — during streaming
+   the thinking indicator sits between them — the time rides the last line. An
+   inline ::after spacer holds its width while the time itself is absolute in
+   the bottom-right corner, so the capsule's own 10px bottom band is the time's
+   band and nothing else. That is what brings the assistant's bottom inset to
+   the user's 10.8px instead of the 27.9px a flow row costs. Any other tail
+   falls back to the flow row above, where a collision is impossible. */
+.cukii-assistant-prose:has(> p:last-child) + .cukii-assistant-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+.cukii-assistant-prose:has(> p:last-child):has(+ .cukii-assistant-metadata)
+  > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: calc(var(--cukii-meta-reserve) + 4px);
+  height: 14px;
 }
 
 /* Assistant capsules live OFF the timeline rail: the row is a plain block at
