@@ -1,21 +1,26 @@
 {
-  "version": "2.0.105",
-  "vsix_sha256": "f9d8d9e4384bd986ca733a052a8fb48f05813ced42cbaf4e05dbaaea605692d4",
-  "commit": "601ad7621",
+  "version": "2.0.108",
+  "vsix_sha256": "СМ. ПОЛЕ gate.activation_smoke",
   "commits": [
     "79504973a — четыре правки по претензиям владельца (собрано как 2.0.104)",
-    "d9f2f7e77 — починка по независимому опровержению (вердикт круга 1: rework)",
-    "601ad7621 — lockfile 2.0.105"
+    "d9f2f7e77 — починка по кругу 1 независимого опровержения (вердикт: rework)",
+    "18cc8ab2c — починка по кругу 2 (вердикт: rework; блокер был в моей же починке)",
+    "34a184b9c — открытие сессии: тело греется параллельно загрузке бандла",
+    "a8f0e9883 — поиск по сессиям за лупой, 1 к 1 с Клодом"
   ],
-  "rollback_vsix": "cukii-vscode-2.0.104.vsix sha256 d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
-  "measured_at": "2026-09-06T23:10:00+03:00",
-  "scope": "Четыре претензии владельца к 2.0.103: строка YouGile с аккаунтом и кнопкой «Log in» одновременно, великоватая полоса от текста ответа до времени, долгое открытие сессии, крупная пилюля модели. 🔴 2.0.104 была собрана и замерена, но независимое опровержение вернуло её на доработку: два блокирующих дефекта. Поставляется 2.0.105.",
-  "how": "Все числа сняты с УСТАНОВЛЕННОГО расширения (cukii.cukii-vscode@2.0.104) в отдельном доверенном инстансе VS Code со своими user-data/extensions под D:\\Scratch\\cukii-parity-2.0.104, CDP 9334, --no-sandbox --disable-gpu --disable-workspace-trust. Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
+  "rollback_vsix": "cukii-vscode-2.0.103.vsix sha256 f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64 (последняя сборка, которую владелец видел рабочей)",
+  "measured_at": "2026-09-07T01:00:00+03:00",
+  "scope": "Четыре претензии владельца к 2.0.103 (строка YouGile, полоса от текста до времени, долгое открытие сессии, крупная пилюля) плюс пятая, поданная по ходу: поиск по сессиям за лупой, как у Клода. 🔴 2.0.104 и 2.0.105 были собраны и замерены, но каждый круг независимого опровержения возвращал их на доработку, а собственный перезамер открытия сессии опроверг моё же заявление об ускорении. Поставляется 2.0.108.",
+  "how": "Все числа сняты с УСТАНОВЛЕННЫХ расширений в отдельных доверенных инстансах VS Code со своими user-data/extensions под D:\\Scratch (--no-sandbox --disable-gpu --disable-workspace-trust): кандидат — cukii-parity-2.0.106 (CDP 9336) и cukii-probe-2.0.107 (9338), базовая линия — cukii-baseline-2.0.103 (9337), эталон Клода — anthropic.claude-code@2.1.263 в claude-ref-9340 (9340). Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
   "gate": {
-    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=8509MiB",
-    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.105 vsix_sha256=f9d8d9e4384bd986ca733a052a8fb48f05813ced42cbaf4e05dbaaea605692d4",
-    "negative_matrix": "СМ. ПОЛЕ negative_matrix_result",
-    "suites": "gui 796/796 в 88 файлах (+9 новых на assistantMetaFitsOnLastLine), extension 560 passed / 4 skipped в 48 файлах, tsc чист в обоих пакетах"
+    "capacity": "ЗАПОЛНИТЬ ФАКТОМ",
+    "activation_smoke": "ЗАПОЛНИТЬ ФАКТОМ",
+    "negative_matrix": "ЗАПОЛНИТЬ ФАКТОМ",
+    "suites": "gui 799/799 в 88 файлах, extension 564 passed / 4 skipped в 48 файлах, tsc чист в обоих пакетах",
+    "earlier_gates": [
+      "2.0.105: ACTIVATION-SMOKE-PASS vsix_sha256=f9d8d9e4…92d4, SELFTEST-PASS: 12 controls",
+      "2.0.106: ACTIVATION-SMOKE-PASS vsix_sha256=8c744646…1bb6, SELFTEST-PASS: 12 controls"
+    ]
   },
   "adversarial": {
     "rounds": 2,
@@ -294,6 +299,64 @@
         "padding": "0px 8px"
       },
       "note": "Единственное расхождение — вертикальный паддинг 1px против 0px. Оно не наблюдаемо: высота задана жёстко 18px и совпадает, содержимое центрируется флексом."
+    }
+  ],
+  "items_added_mid_delivery": [
+    {
+      "id": "session-search-magnifier",
+      "complaint": "у клода в шторке боковой есть поиск по сессиям (лупа) — а у нас нет; сделай точно такой же, 1 к 1",
+      "reference": "живой anthropic.claude-code@2.1.263, вебвью 14ebqtf6lf7524ektmek — замер, а не скриншот",
+      "verdict": "PASS",
+      "was": "Поиск существовал, но всегда развёрнутым полем 275.2×30 во всю ширину шторки, отдельной строкой над рядом фильтров. Лупы-кнопки не было вовсе, поэтому владелец и не увидел «поиск как у Клода».",
+      "reference_numbers": {
+        "collapsed": {
+          "input_exists": false,
+          "toggle": {
+            "cls": "newGroupButton_OOQiHg searchToggleButton_OOQiHg",
+            "aria": "Search sessions",
+            "w": 24,
+            "h": 24,
+            "padding": "4px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "x": 143.73
+          },
+          "next_sibling": "New group (w 93.83, padding 4px 8px — та же геометрия, только с подписью)",
+          "actionsRowWidth": 258.55
+        },
+        "open": {
+          "toggle_exists": false,
+          "box": {
+            "cls": "searchBox_OOQiHg searchBoxCollapsible_OOQiHg",
+            "w": 271,
+            "h": 36.8,
+            "display": "flex"
+          },
+          "children_in_order": [
+            "svg.searchIcon 14×14",
+            "input 263×28.8",
+            "button.searchClearButton 20×20 (aria «Clear search»)"
+          ],
+          "input": {
+            "placeholder": "Search sessions…",
+            "padding": "8px 28px 8px 32px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "focused": true
+          },
+          "actionsRow": "съезжает с y=406.8 на 445.6 и сужается с 258.55 до 234.55 — ровно на ширину исчезнувшей лупы"
+        },
+        "escape": "закрывает и возвращает лупу",
+        "clear_button": "🔴 не просто очищает, а очищает И закрывает — единственный мышиный путь обратно к лупе"
+      },
+      "measurement_defect_found": "Первый прогон сказал «Escape не закрывает». Он был неверен: проверка стояла в том же тике, что и отправка события, и читала DOM до перерисовки React. Отдельный замер следующим вызовом показал обратное.",
+      "deliberate_difference": "Закрытие всегда сбрасывает запрос. У эталона это не удалось подтвердить замером (моя проба строк не находила его разметку), а невидимое поле, оставляющее список молча отфильтрованным, — дефект в любом случае.",
+      "tests": [
+        "keeps the search behind a magnifier and gives it back on Escape",
+        "NEGATIVE CONTROL: the clear button closes the search and unfilters the list",
+        "clears search and filters when a group is created — теперь ещё и схлопывает поле"
+      ],
+      "test_note": "🔴 Запросы в тестах идут ПО РОЛИ, а не по label: кнопка и поле несут один и тот же aria-label «Search sessions» (как у Клода), поэтому запрос по label матчит любое из них и не отличает закрытое состояние от открытого."
     }
   ],
   "remainders": [
