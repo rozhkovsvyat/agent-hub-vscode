@@ -938,6 +938,62 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
     ).toBeInTheDocument();
   });
 
+  /** The field lives behind the magnifier, exactly as in Claude's sidebar. */
+  const openSearch = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Search sessions" }));
+  /* 🔴 By role, not by label: the toggle and the field carry the SAME
+     "Search sessions" label — as they do in Claude — so a label query matches
+     whichever exists and can never tell the collapsed state from the open one. */
+  const searchField = () =>
+    screen.queryByRole("textbox", { name: "Search sessions" });
+  const searchToggle = () =>
+    screen.queryByRole("button", { name: "Search sessions" });
+
+  it("keeps the search behind a magnifier and gives it back on Escape", async () => {
+    // 🔴 1:1 with the live Claude sidebar (measured on 2.1.263): closed there is
+    // no field at all, only a 24×24 button sitting next to "New group"; opening
+    // it puts the field on its own line and takes the button away; Escape and
+    // the clear button both close it AND drop the query, so the list is never
+    // left filtered by a field nobody can see.
+    await mountNavigator();
+    expect(searchField()).toBeNull();
+    expect(searchToggle()).toBeInTheDocument();
+
+    openSearch();
+    const field = searchField()!;
+    expect(field).toBeInTheDocument();
+    // Opening takes the button away, so the two never share the row.
+    expect(searchToggle()).toBeNull();
+
+    fireEvent.change(field, { target: { value: "running" } });
+    expect(rowTitles()).toEqual(["Running session"]);
+
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(searchField()).toBeNull();
+    expect(searchToggle()).toBeInTheDocument();
+    expect(rowTitles()).toHaveLength(4);
+  });
+
+  it("NEGATIVE CONTROL: the clear button closes the search and unfilters the list", async () => {
+    // Measured on the live sidebar: "Clear search" does not merely empty the
+    // field, it collapses it — and it is the only way back to the magnifier
+    // without the keyboard. A clear that left the field open would leave the
+    // list still narrowed on the next render.
+    await mountNavigator();
+    openSearch();
+    fireEvent.change(screen.getByLabelText("Search sessions"), {
+      target: { value: "running" },
+    });
+    expect(rowTitles()).toEqual(["Running session"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(searchField()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear search" })).toBeNull();
+    expect(searchToggle()).toBeInTheDocument();
+    expect(rowTitles()).toHaveLength(4);
+  });
+
   it("stacks the filters on top of the substring search", async () => {
     await mountNavigator();
     openFilterMenu();
@@ -946,6 +1002,7 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
     );
     expect(rowTitles()).toEqual(["Done session", "Closed session"]);
 
+    openSearch();
     fireEvent.change(screen.getByLabelText("Search sessions"), {
       target: { value: "closed" },
     });
@@ -1089,6 +1146,7 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
     // Claude's create-group path ends in `O1(""),n5(!1),P0(Ih)` — the group you
     // just made has to be visible, not hidden behind the narrowing that was on.
     await mountNavigator();
+    openSearch();
     fireEvent.change(screen.getByLabelText("Search sessions"), {
       target: { value: "running" },
     });
@@ -1101,7 +1159,10 @@ describe("CukiiSessionNavigator Claude filter parity", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-    expect(screen.getByLabelText("Search sessions")).toHaveValue("");
+    // The field collapses with its query: left open and empty it would sit
+    // where the magnifier belongs, a field the user never opened.
+    expect(searchField()).toBeNull();
+    expect(searchToggle()).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Active · 2" })).toHaveAttribute(
       "aria-pressed",
       "false",

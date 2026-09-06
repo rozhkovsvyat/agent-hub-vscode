@@ -10,6 +10,7 @@ import {
   PencilIcon,
   PlusIcon,
   TrashIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { BaseSessionMetadata } from "core";
 import type { CukiiOpenChatPanel } from "core/protocol/ideWebview";
@@ -122,12 +123,38 @@ const SearchIcon = styled(MagnifyingGlassIcon)`
   color: var(--vscode-input-placeholderForeground);
   pointer-events: none;
 `;
+/* `.searchClearButton_OOQiHg`: 20×20, on the right inside the box. Measured on
+   the live sidebar, it does not merely clear — it clears AND collapses, and it
+   is the only way back to the magnifier without the keyboard. */
+const SearchClear = styled.button`
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  transform: translateY(-50%);
+  background: transparent;
+  color: var(--vscode-input-placeholderForeground);
+  cursor: pointer;
+  &:hover,
+  &:focus {
+    outline: none;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+  }
+`;
 const Search = styled.input`
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   height: 30px;
-  padding: 5px 9px 5px 31px;
+  padding: 5px 28px 5px 31px;
   border: 1px solid transparent;
   border-radius: 4px;
   outline: none;
@@ -141,8 +168,11 @@ const Search = styled.input`
     border-color: var(--vscode-focusBorder);
   }
 `;
+/* The group name field borrows the search field's shape but neither the leading
+   magnifier nor the trailing clear button, so it takes its side padding back. */
 const GroupInput = styled(Search)`
   padding-left: 9px;
+  padding-right: 9px;
 `;
 const SmallButton = styled.button`
   display: inline-flex;
@@ -422,6 +452,16 @@ export default function CukiiSessionNavigator() {
   const [sessions, setSessions] = useState<BaseSessionMetadata[]>([]);
   const [openPanels, setOpenPanels] = useState<CukiiOpenChatPanel[]>([]);
   const [query, setQuery] = useState("");
+  /* The search field is collapsed behind a magnifier, exactly as in Claude's
+     sidebar: closed there is no field at all, only a 24×24 button next to
+     "New group"; opening it puts the field on its own line above the filter
+     chips and takes the button away. Closing always clears the query too — an
+     invisible field must never leave the list silently filtered. */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setQuery("");
+  }, []);
   const [filters, setFilters] = useState<SessionFilters>(defaultSessionFilters);
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
@@ -774,8 +814,10 @@ export default function CukiiSessionNavigator() {
     setContext(null);
     // Claude's create-group path ends in `O1(""),n5(!1),P0(Ih)`: search and
     // filters are cleared so the group you just made is on screen rather than
-    // hidden behind whatever narrowed the list a moment ago.
-    setQuery("");
+    // hidden behind whatever narrowed the list a moment ago. The field collapses
+    // with the query — leaving it open and empty would be a field the user did
+    // not open, sitting where the magnifier belongs.
+    closeSearch();
     setFilters(defaultSessionFilters());
   };
   const openSession = (session: CukiiNavigatorSession) =>
@@ -1019,15 +1061,33 @@ export default function CukiiSessionNavigator() {
         <PlusIcon width={16} height={16} /> New session
       </Action>
       <SearchRow>
-        <SearchWrap>
-          <SearchIcon />
-          <Search
-            aria-label="Search sessions"
-            placeholder="Search sessions..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </SearchWrap>
+        {searchOpen && (
+          <SearchWrap>
+            <SearchIcon />
+            <Search
+              autoFocus
+              aria-label="Search sessions"
+              placeholder="Search sessions…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeSearch();
+                }
+              }}
+            />
+            <SearchClear
+              className="cukii-session-search-clear"
+              type="button"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={closeSearch}
+            >
+              <XMarkIcon style={toolIconStyle} />
+            </SearchClear>
+          </SearchWrap>
+        )}
         <SearchRowActions>
           {(() => {
             const ActiveChip = filters.activeOnly ? ToolButtonOn : ToolButton;
@@ -1067,6 +1127,20 @@ export default function CukiiSessionNavigator() {
               </FunnelButton>
             );
           })()}
+          {!searchOpen && (
+            /* 24×24 and square: the shared control geometry with no label, so
+               it sits flush against "New group" the way Claude's does. */
+            <ToolButton
+              className="cukii-session-action cukii-session-search-toggle"
+              style={{ padding: 4 }}
+              title="Search sessions"
+              aria-label="Search sessions"
+              aria-expanded={false}
+              onClick={() => setSearchOpen(true)}
+            >
+              <MagnifyingGlassIcon style={toolIconStyle} />
+            </ToolButton>
+          )}
           <ToolButton
             className="cukii-session-action"
             onClick={() => setAddingGroup(true)}
