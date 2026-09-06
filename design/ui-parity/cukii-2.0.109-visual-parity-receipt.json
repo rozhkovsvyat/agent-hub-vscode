@@ -1,6 +1,57 @@
 {
-  "version": "2.0.108",
-  "vsix_sha256": "СМ. ПОЛЕ gate.activation_smoke",
+  "version": "2.0.109",
+  "vsix_sha256": "c5b8247328b1c2c253b37562c1a31f7e94a5378a6456a0462012feb32466acc2",
+  "final_verification": {
+    "where": "УСТАНОВЛЕННАЯ cukii.cukii-vscode@2.0.109, отдельный доверенный инстанс D:\\Scratch\\cukii-parity-2.0.109, CDP 9342",
+    "session_open": {
+      "session": "проверка вёрстки капсул",
+      "clickToFirstBubbleMs": 689,
+      "toPanelMs": 231,
+      "insideMs": 464
+    },
+    "short_answer_capsule": {
+      "mode": "inline",
+      "linesInLastBlock": 1,
+      "atMaxWidth": false,
+      "spare": 120.04,
+      "needed": 31.11,
+      "band": 11.9,
+      "metaBottomInset": 4.8,
+      "metaRightInset": 10.8,
+      "glyphCollisions": 0,
+      "reserve": "32px"
+    },
+    "user_capsule_reference": {
+      "metaBottomInset": 4.8,
+      "metaRightInset": 10.8
+    },
+    "pill": {
+      "h": 18,
+      "w": 139.15,
+      "fontSize": "11.05px",
+      "lineHeight": "18px",
+      "gap": "4px",
+      "borderRadius": "9999px",
+      "padding": "1px 8px"
+    },
+    "yougile_row": {
+      "testid": "cukii-vendor-account-yougile",
+      "group": "Testing",
+      "text": "YouGile rozhkovsvyat@gmail.com Log out",
+      "loginButtonPresent": false
+    },
+    "search": {
+      "collapsed": {
+        "toggle": "24×24, padding 4px, 11.7px",
+        "field_exists": false
+      },
+      "open": {
+        "field": "275.2×28.8, padding 8px 28px 8px 32px, radius 4px, 11.7px, сфокусировано",
+        "clear": "20×20",
+        "toggle_exists": false
+      }
+    }
+  },
   "commits": [
     "79504973a — четыре правки по претензиям владельца (собрано как 2.0.104)",
     "d9f2f7e77 — починка по кругу 1 независимого опровержения (вердикт: rework)",
@@ -13,9 +64,9 @@
   "scope": "Четыре претензии владельца к 2.0.103 (строка YouGile, полоса от текста до времени, долгое открытие сессии, крупная пилюля) плюс пятая, поданная по ходу: поиск по сессиям за лупой, как у Клода. 🔴 2.0.104 и 2.0.105 были собраны и замерены, но каждый круг независимого опровержения возвращал их на доработку, а собственный перезамер открытия сессии опроверг моё же заявление об ускорении. Поставляется 2.0.108.",
   "how": "Все числа сняты с УСТАНОВЛЕННЫХ расширений в отдельных доверенных инстансах VS Code со своими user-data/extensions под D:\\Scratch (--no-sandbox --disable-gpu --disable-workspace-trust): кандидат — cukii-parity-2.0.106 (CDP 9336) и cukii-probe-2.0.107 (9338), базовая линия — cukii-baseline-2.0.103 (9337), эталон Клода — anthropic.claude-code@2.1.263 в claude-ref-9340 (9340). Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
   "gate": {
-    "capacity": "ЗАПОЛНИТЬ ФАКТОМ",
-    "activation_smoke": "ЗАПОЛНИТЬ ФАКТОМ",
-    "negative_matrix": "ЗАПОЛНИТЬ ФАКТОМ",
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=6507MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.109 vsix_sha256=c5b8247328b1c2c253b37562c1a31f7e94a5378a6456a0462012feb32466acc2",
+    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls",
     "suites": "gui 799/799 в 88 файлах, extension 564 passed / 4 skipped в 48 файлах, tsc чист в обоих пакетах",
     "earlier_gates": [
       "2.0.105: ACTIVATION-SMOKE-PASS vsix_sha256=f9d8d9e4…92d4, SELFTEST-PASS: 12 controls",
