@@ -1,0 +1,173 @@
+{
+  "version": "2.0.103",
+  "vsix_sha256": "f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64",
+  "commit": "c39f3d82b",
+  "measured_at": "2026-09-06T16:20:00+03:00",
+  "scope": "Три претензии владельца к 2.0.102: левый и нижний инсеты серой капсулы, горизонтальная полоса в списке моделей, наезд пикера на поле ввода.",
+  "how": "Замеры сняты с УСТАНОВЛЕННОГО расширения в отдельном доверенном инстансе VS Code (свои user-data/extensions под D:\\Scratch\\cukii-parity-2.0.103, CDP 9334, --no-sandbox --disable-gpu --disable-workspace-trust). Инструмент — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding и не сравнение на глаз.",
+  "gate": {
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=10638MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.103 vsix_sha256=f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64",
+    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls",
+    "suites": "gui 787/787 в 87 файлах, extension 553 passed / 4 skipped, tsc чист в обоих пакетах"
+  },
+  "adversarial": {
+    "rounds": 1,
+    "agents": 16,
+    "verdict": "все четыре первичных диагноза сломаны тремя независимыми опровергающими каждый, правки переработаны до применения",
+    "findings_that_changed_the_fix": [
+      "width:auto у <button> в Blink резолвится в max-content даже при display:flex — предложенное лечение полосы схлопнуло бы строки до 129-535px и унесло колонку галочки; взят width: calc(100% - 8px)",
+      "абсолютная мета у агента гарантированно ложится на глифы, если ответ кончается кодом, таблицей, списком или заголовком — MAX-режим поставлен под условие `:has(> p:last-child)` и соседства `+ .cukii-assistant-metadata`",
+      "вставка объявлений в первый блок .cukii-assistant-bubble выбивает max-width: 70% из 330-символьного окна контрактного теста — объявления вынесены во второй блок",
+      "styled-components инжектит свой лист ПОСЛЕ index.css и матчит одним классом — правило обнуления паддинга сделано двухклассовым с !important"
+    ]
+  },
+  "items": [
+    {
+      "id": "assistant-capsule-side-inset",
+      "complaint": "левый отступ у серой капсулы отличается от отступов пользовательской оранжевой",
+      "reference": "пользовательская капсула в том же треде",
+      "verdict": "PASS",
+      "before": {
+        "assistantInsetLeft": 18.8,
+        "userInsetLeft": 10.8,
+        "delta": 8
+      },
+      "numbers": {
+        "assistantInsetLeft": 10.8,
+        "userInsetLeft": 10.8,
+        "delta": 0,
+        "assistantInsetRight": 10.8
+      },
+      "cause": "styled-обёртка StyledMarkdown объявляла padding: 0 8px уровнем выше .wmde-markdown, чей паддинг уже был обнулён"
+    },
+    {
+      "id": "assistant-capsule-bottom-inset",
+      "complaint": "нижний отступ у серой капсулы отличается от пользовательской",
+      "reference": "механика MAX (web.max.ru), уже реализованная в пользовательской капсуле",
+      "verdict": "PASS",
+      "before": {
+        "assistantBottomInset": 27.9,
+        "metaPosition": "static",
+        "gapFromText": 25.2
+      },
+      "numbers": {
+        "assistantBottomInset": 11.9,
+        "metaPosition": "absolute",
+        "metaInsetBottom": 4.8,
+        "metaInsetRight": 10.8,
+        "gapFromLastBlock": -6.9,
+        "spacerWidth": "35px",
+        "userMetaInsetBottom": 4.8,
+        "userMetaInsetRight": 10.8
+      },
+      "note": "Три числа меты (низ 4.8, право 10.8, время на строке) совпадают с пользовательской капсулой."
+    },
+    {
+      "id": "assistant-tail-modes",
+      "complaint": "нет (проверка на регрессию, предсказанную тремя рецензентами)",
+      "reference": "механика MAX применима только к абзацному хвосту; всё остальное обязано остаться строкой в потоке",
+      "verdict": "PASS",
+      "numbers": {
+        "абзац": {
+          "metaPosition": "absolute",
+          "glyphCollisions": 0,
+          "gap": -6.9,
+          "bottomInset": 11.9
+        },
+        "заголовок": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 4.08
+        },
+        "плотный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3.1
+        },
+        "свободный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3.7
+        },
+        "таблица": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 5.7
+        },
+        "блок кода (виджет)": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 13.5
+        },
+        "картинка": { "metaPosition": "static", "glyphCollisions": 0, "gap": 2 }
+      },
+      "note": "Ноль пересечений времени с глифами во всех шести не-абзацных хвостах. Замер D:\\Scratch\\expr-tail-modes.js: капсула клонируется, хвост подменяется, считается площадь пересечения бокса <time> с прямоугольниками текстовых узлов."
+    },
+    {
+      "id": "picker-horizontal-scrollbar",
+      "complaint": "и нахуя тут горизонтальный скролл? это баг",
+      "reference": "живой Claude Code 2.1.261: список моделей scrollWidth == clientWidth, полосы нет",
+      "verdict": "PASS",
+      "before": {
+        "scrollWidth": 668,
+        "clientWidth": 664,
+        "clientHeight": 285,
+        "offenders": "список и все шесть секций"
+      },
+      "numbers": {
+        "scrollWidth": 665,
+        "clientWidth": 665,
+        "clientHeight": 300,
+        "horizontalOffenders": [],
+        "overhangingChildren": []
+      },
+      "cause": "строки несут margin: 0 4px и Tailwind-класс w-full; 100% отмеряется от контентной ширины, margin-left сдвигает бокс, правый край выходит ровно на 4px, а объявленный один overflow-y: auto доводит overflow-x до auto",
+      "note": "Возврат 15px высоты списка — полоса их съедала; видна на строку больше."
+    },
+    {
+      "id": "picker-anchor",
+      "complaint": "почему меню накладывается на окно ввода, а не прямо над ним начинается? разве у клода также?",
+      "reference": "живой Claude Code 2.1.261: .menuPopup position: absolute; bottom: 100%; margin-bottom: 8px на композере, offsetParent = FIELDSET.inputContainer, ни одного fixed-элемента во всём вебвью; зазор 7.2px",
+      "verdict": "PASS",
+      "answer_to_owner": "у Клода не так: его панель привязана к самому композеру через bottom: 100%, поэтому зазор постоянен при любой высоте поля ввода",
+      "before": {
+        "overlapPx": 17,
+        "laneBottom": "86px от вьюпорта",
+        "composerHeight": 103
+      },
+      "numbers": {
+        "overlapPx": -7,
+        "gapAboveComposer": 7.2,
+        "panelX": 58,
+        "panelWidth": 681,
+        "panelRight": 739,
+        "composerX": 41,
+        "composerLeftPadding": 17,
+        "composerRightPadding": 16
+      },
+      "invariance": {
+        "composerHeights": [102.9, 176, 256, 356],
+        "gapAboveComposer": [7.2, 7.2, 7.2, 7.2],
+        "panelWidth": [681.4, 681.4, 681.4, 681.4],
+        "note": "Зазор и ширина не меняются при росте композера втрое — привязка идёт за композером, а не за окном. Прежнее bottom-[86px] на этих же высотах давало наезд 17, 90, 170 и 270px."
+      }
+    }
+  ],
+  "remainders": [
+    {
+      "id": "tall-composer-offscreen",
+      "what": "Если композер вырастет примерно до половины высоты вебвью, верх панели уйдёт за верх окна: панель прибита к верхней кромке композера и ограничена min(50vh, 570px).",
+      "why_accepted": "Ровно такое же свойство у эталона — Claude Code с bottom: 100% и max-height: 50vh. Владелец просил паритет 1 к 1, а не расхождение с эталоном. Замер: при композере 356px верх панели 60px, ещё на экране.",
+      "alternative_rejected": "Ограничивать высоту панели остатком над композером — проверено рецензентами: список схлопывается до нуля строк и меню становится нерабочим, что хуже исходного дефекта."
+    }
+  ],
+  "not_verified": [
+    {
+      "id": "remote-runtime-receipt",
+      "what": "Установка на Remote-SSH и receipt ui_submit → bridge_dispatch → vendor_completed",
+      "status": "BLOCKED",
+      "why": "macbook-035 офлайн в tailnet. Слова release/PASS про remote не заявляются."
+    }
+  ]
+}
