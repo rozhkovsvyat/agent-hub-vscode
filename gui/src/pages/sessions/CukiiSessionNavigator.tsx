@@ -149,18 +149,24 @@ const SearchClear = styled.button`
     color: var(--vscode-foreground);
   }
 `;
+/* `.filterInput_90gk3A .searchInput_OOQiHg`, measured on the live sidebar:
+   28.8px tall, 8px 28px 8px 32px of padding, 11.7px text — the same type size
+   the buttons in the row below already use. Ours stood at 30px and 13px, which
+   read as a heavier field than the reference. The base class is shared with the
+   group-name field there, so both keep one size here too. */
 const Search = styled.input`
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 30px;
-  padding: 5px 28px 5px 31px;
+  height: 28.8px;
+  padding: 8px 28px 8px 32px;
   border: 1px solid transparent;
   border-radius: 4px;
   outline: none;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   font: inherit;
+  font-size: 11.7px;
   &::placeholder {
     color: var(--vscode-input-placeholderForeground);
   }
