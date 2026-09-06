@@ -949,6 +949,19 @@ const getCommandsMap: (
           return;
         }
         initialTitle = known.title;
+
+        // 🔴 Started here and deliberately NOT awaited. Measured like for like
+        // on the same sessions, moving the body load off the precheck did not
+        // make the open shorter — it moved the wait: on 2.0.103 the precheck
+        // paid 7.9s and the webview's own load then cost 0.7s, because
+        // `startHookSession` is idempotent per session and the second load
+        // found the work done. So the cost is one load either way, and the only
+        // thing left to win is overlap: kicked off now, it runs while the
+        // ~3.9MB webview bundle boots instead of after it, and the webview's
+        // own `history/load` lands on an already-warm session.
+        void Promise.resolve(
+          core.invoke("history/load", { id: initialSessionId }),
+        ).catch(() => undefined);
       }
 
       const panel = vscode.window.createWebviewPanel(

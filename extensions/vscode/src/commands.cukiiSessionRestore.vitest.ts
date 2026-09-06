@@ -124,34 +124,51 @@ describe("saved Cukii sidebar session opening", () => {
   });
 
   /**
-   * Opening a session must cost an index lookup, never a body load. The body
-   * load also starts the SessionStart lifecycle hooks, and because that start
-   * is idempotent per session it made the webview's own load a no-op — the
-   * whole hook cost was paid before the tab existed, on a blank screen
-   * (measured: 7.9s of a 10.5s open on the installed 2.0.103).
+   * Deciding whether a session exists must cost an index lookup, never a body
+   * load: loading the body also starts the SessionStart lifecycle hooks, and
+   * awaiting all that before creating the tab left the click doing nothing on
+   * screen for seconds (measured on the installed 2.0.103: 13.3s of a 14.5s
+   * open went by before the tab even appeared).
+   *
+   * The body load itself still has to happen — the webview needs the session —
+   * and it is idempotent per session, so it is started here and NOT awaited.
+   * That way it runs while the webview's own bundle boots instead of before
+   * it. Measured like for like on the same sessions: SSH 14527 → 1231 ms,
+   * Багхантер 14516 → 1481, Память 8589 → 1065, Плагин 10488 → 3254.
    */
   function metadataCore(
     rows: Array<{ sessionId: string; title: string; messageCount: number }>,
+    options: { loadNeverSettles?: boolean } = {},
   ) {
     return {
-      invoke: vi.fn((command: string) =>
-        command === "history/list"
-          ? Promise.resolve(rows)
-          : Promise.resolve(undefined),
-      ),
+      invoke: vi.fn((command: string) => {
+        if (command === "history/list") return Promise.resolve(rows);
+        if (command === "history/load" && options.loadNeverSettles)
+          return new Promise(() => undefined);
+        return Promise.resolve(undefined);
+      }),
     };
   }
 
-  it("opens a nonempty saved sidebar session from the index, without loading its body", async () => {
+  /** How much core work an open cost, so a second open can be shown free. */
+  const invokeCount = (core: { invoke: { mock: { calls: unknown[] } } }) =>
+    core.invoke.mock.calls.length;
+
+  it("opens a nonempty saved sidebar session from the index and warms its body without waiting", async () => {
     const created = panel();
     state.createWebviewPanel.mockReturnValue(created);
-    const core = metadataCore([
-      {
-        sessionId: "saved-session",
-        title: "Saved sidebar chat",
-        messageCount: 2,
-      },
-    ]);
+    const core = metadataCore(
+      [
+        {
+          sessionId: "saved-session",
+          title: "Saved sidebar chat",
+          messageCount: 2,
+        },
+      ],
+      // 🔴 The load never settles. If the open awaited it — as it did before —
+      // this test would hang instead of failing, and no panel would exist.
+      { loadNeverSettles: true },
+    );
     register(core);
     const open = state.commands.get("continue.openInNewWindow")!;
 
@@ -163,14 +180,32 @@ describe("saved Cukii sidebar session opening", () => {
     expect(core.invoke).toHaveBeenCalledWith("history/list", {
       limit: 1_000_000,
     });
-    // 🔴 The regression this pins: a body load here costs seconds of blank
-    // screen and makes the webview's own load a no-op.
+    // Existence is decided by the index; the body is merely set going.
+    expect(core.invoke).toHaveBeenCalledWith("history/load", {
+      id: "saved-session",
+    });
+    expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(created.title).toBe("Saved sidebar chat");
+  });
+
+  it("NEGATIVE CONTROL: a session missing from the index costs no body load", async () => {
+    // The warm-up must sit behind the existence check. Started before it, a
+    // click on a deleted session would spin up hooks for a session that is not
+    // there — and the check itself would no longer be free.
+    const core = metadataCore([
+      { sessionId: "other", title: "Other", messageCount: 2 },
+    ]);
+    register(core);
+
+    await state.commands.get("continue.openInNewWindow")!({
+      sessionId: "deleted-session",
+    });
+
     expect(core.invoke).not.toHaveBeenCalledWith(
       "history/load",
       expect.anything(),
     );
-    expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
-    expect(created.title).toBe("Saved sidebar chat");
+    expect(state.createWebviewPanel).not.toHaveBeenCalled();
   });
 
   it("does not create a blank panel for a session the index reports as empty", async () => {
@@ -227,9 +262,12 @@ describe("saved Cukii sidebar session opening", () => {
     const open = state.commands.get("continue.openInNewWindow")!;
 
     await open({ sessionId: "saved-session" });
+    const afterFirst = invokeCount(core);
     await open({ sessionId: "saved-session" });
 
-    expect(core.invoke).toHaveBeenCalledTimes(1);
+    // The second open costs nothing at all: it returns on the open-panel check
+    // before the index lookup, so neither the list nor the warm-up runs again.
+    expect(invokeCount(core)).toBe(afterFirst);
     expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(created.reveal).toHaveBeenCalledTimes(1);
   });
@@ -249,9 +287,10 @@ describe("saved Cukii sidebar session opening", () => {
 
     await open({ sessionId: "saved-session" });
     const panelId = cukiiPanelRegistry.values()[0]!.id;
+    const afterFirst = invokeCount(core);
     await open({ panelId, sessionId: "saved-session" });
 
-    expect(core.invoke).toHaveBeenCalledTimes(1);
+    expect(invokeCount(core)).toBe(afterFirst);
     expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(created.reveal).toHaveBeenCalledTimes(1);
   });
