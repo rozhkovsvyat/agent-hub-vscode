@@ -25,11 +25,18 @@ export const YOUGILE_ACCOUNT_ID = "yougile" as const;
 export const YOUGILE_ACCOUNT_LABEL = "YouGile";
 export const YOUGILE_SECRET_KEY = "cukii.yougile.apiKey";
 export const YOUGILE_API_BASE = "https://ru.yougile.com/api-v2";
+/**
+ * `/users/me` is both the cheapest authenticated read and the only one that
+ * says WHO the key belongs to: it answers `{ id, email, realName, … }`.
+ * `/users?limit=1` proves the key works but returns the first user of the
+ * company, which is not necessarily its owner — using it for the row label
+ * would put someone else's address under the account.
+ */
+export const YOUGILE_PROBE_PATH = "/users/me";
 export const YOUGILE_LOGIN_URL = "https://ru.yougile.com/";
 
 export type YougileAuthHost = {
   openExternal(url: string): PromiseLike<boolean>;
-  promptEmail(): PromiseLike<string | undefined>;
   promptSecret(): PromiseLike<string | undefined>;
 };
 
@@ -61,9 +68,6 @@ export type YougileEnvironment = {
   readFile?: (file: string) => string | undefined;
 };
 
-const EMAIL_PATTERN =
-  /^[a-z0-9.!#$%&'*+/^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
-
 export function isYougileAccountId(
   id: string,
 ): id is typeof YOUGILE_ACCOUNT_ID {
@@ -79,10 +83,6 @@ export function looksLikeYougileKey(value: string): boolean {
   const key = value.trim();
   if (key.length < 16 || key.length > 512) return false;
   return !/[\x00-\x1f\x7f\s]/.test(key);
-}
-
-export function isYougileEmail(value: string): boolean {
-  return EMAIL_PATTERN.test(value.trim());
 }
 
 function parseStored(
@@ -140,16 +140,22 @@ export async function readYougileAccount(
   return stored ?? readMachineToken(environment);
 }
 
+export type YougileProbe = {
+  verdict: "valid" | "rejected" | "unreachable";
+  /** Present only on a 2xx: the address the key actually belongs to. */
+  email?: string;
+};
+
 /**
- * `GET /users` is the cheapest authenticated read the key can do. Anything but
- * a 2xx means the key does not currently work, which is exactly what the row
- * has to report; a transport failure is reported separately so a broken
- * network never looks like a revoked key.
+ * One call answers both questions the row asks: does this key work, and whose
+ * is it. Anything but a 2xx means the key does not currently work; a transport
+ * failure is reported separately so a broken network never looks like a
+ * revoked key.
  */
-export async function verifyYougileKey(
+export async function probeYougileKey(
   key: string,
   options: { http?: YougileHttp; timeoutMs?: number } = {},
-): Promise<"valid" | "rejected" | "unreachable"> {
+): Promise<YougileProbe> {
   const http = options.http ?? defaultHttp;
   const controller = new AbortController();
   const timer = setTimeout(
@@ -157,17 +163,31 @@ export async function verifyYougileKey(
     options.timeoutMs ?? 8_000,
   );
   try {
-    const response = await http(`${YOUGILE_API_BASE}/users?limit=1`, {
+    const response = await http(`${YOUGILE_API_BASE}${YOUGILE_PROBE_PATH}`, {
       headers: { Authorization: `Bearer ${key}` },
       signal: controller.signal,
     });
-    if (response.ok) return "valid";
+    if (response.ok) {
+      // A body we cannot read is not a reason to call a working key broken:
+      // the row simply goes without a label.
+      let email: string | undefined;
+      try {
+        const body = (await response.json()) as { email?: unknown };
+        if (typeof body?.email === "string" && body.email) email = body.email;
+      } catch {
+        email = undefined;
+      }
+      return email ? { verdict: "valid", email } : { verdict: "valid" };
+    }
     // 401/403 is a real verdict about the key; a 5xx is the service, not us.
-    return response.status >= 400 && response.status < 500
-      ? "rejected"
-      : "unreachable";
+    return {
+      verdict:
+        response.status >= 400 && response.status < 500
+          ? "rejected"
+          : "unreachable",
+    };
   } catch {
-    return "unreachable";
+    return { verdict: "unreachable" };
   } finally {
     clearTimeout(timer);
   }
@@ -202,12 +222,16 @@ export async function yougileAccountStatus(
       actions: ["login"],
     };
   }
-  const verdict = await verifyYougileKey(stored.key, {
+  const probe = await probeYougileKey(stored.key, {
     ...(options.http ? { http: options.http } : {}),
     ...(options.timeoutMs !== undefined
       ? { timeoutMs: options.timeoutMs }
       : {}),
   });
+  const verdict = probe.verdict;
+  // The address the key itself reports wins over the stored one: a key can be
+  // replaced with another account's, and the row must not keep the old name.
+  const label = probe.email ?? stored.accountLabel;
   if (verdict === "unreachable") {
     // The stored identity is still the truth we know; only its freshness is
     // unknown, so the row keeps the account and says so through its state.
@@ -218,7 +242,7 @@ export async function yougileAccountStatus(
       installed: true,
       authenticated: false,
       state: "unknown",
-      ...(stored.accountLabel ? { accountLabel: stored.accountLabel } : {}),
+      ...(label ? { accountLabel: label } : {}),
       actions: clearable ? ["logout"] : ["login"],
     };
   }
@@ -240,7 +264,7 @@ export async function yougileAccountStatus(
     installed: true,
     authenticated: true,
     state: "connected",
-    ...(stored.accountLabel ? { accountLabel: stored.accountLabel } : {}),
+    ...(label ? { accountLabel: label } : {}),
     actions: clearable ? ["logout"] : ["login"],
   };
 }
@@ -251,13 +275,6 @@ export async function loginYougile(options: {
   http?: YougileHttp;
 }): Promise<{ opened: boolean; message: string }> {
   await options.host.openExternal(YOUGILE_LOGIN_URL);
-  const email = (await options.host.promptEmail())?.trim();
-  if (!email) {
-    return { opened: true, message: "YouGile sign-in cancelled." };
-  }
-  if (!isYougileEmail(email)) {
-    return { opened: true, message: "That is not a valid e-mail address." };
-  }
   const key = (await options.host.promptSecret())?.trim();
   if (!key) {
     return { opened: true, message: "YouGile sign-in cancelled." };
@@ -268,17 +285,20 @@ export async function loginYougile(options: {
       message: "That does not look like a YouGile API key.",
     };
   }
-  const verdict = await verifyYougileKey(
+  // 🔴 The identity is NOT asked for. `/users/me` already answers it, and a
+  // typed address could disagree with the key — the row would then name an
+  // account the plugin is not actually acting as. Vendors do not ask either.
+  const probe = await probeYougileKey(
     key,
     options.http ? { http: options.http } : {},
   );
-  if (verdict === "unreachable") {
+  if (probe.verdict === "unreachable") {
     return {
       opened: true,
       message: "Could not reach YouGile to check the key. Nothing was saved.",
     };
   }
-  if (verdict === "rejected") {
+  if (probe.verdict === "rejected") {
     return {
       opened: true,
       message: "YouGile rejected that API key. Nothing was saved.",
@@ -294,11 +314,16 @@ export async function loginYougile(options: {
     YOUGILE_SECRET_KEY,
     JSON.stringify({
       key,
-      accountLabel: email,
+      ...(probe.email ? { accountLabel: probe.email } : {}),
       source: "plugin",
     } satisfies StoredYougileAccount),
   );
-  return { opened: true, message: `Signed in to YouGile as ${email}.` };
+  return {
+    opened: true,
+    message: probe.email
+      ? `Signed in to YouGile as ${probe.email}.`
+      : "Signed in to YouGile.",
+  };
 }
 
 export async function logoutYougile(options: {

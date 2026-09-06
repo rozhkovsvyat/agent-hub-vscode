@@ -937,13 +937,6 @@ export class VsCodeMessenger {
           host: {
             openExternal: (url) =>
               vscode.env.openExternal(vscode.Uri.parse(url)),
-            promptEmail: () =>
-              vscode.window.showInputBox({
-                ignoreFocusOut: true,
-                title: "YouGile",
-                prompt: "E-mail of the YouGile account this key belongs to",
-                placeHolder: "name@company.ru",
-              }),
             promptSecret: () =>
               vscode.window.showInputBox({
                 password: true,
