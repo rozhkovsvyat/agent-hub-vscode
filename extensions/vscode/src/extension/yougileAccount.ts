@@ -38,6 +38,14 @@ export const YOUGILE_LOGIN_URL = "https://ru.yougile.com/";
 export type YougileAuthHost = {
   openExternal(url: string): PromiseLike<boolean>;
   promptSecret(): PromiseLike<string | undefined>;
+  /**
+   * After a recorded sign-out, offer to use the key this machine already holds
+   * instead of typing one. 🔴 It has to be a question. Adopting that key on its
+   * own would make an explicit sign-in unreachable: every "Log in" would land
+   * back on the machine's key and a different account could never be entered.
+   * A host that cannot ask simply omits this, and the normal flow runs.
+   */
+  confirmResume?(account: string | undefined): PromiseLike<boolean>;
 };
 
 /** Only what this module needs from fetch, so tests never touch the network. */
@@ -120,10 +128,14 @@ function parseStored(raw: string | undefined): StoredRecord | undefined {
     if (parsed?.suppressed === true) return { kind: "suppressed" };
     return undefined;
   } catch {
-    // A key written by an older build was a bare string.
-    return raw.trim()
-      ? { kind: "account", account: { key: raw.trim(), source: "plugin" } }
-      : undefined;
+    // A key written by an older build was a bare string. 🔴 A record truncated
+    // mid-write parses as neither, and `{"suppressed":tru` happens to look like
+    // an opaque key — without this guard that fragment would be sent to
+    // ru.yougile.com as a Bearer credential.
+    const bare = raw.trim();
+    return bare.startsWith("{") || !looksLikeYougileKey(bare)
+      ? undefined
+      : { kind: "account", account: { key: bare, source: "plugin" } };
   }
 }
 
@@ -308,8 +320,10 @@ export async function loginYougile(options: {
   // used. Without a way back, one "Log out" would cost the owner the very
   // convenience discovery exists for — he would have to open
   // ~/.claude/yougile-token and paste by hand a key the machine already holds.
-  // So "Log in" first offers to resume it: no browser, no prompt, one click.
-  if (options.store) {
+  // So "Log in" OFFERS to resume it. Offers, not takes: adopting it silently
+  // made the explicit path unreachable, because every "Log in" would land back
+  // on that same key and a different account could never be entered at all.
+  if (options.store && options.host.confirmResume) {
     const record = parseStored(await options.store.get(YOUGILE_SECRET_KEY));
     if (record?.kind === "suppressed") {
       const machine = readMachineToken(options.environment ?? {});
@@ -318,7 +332,10 @@ export async function loginYougile(options: {
           machine.key,
           options.http ? { http: options.http } : {},
         );
-        if (resumed.verdict === "valid") {
+        if (
+          resumed.verdict === "valid" &&
+          (await options.host.confirmResume(resumed.email))
+        ) {
           await options.store.delete(YOUGILE_SECRET_KEY);
           return {
             opened: false,

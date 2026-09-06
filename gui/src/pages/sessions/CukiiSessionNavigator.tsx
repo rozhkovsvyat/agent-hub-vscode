@@ -464,7 +464,12 @@ export default function CukiiSessionNavigator() {
   const load = useCallback(async () => {
     const sequence = ++loadSequenceRef.current;
     const [historyResult, panelResult] = await Promise.all([
-      messenger.request("history/list", {}),
+      // 🔴 The explicit limit is the navigator's horizon. `history/list`
+      // defaults to the 100 newest sessions, so without it the 101st chat
+      // simply stops being listed — it is not deleted, not archived, just
+      // invisible, with nothing on screen to say so. The query itself reads
+      // metadata only (no session bodies), so asking for all of them is cheap.
+      messenger.request("history/list", { limit: 1_000_000 }),
       messenger.request("cukii/listOpenChatPanels", undefined),
     ]);
     if (sequence !== loadSequenceRef.current) return;

@@ -20,6 +20,24 @@ describe("CukiiSessionNavigator Claude parity", () => {
     );
   });
 
+  it("asks for every session, not the newest hundred", async () => {
+    // 🔴 `history/list` answers with the 100 most recent sessions unless a
+    // limit says otherwise. Left at the default, the 101st chat simply stops
+    // appearing in the navigator — not deleted, not archived, just gone from
+    // the list with nothing on screen to explain it. The query reads metadata
+    // only, so asking for all of them costs no session bodies.
+    const messenger = new MockIdeMessenger();
+    const listSpy = vi.fn(async (_options: { limit?: number }) => []);
+    messenger.responseHandlers["history/list"] = listSpy;
+    messenger.responses["cukii/listOpenChatPanels"] = [];
+
+    await renderWithProviders(<CukiiSessionNavigator />, {
+      mockIdeMessenger: messenger,
+    });
+
+    expect(listSpy).toHaveBeenCalledWith({ limit: 1_000_000 });
+  });
+
   it("uses relative time and a custom context menu without native selects", async () => {
     const messenger = new MockIdeMessenger();
     messenger.responses["history/list"] = [

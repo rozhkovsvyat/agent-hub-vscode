@@ -58,6 +58,16 @@ const noMachineToken = {
   readFile: () => undefined,
 };
 
+/** The vault tooling has written its key where discovery looks for it. */
+const machineWithToken = {
+  env: {},
+  homedir: () => "C:\\Users\\owner",
+  readFile: (file: string) =>
+    file === "C:\\Users\\owner\\.claude\\yougile-token"
+      ? `${KEY}\n`
+      : undefined,
+};
+
 describe("YouGile account row", () => {
   it("offers only sign-in when nothing is stored", async () => {
     const status = await yougileAccountStatus({
@@ -333,29 +343,24 @@ describe("YouGile account row", () => {
     expect(after.actions).toEqual(["login"]);
   });
 
-  it("brings the machine key back on the next sign-in, without asking for it", async () => {
+  it("offers the machine key back on the next sign-in, naming the account", async () => {
     // The way back matters as much as the sign-out. Without it one "Log out"
     // would cost the owner the whole point of discovery: he would have to open
     // ~/.claude/yougile-token and paste by hand a key the machine already has.
-    const machine = {
-      env: {},
-      homedir: () => "C:\\Users\\owner",
-      readFile: (file: string) =>
-        file === "C:\\Users\\owner\\.claude\\yougile-token"
-          ? `${KEY}\n`
-          : undefined,
-    };
     const secrets = store(JSON.stringify({ suppressed: true }));
-    const host = authHost(KEY);
+    const host = { ...authHost(KEY), confirmResume: vi.fn(async () => true) };
 
     const result = await runYougileAuthAction("login", {
       host,
       store: secrets,
       http: http(200),
-      environment: machine,
+      environment: machineWithToken,
     });
 
-    // No browser, no prompt: the key is already here and it works.
+    // The offer names whose account it is — "use this key" is not a decision
+    // anyone can make without knowing which account it signs them into.
+    expect(host.confirmResume).toHaveBeenCalledWith(OWNER);
+    // Accepted, so no browser and no key to type.
     expect(host.openExternal).not.toHaveBeenCalled();
     expect(host.promptSecret).not.toHaveBeenCalled();
     expect(result.message).toContain(OWNER);
@@ -364,11 +369,73 @@ describe("YouGile account row", () => {
     const after = await yougileAccountStatus({
       store: secrets,
       http: http(200),
-      environment: machine,
+      environment: machineWithToken,
     });
     expect(after.state).toBe("connected");
     expect(after.accountLabel).toBe(OWNER);
     expect(after.actions).toEqual(["logout"]);
+  });
+
+  it("NEGATIVE CONTROL: declining the offer still lets a different key be entered", async () => {
+    // 🔴 The regression this pins. Adopting the machine's key without asking
+    // made an explicit sign-in unreachable: Log out → Log in landed back on
+    // that same key every time, so a second account could never be entered
+    // while a valid token sat on disk. Declining must fall through to the
+    // ordinary browser-and-key flow.
+    const secrets = store(JSON.stringify({ suppressed: true }));
+    const other = "another-account-key-0123456789";
+    const host = {
+      openExternal: vi.fn(async () => true),
+      promptSecret: vi.fn(async () => other),
+      confirmResume: vi.fn(async () => false),
+    };
+
+    await runYougileAuthAction("login", {
+      host,
+      store: secrets,
+      http: http(200, "second@company.ru"),
+      environment: machineWithToken,
+    });
+
+    expect(host.confirmResume).toHaveBeenCalled();
+    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
+    expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
+      key: other,
+      accountLabel: "second@company.ru",
+      source: "plugin",
+    });
+  });
+
+  it("a host that cannot ask never adopts the machine key by itself", async () => {
+    // `confirmResume` is optional. Absent it, the only safe reading of "Log in"
+    // is the ordinary flow — silently reusing a key nobody confirmed would be
+    // the same defect through a different door.
+    const secrets = store(JSON.stringify({ suppressed: true }));
+    const host = authHost(KEY);
+
+    await runYougileAuthAction("login", {
+      host,
+      store: secrets,
+      http: http(200),
+      environment: machineWithToken,
+    });
+
+    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
+    expect(host.promptSecret).toHaveBeenCalled();
+  });
+
+  it("NEGATIVE CONTROL: a truncated record is not sent as a credential", async () => {
+    // A write cut short leaves something that is neither JSON nor a key, and
+    // `{"suppressed":tru` happens to pass the shape check for an opaque key.
+    // Without a guard that fragment would go to the API as a Bearer token.
+    const probe = http(200);
+    const status = await yougileAccountStatus({
+      store: store('{"suppressed":tru'),
+      http: probe,
+      environment: noMachineToken,
+    });
+    expect(probe).not.toHaveBeenCalled();
+    expect(status.state).toBe("disconnected");
   });
 
   it("falls back to asking when the machine key no longer works", async () => {

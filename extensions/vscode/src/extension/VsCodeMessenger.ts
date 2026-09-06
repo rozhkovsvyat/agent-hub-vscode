@@ -945,6 +945,21 @@ export class VsCodeMessenger {
                 prompt:
                   "Personal API key — YouGile → company settings → API keys",
               }),
+            // After a sign-out, the key on this machine is still there. Offer
+            // it rather than making the owner paste a key he already has — and
+            // offer it, so entering a different account stays possible.
+            confirmResume: async (account) => {
+              const use = "Use it";
+              const choice = await vscode.window.showInformationMessage(
+                account
+                  ? `Sign back in to YouGile with this machine's key (${account})?`
+                  : "Sign back in to YouGile with this machine's key?",
+                { modal: true },
+                use,
+                "Enter a different key",
+              );
+              return choice === use;
+            },
           },
         });
       }

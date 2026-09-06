@@ -1,16 +1,21 @@
 {
-  "version": "2.0.104",
-  "vsix_sha256": "d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
-  "commit": "79504973a",
-  "rollback_vsix": "cukii-vscode-2.0.103.vsix sha256 f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64",
-  "measured_at": "2026-09-06T22:30:00+03:00",
-  "scope": "Четыре претензии владельца к 2.0.103: строка YouGile с аккаунтом и кнопкой «Log in» одновременно, великоватая полоса от текста ответа до времени, долгое открытие сессии, крупная пилюля модели.",
+  "version": "2.0.105",
+  "vsix_sha256": "f9d8d9e4384bd986ca733a052a8fb48f05813ced42cbaf4e05dbaaea605692d4",
+  "commit": "601ad7621",
+  "commits": [
+    "79504973a — четыре правки по претензиям владельца (собрано как 2.0.104)",
+    "d9f2f7e77 — починка по независимому опровержению (вердикт круга 1: rework)",
+    "601ad7621 — lockfile 2.0.105"
+  ],
+  "rollback_vsix": "cukii-vscode-2.0.104.vsix sha256 d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
+  "measured_at": "2026-09-06T23:10:00+03:00",
+  "scope": "Четыре претензии владельца к 2.0.103: строка YouGile с аккаунтом и кнопкой «Log in» одновременно, великоватая полоса от текста ответа до времени, долгое открытие сессии, крупная пилюля модели. 🔴 2.0.104 была собрана и замерена, но независимое опровержение вернуло её на доработку: два блокирующих дефекта. Поставляется 2.0.105.",
   "how": "Все числа сняты с УСТАНОВЛЕННОГО расширения (cukii.cukii-vscode@2.0.104) в отдельном доверенном инстансе VS Code со своими user-data/extensions под D:\\Scratch\\cukii-parity-2.0.104, CDP 9334, --no-sandbox --disable-gpu --disable-workspace-trust. Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
   "gate": {
-    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=8915MiB",
-    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.104 vsix_sha256=d4eae7f081e7ea4de98c1d32f40539337bae1fdcb781cc1d7af3b31390b0a345",
-    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls",
-    "suites": "gui 793/793 в 88 файлах (+6 новых на assistantMetaFitsOnLastLine), extension 555 passed / 4 skipped, tsc чист в обоих пакетах"
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=8509MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.105 vsix_sha256=f9d8d9e4384bd986ca733a052a8fb48f05813ced42cbaf4e05dbaaea605692d4",
+    "negative_matrix": "СМ. ПОЛЕ negative_matrix_result",
+    "suites": "gui 796/796 в 88 файлах (+9 новых на assistantMetaFitsOnLastLine), extension 560 passed / 4 skipped в 48 файлах, tsc чист в обоих пакетах"
   },
   "adversarial": {
     "rounds": 1,
