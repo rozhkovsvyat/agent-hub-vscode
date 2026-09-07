@@ -318,7 +318,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           />
         )}
         <EditorContent
-          className={`scroll-container overflow-y-scroll ${props.isMainInput ? "max-h-[70vh]" : ""}`}
+          className="scroll-container overflow-y-auto"
           spellCheck={false}
           editor={editor}
           onClick={(event) => {

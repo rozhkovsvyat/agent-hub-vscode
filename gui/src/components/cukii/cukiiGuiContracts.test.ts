@@ -90,6 +90,26 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
+  it("caps the live composer at Claude's measured 200px content viewport", () => {
+    const css = source("index.css");
+    const start = css.indexOf(
+      ".cukii-main-input-shell .cukii-editor-stack > .scroll-container",
+    );
+    const contract = css.slice(start, css.indexOf("}", start) + 1);
+    const editorSource = source(
+      "components/mainInput/TipTapEditor/TipTapEditor.tsx",
+    );
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(contract).toContain("box-sizing: content-box;");
+    expect(contract).toContain("min-height: 1.5em;");
+    expect(contract).toContain("max-height: 200px;");
+    expect(contract).toContain("overflow-y: auto;");
+    expect(contract).toContain("scrollbar-gutter: stable;");
+    expect(contract).toContain("padding: 10px 36px 10px 14px;");
+    expect(editorSource).not.toContain("max-h-[70vh]");
+  });
+
   it("lets queued and sent bubbles grow to their full wrapped height", () => {
     const css = source("index.css");
     const bubbleStart = css.indexOf(".cukii-user-bubble .scroll-container");

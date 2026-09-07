@@ -381,6 +381,11 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-main-input-shell .cukii-editor-stack > .scroll-container {
+  box-sizing: content-box;
+  min-height: 1.5em;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 10px 36px 10px 14px;
 }
 
