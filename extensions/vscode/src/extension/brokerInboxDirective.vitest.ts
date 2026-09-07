@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
 
-import {
-  brokerInboxDirective,
-  supportsBrokerInbox,
-} from "./bridgeChatAdapter";
+import { brokerInboxDirective, supportsBrokerInbox } from "./bridgeChatAdapter";
 
 describe("broker inbox steering gate", () => {
   it("covers every MCP-capable vendor; claude stays out", () => {
@@ -29,8 +26,9 @@ describe("broker inbox steering gate", () => {
     ] as const) {
       const lines = brokerInboxDirective(model);
       expect(lines).toHaveLength(2);
-      expect(lines[0]).toContain("mcp__cukii-broker__broker_inbox");
-      expect(lines[0]).toContain("mcp__cukii-broker__broker_inbox_ack");
+      expect(lines[0]).toContain("base name is broker_inbox");
+      expect(lines[0]).toContain("cukii-broker or agent-hub-broker");
+      expect(lines[0]).toContain("broker_inbox_ack");
       expect(lines[0]).toContain(
         "If you fail before ack, the batch must be delivered again",
       );
@@ -40,10 +38,12 @@ describe("broker inbox steering gate", () => {
       // The strict gate is part of the contract the model is told about.
       expect(lines[0]).toContain("force-delivered");
       expect(lines[0]).toContain("A normal follow-up must never stop the run");
-      expect(lines[0]).toContain("only an explicit stop/cancel request ends the run");
+      expect(lines[0]).toContain(
+        "only an explicit stop/cancel request ends the run",
+      );
       // Inter-agent channel rides the same rails.
-      expect(lines[1]).toContain("mcp__cukii-broker__broker_send");
-      expect(lines[1]).toContain("mcp__cukii-broker__broker_sessions");
+      expect(lines[1]).toContain("broker_send");
+      expect(lines[1]).toContain("broker_sessions");
       expect(lines[1]).toContain("never broker_send");
     }
   });
