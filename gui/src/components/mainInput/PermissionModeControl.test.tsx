@@ -216,11 +216,7 @@ describe("PermissionModeControl route snapshots", () => {
     }
   });
 
-  // Effort deliberately left this popover: it is reachable from the "/" menu and
-  // from the model picker footer, and its current value is visible in the model
-  // pill. These two tests are the guard against it creeping back in — they are
-  // the previous "keeps the effort row" pair, inverted on purpose.
-  it("does not render an effort row inside the permissions popover", async () => {
+  it("keeps Claude's one-line effort row inside the permissions popover", async () => {
     setPermissionProbeRetryMsForTests(60_000);
     try {
       const messenger = new MockIdeMessenger();
@@ -252,17 +248,15 @@ describe("PermissionModeControl route snapshots", () => {
         await screen.findByTestId("cukii-permission-mode-bypass"),
       ).toBeInTheDocument();
       expect(
-        screen.queryByTestId("cukii-permission-effort-row"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId("cukii-effort-slider"),
-      ).not.toBeInTheDocument();
+        screen.getByTestId("cukii-permission-effort-row"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("cukii-effort-slider")).toBeInTheDocument();
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }
   });
 
-  it("does not render an effort row while permission discovery is degraded", async () => {
+  it("keeps effort available while permission discovery is degraded", async () => {
     setPermissionProbeRetryMsForTests(60_000);
     try {
       const messenger = new MockIdeMessenger();
@@ -292,11 +286,9 @@ describe("PermissionModeControl route snapshots", () => {
         await screen.findByTestId("cukii-permission-degraded-note"),
       ).toBeInTheDocument();
       expect(
-        screen.queryByTestId("cukii-permission-effort-row"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId("cukii-effort-slider"),
-      ).not.toBeInTheDocument();
+        screen.getByTestId("cukii-permission-effort-row"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("cukii-effort-slider")).toBeInTheDocument();
     } finally {
       setPermissionProbeRetryMsForTests(PERMISSION_PROBE_RETRY_MS);
     }

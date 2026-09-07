@@ -261,6 +261,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   border-radius: 8px !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   min-height: 78px;
+  padding: 0 !important;
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
@@ -330,15 +331,17 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-main-input-shell {
   box-sizing: border-box;
-  position: relative;
+  position: absolute;
   z-index: 20;
   isolation: isolate;
-  width: 100%;
-  max-width: 714px;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  width: auto;
+  max-width: 680px;
   margin-right: auto;
   margin-left: auto;
-  margin-top: auto;
-  padding: 0 16px 16px 17px;
+  padding: 0;
 }
 
 .cukii-main-input-shell *,
@@ -374,12 +377,19 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 10px 0 !important;
+  padding: 0 !important;
 }
 
 .cukii-main-input-shell .cukii-editor-stack > .scroll-container {
-  padding-left: 14px;
-  padding-right: 36px;
+  padding: 10px 36px 10px 14px;
+}
+
+/* TipTap wraps even an empty editor in a paragraph with 4px block margins.
+   Claude's plaintext editor has no such wrapper, so those margins inflated a
+   one-line card by 8px and made the submit button's bottom inset exceed its
+   right inset. The card owns the full 10px text inset. */
+.cukii-main-input-shell .ProseMirror > p {
+  margin: 0;
 }
 
 .cukii-voice-button {
@@ -565,11 +575,27 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   font-size: 13px !important;
   line-height: 19.5px !important;
   color: var(--vscode-descriptionForeground, #8c8c8c) !important;
-  transform: translateY(4.5px);
+  transform: none;
 }
 
 .cukii-input-footer > .flex:first-child {
   gap: 2px !important;
+}
+
+/* Claude fit-stage 2: once the primary controls wrap, the permission/send
+   pair stays on the first row and the model pill gets the next row without
+   intersecting it.  Removing the pill's 6px wide-layout offset reproduces
+   Claude's `.modelPillRow ... padding:0 5px 5px` left edge. */
+.cukii-input-footer--model-row {
+  align-items: flex-start !important;
+}
+
+.cukii-input-footer--model-row .cukii-footer-secondary-actions {
+  align-self: flex-start;
+}
+
+.cukii-input-footer--model-row .cukii-model-pill {
+  margin-left: 0;
 }
 
 .cukii-icon-button,
@@ -758,6 +784,10 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   border-top: 1px solid var(--vscode-widget-border, rgba(204, 204, 204, 0.2));
   margin: 4px 0 0;
   padding: 4px 0 0;
+}
+
+.cukii-permission-effort-row .cukii-menu-item {
+  width: calc(100% - 8px) !important;
 }
 
 html[data-cukii-panel-tone="light"] .cukii-permission-popover {
@@ -1091,6 +1121,15 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 .cukii-model-option-selected {
   background: transparent !important;
   color: var(--vscode-menu-foreground, #cccccc) !important;
+}
+
+/* Live Claude Code parity: the current model is indicated only by the check
+   column while a POINTER-HOVERED row wears the active-selection blue.  Do not
+   use list-hoverBackground here: in the VS Code dark theme it is a translucent
+   grey and made the model hover effectively disappear. */
+.cukii-model-picker-list .cukii-menu-item:hover:not(:disabled) {
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
 }
 
 /* The menu hangs off the composer's top edge, exactly as in Claude Code
@@ -1546,6 +1585,30 @@ button.cukii-submit-button--stop:active {
   padding: 20px 20px 40px;
 }
 
+/* Claude keeps the transcript full-height and floats the composer above it.
+   The last child reserves the measured composer height in scroll geometry;
+   the 150px scrim softens content behind the overlaid card. */
+.cukii-composer-spacer {
+  width: 100%;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.cukii-message-gradient {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  height: 150px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--vscode-editor-background, #1e1e1e) 100%
+  );
+  pointer-events: none;
+}
+
 /* Claude-style transcript pagination is a quiet secondary action. Keep every
    state explicit so Electron never falls back to the platform's white button. */
 .cukii-load-earlier {
@@ -1649,17 +1712,7 @@ button.cukii-submit-button--stop:active {
   --cukii-meta-reserve: 0px;
 }
 
-/* "21:45" at 11px tabular numerals. */
-.cukii-user-bubble--with-receipt {
-  --cukii-meta-reserve: 31px;
-}
-
-/* Time + 2px gap + the 16px tick column. */
-.cukii-user-bubble--with-receipt.cukii-user-bubble--receipt-checks {
-  --cukii-meta-reserve: 49px;
-}
-
-.cukii-user-message-bubble .ProseMirror p:last-child::after {
+.cukii-user-bubble--meta-inline .ProseMirror p:last-child::after {
   content: "";
   display: inline-block;
   width: calc(var(--cukii-meta-reserve) + 4px);
@@ -1683,21 +1736,29 @@ button.cukii-submit-button--stop:active {
 /* The receipt lives absolutely in the bubble's bottom-right corner (see the
    spacer mechanism above). */
 .cukii-user-metadata {
-  position: absolute;
-  right: 10px;
-  bottom: 4px;
-  display: inline-flex;
-  align-items: flex-end;
+  position: static;
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  margin: 0;
+  margin: 2px 0 -6px auto;
   padding: 0;
   color: var(--vscode-descriptionForeground, #a0a0a0);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
   line-height: 14px;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
+}
+
+.cukii-user-bubble--meta-inline > .cukii-user-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
 }
 
 /* Dark ink on the orange capsule: time and checks inherit the brand text
@@ -1707,16 +1768,11 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-receipt-status {
-  display: inline-flex;
+  display: block;
   flex: 0 0 16px;
   width: 16px;
-  height: 10px;
-  align-self: flex-end;
-}
-
-.cukii-receipt-check {
-  overflow: visible;
-  stroke-width: 1.5px;
+  height: 16px;
+  align-self: center;
 }
 
 .cukii-user-bubble .ProseMirror img,
@@ -2055,10 +2111,7 @@ button.cukii-submit-button--stop:active {
   align-items: flex-start;
   min-height: 1.5em;
   margin-top: 6px;
-  /* Cukii's composer is in normal flow, unlike Claude's bottom overlay.
-     This measured 12px spacer yields the same visible loader-to-composer gap
-     without importing the overlay's large transcript reservation. */
-  margin-bottom: 12px;
+  margin-bottom: 0;
   /* Глиф в жёлобе таймлайна (left: 8px, 12px), текст начинается ближе к нему,
      чтобы ровняться с текстом строк выше, как у Claude. */
   padding-left: 24px;

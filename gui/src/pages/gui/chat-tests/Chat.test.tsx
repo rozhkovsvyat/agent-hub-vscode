@@ -9,7 +9,7 @@ import {
   getElementByText,
   sendInputWithMockedResponse,
 } from "../../../util/test/utils";
-import { Chat } from "../Chat";
+import { Chat, composerSpacerHeight } from "../Chat";
 import {
   acceptToolCall,
   setMode,
@@ -189,6 +189,14 @@ test("streaming loader lives in the transcript, not on the composer", async () =
   expect(
     container.querySelector("[data-testid='cukii-spinner-row']"),
   ).not.toBeNull();
+  expect(container.querySelector(".cukii-composer-spacer")).not.toBeNull();
+  expect(container.querySelector(".cukii-message-gradient")).not.toBeNull();
+});
+
+test("streaming spacer makes the 16px loader band symmetric without changing idle backing", () => {
+  expect(composerSpacerHeight(103, false)).toBe(103);
+  expect(composerSpacerHeight(103, true)).toBe(95);
+  expect(composerSpacerHeight(4, true)).toBe(0);
 });
 
 test("user bubbles are not timeline items", async () => {
@@ -312,7 +320,7 @@ test("assistant capsule shows the corner time, backfills legacy turns and copies
   ).toBeNull();
 });
 
-test("read follow-up uses the check-plus-stroke double-check SVG", async () => {
+test("read follow-up uses the exact MAX 16px filled double-check SVG", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -344,10 +352,11 @@ test("read follow-up uses the check-plus-stroke double-check SVG", async () => {
     "aria-label",
     expect.stringContaining("read"),
   );
-  expect(readStatus?.querySelectorAll("path")).toHaveLength(2);
+  expect(readStatus?.querySelectorAll("path")).toHaveLength(1);
   expect(receipt?.textContent).toBe("01:13");
   expect(readStatus).toHaveAttribute("width", "16");
-  expect(readStatus).toHaveAttribute("height", "10");
+  expect(readStatus).toHaveAttribute("height", "16");
+  expect(readStatus).toHaveAttribute("viewBox", "0 0 24 24");
 });
 
 test("short, multiline and image user turns stay in the right bubble lane while agent rows stay left", async () => {

@@ -14,6 +14,7 @@ import {
   memo,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -184,6 +185,8 @@ function InputToolbar(props: InputToolbarProps) {
     null,
   );
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
+  const primaryActionsRef = useRef<HTMLDivElement | null>(null);
+  const [modelPillOnOwnRow, setModelPillOnOwnRow] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,6 +352,27 @@ function InputToolbar(props: InputToolbarProps) {
   ]
     .filter(Boolean)
     .join(" ");
+
+  // Claude moves the model pill to a dedicated row at its final fit stage.
+  // Cukii's first implementation let the left group wrap but kept the right
+  // controls vertically centred, so the two rows physically overlapped.  The
+  // wrapped height is the reliable signal because labels/theme fonts vary.
+  useLayoutEffect(() => {
+    const actions = primaryActionsRef.current;
+    if (!actions || isInEdit) {
+      setModelPillOnOwnRow(false);
+      return;
+    }
+    const update = () => {
+      setModelPillOnOwnRow(actions.getBoundingClientRect().height > 30);
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, [isInEdit, currentLabel, pillDetail]);
+
   const smallFont = useFontSize(-2);
   const showAction = (label: string) =>
     label.toLowerCase().includes(actionQuery.trim().toLowerCase());
@@ -412,6 +436,8 @@ function InputToolbar(props: InputToolbarProps) {
       <div
         onClick={props.onClick}
         className={`cukii-input-footer find-widget-skip flex min-w-0 select-none items-center justify-between gap-2 border-t border-[var(--vscode-panel-border)] px-2 pb-1 pt-2 ${
+          modelPillOnOwnRow ? "cukii-input-footer--model-row" : ""
+        } ${
           props.hidden
             ? "pointer-events-none h-0 opacity-0"
             : "pointer-events-auto mt-2 opacity-100"
@@ -420,7 +446,10 @@ function InputToolbar(props: InputToolbarProps) {
       >
         {/* Claude fit-stage parity: controls never overlap — the pill wraps
             to its own line inside the left group when the width runs out. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 gap-y-[3px]">
+        <div
+          ref={primaryActionsRef}
+          className="cukii-footer-primary-actions flex min-w-0 flex-1 flex-wrap items-center gap-1 gap-y-[3px]"
+        >
           {!isInEdit && (
             <Popover className="relative">
               <PopoverButton
@@ -701,14 +730,12 @@ function InputToolbar(props: InputToolbarProps) {
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="cukii-footer-secondary-actions flex shrink-0 items-center gap-2">
           {!isInEdit && (
-            /* Effort lives in the "/" menu and in the model pill; the copy that
-               used to sit inside this popover was a third place to change one
-               value and is gone. */
             <PermissionModeControl
               brokerModel={currentModel}
               permissionMode={brokerPermissionMode}
+              effort={brokerEffort}
               onChange={(mode) => {
                 updateBrokerPreferences(
                   currentModel,
@@ -718,6 +745,17 @@ function InputToolbar(props: InputToolbarProps) {
                   hasReasoningEnabled,
                   brokerAutocompact,
                   mode,
+                );
+              }}
+              onEffortChange={(effort) => {
+                updateBrokerPreferences(
+                  currentModel,
+                  brokerSubagent ?? "auto",
+                  effort,
+                  brokerSpeed,
+                  hasReasoningEnabled,
+                  brokerAutocompact,
+                  brokerPermissionMode,
                 );
               }}
             />

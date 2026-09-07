@@ -4,11 +4,14 @@ interface CukiiMessageReceiptStatusProps {
   status: ReceiptStatus;
 }
 
-/**
- * Compact messenger-style delivery state. The read state draws a full check
- * plus a parallel bare stroke (the second check's tail only), Telegram-style:
- * overlapping full checks read as one thick glyph at 10px height.
- */
+const DELIVERED_PATH =
+  "M18.09 5.589a.9.9 0 0 1 0 1.272L7.063 17.886a.9.9 0 0 1-1.273 0L1.884 13.98a.9.9 0 0 1 1.273-1.273l3.27 3.271L16.818 5.59a.9.9 0 0 1 1.272 0";
+
+const READ_PATH =
+  "M18.089 5.589a.9.9 0 0 1 0 1.272L7.064 17.886a.9.9 0 0 1-1.273 0L1.883 13.98a.9.9 0 0 1 1.273-1.273l3.271 3.271L16.816 5.59a.9.9 0 0 1 1.273 0m5.459-.001a.9.9 0 0 1 0 1.273L12.523 17.887a.9.9 0 0 1-1.272 0l-.73-.73a.9.9 0 0 1 1.273-1.272l.093.092L22.276 5.59a.9.9 0 0 1 1.272 0";
+
+/** Exact web.max.ru status geometry: a 24-unit filled glyph centred in a
+ * 16×16 indicator slot beside the 11/14px time label. */
 export function CukiiMessageReceiptStatus({
   status,
 }: CukiiMessageReceiptStatusProps) {
@@ -23,27 +26,18 @@ export function CukiiMessageReceiptStatus({
       }
       data-testid={`cukii-message-receipt-status-${status}`}
       fill="none"
-      height="10"
-      viewBox="0 0 16 10"
+      height="16"
+      viewBox="0 0 24 24"
       width="16"
     >
-      {isRead && (
-        <path
-          className="cukii-receipt-check-back"
-          d="M9 8L15 2"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-        />
-      )}
       <path
-        className="cukii-receipt-check-front"
-        d="M2 5L5 8L11 2"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
+        className={
+          isRead ? "cukii-receipt-check-read" : "cukii-receipt-check-delivered"
+        }
+        clipRule="evenodd"
+        d={isRead ? READ_PATH : DELIVERED_PATH}
+        fill="currentColor"
+        fillRule="evenodd"
       />
     </svg>
   );

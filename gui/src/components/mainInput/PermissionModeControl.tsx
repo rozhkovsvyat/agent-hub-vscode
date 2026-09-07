@@ -8,8 +8,17 @@ import {
   type CukiiPermissionMode,
 } from "core/cukiiPermissionModes";
 import type { BrokerModel, BrokerVendorId } from "core/protocol/ideWebview";
-import { useContext, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import type { BrokerEffort } from "../../redux/slices/sessionSlice";
+import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
 import { Popover, PopoverButton, PopoverPanel } from "../ui";
 
 const modeRowClass =
@@ -19,8 +28,11 @@ const modeRowClass =
  * its 300px panel can escape the viewport and clip the mode copy. Shift the
  * panel back inside instead of letting it ride off-window. */
 function useViewportClampedPanel() {
-  return (el: HTMLDivElement | null) => {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const clamp = useCallback(() => {
+    const el = panelRef.current;
     if (!el) return;
+    el.style.transform = "";
     const gutter = 8;
     const rect = el.getBoundingClientRect();
     let dx = 0;
@@ -30,7 +42,20 @@ function useViewportClampedPanel() {
       dx = window.innerWidth - gutter - rect.right;
     }
     el.style.transform = dx !== 0 ? `translateX(${dx}px)` : "";
-  };
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [clamp]);
+
+  return useCallback(
+    (el: HTMLDivElement | null) => {
+      panelRef.current = el;
+      if (el) requestAnimationFrame(clamp);
+    },
+    [clamp],
+  );
 }
 
 export function PermissionModeIcon({ mode }: { mode: CukiiPermissionMode }) {
@@ -103,20 +128,19 @@ export function setPermissionProbeRetryMsForTests(ms: number): void {
   probeRetryMs = ms;
 }
 
-/**
- * Permissions only. Effort used to be duplicated at the bottom of this popover;
- * it now lives solely in the "/" menu and the model picker footer, and its
- * current value is readable at a glance from the model pill — three places to
- * change one number was one too many.
- */
+/** Permission modes plus Claude's shared bottom effort row. */
 export function PermissionModeControl({
   brokerModel,
   permissionMode,
   onChange,
+  effort = "high",
+  onEffortChange = () => undefined,
 }: {
   brokerModel: BrokerModel;
   permissionMode: CukiiPermissionMode;
   onChange: (mode: CukiiPermissionMode) => void;
+  effort?: BrokerEffort;
+  onEffortChange?: (effort: BrokerEffort) => void;
 }) {
   const ideMessenger = useContext(IdeMessengerContext);
   const vendor = brokerVendorForModel(brokerModel);
@@ -125,6 +149,20 @@ export function PermissionModeControl({
     null,
   );
   const [probeStatus, setProbeStatus] = useState<ProbeStatus>("pending");
+
+  const effortRow = (
+    <div
+      className="cukii-permission-effort-row"
+      data-testid="cukii-permission-effort-row"
+    >
+      <CukiiEffortRow
+        className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
+        model={brokerModel}
+        effort={effort}
+        onEffortChange={onEffortChange}
+      />
+    </div>
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -278,6 +316,7 @@ export function PermissionModeControl({
             Native permission modes could not be verified on this host. The
             selected mode is preserved; Cukii retries discovery automatically.
           </div>
+          {effortRow}
         </PopoverPanel>
       </Popover>
     );
@@ -305,6 +344,7 @@ export function PermissionModeControl({
         <span className="cukii-permission-label">{currentCopy.title}</span>
       </PopoverButton>
       <PopoverPanel
+        ref={clampPanel}
         className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[300px]"
         data-testid="cukii-permission-popover"
       >
@@ -351,6 +391,7 @@ export function PermissionModeControl({
                 </button>
               );
             })}
+            {effortRow}
           </>
         )}
       </PopoverPanel>

@@ -22,6 +22,10 @@ interface StepContainerProps {
  * the full transcript width instead of the user-capsule lane limit. */
 export const ASSISTANT_LONGREAD_CHARS = 800;
 
+export function isAssistantLongRead(renderedText: string): boolean {
+  return renderedText.length > ASSISTANT_LONGREAD_CHARS;
+}
+
 /** Breathing room between the last word and the reply time riding its line. */
 const META_INLINE_GAP = 5;
 
@@ -138,7 +142,7 @@ function StepContainer(props: StepContainerProps) {
   const isLatestSummary =
     latestSummaryIndex !== -1 && props.index === latestSummaryIndex;
   const proseText = renderChatMessage(props.item.message);
-  const isLongRead = proseText.length > ASSISTANT_LONGREAD_CHARS;
+  const isLongRead = isAssistantLongRead(proseText);
 
   const bubbleRef = useRef<HTMLDivElement>(null);
   // Own row is the safe default: it can never collide with the answer's tail,

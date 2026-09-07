@@ -114,14 +114,14 @@ describe("ModelPickerModal", () => {
     expect(screen.queryByTestId("cukii-capability-rating-sonnet-5")).toBeNull();
   });
 
-  it("defaults to the Best scope and hides non-curated models", async () => {
+  it("defaults to the Milky scope and hides non-curated models", async () => {
     await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
 
     // Curated routes stay visible in the default scope.
     await getElementByText("GPT-5.6 Sol");
     await getElementByText("Fable 5.1");
     await getElementByText("Kimi K3");
-    // Full-catalog-only entries must not leak into Best.
+    // Full-catalog-only entries must not leak into Milky.
     expect(screen.queryByText("Fable 5")).toBeNull();
     expect(screen.queryByText("Grok 4.5")).toBeNull();
     expect(screen.queryByText("V4 Pro (soon)")).toBeNull();

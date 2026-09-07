@@ -71,6 +71,7 @@ import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessa
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
+import { userMetaFitsOnLastLine, userMetaWidth } from "./userMetaMode";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -107,6 +108,28 @@ const StepsDiv = styled.div`
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
+export const CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX = 40;
+export const CLAUDE_COMPOSER_BOTTOM_INSET_PX = 16;
+export const CUKII_STREAMING_LOADER_GAP_PX = 16;
+
+/**
+ * The transcript ends 40px above its scroll bottom while the overlaid composer
+ * ends 16px above the viewport bottom. Claude reserves the full composer
+ * height, leaving the resulting 24px visual band. While Cukii's explicit
+ * streaming row is visible, the owner requires the band below it to equal the
+ * measured 16px band above it, so only that state shortens the spacer by 8px.
+ */
+export function composerSpacerHeight(
+  composerHeight: number,
+  streamingLoaderVisible: boolean,
+): number {
+  const referenceGap =
+    CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX - CLAUDE_COMPOSER_BOTTOM_INSET_PX;
+  const desiredGap = streamingLoaderVisible
+    ? CUKII_STREAMING_LOADER_GAP_PX
+    : referenceGap;
+  return Math.max(0, composerHeight - referenceGap + desiredGap);
+}
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
@@ -144,6 +167,8 @@ export function Chat() {
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
   const mainInputShellRef = useRef<HTMLDivElement>(null);
+  const measuredComposerHeightRef = useRef(78);
+  const [composerHeight, setComposerHeight] = useState(78);
   /** Distance-from-bottom snapshot taken before "Load earlier messages"
    * prepends older rows, so the viewport can be re-pinned afterwards. */
   const loadEarlierAnchorRef = useRef<number | null>(null);
@@ -174,6 +199,69 @@ export function Chat() {
   );
 
   useAutoScroll(stepsDivRef, history, isStreaming, sessionId);
+
+  // Claude overlays the composer and appends a same-height spacer inside the
+  // transcript. Measure the real card because attachments and a long prompt
+  // change its height. If the reader is pinned to the bottom, keep that latch
+  // while the composer grows; otherwise leave their reading position alone.
+  useLayoutEffect(() => {
+    const shell = mainInputShellRef.current;
+    if (!shell || isSessionLoading) return;
+
+    const update = () => {
+      const next = Math.ceil(shell.getBoundingClientRect().height);
+      if (next <= 0 || next === measuredComposerHeightRef.current) return;
+      const transcript = stepsDivRef.current;
+      const wasPinned = transcript
+        ? transcript.scrollHeight -
+            transcript.scrollTop -
+            transcript.clientHeight <
+          2
+        : false;
+      measuredComposerHeightRef.current = next;
+      setComposerHeight(next);
+      if (wasPinned && transcript) {
+        requestAnimationFrame(() => {
+          transcript.scrollTop = transcript.scrollHeight;
+        });
+      }
+    };
+
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [isSessionLoading]);
+
+  // User receipts use the same measured MAX split as assistant times. The old
+  // unconditional ::after spacer wrapped to a full empty line for attachments
+  // and near-full final lines — exactly the oversized band from the owner's
+  // screenshot. Measure every rendered bubble and select inline/compact mode.
+  useLayoutEffect(() => {
+    const transcript = stepsDivRef.current;
+    if (!transcript) return;
+    const bubbles = Array.from(
+      transcript.querySelectorAll<HTMLElement>(".cukii-user-message-bubble"),
+    ).filter((bubble) => bubble.querySelector(".cukii-user-metadata"));
+    const apply = (bubble: HTMLElement) => {
+      const metaWidth = userMetaWidth(bubble);
+      if (metaWidth > 0) {
+        bubble.style.setProperty("--cukii-meta-reserve", `${metaWidth}px`);
+      }
+      bubble.classList.toggle(
+        "cukii-user-bubble--meta-inline",
+        userMetaFitsOnLastLine(bubble, metaWidth),
+      );
+    };
+    bubbles.forEach(apply);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach((entry) => apply(entry.target as HTMLElement));
+    });
+    bubbles.forEach((bubble) => observer.observe(bubble));
+    return () => observer.disconnect();
+  }, [history, transcriptStart]);
 
   // Loading earlier messages prepends rows at the top of the transcript.
   // Re-pin the viewport by its distance from the bottom so the reading
@@ -393,6 +481,10 @@ export function Chat() {
   // Rendering belongs to the active stream, not to whether its latest event is
   // a tool call. A tool may be quiet for seconds while the stream is alive.
   const shouldRenderStreamingToolbar = isStreaming && !isInEdit && !bridgeWait;
+  const transcriptComposerSpacer = composerSpacerHeight(
+    composerHeight,
+    shouldRenderStreamingToolbar,
+  );
 
   // Right-click on capsules uses the native webview context menu; session
   // commands reach it through the extension's webview/context contribution.
@@ -469,8 +561,8 @@ export function Chat() {
               : groupedWithPrevious
                 ? "cukii-user-bubble--group-end"
                 : "cukii-user-bubble--solo";
-        // MAX receipt flow is pure CSS: the meta span is an inline run-on of
-        // the prose and rises to the last text line whenever it fits.
+        // MAX receipt flow is measured after render: inline on a paragraph
+        // tail only when it fits, compact own-row for every other case.
         return [
           <div
             key={message.id}
@@ -749,12 +841,22 @@ export function Chat() {
               <CukiiStreamingToolbar active />
             </div>
           ) : null)}
+        {!isSessionLoading && (
+          <div
+            aria-hidden="true"
+            className="cukii-composer-spacer"
+            style={{
+              height: transcriptComposerSpacer,
+              minHeight: transcriptComposerSpacer,
+            }}
+          />
+        )}
       </StepsDiv>
       {!isSessionLoading && (
-        <div
-          ref={mainInputShellRef}
-          className={"cukii-main-input-shell relative shrink-0"}
-        >
+        <div aria-hidden="true" className="cukii-message-gradient" />
+      )}
+      {!isSessionLoading && (
+        <div ref={mainInputShellRef} className="cukii-main-input-shell">
           <ContinueInputBox
             isMainInput
             isLastUserInput={false}

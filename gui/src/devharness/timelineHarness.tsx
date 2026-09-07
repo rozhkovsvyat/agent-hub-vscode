@@ -19,6 +19,7 @@ const store = setupStore({ ideMessenger });
 const RECEIPT_SENT_AT = 1_700_000_000_000;
 const HARNESS_IMAGE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='96'%3E%3Crect width='180' height='96' fill='%235a6b7c'/%3E%3C/svg%3E";
+const LONG_ASSISTANT = `${"Longread parity sentence with enough words to exercise the full-width assistant lane. ".repeat(12)}The footer must remain compact at the lower-right edge without covering the final words.`;
 
 const HISTORY = [
   {
@@ -75,6 +76,33 @@ const HISTORY = [
     },
     isSteer: true,
     steerStatus: "delivered",
+    steerSentAt: RECEIPT_SENT_AT,
+  },
+  {
+    message: {
+      id: "receipt-image-then-text",
+      role: "user",
+      content:
+        "Привет, что за херня? опять рассинхрон — логаут при not logged in — ты уж определись",
+    },
+    contextItems: [],
+    editorState: {
+      type: "doc",
+      content: [
+        { type: "image", attrs: { src: HARNESS_IMAGE } },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Привет, что за херня? опять рассинхрон — логаут при not logged in — ты уж определись",
+            },
+          ],
+        },
+      ],
+    },
+    isSteer: true,
+    steerStatus: "read",
     steerSentAt: RECEIPT_SENT_AT,
   },
   {
@@ -157,6 +185,23 @@ const HISTORY = [
     },
     contextItems: [],
   },
+  {
+    message: {
+      id: "assistant-longread",
+      role: "assistant",
+      content: LONG_ASSISTANT,
+    },
+    contextItems: [],
+  },
+  {
+    message: {
+      id: "assistant-code-tail",
+      role: "assistant",
+      content:
+        "The final block cannot share its line with the reply time.\n\n```ts\nconst parity = true;\n```",
+    },
+    contextItems: [],
+  },
 ];
 
 function Harness() {
@@ -180,7 +225,18 @@ function Harness() {
     return () => window.clearTimeout(activate);
   }, []);
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto", padding: 16 }}>
+    <div
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        maxWidth: 720,
+        margin: "0 auto",
+        overflow: "hidden",
+      }}
+    >
       <Chat />
     </div>
   );

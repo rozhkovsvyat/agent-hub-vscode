@@ -136,16 +136,21 @@ describe("Cukii GUI contracts", () => {
     expect(getComputedStyle(completed).fontWeight).toBe("400");
   });
 
-  it("keeps the measured 12px non-overlay loader-to-composer gap", () => {
+  it("uses the Claude overlay composer and a measured streaming spacer", () => {
     const css = source("index.css");
     const start = css.indexOf(".cukii-spinner-row {");
     const contract = css.slice(
       start,
       css.indexOf(".cukii-spinner-row .cukii-thinking-row", start),
     );
-    expect(contract).toContain("margin-bottom: 12px;");
+    expect(contract).toContain("margin-bottom: 0;");
     expect(contract).toContain("margin-top: 6px;");
-    expect(contract).not.toContain("40px");
+    expect(css).toContain(".cukii-composer-spacer {");
+    expect(css).toContain(".cukii-message-gradient {");
+    expect(css).toContain("height: 150px;");
+    expect(css).toMatch(
+      /\.cukii-main-input-shell \{[\s\S]*?position: absolute;[\s\S]*?right: 16px;[\s\S]*?bottom: 16px;[\s\S]*?left: 16px;[\s\S]*?max-width: 680px;/,
+    );
   });
 
   it("owns every Load earlier messages visual state without a native white fallback", () => {
@@ -201,19 +206,26 @@ describe("Cukii GUI contracts", () => {
     // while an inline ::after spacer at the end of the prose reserves its
     // width, so the meta rides the last text line whenever it fits and
     // drops below the text when it does not.
-    expect(bubbleContract).toContain("--cukii-meta-reserve: 31px;");
-    expect(bubbleContract).toContain("--cukii-meta-reserve: 49px;");
+    expect(bubbleContract).toContain("--cukii-meta-reserve: 0px;");
     expect(bubbleContract).toContain(
-      ".cukii-user-message-bubble .ProseMirror p:last-child::after",
+      ".cukii-user-bubble--meta-inline .ProseMirror p:last-child::after",
     );
     expect(bubbleContract).toContain("display: inline-block;");
     expect(bubbleContract).toContain("height: 14px;");
     // The fragile display:contents chain is gone for good.
     expect(bubbleContract).not.toContain("display: contents !important;");
-    expect(metadataContract).toContain("position: absolute;");
+    expect(metadataContract).toContain("position: static;");
+    expect(metadataContract).toContain("width: fit-content;");
+    expect(metadataContract).toContain("margin: 2px 0 -6px auto;");
+    expect(css).toContain(
+      ".cukii-user-bubble--meta-inline > .cukii-user-metadata",
+    );
+    expect(css).toMatch(
+      /\.cukii-user-bubble--meta-inline > \.cukii-user-metadata \{[\s\S]*?position: absolute;/,
+    );
     expect(metadataContract).toContain("right: 10px;");
     expect(metadataContract).toContain("bottom: 4px;");
-    expect(metadataContract).toContain("align-items: flex-end;");
+    expect(metadataContract).toContain("align-items: center;");
     expect(metadataContract).toContain("font-size: 11px;");
     expect(metadataContract).toContain("line-height: 14px;");
   });
@@ -323,6 +335,9 @@ describe("Cukii GUI contracts", () => {
     expect(toolbar).toContain("px-2");
     expect(toolbar).toContain("text-[11.05px]");
     expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
+    expect(toolbar).toContain("primaryActionsRef");
+    expect(toolbar).toContain("modelPillOnOwnRow");
+    expect(toolbar).toContain("cukii-input-footer--model-row");
 
     // Scope toggle: the single Milky (-0) knob switch pinned to the right
     // edge, symmetric with the "Select a model" title; ON (orange) is the
@@ -338,18 +353,36 @@ describe("Cukii GUI contracts", () => {
     expect(slice).toContain("brokerModelScope: BrokerModelScope;");
     expect(slice).toContain('brokerModelScope: "best",');
 
-    // Effort: ONE shared slider row component rendered in the "/" menu and the
-    // model picker footer — never a second from-scratch control. It is
-    // deliberately absent from the permissions popover: the value already has
-    // two homes plus the pill, and a third copy is how the rows drifted apart.
+    // Live Claude distinction: the current model has only the right-hand
+    // check on a transparent row; pointer hover paints that row #04395e via
+    // the theme active-selection pair (not the translucent list-hover token).
+    const pickerCss = source("index.css");
+    expect(pickerCss).toMatch(
+      /\.cukii-model-option-selected\s*\{[\s\S]*?background: transparent !important;/,
+    );
+    expect(pickerCss).toMatch(
+      /\.cukii-model-picker-list \.cukii-menu-item:hover:not\(:disabled\)\s*\{[\s\S]*?background: var\(--vscode-list-activeSelectionBackground, #04395e\) !important;[\s\S]*?color: var\(--vscode-list-activeSelectionForeground, #ffffff\) !important;/,
+    );
+    expect(pickerCss).toMatch(
+      /\.cukii-input-footer--model-row \.cukii-footer-secondary-actions\s*\{[\s\S]*?align-self: flex-start;/,
+    );
+    expect(pickerCss).toMatch(
+      /\.cukii-input-footer--model-row \.cukii-model-pill\s*\{[\s\S]*?margin-left: 0;/,
+    );
+
+    // Effort: ONE shared slider row component rendered in all three Claude
+    // entry points — never a second from-scratch control that can drift.
     const effortRow = source("components/cukii/CukiiEffortRow.tsx");
     expect(effortRow).toContain('testId="cukii-effort-slider"');
     expect(effortRow).toContain("normalizeEffortForModel");
     expect(effortRow).toContain("effortLevelsForModel");
     expect(toolbar).toContain("<CukiiEffortRow");
     expect(modal).toContain("<CukiiEffortRow");
-    expect(permissions).not.toContain("CukiiEffortRow");
-    expect(permissions).not.toContain("cukii-permission-effort-row");
+    expect(permissions).toContain("<CukiiEffortRow");
+    expect(permissions).toContain("cukii-permission-effort-row");
+    expect(pickerCss).toMatch(
+      /\.cukii-effort-menu-row \{[\s\S]*?white-space: nowrap;/,
+    );
 
     // Autocompact rides the same slider primitive as Effort — same track, same
     // thumb, same keyboard contract — so the two rows in the "/" menu cannot
@@ -606,14 +639,19 @@ describe("Cukii GUI contracts", () => {
       /\.cukii-assistant-bubble \.wmde-markdown code,[\s\S]*?background: transparent !important;/,
     );
 
-    // Checks bottom-align with the time, and the read state is a full check
-    // plus a parallel bare stroke — not two overlapping checks.
+    // MAX centres its 16px indicator slot on the 14px time line and uses the
+    // exact filled 24-unit glyph from its live SVG sprite.
+    expect(css).toMatch(/\.cukii-user-metadata \{[\s\S]*?align-items: center;/);
     expect(css).toMatch(
-      /\.cukii-user-metadata \{[\s\S]*?align-items: flex-end;/,
+      /\.cukii-user-metadata \{[\s\S]*?letter-spacing: 0\.3px;/,
+    );
+    expect(css).toMatch(
+      /\.cukii-receipt-status \{[\s\S]*?width: 16px;[\s\S]*?height: 16px;[\s\S]*?align-self: center;/,
     );
     const receipt = source("components/cukii/CukiiMessageReceiptStatus.tsx");
-    expect(receipt).toContain('d="M2 5L5 8L11 2"');
-    expect(receipt).toContain('d="M9 8L15 2"');
+    expect(receipt).toContain('viewBox="0 0 24 24"');
+    expect(receipt).toContain("M18.089 5.589");
+    expect(receipt).toContain("m5.459-.001");
 
     // Right-click uses the native webview context menu: the extension
     // contributes session commands through webview/context, and the GUI keeps

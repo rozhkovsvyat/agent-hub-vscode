@@ -1,5 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { assistantMetaFitsOnLastLine } from "./StepContainer";
+import {
+  ASSISTANT_LONGREAD_CHARS,
+  assistantMetaFitsOnLastLine,
+  isAssistantLongRead,
+} from "./StepContainer";
+
+describe("isAssistantLongRead", () => {
+  it("keeps the MAX-width lane through the boundary and opens it afterwards", () => {
+    expect(isAssistantLongRead("x".repeat(ASSISTANT_LONGREAD_CHARS))).toBe(
+      false,
+    );
+    expect(isAssistantLongRead("x".repeat(ASSISTANT_LONGREAD_CHARS + 1))).toBe(
+      true,
+    );
+  });
+});
 
 /**
  * The reply time rides the answer's last line only when it actually fits there.

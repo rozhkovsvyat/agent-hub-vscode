@@ -17,8 +17,8 @@ interface CukiiEffortRowProps {
 }
 
 /** Claude-parity effort row: label on the left, shared slider on the right.
- * Rendered inside the "/" command menu and at the bottom of the model picker,
- * exactly where the reference client keeps its own effort control. */
+ * The same component is rendered in the command menu, model picker and Modes
+ * popover, so geometry and fill cannot drift between the three entry points. */
 export function CukiiEffortRow({
   model,
   effort,
