@@ -199,6 +199,12 @@ describe("Cukii GUI contracts", () => {
     expect(css).toContain(".cukii-composer-spacer {");
     expect(css).toContain(".cukii-message-gradient {");
     expect(css).toContain("height: 150px;");
+    const gradientRule =
+      css.match(/^\.cukii-message-gradient \{[^}]*\}/m)?.[0] ?? "";
+    expect(gradientRule).toContain("--cukii-chat-background");
+    expect(gradientRule).not.toMatch(
+      /transparent 0%,\s*var\(--vscode-editor-background/,
+    );
     expect(css).toMatch(
       /\.cukii-main-input-shell \{[\s\S]*?position: absolute;[\s\S]*?right: 16px;[\s\S]*?bottom: 16px;[\s\S]*?left: 16px;[\s\S]*?max-width: 680px;/,
     );

@@ -2058,7 +2058,7 @@ button.cukii-submit-button--stop:active {
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    var(--vscode-editor-background, #1e1e1e) 100%
+    var(--cukii-chat-background, var(--vscode-editor-background, #1e1e1e)) 100%
   );
   pointer-events: none;
 }
