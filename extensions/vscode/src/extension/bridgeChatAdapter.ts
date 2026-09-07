@@ -496,12 +496,12 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
   return [
     "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
       " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call the available MCP tool whose base name is broker_inbox; its qualified prefix may be cukii-broker or agent-hub-broker." +
-      " If it returns messages, that array is the complete accumulated FIFO batch: read and address every item together as immediate input before resuming your task." +
+      " If it returns messages, that array is the complete newly offered FIFO batch: read and address every item together as immediate input before resuming your task. A later call never repeats an outstanding batch to the same live reader; outstandingMessageIds are receipts to ack, not new instructions to process again." +
       " Only after the entire batch is understood and every referenced @file is accessible, call the available broker_inbox_ack tool with all exact messageId values; this acknowledgement is what permits read receipts and deduplication. If you fail before ack, the batch must be delivered again." +
       " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
       " Empty results are normal; never call it more than once per step boundary." +
       " Classify every incoming item by intent: an addition or correction augments the current task, so continue the same work after incorporating it; an explicit replacement switches the task; only an explicit stop/cancel request ends the run without another tool call. A normal follow-up must never stop the run." +
-      " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue unless that message explicitly told you to stop.",
+      " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason. Process that displayed batch once and call broker_inbox_ack directly with the displayed IDs; do not call broker_inbox to reread it. Then continue unless that message explicitly told you to stop.",
     "To coordinate with parallel sessions, the same channel is bidirectional: the available broker_sessions tool lists live sessions and broker_send writes one of them a message" +
       " (status or fact requests, handoff notes). Sending new work to a worker is still broker_delegate, never broker_send.",
   ];
@@ -1674,7 +1674,7 @@ async function* launchBridgeChild(options: {
           messages,
           queuedFollowUpMessageIds,
           event.text,
-          new Set(),
+          queuedFollowUpRead,
         );
         if (queuedMessageId && queuedFollowUpRead.has(queuedMessageId)) {
           // Structured vendor activity already acknowledged this exact batch

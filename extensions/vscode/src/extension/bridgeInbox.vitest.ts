@@ -50,6 +50,36 @@ describe("bridgeInbox", () => {
     });
   });
 
+  it("uses messageId as an idempotency key across transport retries", () => {
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(2_000)
+      .mockReturnValueOnce(3_000);
+    try {
+      expect(
+        writeBridgeInboxMessage("session-1", "same-id", "ровно один раз"),
+      ).toBe(true);
+      expect(
+        writeBridgeInboxMessage("session-1", "same-id", "ровно один раз"),
+      ).toBe(true);
+      expect(
+        fs
+          .readdirSync(path.join(root, "session-1"))
+          .filter((name) => name.endsWith("-same-id.json")),
+      ).toHaveLength(1);
+
+      expect(
+        writeBridgeInboxMessage("session-1", "same-id", "другой payload"),
+      ).toBe(false);
+      expect(bridgeInboxMessageStatus("session-1", "same-id")).toBe(
+        "pending",
+      );
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("refuses traversal-shaped segments and empty text", () => {
     expect(writeBridgeInboxMessage("../evil", "msg-1", "нет")).toBe(false);
     expect(writeBridgeInboxMessage("session-1", "../evil", "нет")).toBe(false);

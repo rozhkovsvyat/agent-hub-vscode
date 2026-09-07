@@ -92,6 +92,15 @@ export function writeBridgeInboxMessage(
   try {
     fs.mkdirSync(dir, { recursive: true });
     purgeExpired(dir);
+    // messageId is the transport idempotency key. A webview retry must not
+    // create a second JSON record (and therefore a second user instruction),
+    // while an id collision with different bytes must fail closed so the
+    // durable GUI outbox can carry the authoritative payload instead.
+    for (const file of listSessionFiles(sessionId)) {
+      const existing = readRecord(file);
+      if (existing?.id !== messageId) continue;
+      return existing.sessionId === sessionId && existing.text === text;
+    }
     const record: InboxRecord = {
       id: messageId,
       sessionId,

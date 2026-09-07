@@ -1021,5 +1021,13 @@ describe("native bridge argv", () => {
     );
     expect(swallowBlock).toContain("continue;");
     expect(swallowBlock).not.toContain("queue.push");
+    // The matcher must advance past already-read ids. Passing a fresh Set on
+    // every echo made two equal follow-ups map to the first id forever.
+    const matcherCall = source.slice(
+      source.indexOf("const queuedMessageId = queuedFollowUpEchoMessageId("),
+      swallowAt,
+    );
+    expect(matcherCall).toContain("queuedFollowUpRead,");
+    expect(matcherCall).not.toContain("new Set(),");
   });
 });
