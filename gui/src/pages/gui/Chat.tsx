@@ -65,6 +65,7 @@ import {
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
+import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
@@ -477,7 +478,10 @@ export function Chat() {
 
   const renderTranscriptRows = useCallback((): JSX.Element[] => {
     const transcriptHistory = history.slice(transcriptStart);
-    return transcriptHistory.flatMap((item, relativeIndex): JSX.Element[] => {
+    const renderTranscriptEntry = (
+      item: ChatHistoryItemWithMessageId,
+      relativeIndex: number,
+    ): JSX.Element[] => {
       const historyIndex = transcriptStart + relativeIndex;
       const {
         message,
@@ -552,16 +556,40 @@ export function Chat() {
         return [
           <div
             key={message.id}
-            className={`cukii-user-row shrink-0 ${
+            className={`cukii-user-row cukii-user-row--sticky shrink-0 ${
               groupedWithPrevious ? "cukii-user-row--grouped" : ""
             }`}
           >
             <div className="cukii-user-message">
-              <div
-                className={`cukii-user-message-bubble ${groupClass} ${
+              <CukiiStickyUserMessage
+                bubbleClassName={`cukii-user-message-bubble ${groupClass} ${
                   sentTime ? "cukii-user-bubble--with-receipt" : ""
                 } ${visualReceiptStatus ? "cukii-user-bubble--receipt-checks" : ""}`}
-                data-testid={`cukii-user-bubble-${message.id}`}
+                messageId={message.id}
+                metadata={
+                  sentTime ? (
+                    <span
+                      className="cukii-user-metadata"
+                      data-testid={`cukii-message-receipt-${message.id}`}
+                      aria-label={
+                        visualReceiptStatus === "read"
+                          ? `Sent ${sentTime}, read`
+                          : receiptStatus === "deferred"
+                            ? `Sent ${sentTime}, queued for the next turn`
+                            : visualReceiptStatus
+                              ? `Sent ${sentTime}, delivered`
+                              : `Sent ${sentTime}`
+                      }
+                    >
+                      <time>{sentTime}</time>
+                      {visualReceiptStatus && (
+                        <CukiiMessageReceiptStatus
+                          status={visualReceiptStatus}
+                        />
+                      )}
+                    </span>
+                  ) : undefined
+                }
               >
                 {errorBoundary(
                   <ContinueInputBox
@@ -576,27 +604,7 @@ export function Chat() {
                     inputId={message.id}
                   />,
                 )}
-                {sentTime && (
-                  <span
-                    className="cukii-user-metadata"
-                    data-testid={`cukii-message-receipt-${message.id}`}
-                    aria-label={
-                      visualReceiptStatus === "read"
-                        ? `Sent ${sentTime}, read`
-                        : receiptStatus === "deferred"
-                          ? `Sent ${sentTime}, queued for the next turn`
-                          : visualReceiptStatus
-                            ? `Sent ${sentTime}, delivered`
-                            : `Sent ${sentTime}`
-                    }
-                  >
-                    <time>{sentTime}</time>
-                    {visualReceiptStatus && (
-                      <CukiiMessageReceiptStatus status={visualReceiptStatus} />
-                    )}
-                  </span>
-                )}
-              </div>
+              </CukiiStickyUserMessage>
             </div>
           </div>,
         ];
@@ -749,7 +757,32 @@ export function Chat() {
       }
 
       return [];
+    };
+
+    const renderedEntries = transcriptHistory.map(renderTranscriptEntry);
+    const turns: Array<{ key: string; rows: JSX.Element[] }> = [];
+    let currentRows: JSX.Element[] = [];
+    let currentKey = `continuation-${transcriptStart}`;
+
+    renderedEntries.forEach((rows, relativeIndex) => {
+      const item = transcriptHistory[relativeIndex];
+      const startsTurn = item.message.role === "user" && !item.modelSwitch;
+      if (startsTurn && currentRows.length > 0) {
+        turns.push({ key: currentKey, rows: currentRows });
+        currentRows = [];
+      }
+      if (startsTurn) currentKey = item.message.id;
+      currentRows.push(...rows);
     });
+    if (currentRows.length > 0) {
+      turns.push({ key: currentKey, rows: currentRows });
+    }
+
+    return turns.map(({ key, rows }) => (
+      <div className="cukii-turn" data-testid={`cukii-turn-${key}`} key={key}>
+        {rows}
+      </div>
+    ));
   }, [
     dispatch,
     history,

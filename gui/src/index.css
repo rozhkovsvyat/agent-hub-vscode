@@ -1991,11 +1991,18 @@ button.cukii-submit-button--stop:active {
   margin: 10px 0;
 }
 
-/* Geometry copied from Claude Code webview `.messagesContainer`: 20px top
-   and side padding, 40px bottom — the backing zone under the composer. The
-   scrollbar itself is the native webview one; Claude adds no custom rules. */
+/* Claude sticky mode keeps the scrollport's top edge at zero and supplies the
+   initial 20px breathing room as a flex pseudo-item. Unlike padding, that
+   spacer scrolls away, so a sticky turn can reach the true top of the page. */
 .cukii-transcript {
-  padding: 20px 20px 40px;
+  isolation: isolate;
+  padding: 0 20px 40px;
+}
+
+.cukii-transcript::before {
+  content: "";
+  flex-shrink: 0;
+  height: 20px;
 }
 
 /* Claude keeps the transcript full-height and floats the composer above it.
@@ -2063,6 +2070,51 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
+/* Claude Code 2.1.263 groups each prompt with its response and constrains the
+   sticky header to that turn. The next turn therefore pushes the previous
+   prompt away instead of stacking multiple sticky cards at the top. */
+.cukii-turn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.cukii-user-row--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-items: stretch;
+  margin: 0;
+  padding-top: 14px;
+  padding-bottom: 12px;
+  background-image:
+    linear-gradient(
+      to bottom,
+      var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e))
+        calc(100% - 12px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      var(--vscode-editor-background, #1e1e1e) calc(100% - 12px),
+      transparent 100%
+    );
+}
+
+.cukii-user-row--sticky:has([aria-expanded="true"]) {
+  z-index: 3;
+}
+
+.cukii-user-row--sticky .cukii-user-message,
+.cukii-user-row--sticky .cukii-user-message-bubble {
+  display: block;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
 /* MAX-style grouping: adjacent user turns sit almost flush; only groups get
    the breathing margin. */
 .cukii-user-row--grouped {
@@ -2098,6 +2150,104 @@ button.cukii-submit-button--stop:active {
   /* MAX geometry: large outer corners by default; group modifiers tighten the
      corner that faces an adjacent user bubble on the same side. */
   border-radius: 16px;
+}
+
+/* Claude's prompt fold: 60px of content, a 50px fade, and a 300ms expansion.
+   Delivery metadata remains a sibling below this clipped shell, never inside
+   it, so time and ticks are always visible. */
+.cukii-user-content-shell {
+  position: relative;
+  width: 100%;
+}
+
+.cukii-user-content-shell--clickable {
+  cursor: pointer;
+}
+
+.cukii-user-content-shell--clickable .cukii-input-box,
+.cukii-user-content-shell--clickable .ProseMirror {
+  cursor: pointer !important;
+}
+
+.cukii-user-message-content {
+  overflow-x: hidden;
+  overflow-y: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: max-height 300ms ease-in-out;
+}
+
+.cukii-user-message-content--collapsed {
+  position: relative;
+  max-height: 60px;
+}
+
+.cukii-user-truncation-gradient {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 50px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--cukii-primary-action-background, #e3a867) 100%
+  );
+}
+
+.cukii-user-expand-button-container {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.cukii-user-content-shell:hover > .cukii-user-expand-button-container,
+.cukii-user-content-shell:focus-within > .cukii-user-expand-button-container {
+  opacity: 0.9;
+  pointer-events: auto;
+}
+
+.cukii-user-expand-button,
+.cukii-user-collapse-button {
+  display: flex;
+  align-items: center;
+  margin: 4px;
+  padding: 8px;
+  color: var(--vscode-menu-background, #1e1e1e);
+  font-size: 0.85em;
+  background-color: var(--vscode-menu-foreground, #f0f0f0);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    transform 200ms,
+    box-shadow 200ms;
+}
+
+.cukii-user-collapse-button-container {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  opacity: 0.9;
+}
+
+.cukii-user-message-bubble[data-cukii-collapsible="true"].cukii-user-bubble--meta-inline
+  > .cukii-user-metadata {
+  position: static;
+  margin: 2px 0 -6px auto;
+}
+
+.cukii-user-message-bubble[data-cukii-collapsible="true"]
+  .ProseMirror
+  p:last-child::after {
+  display: none;
 }
 
 .cukii-user-bubble--group-start {

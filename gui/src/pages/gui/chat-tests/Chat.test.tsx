@@ -571,7 +571,10 @@ test("renders a persisted Claude-style model switch boundary before the next tur
   expect(boundary?.querySelectorAll(".cukii-model-switch-wave")).toHaveLength(
     2,
   );
-  expect(boundary?.nextElementSibling).toHaveClass("cukii-user-row");
+  const boundaryTurn = boundary?.closest(".cukii-turn");
+  expect(
+    boundaryTurn?.nextElementSibling?.querySelector(".cukii-user-row"),
+  ).not.toBeNull();
   expect(boundary?.closest(".cukii-timeline-item")).toBeNull();
 
   const css = canonicalCss();
