@@ -312,8 +312,8 @@ describe("Cukii GUI contracts", () => {
     // Comment-stripped slice: prose comments must never push a pinned
     // declaration out of the contract window.
     const flatGroup = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    const bubbleStart = flatGroup.indexOf(".cukii-user-message-bubble {");
-    const bubbleContract = flatGroup.slice(bubbleStart, bubbleStart + 600);
+    const bubbleContract =
+      flatGroup.match(/^\.cukii-user-message-bubble \{[^}]*\}/m)?.[0] ?? "";
     expect(bubbleContract).toContain("border-radius: 16px;");
     expect(css).toContain(".cukii-user-bubble--group-start {");
     expect(css).toContain(".cukii-user-bubble--group-middle {");
@@ -725,8 +725,8 @@ describe("Cukii GUI contracts", () => {
 
     // The sent capsule wears cookie-orange with dark ink everywhere.
     const flatSent = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    const sentStart = flatSent.indexOf(".cukii-user-message-bubble {");
-    const sentContract = flatSent.slice(sentStart, sentStart + 400);
+    const sentContract =
+      flatSent.match(/^\.cukii-user-message-bubble \{[^}]*\}/m)?.[0] ?? "";
     expect(sentContract).toContain("--cukii-primary-action-background");
     expect(css).toMatch(
       /\.cukii-user-message-bubble \.cukii-user-metadata\s*\{\s*color: var\(--cukii-text/,

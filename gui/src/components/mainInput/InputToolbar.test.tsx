@@ -278,12 +278,16 @@ describe("Cukii Claude-parity input toolbar", () => {
       expect(icon).toHaveAttribute("viewBox", "0 0 20 20");
     }
     const css = canonicalCss();
-    expect(css).toContain("width: 300px;");
+    const permissionCss = css.slice(
+      css.indexOf(".cukii-permission-popover {"),
+      css.indexOf("@media screen and (max-width: 300px)"),
+    );
+    expect(permissionCss).toContain("width: 300px;");
     // Claude metrics: content-sized rows and theme-driven selection colors.
-    expect(css).not.toContain("min-height: 52px;");
-    expect(css).toContain("padding: 4px 8px;");
-    expect(css).toContain("gap: 10px;");
-    expect(css).toContain(
+    expect(permissionCss).not.toContain("min-height: 52px;");
+    expect(permissionCss).toContain("padding: 4px 8px;");
+    expect(permissionCss).toContain("gap: 10px;");
+    expect(permissionCss).toContain(
       "background: var(--vscode-list-activeSelectionBackground, #04395e) !important;",
     );
   });
