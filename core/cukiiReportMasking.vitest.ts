@@ -20,10 +20,28 @@ describe("maskCukiiReportText", () => {
       maskCukiiReportText(
         '{"authorFullName":"Иванов Иван","email":"owner@example.com"} C:\\Users\\svyat\\repo',
       ),
-    ).toBe(
-      '{"authorFullName":"[NAME]","email":"[EMAIL]"} C:\\Users\\[USER]\\repo',
-    );
+    ).toBe('{"authorFullName":"[NAME]","email":"[EMAIL]"} [PATH]');
     expect(maskCukiiReportText("call +7 (999) 123-45-67")).toBe("call [PHONE]");
+  });
+
+  it("removes absolute Windows, UNC and POSIX paths", () => {
+    const text = [
+      "at D:\\Brain\\clients\\secret\\a.ts:12",
+      "copy \\\\fileserver\\customer-share\\private.log",
+      "open /srv/customer/acme/private.log",
+      'file="C:\\Program Files\\Cukii\\runtime.log"',
+      "at D:\\Client Alpha\\SecretProject\\src\\a.ts:12",
+      "copy \\\\fileserver\\Customer Share\\Private Folder\\dump.log",
+      "open /srv/Client Alpha/private.log",
+    ].join("\n");
+    const masked = maskCukiiReportText(text);
+    expect(masked).not.toContain("D:\\Brain");
+    expect(masked).not.toContain("\\\\fileserver");
+    expect(masked).not.toContain("/srv/customer");
+    expect(masked).not.toContain("C:\\Program Files");
+    expect(masked).not.toContain("Client Alpha");
+    expect(masked).not.toContain("Customer Share");
+    expect(masked.match(/\[PATH\]/g)).toHaveLength(7);
   });
 
   it("does not destroy ordinary diagnostic text", () => {

@@ -12,7 +12,10 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { ProtectedSecretStore } from "./alibabaTokenPlan";
-import { recentCukiiDiagnostics } from "./cukiiDiagnosticBuffer";
+import {
+  recentCukiiDiagnostics,
+  recordCukiiDiagnostic,
+} from "./cukiiDiagnosticBuffer";
 import {
   probeYougileKey,
   readYougileAccount,
@@ -29,6 +32,7 @@ export const CUKII_ISSUE_MAX_IMAGES = 3;
 export const CUKII_ISSUE_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const CUKII_ISSUE_MAX_TITLE = 160;
 export const CUKII_ISSUE_MAX_FIELD = 4_000;
+const ORPHAN_CLEANUP_RETRY_MS = 30_000;
 
 type IssueResponse = {
   ok: boolean;
@@ -226,6 +230,7 @@ export class YougileIssueReporter {
     string,
     Promise<CukiiIssueReportReceipt>
   >();
+  private readonly activeStagingDirectories = new Set<string>();
   private retryTimer?: ReturnType<typeof setTimeout>;
   private started = false;
 
@@ -240,6 +245,10 @@ export class YougileIssueReporter {
 
   private sentRoot(): string {
     return path.join(this.host.storageRoot, "sent");
+  }
+
+  private stagingRoot(): string {
+    return path.join(this.host.storageRoot, "staging");
   }
 
   private reportDir(reportId: string): string {
@@ -527,77 +536,147 @@ export class YougileIssueReporter {
   private async persistSubmission(
     submission: CukiiIssueReportSubmission,
   ): Promise<StoredIssueReport> {
-    const directory = this.reportDir(submission.reportId);
-    await fs.promises.mkdir(directory, { recursive: true });
+    const directory = path.join(
+      this.stagingRoot(),
+      `.staging-${submission.reportId}-${process.pid}-${crypto.randomUUID()}`,
+    );
+    await Promise.all([
+      fs.promises.mkdir(this.pendingRoot(), { recursive: true }),
+      fs.promises.mkdir(this.stagingRoot(), { recursive: true }),
+    ]);
+    await fs.promises.mkdir(directory, { recursive: false });
+    this.activeStagingDirectories.add(directory);
     const files: LocalIssueFile[] = [];
 
-    if (submission.snapshot?.pngBase64) {
-      if (submission.snapshot.sanitizer !== "cukii-report-v1") {
-        throw new Error("The automatic snapshot was not sanitized.");
+    try {
+      if (submission.snapshot?.pngBase64) {
+        if (submission.snapshot.sanitizer !== "cukii-report-v1") {
+          throw new Error("The automatic snapshot was not sanitized.");
+        }
+        const bytes = Buffer.from(submission.snapshot.pngBase64, "base64");
+        if (
+          bytes.length > CUKII_ISSUE_MAX_IMAGE_BYTES ||
+          bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a"
+        ) {
+          throw new Error(
+            "The automatic snapshot is not a valid PNG under 5 MB.",
+          );
+        }
+        const localName = "cukii-window.png";
+        await atomicWrite(path.join(directory, localName), bytes);
+        files.push({
+          kind: "snapshot",
+          name: localName,
+          mimeType: "image/png",
+          localName,
+        });
       }
-      const bytes = Buffer.from(submission.snapshot.pngBase64, "base64");
-      if (
-        bytes.length > CUKII_ISSUE_MAX_IMAGE_BYTES ||
-        bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a"
-      ) {
-        throw new Error(
-          "The automatic snapshot is not a valid PNG under 5 MB.",
+
+      for (let index = 0; index < submission.attachmentIds.length; index++) {
+        const picked = this.pickedImages.get(submission.attachmentIds[index]);
+        if (!picked)
+          throw new Error("A selected screenshot expired. Choose it again.");
+        const localName = `manual-${index}-${safeFileName(picked.name)}`;
+        await fs.promises.copyFile(
+          picked.path,
+          path.join(directory, localName),
         );
+        files.push({
+          kind: "manual",
+          name: maskCukiiReportText(picked.name),
+          mimeType: picked.mimeType,
+          localName,
+        });
       }
-      const localName = "cukii-window.png";
-      await atomicWrite(path.join(directory, localName), bytes);
+
+      const diagnostics = (
+        await this.diagnosticLines(submission.sessionId, submission.brokerModel)
+      ).join("\n");
+      const diagnosticsName = "cukii-diagnostics.txt";
+      await atomicWrite(path.join(directory, diagnosticsName), diagnostics);
       files.push({
-        kind: "snapshot",
-        name: localName,
-        mimeType: "image/png",
-        localName,
+        kind: "diagnostics",
+        name: diagnosticsName,
+        mimeType: "text/plain",
+        localName: diagnosticsName,
       });
-    }
 
-    for (let index = 0; index < submission.attachmentIds.length; index++) {
-      const picked = this.pickedImages.get(submission.attachmentIds[index]);
-      if (!picked)
-        throw new Error("A selected screenshot expired. Choose it again.");
-      const localName = `manual-${index}-${safeFileName(picked.name)}`;
-      await fs.promises.copyFile(picked.path, path.join(directory, localName));
-      files.push({
-        kind: "manual",
-        name: picked.name,
-        mimeType: picked.mimeType,
-        localName,
+      const createdAt = this.now().toISOString();
+      const stored: StoredIssueReport = {
+        schemaVersion: 1,
+        reportId: submission.reportId,
+        createdAt,
+        title: maskCukiiReportText(submission.title.trim()),
+        stepsToReproduce: maskCukiiReportText(
+          submission.stepsToReproduce.trim(),
+        ),
+        expectedResult: maskCukiiReportText(submission.expectedResult.trim()),
+        actualResult: maskCukiiReportText(submission.actualResult.trim()),
+        severity: submission.severity,
+        sessionId: submission.sessionId,
+        brokerModel: submission.brokerModel,
+        files,
+        attempts: 0,
+        nextAttemptAt: createdAt,
+      };
+      await atomicWrite(
+        path.join(directory, "report.json"),
+        `${JSON.stringify(stored, null, 2)}\n`,
+      );
+      const finalDirectory = this.reportDir(submission.reportId);
+      try {
+        await fs.promises.rename(directory, finalDirectory);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST" && code !== "ENOTEMPTY" && code !== "EPERM") {
+          throw error;
+        }
+        const existing = await this.readReport(submission.reportId);
+        if (!existing) throw error;
+        return existing;
+      }
+      return stored;
+    } finally {
+      this.activeStagingDirectories.delete(directory);
+      await fs.promises.rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  private async cleanupStaging(): Promise<boolean> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(this.stagingRoot(), {
+        withFileTypes: true,
       });
+    } catch {
+      return true;
     }
+    const results = await Promise.all(
+      entries.map(async (entry) => {
+        const directory = path.join(this.stagingRoot(), entry.name);
+        if (this.activeStagingDirectories.has(directory)) return true;
+        return this.removeOrphan(directory, "staging");
+      }),
+    );
+    return results.every(Boolean);
+  }
 
-    const diagnostics = (
-      await this.diagnosticLines(submission.sessionId, submission.brokerModel)
-    ).join("\n");
-    const diagnosticsName = "cukii-diagnostics.txt";
-    await atomicWrite(path.join(directory, diagnosticsName), diagnostics);
-    files.push({
-      kind: "diagnostics",
-      name: diagnosticsName,
-      mimeType: "text/plain",
-      localName: diagnosticsName,
-    });
-
-    const createdAt = this.now().toISOString();
-    const stored: StoredIssueReport = {
-      schemaVersion: 1,
-      reportId: submission.reportId,
-      createdAt,
-      title: maskCukiiReportText(submission.title.trim()),
-      stepsToReproduce: maskCukiiReportText(submission.stepsToReproduce.trim()),
-      expectedResult: maskCukiiReportText(submission.expectedResult.trim()),
-      actualResult: maskCukiiReportText(submission.actualResult.trim()),
-      severity: submission.severity,
-      sessionId: submission.sessionId,
-      brokerModel: submission.brokerModel,
-      files,
-      attempts: 0,
-      nextAttemptAt: createdAt,
-    };
-    await this.writeReport(stored);
-    return stored;
+  private async removeOrphan(
+    directory: string,
+    kind: "staging" | "legacy-pending",
+  ): Promise<boolean> {
+    try {
+      await fs.promises.rm(directory, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      // Cleanup is privacy-sensitive, but one locked Windows file must never
+      // block delivery/retry of every valid report beside it.
+      recordCukiiDiagnostic("yougile.report.orphan_cleanup_failed", {
+        kind,
+        code: (error as NodeJS.ErrnoException).code ?? "unknown",
+      });
+      return false;
+    }
   }
 
   private async writeReport(report: StoredIssueReport): Promise<void> {
@@ -919,12 +998,14 @@ export class YougileIssueReporter {
   }
 
   private async flushPending(): Promise<void> {
+    let cleanupRetryNeeded = !(await this.cleanupStaging());
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(this.pendingRoot(), {
         withFileTypes: true,
       });
     } catch {
+      if (cleanupRetryNeeded) this.schedule(ORPHAN_CLEANUP_RETRY_MS);
       return;
     }
     let earliestNext: number | undefined;
@@ -933,7 +1014,18 @@ export class YougileIssueReporter {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const report = await this.readReport(entry.name);
-      if (!report) continue;
+      if (!report) {
+        // Before staged commits existed, a crash between copying an image and
+        // writing report.json left private screenshots in pending forever.
+        // A complete current report is committed atomically, so a directory
+        // without its manifest is necessarily an orphan and must be removed.
+        cleanupRetryNeeded =
+          !(await this.removeOrphan(
+            this.reportDir(entry.name),
+            "legacy-pending",
+          )) || cleanupRetryNeeded;
+        continue;
+      }
       const receipt = await this.readReceipt(report.reportId);
       if (receipt) {
         await fs.promises.rm(this.reportDir(report.reportId), {
@@ -976,6 +1068,12 @@ export class YougileIssueReporter {
       earliestNext = Math.min(
         earliestNext ?? Number.POSITIVE_INFINITY,
         this.now().getTime() + 1_000,
+      );
+    }
+    if (cleanupRetryNeeded) {
+      earliestNext = Math.min(
+        earliestNext ?? Number.POSITIVE_INFINITY,
+        this.now().getTime() + ORPHAN_CLEANUP_RETRY_MS,
       );
     }
     if (earliestNext !== undefined) {

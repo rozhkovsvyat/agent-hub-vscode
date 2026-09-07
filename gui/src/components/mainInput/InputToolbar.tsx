@@ -196,6 +196,7 @@ function InputToolbar(props: InputToolbarProps) {
     null,
   );
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
+  const commandMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const primaryActionsRef = useRef<HTMLDivElement | null>(null);
   const [modelPillOnOwnRow, setModelPillOnOwnRow] = useState(false);
 
@@ -544,6 +545,7 @@ function InputToolbar(props: InputToolbarProps) {
           {!isInEdit && (
             <Popover className="relative">
               <PopoverButton
+                ref={commandMenuButtonRef}
                 data-testid="broker-menu-button"
                 onClick={() => {
                   setActionQuery("");
@@ -898,6 +900,7 @@ function InputToolbar(props: InputToolbarProps) {
         <ReportIssueModal
           sessionId={sessionId}
           brokerModel={currentModel}
+          returnFocusRef={commandMenuButtonRef}
           onClose={() => {
             setReportIssueOpen(false);
             void refreshIssueCapability(true);

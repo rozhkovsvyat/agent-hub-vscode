@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CukiiIssueReportSubmission } from "core/protocol/ideWebview";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IdeMessengerProvider } from "../../context/IdeMessenger";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
@@ -41,6 +42,54 @@ function renderForm(messenger = new MockIdeMessenger()) {
 }
 
 describe("ReportIssueModal", () => {
+  it("traps keyboard focus and restores the command trigger on close", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <IdeMessengerProvider messenger={messenger}>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open report
+          </button>
+          <button type="button">Underlying composer</button>
+          {open && (
+            <ReportIssueModal
+              sessionId="session-1"
+              brokerModel="codex-5-6-terra"
+              onClose={() => setOpen(false)}
+            />
+          )}
+        </IdeMessengerProvider>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Open report" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+      ),
+    );
+    expect(focusable.length).toBeGreaterThan(2);
+    focusable.at(-1)?.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(focusable[0]);
+    focusable[0].focus();
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(focusable.at(-1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Close issue report" }),
+    );
+    expect(trigger).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Underlying composer" }),
+    ).not.toHaveFocus();
+  });
+
   it("submits the form with a freshly reconstructed sanitized snapshot", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     const messenger = new MockIdeMessenger();

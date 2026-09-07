@@ -72,11 +72,40 @@ const PERSONAL_DATA_RULES: MaskRule[] = [
   { re: /\/(?:Users|home)\/[^/\s]+/g, replace: "/Users/[USER]" },
 ];
 
+// Report diagnostics are uploaded outside the user's machine.  Mask the
+// complete absolute path, not merely its account-name segment: project names,
+// customer names and repository layout are private too.  Single endpoint
+// paths such as `/tasks` deliberately remain readable.
+const LOCAL_PATH_RULES: MaskRule[] = [
+  {
+    re: /(["'])(?:(?:[A-Za-z]:\\|\\\\|\/(?:[A-Za-z0-9._~-]+\/)+)[^"'\r\n]+)\1/g,
+    replace: "$1[PATH]$1",
+  },
+  {
+    // An unquoted path can legally contain spaces. There is no reliable end
+    // delimiter in a free-form log line, so redact the safe superset through
+    // EOL instead of leaking the remaining project hierarchy.
+    re: /\b[A-Za-z]:\\[^\r\n"']+/g,
+    replace: "[PATH]",
+  },
+  {
+    re: /\\\\[^\\\r\n"']+\\[^\r\n"']+/g,
+    replace: "[PATH]",
+  },
+  {
+    re: /(?<![A-Za-z0-9:/])\/(?:[A-Za-z0-9._~-]+\/)+[^\r\n"']+/g,
+    replace: "[PATH]",
+  },
+];
+
 export function maskCukiiReportText(input: string): string {
   let output = input;
   for (const rule of SECRET_RULES)
     output = output.replace(rule.re, rule.replace);
   for (const rule of PERSONAL_DATA_RULES) {
+    output = output.replace(rule.re, rule.replace);
+  }
+  for (const rule of LOCAL_PATH_RULES) {
     output = output.replace(rule.re, rule.replace);
   }
   return output;

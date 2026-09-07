@@ -12,7 +12,14 @@ import type {
   CukiiIssueReportReceipt,
   CukiiIssueSeverity,
 } from "core/protocol/ideWebview";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import {
   captureCukiiChatSnapshot,
@@ -23,6 +30,7 @@ type ReportIssueModalProps = {
   sessionId: string;
   brokerModel: BrokerModel;
   onClose: () => void;
+  returnFocusRef?: RefObject<HTMLElement>;
 };
 
 type IssueDraft = {
@@ -43,6 +51,15 @@ const EMPTY_DRAFT: IssueDraft = {
   severity: "major",
 };
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 function readableBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -56,6 +73,7 @@ export function ReportIssueModal({
   sessionId,
   brokerModel,
   onClose,
+  returnFocusRef,
 }: ReportIssueModalProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   // Report text can itself contain secrets. Keep the draft only in component
@@ -75,6 +93,9 @@ export function ReportIssueModal({
   const submittingRef = useRef(false);
   const attachmentsRef = useRef<CukiiIssuePickedImage[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const resultCloseRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   attachmentsRef.current = attachments;
 
@@ -95,7 +116,6 @@ export function ReportIssueModal({
   }, []);
 
   useEffect(() => {
-    titleRef.current?.focus();
     void refreshSnapshot();
     void ideMessenger
       .request("cukii/prepareIssueReport", { sessionId, brokerModel })
@@ -105,8 +125,51 @@ export function ReportIssueModal({
   }, [brokerModel, ideMessenger, refreshSnapshot, sessionId]);
 
   useEffect(() => {
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    titleRef.current?.focus();
+    return () => {
+      const target = returnFocusRef?.current ?? previousFocusRef.current;
+      if (target?.isConnected) target.focus();
+    };
+  }, [returnFocusRef]);
+
+  useEffect(() => {
+    if (phase === "complete") resultCloseRef.current?.focus();
+  }, [phase]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && phase !== "submitting") onClose();
+      if (event.key === "Escape" && phase !== "submitting") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last || !dialog.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -199,6 +262,7 @@ export function ReportIssueModal({
       onMouseDown={close}
     >
       <section
+        ref={dialogRef}
         className="cukii-report-dialog flex flex-col overflow-hidden rounded-lg"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -240,6 +304,7 @@ export function ReportIssueModal({
               </p>
             )}
             <button
+              ref={resultCloseRef}
               type="button"
               className="cukii-report-primary"
               onClick={onClose}
@@ -440,7 +505,7 @@ export function ReportIssueModal({
 
             <footer className="cukii-report-footer">
               <span className="cukii-report-muted">
-                No token or local file path is included.
+                Secrets and absolute local paths are masked before upload.
               </span>
               <div className="flex items-center gap-2">
                 <button

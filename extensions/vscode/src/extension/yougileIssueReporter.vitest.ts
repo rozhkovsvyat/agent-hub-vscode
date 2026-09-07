@@ -34,6 +34,7 @@ afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
   }
   clearCukiiDiagnosticsForTest();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -176,6 +177,9 @@ describe("YougileIssueReporter", () => {
     recordCukiiDiagnostic("bridge.run.failed", {
       token: "super-secret-diagnostic-token",
       user: "qa@example.com",
+      windowsPath: "D:\\Brain\\clients\\secret\\a.ts",
+      uncPath: "\\\\fileserver\\customer-share\\private.log",
+      posixPath: "/srv/customer/acme/private.log",
     });
 
     const manualPath = path.join(fx.root, "qa@example.com.png");
@@ -199,6 +203,9 @@ describe("YougileIssueReporter", () => {
     );
     expect(diagnostics).not.toContain("super-secret-diagnostic-token");
     expect(diagnostics).not.toContain("qa@example.com");
+    expect(diagnostics).not.toContain("D:\\Brain\\clients");
+    expect(diagnostics).not.toContain("\\\\fileserver");
+    expect(diagnostics).not.toContain("/srv/customer");
 
     fx.setFailUploads(false);
     fx.advance(61_000);
@@ -227,6 +234,13 @@ describe("YougileIssueReporter", () => {
     expect(
       fx.calls.map((call) => String(call.body ?? "")).join("\n"),
     ).not.toContain("typed-secret-value");
+    const uploadedBodies = fx.calls
+      .filter((call) => call.url.endsWith("/upload-file"))
+      .map((call) => String(call.body ?? ""))
+      .join("\n");
+    expect(uploadedBodies).not.toContain("D:\\Brain\\clients");
+    expect(uploadedBodies).not.toContain("\\\\fileserver");
+    expect(uploadedBodies).not.toContain("/srv/customer");
   });
 
   it("schedules another bounded pass instead of stranding the third report", async () => {
@@ -294,5 +308,89 @@ describe("YougileIssueReporter", () => {
           call.method === "POST" && /\/chats\/task-1\/messages$/.test(call.url),
       ),
     ).toHaveLength(1);
+  });
+
+  it("cleans crash orphans before reading the durable outbox", async () => {
+    const fx = fixture();
+    const staged = path.join(
+      fx.root,
+      "staging",
+      ".staging-report-crash-123-dead-process",
+    );
+    fs.mkdirSync(staged, { recursive: true });
+    fs.writeFileSync(path.join(staged, "manual-0-private.png"), "private");
+
+    // Fault state produced by the legacy implementation when the process
+    // died after copyFile/diagnostics but before report.json was committed.
+    const legacyPending = path.join(fx.root, "pending", "report-legacy-crash");
+    fs.mkdirSync(legacyPending, { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyPending, "manual-0-private.png"),
+      "private",
+    );
+
+    await fx.reporter.flush();
+
+    expect(fs.existsSync(staged)).toBe(false);
+    expect(fs.existsSync(legacyPending)).toBe(false);
+    expect(fs.existsSync(path.join(fx.root, "pending", "report-crash"))).toBe(
+      false,
+    );
+  });
+
+  it("delivers valid reports when a stale staging file is locked", async () => {
+    const fx = fixture({ failUploads: true });
+    expect((await fx.reporter.submit(submission("report-valid"))).status).toBe(
+      "queued",
+    );
+    fx.setFailUploads(false);
+    fx.advance(61_000);
+
+    const locked = path.join(fx.root, "staging", ".staging-locked");
+    fs.mkdirSync(locked, { recursive: true });
+    fs.writeFileSync(path.join(locked, "manual-private.png"), "private");
+    const realRm = fs.promises.rm.bind(fs.promises);
+    vi.spyOn(fs.promises, "rm").mockImplementation(async (target, options) => {
+      if (String(target) === locked) {
+        throw Object.assign(new Error("locked"), { code: "EPERM" });
+      }
+      return realRm(target, options);
+    });
+
+    await expect(fx.reporter.flush()).resolves.toBeUndefined();
+    expect(fs.existsSync(locked)).toBe(true);
+    expect(
+      fx.calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/tasks"),
+      ),
+    ).toHaveLength(1);
+    expect(fs.existsSync(path.join(fx.root, "pending", "report-valid"))).toBe(
+      false,
+    );
+  });
+
+  it("retries cleanup after a staging file is unlocked without a new report", async () => {
+    vi.useFakeTimers();
+    const fx = fixture();
+    const locked = path.join(fx.root, "staging", ".staging-unlock-later");
+    fs.mkdirSync(locked, { recursive: true });
+    fs.writeFileSync(path.join(locked, "manual-private.png"), "private");
+    const realRm = fs.promises.rm.bind(fs.promises);
+    let lockedOnce = true;
+    vi.spyOn(fs.promises, "rm").mockImplementation(async (target, options) => {
+      if (String(target) === locked && lockedOnce) {
+        lockedOnce = false;
+        throw Object.assign(new Error("locked"), { code: "EPERM" });
+      }
+      return realRm(target, options);
+    });
+
+    fx.reporter.start();
+    await fx.reporter.flush();
+    expect(fs.existsSync(locked)).toBe(true);
+    fx.advance(30_100);
+    await vi.advanceTimersByTimeAsync(30_100);
+    await fx.reporter.flush();
+    expect(fs.existsSync(locked)).toBe(false);
   });
 });
