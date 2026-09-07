@@ -128,6 +128,27 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     },
   ],
   "cukii/pickAttachmentFiles": [],
+  "cukii/getIssueReportCapability": {
+    available: false,
+    reason: "not_authenticated",
+  },
+  "cukii/prepareIssueReport": {
+    extensionVersion: "0.0.0-dev",
+    operatingSystem: "Mock OS",
+    remote: "local",
+    workspace: ["mock-workspace"],
+    sessionId: "mock-session",
+    brokerModel: "codex-5-6-terra",
+    logLines: ["Mock sanitized diagnostic line"],
+  },
+  "cukii/pickIssueImages": [],
+  "cukii/releaseIssueImages": undefined,
+  "cukii/submitIssueReport": {
+    reportId: "mock-report-id",
+    status: "sent",
+    taskId: "mock-task-id",
+    message: "Report sent to the Cukii Bugs board.",
+  },
   "cukii/startVoiceRecording": {
     recordingId: "mock-recording",
     device: "Mock microphone",

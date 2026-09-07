@@ -620,6 +620,94 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(await getElementByText("(Medium)")).toBeDefined();
   });
 
+  it.each(["not_authenticated", "board_unavailable", "unreachable"] as const)(
+    "hides Report an issue when YouGile capability is %s",
+    async (reason) => {
+      const mockIdeMessenger = new MockIdeMessenger();
+      mockIdeMessenger.responses["cukii/getIssueReportCapability"] = {
+        available: false,
+        reason,
+      };
+      const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+        mockIdeMessenger,
+      });
+
+      await user.click(await getElementByTestId("broker-menu-button"));
+      await waitFor(() =>
+        expect(document.body.textContent).toContain("Manage accounts…"),
+      );
+      expect(document.body.textContent).not.toContain("Report an issue…");
+    },
+  );
+
+  it("shows Report an issue last only after board access is verified", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    const capabilityRequests: Array<{ force?: boolean } | undefined> = [];
+    mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
+      async (input) => {
+        capabilityRequests.push(input);
+        return {
+          available: true,
+          reason: "available",
+          accountLabel: "tester@example.com",
+        };
+      };
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+    });
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    const report = await getElementByTestId("cukii-report-issue-menu-item");
+    const menu = await getElementByTestId("cukii-slash-menu");
+    const actions = [
+      ...menu.querySelectorAll<HTMLElement>("[data-cukii-command-action]"),
+    ];
+    expect(report.textContent).toBe("Report an issue…");
+    expect(actions.at(-1)).toBe(report);
+    expect(
+      actions.findIndex(
+        (action) =>
+          action.getAttribute("data-cukii-command-action") ===
+          "Manage accounts",
+      ),
+    ).toBe(actions.length - 2);
+    expect(capabilityRequests.some((request) => request?.force)).toBe(true);
+
+    await user.click(report);
+    expect(await getElementByText("Report an issue")).toBeDefined();
+    expect(
+      document.querySelector('[data-testid="cukii-slash-menu"]'),
+    ).toBeNull();
+  });
+
+  it("fails closed while board access is revalidated", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    let available = true;
+    mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
+      async () =>
+        available
+          ? { available: true, reason: "available" }
+          : { available: false, reason: "board_unavailable" };
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+    });
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    expect(
+      await getElementByTestId("cukii-report-issue-menu-item"),
+    ).toBeDefined();
+    await user.keyboard("{Escape}");
+
+    available = false;
+    await user.click(await getElementByTestId("broker-menu-button"));
+    expect(
+      document.querySelector('[data-testid="cukii-report-issue-menu-item"]'),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(document.body.textContent).not.toContain("Report an issue…"),
+    );
+  });
+
   it("keeps the slash panel as a bounded overlay for narrow and long-label layouts", async () => {
     const { user } = await renderWithProviders(<InputToolbar {...props} />);
 

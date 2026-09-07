@@ -20,6 +20,7 @@ import type {
   CukiiBridgeRunCompletion,
   CukiiCancelReceipt,
   CukiiInboxReceipt,
+  CukiiIssueReportReceipt,
   CukiiPermissionMode,
   CukiiSteerReceipt,
 } from "core/protocol/ideWebview";
@@ -105,6 +106,8 @@ import {
   watchVendorAuthTransition,
 } from "./bridgeVendorAuth";
 import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
+import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
+import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
@@ -426,6 +429,7 @@ export class VsCodeMessenger {
     private readonly context: vscode.ExtensionContext,
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
+    const issueReporter = yougileIssueReporterForContext(context);
     this.webviewProtocol.onDispose((protocol) => {
       const run = this.bridgeRuns.activeFor(protocol);
       // Invalidate candidates already waiting behind this run before their
@@ -901,6 +905,35 @@ export class VsCodeMessenger {
     this.onWebview("cukii/listBrokerModelCatalog", async () => {
       return listBrokerModelCatalog();
     });
+    this.onWebview("cukii/getIssueReportCapability", async ({ data }) => {
+      return issueReporter.capability(data?.force === true);
+    });
+    this.onWebview("cukii/prepareIssueReport", async ({ data }) => {
+      return issueReporter.prepare(data.sessionId, data.brokerModel);
+    });
+    this.onWebview("cukii/pickIssueImages", async ({ data }) => {
+      const remaining = Math.max(0, Math.min(3, Math.trunc(data.remaining)));
+      if (remaining === 0) return [];
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: remaining > 1,
+        openLabel: "Attach screenshots",
+        title: "Attach screenshots to the Cukii issue report",
+        filters: { Images: ["png", "jpg", "jpeg", "webp", "gif"] },
+      });
+      return issueReporter.registerPickedImages(
+        (picked ?? []).slice(0, remaining).map((uri) => uri.fsPath),
+      );
+    });
+    this.onWebview("cukii/releaseIssueImages", ({ data }) => {
+      issueReporter.releasePickedImages(data.attachmentIds);
+    });
+    this.onWebview(
+      "cukii/submitIssueReport",
+      async ({ data }): Promise<CukiiIssueReportReceipt> =>
+        issueReporter.submit(data),
+    );
     this.onWebview("cukii/pickAttachmentFiles", async () => {
       const picked = await vscode.window.showOpenDialog({
         canSelectFiles: true,
@@ -1129,6 +1162,10 @@ export class VsCodeMessenger {
           this.removePermissionBroker(protocol, broker),
         steering,
         onToolActivity: (event) => {
+          recordCukiiDiagnostic(`bridge.tool.${event.kind}`, {
+            sessionId: msg.data.sessionId,
+            toolId: event.id,
+          });
           if (event.kind === "start") cancellation.toolStarted(event.id);
           else cancellation.toolFinished(event.id);
         },
@@ -1140,9 +1177,18 @@ export class VsCodeMessenger {
         },
         onTerminationResult: (terminated) => {
           terminationVerified = terminated;
+          recordCukiiDiagnostic("bridge.termination", {
+            sessionId: msg.data.sessionId,
+            terminated,
+          });
         },
         onChildSpawned: (pid) => {
           childPid = pid;
+          recordCukiiDiagnostic("bridge.child.spawned", {
+            sessionId: msg.data.sessionId,
+            model: msg.data.brokerModel,
+            pid,
+          });
           // The coordinator reclaims zombie slots by probing this pid.
           run.childPid = pid;
         },
@@ -1179,10 +1225,27 @@ export class VsCodeMessenger {
         // marker is dropped in `finally`, so an abort or a thrown stream frees
         // it just as a clean end does.
         cukiiSessionAttention.runStarted(run.sessionId, run.runId);
+        recordCukiiDiagnostic("bridge.run.started", {
+          sessionId: run.sessionId,
+          model: run.brokerModel,
+          runId: run.runId,
+        });
         try {
           return yield* stream;
+        } catch (error) {
+          recordCukiiDiagnostic("bridge.run.failed", {
+            sessionId: run.sessionId,
+            model: run.brokerModel,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
         } finally {
           cukiiSessionAttention.runEnded(run.sessionId, run.runId);
+          recordCukiiDiagnostic("bridge.run.finished", {
+            sessionId: run.sessionId,
+            model: run.brokerModel,
+            terminationVerified,
+          });
           resolveDone({ terminationVerified, childPid });
           if (terminationVerified) {
             messenger.bridgeRuns.release(protocol, run);

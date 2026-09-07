@@ -12,6 +12,7 @@ import {
 } from "core/cukiiPermissionModes";
 import {
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -46,13 +47,18 @@ import type {
   BrokerSubagent,
   CukiiPermissionMode,
 } from "../../redux/slices/sessionSlice";
-import type { BrokerVendorId, CukiiPickedFile } from "core/protocol/ideWebview";
+import type {
+  BrokerVendorId,
+  CukiiIssueReportCapability,
+  CukiiPickedFile,
+} from "core/protocol/ideWebview";
 import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
 import { saveCurrentSession } from "../../redux/thunks/session";
 import { isMetaEquivalentKeyPressed } from "../../util";
 import { ToolTip } from "../gui/Tooltip";
 import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
+import { ReportIssueModal } from "../reportIssue/ReportIssueModal";
 import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
 import {
   displayModelLabel,
@@ -152,6 +158,7 @@ function InputToolbar(props: InputToolbarProps) {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const historyLength = useAppSelector((state) => state.session.history.length);
   const brokerModel = useAppSelector((state) => state.session.brokerModel);
+  const sessionId = useAppSelector((state) => state.session.id);
   const brokerSubagent = useAppSelector(
     (state) => state.session.brokerSubagent,
   );
@@ -180,6 +187,10 @@ function InputToolbar(props: InputToolbarProps) {
     generation?: number;
   } | null>(null);
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
+  const [reportIssueOpen, setReportIssueOpen] = useState(false);
+  const [issueCapability, setIssueCapability] =
+    useState<CukiiIssueReportCapability>();
+  const issueCapabilityGeneration = useRef(0);
   const [actionQuery, setActionQuery] = useState("");
   const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
     null,
@@ -187,6 +198,41 @@ function InputToolbar(props: InputToolbarProps) {
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const primaryActionsRef = useRef<HTMLDivElement | null>(null);
   const [modelPillOnOwnRow, setModelPillOnOwnRow] = useState(false);
+
+  const refreshIssueCapability = useCallback(
+    async (force = false) => {
+      if (!props.isMainInput) return;
+      const generation = ++issueCapabilityGeneration.current;
+      // Fail closed while a forced board-access check is in flight. Keeping a
+      // previously successful capability here would briefly expose the action
+      // after the owner revoked the board share.
+      if (force) setIssueCapability(undefined);
+      try {
+        const response = await ideMessenger.request(
+          "cukii/getIssueReportCapability",
+          { force },
+        );
+        if (
+          generation === issueCapabilityGeneration.current &&
+          response.status === "success"
+        ) {
+          setIssueCapability(response.content);
+        }
+      } catch {
+        if (generation === issueCapabilityGeneration.current) {
+          setIssueCapability({ available: false, reason: "unreachable" });
+        }
+      }
+    },
+    [ideMessenger, props.isMainInput],
+  );
+
+  useEffect(() => {
+    void refreshIssueCapability();
+    return () => {
+      issueCapabilityGeneration.current += 1;
+    };
+  }, [refreshIssueCapability]);
 
   useEffect(() => {
     let cancelled = false;
@@ -502,6 +548,7 @@ function InputToolbar(props: InputToolbarProps) {
                 onClick={() => {
                   setActionQuery("");
                   setActiveCommandAction(null);
+                  void refreshIssueCapability(true);
                 }}
                 className="cukii-icon-button flex items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
                 aria-label="Commands and model"
@@ -675,11 +722,29 @@ function InputToolbar(props: InputToolbarProps) {
                       <button
                         {...commandActionProps("Manage accounts")}
                         type="button"
-                        onClick={() => setVendorAccountsOpen(true)}
+                        onClick={() => {
+                          close();
+                          setVendorAccountsOpen(true);
+                        }}
                       >
                         Manage accounts…
                       </button>
                     )}
+                    {props.isMainInput &&
+                      issueCapability?.available &&
+                      showAction("Report an issue") && (
+                        <button
+                          data-testid="cukii-report-issue-menu-item"
+                          {...commandActionProps("Report an issue")}
+                          type="button"
+                          onClick={() => {
+                            close();
+                            setReportIssueOpen(true);
+                          }}
+                        >
+                          Report an issue…
+                        </button>
+                      )}
                   </div>
                 )}
               </PopoverPanel>
@@ -822,7 +887,22 @@ function InputToolbar(props: InputToolbarProps) {
         />
       )}
       {vendorAccountsOpen && (
-        <VendorAccountsModal onClose={() => setVendorAccountsOpen(false)} />
+        <VendorAccountsModal
+          onClose={() => {
+            setVendorAccountsOpen(false);
+            void refreshIssueCapability(true);
+          }}
+        />
+      )}
+      {reportIssueOpen && (
+        <ReportIssueModal
+          sessionId={sessionId}
+          brokerModel={currentModel}
+          onClose={() => {
+            setReportIssueOpen(false);
+            void refreshIssueCapability(true);
+          }}
+        />
       )}
     </>
   );

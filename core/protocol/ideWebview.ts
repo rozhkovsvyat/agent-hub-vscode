@@ -164,6 +164,62 @@ export type CukiiPickedFile = {
   name: string;
 };
 
+export type CukiiIssueSeverity = "blocker" | "major" | "minor" | "cosmetic";
+
+export type CukiiIssueReportCapability = {
+  available: boolean;
+  reason:
+    | "available"
+    | "not_authenticated"
+    | "board_unavailable"
+    | "unreachable";
+  accountLabel?: string;
+};
+
+/** Opaque host-approved image. The webview never receives a filesystem path. */
+export type CukiiIssuePickedImage = {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  previewDataUrl: string;
+};
+
+export type CukiiIssueDiagnosticsPreview = {
+  extensionVersion: string;
+  operatingSystem: string;
+  remote: string;
+  workspace: string[];
+  sessionId: string;
+  brokerModel: BrokerModel;
+  logLines: string[];
+};
+
+export type CukiiIssueReportSubmission = {
+  reportId: string;
+  title: string;
+  stepsToReproduce: string;
+  expectedResult: string;
+  actualResult: string;
+  severity: CukiiIssueSeverity;
+  sessionId: string;
+  brokerModel: BrokerModel;
+  attachmentIds: string[];
+  snapshot?: {
+    pngBase64: string;
+    width: number;
+    height: number;
+    sanitizer: "cukii-report-v1";
+  };
+};
+
+export type CukiiIssueReportReceipt = {
+  reportId: string;
+  status: "sent" | "queued";
+  taskId?: string;
+  message: string;
+};
+
 export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   openUrl: [string, void];
   applyToFile: [ApplyToFilePayload, void];
@@ -244,6 +300,20 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/listVendorAccounts": [undefined, BrokerVendorAuthStatus[]];
   "cukii/listBrokerModelCatalog": [undefined, BrokerVendorModelCatalog[]];
   "cukii/pickAttachmentFiles": [undefined, CukiiPickedFile[]];
+  "cukii/getIssueReportCapability": [
+    { force?: boolean } | undefined,
+    CukiiIssueReportCapability,
+  ];
+  "cukii/prepareIssueReport": [
+    { sessionId: string; brokerModel: BrokerModel },
+    CukiiIssueDiagnosticsPreview,
+  ];
+  "cukii/pickIssueImages": [{ remaining: number }, CukiiIssuePickedImage[]];
+  "cukii/releaseIssueImages": [{ attachmentIds: string[] }, void];
+  "cukii/submitIssueReport": [
+    CukiiIssueReportSubmission,
+    CukiiIssueReportReceipt,
+  ];
   "cukii/startVoiceRecording": [
     { recordingId: string },
     { recordingId: string; device: string },

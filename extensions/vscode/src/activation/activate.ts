@@ -2,6 +2,7 @@ import { getContinueRcPath, getTsConfigPath } from "core/util/paths";
 import * as vscode from "vscode";
 
 import { VsCodeExtension } from "../extension/VsCodeExtension";
+import { startYougileIssueOutbox } from "../extension/yougileIssueReporterVscode";
 import { isUnsupportedPlatform } from "../util/util";
 
 import { GlobalContext } from "core/util/GlobalContext";
@@ -35,6 +36,10 @@ export async function activateExtension(context: vscode.ExtensionContext) {
 
   const vscodeExtension = new VsCodeExtension(context);
   activeExtension = vscodeExtension;
+  // A report survives extension/window restarts in globalStorage. Start the
+  // single delivery worker at activation rather than waiting for the chat
+  // webview to be opened again.
+  context.subscriptions.push(startYougileIssueOutbox(context));
 
   // Load Continue configuration
   if (!context.globalState.get("hasBeenInstalled")) {

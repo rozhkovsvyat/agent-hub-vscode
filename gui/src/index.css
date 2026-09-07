@@ -1045,6 +1045,403 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
   user-select: text;
 }
 
+/* Report-an-issue follows the same compact VS Code/Claude surface language as
+   Accounts and the model picker.  The report body alone scrolls; its title and
+   actions remain reachable even when the webview is short. */
+.cukii-report-overlay {
+  background: rgb(0 0 0 / 75%);
+}
+
+.cukii-report-dialog {
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  border: 1px solid
+    var(--vscode-sideBarActivityBarTop-border, var(--vscode-widget-border));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 38%);
+  font-family: var(--vscode-chat-font-family, var(--vscode-font-family));
+  font-size: var(--vscode-chat-font-size, 13px);
+  line-height: 19.5px;
+}
+
+.cukii-report-header {
+  min-height: 48px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+}
+
+.cukii-report-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.cukii-report-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 13px;
+  overflow-y: auto;
+  padding: 14px;
+  scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+  scrollbar-width: thin;
+}
+
+.cukii-report-intro,
+.cukii-report-error,
+.cukii-report-muted,
+.cukii-report-result p,
+.cukii-report-diagnostics p {
+  margin: 0;
+}
+
+.cukii-report-intro,
+.cukii-report-muted {
+  color: var(--vscode-descriptionForeground);
+}
+
+.cukii-report-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cukii-report-field > span,
+.cukii-report-assets-heading strong {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.cukii-report-field > span strong {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.cukii-report-field input,
+.cukii-report-field textarea,
+.cukii-report-field select {
+  width: 100%;
+  box-sizing: border-box;
+  appearance: none;
+  border: 1px solid var(--vscode-input-border, rgb(204 204 204 / 20%));
+  border-radius: 3px;
+  outline: none;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+}
+
+.cukii-report-field input,
+.cukii-report-field select {
+  height: 28px;
+  padding: 3px 8px;
+}
+
+.cukii-report-field select {
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 11px,
+    calc(100% - 9px) 11px;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+}
+
+.cukii-report-field textarea {
+  min-height: 66px;
+  max-height: 140px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.cukii-report-field input:focus,
+.cukii-report-field textarea:focus,
+.cukii-report-field select:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+.cukii-report-field input:disabled,
+.cukii-report-field textarea:disabled,
+.cukii-report-field select:disabled {
+  opacity: 0.62;
+}
+
+.cukii-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 180px);
+}
+
+.cukii-report-assets {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+.cukii-report-assets-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cukii-report-assets-heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.cukii-report-assets-heading span {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.cukii-report-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+}
+
+.cukii-report-preview-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+  border-radius: 5px;
+  background: var(--vscode-editor-background);
+}
+
+.cukii-report-preview-image {
+  display: flex;
+  height: 88px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  background: rgb(127 127 127 / 8%);
+  font-size: 11px;
+}
+
+.cukii-report-preview-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cukii-report-preview-caption {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px 3px 2px 7px;
+}
+
+.cukii-report-preview-caption > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cukii-report-diagnostics {
+  border: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+  border-radius: 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.cukii-report-diagnostics summary {
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+  font-weight: 500;
+  user-select: none;
+}
+
+.cukii-report-diagnostics > div,
+.cukii-report-diagnostics > p {
+  padding: 0 8px 8px;
+}
+
+.cukii-report-diagnostics dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0 0 8px;
+}
+
+.cukii-report-diagnostics dt {
+  font-weight: 600;
+}
+
+.cukii-report-diagnostics dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cukii-report-diagnostics pre {
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  padding: 7px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgb(0 0 0 / 18%));
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cukii-report-footer {
+  display: flex;
+  min-height: 50px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px 9px 14px;
+  border-top: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+}
+
+.cukii-report-primary,
+.cukii-report-secondary,
+.cukii-report-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cukii-report-primary,
+.cukii-report-secondary {
+  min-height: 28px;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.cukii-report-primary {
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+.cukii-report-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.cukii-report-secondary {
+  border: 1px solid var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.cukii-report-secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.cukii-report-primary:focus-visible,
+.cukii-report-secondary:focus-visible,
+.cukii-report-icon-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.cukii-report-primary:disabled,
+.cukii-report-secondary:disabled,
+.cukii-report-icon-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.cukii-report-secondary svg {
+  width: 15px;
+  height: 15px;
+}
+
+.cukii-report-icon-button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+
+.cukii-report-icon-button:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.cukii-report-icon-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cukii-report-error {
+  padding: 7px 8px;
+  border-left: 2px solid var(--vscode-errorForeground, #f48771);
+  color: var(--vscode-errorForeground, #f48771);
+  background: rgb(244 135 113 / 8%);
+  overflow-wrap: anywhere;
+}
+
+.cukii-report-result {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 28px;
+  text-align: center;
+}
+
+.cukii-report-result h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cukii-report-result-mark {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--vscode-testing-iconPassed, #73c991);
+  background: rgb(115 201 145 / 12%);
+  font-size: 22px;
+}
+
+@media (max-width: 440px) {
+  .cukii-report-dialog {
+    margin: 12px;
+    max-height: calc(100vh - 24px);
+  }
+
+  .cukii-report-footer,
+  .cukii-report-assets-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cukii-report-footer > div {
+    align-self: flex-end;
+  }
+}
+
 .cukii-account-section-title {
   margin: 0;
   color: var(--vscode-foreground);
