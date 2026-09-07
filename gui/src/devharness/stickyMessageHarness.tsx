@@ -39,6 +39,18 @@ const LONG_PROMPT =
   );
 const IMAGE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect width='320' height='180' fill='%23d97757'/%3E%3Ccircle cx='160' cy='90' r='42' fill='%23121314'/%3E%3C/svg%3E";
+// A tall code block is the only way to reproduce the reported overlap: its own
+// `Apply` toolbar pins to the top of the scrollport while the prompt above is
+// still sticky, so the two layers genuinely compete for the same band.
+const CODE_ANSWER = [
+  "Running it now:",
+  "",
+  "```ts",
+  ...Array.from({ length: 40 }, (_, index) => `const step${index} = ${index};`),
+  "```",
+  "",
+  LONG_ANSWER,
+].join("\n");
 
 const HISTORY = [
   {
@@ -115,6 +127,19 @@ const HISTORY = [
       role: "assistant",
       content: LONG_ANSWER,
     },
+    contextItems: [],
+  },
+  {
+    message: {
+      id: "sticky-code",
+      role: "user",
+      content: "Purge the request",
+    },
+    contextItems: [],
+    messageReceipt: { sentAt: SENT_AT + 100_000, status: "read" },
+  },
+  {
+    message: { id: "answer-code", role: "assistant", content: CODE_ANSWER },
     contextItems: [],
   },
   {

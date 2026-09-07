@@ -2115,12 +2115,18 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
+/* Transcript layer scale. Upstream code-block and tool-call headers ship as
+   `sticky -top-2 z-10`, so a capsule at the old z-index 2 was painted over by
+   the answer's own `Apply` toolbar as it scrolled underneath. The capsule must
+   outrank every sticky element that scrolls beneath it, yet stay under the
+   composer shell (z-index 20); `.cukii-transcript`'s isolate guarantees the
+   second half, so these numbers can never leak into the page's overlays. */
 .cukii-user-row--sticky {
   --cukii-user-row-padding-top: 14px;
   --cukii-user-row-padding-bottom: 12px;
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 15;
   align-items: stretch;
   margin: 0;
   padding-top: var(--cukii-user-row-padding-top);
@@ -2136,7 +2142,7 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-user-row--sticky:has([aria-expanded="true"]) {
-  z-index: 3;
+  z-index: 16;
 }
 
 .cukii-user-row--sticky .cukii-user-message,
