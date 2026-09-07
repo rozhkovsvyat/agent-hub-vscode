@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CukiiIssueReportSubmission } from "core/protocol/ideWebview";
 import { useState } from "react";
@@ -42,6 +48,26 @@ function renderForm(messenger = new MockIdeMessenger()) {
 }
 
 describe("ReportIssueModal", () => {
+  it("ignores the second press from a double-click that opened the form", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const { onClose } = renderForm();
+    const dialog = screen.getByRole("dialog");
+    const title = screen.getByPlaceholderText(
+      "A short description of the problem",
+    );
+
+    await screen.findByAltText("Sanitized Cukii chat preview");
+    await screen.findByText(/1 sanitized diagnostic lines collected/i);
+    expect(title).toHaveFocus();
+    const footer = dialog.querySelector(".cukii-report-footer")!;
+    expect(fireEvent.mouseDown(footer, { detail: 2 })).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(title).toHaveFocus();
+
+    fireEvent.mouseDown(dialog, { detail: 1 });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("traps keyboard focus and restores the command trigger on close", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     const messenger = new MockIdeMessenger();
@@ -166,5 +192,25 @@ describe("ReportIssueModal", () => {
     await screen.findByText("Canvas unavailable");
     expect(screen.getByRole("button", { name: "Send report" })).toBeDisabled();
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("states that the complete refreshed diagnostic set is attached", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    messenger.responses["cukii/prepareIssueReport"] = {
+      extensionVersion: "2.0.110",
+      operatingSystem: "Mock OS",
+      remote: "ssh-remote",
+      workspace: ["mock-workspace"],
+      sessionId: "session-1",
+      brokerModel: "codex-5-6-terra",
+      logLines: Array.from({ length: 37 }, (_, index) => `event-${index}`),
+    };
+    renderForm(messenger);
+
+    expect(
+      await screen.findByText(/37 sanitized diagnostic lines collected/i),
+    ).toHaveTextContent(/attaches the full set as cukii-diagnostics\.txt/i);
+    expect(screen.getByText(/event-36/)).toBeInTheDocument();
   });
 });

@@ -23,6 +23,13 @@ export class BridgeSteeringController {
   private inFlight: PendingSteer | undefined;
   /** Inputs accepted by stdin but not yet explicitly echoed by the vendor. */
   private readonly awaitingVendorEcho: SteerMessage[] = [];
+  /**
+   * Echo-less transports acknowledge inside their async writer callback,
+   * before `flush()` receives the successful writer result. Remember that
+   * exact in-flight id so `flush()` does not put an already-read envelope
+   * back into the echo ledger.
+   */
+  private readonly acknowledgedInFlightWrites = new Set<string>();
   private closed = false;
   private flushing = false;
 
@@ -63,6 +70,7 @@ export class BridgeSteeringController {
     this.closed = true;
     this.writer = undefined;
     this.awaitingVendorEcho.length = 0;
+    this.acknowledgedInFlightWrites.clear();
     if (this.inFlight) {
       this.inFlight.resolve(this.deferred(this.inFlight.message));
     }
@@ -98,11 +106,20 @@ export class BridgeSteeringController {
    * adapter can paint the read receipt, and unblock equal-text follow-ups.
    */
   acknowledgeWritten(messageId: string): boolean {
+    if (this.closed) return false;
     const index = this.awaitingVendorEcho.findIndex(
       (message) => message.messageId === messageId,
     );
-    if (index < 0) return false;
-    this.awaitingVendorEcho.splice(index, 1);
+    if (index >= 0) {
+      this.awaitingVendorEcho.splice(index, 1);
+    } else if (
+      this.inFlight?.message.messageId === messageId &&
+      !this.acknowledgedInFlightWrites.has(messageId)
+    ) {
+      this.acknowledgedInFlightWrites.add(messageId);
+    } else {
+      return false;
+    }
     void this.flush();
     return true;
   }
@@ -135,13 +152,18 @@ export class BridgeSteeringController {
           delivered = false;
         }
         if (delivered && !this.closed) {
-          this.awaitingVendorEcho.push(pending.message);
+          if (
+            !this.acknowledgedInFlightWrites.delete(pending.message.messageId)
+          ) {
+            this.awaitingVendorEcho.push(pending.message);
+          }
           pending.resolve({
             messageId: pending.message.messageId,
             sessionId: this.sessionId,
             status: "delivered",
           });
         } else {
+          this.acknowledgedInFlightWrites.delete(pending.message.messageId);
           pending.resolve(this.deferred(pending.message));
         }
         if (this.inFlight === pending) this.inFlight = undefined;

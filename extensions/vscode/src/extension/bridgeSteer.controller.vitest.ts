@@ -212,4 +212,29 @@ describe("BridgeSteeringController", () => {
     await expect(second).resolves.toMatchObject({ status: "delivered" });
     expect(writes).toEqual(["same text", "same text"]);
   });
+
+  it("acknowledges the active Claude stdin write in the writer callback", async () => {
+    const acknowledgements: boolean[] = [];
+    const controller = new BridgeSteeringController("session-1", true);
+    controller.attachWriter(async (message) => {
+      // This is the real adapter order: Node invokes the successful
+      // child.stdin.write callback before BridgeSteeringController.flush()
+      // receives the writer result.
+      acknowledgements.push(controller.acknowledgeWritten(message.messageId));
+      return true;
+    });
+
+    await expect(
+      controller.deliver({
+        messageId: "live-follow-up",
+        sessionId: "session-1",
+        content: "read this while the run is active",
+      }),
+    ).resolves.toMatchObject({ status: "delivered" });
+
+    expect(acknowledgements).toEqual([true]);
+    expect(
+      controller.consumeVendorEcho("read this while the run is active"),
+    ).toBeUndefined();
+  });
 });

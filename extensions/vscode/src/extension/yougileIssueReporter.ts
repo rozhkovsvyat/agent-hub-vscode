@@ -266,6 +266,10 @@ export class YougileIssueReporter {
   start(): void {
     if (this.started) return;
     this.started = true;
+    // Warm the board-access capability at extension activation, before the
+    // user can open the command menu. The webview's mount-time request can
+    // then reuse this in-flight/cached result instead of making the menu wait.
+    void this.capability().catch(() => undefined);
     void this.flush();
   }
 
@@ -435,7 +439,10 @@ export class YougileIssueReporter {
       workspace: this.host.workspace().map(maskCukiiReportText),
       sessionId,
       brokerModel,
-      logLines: lines.slice(-20),
+      // The dialog is itself scrollable; returning the complete sanitized
+      // collection makes the preview honest. Submission refreshes this same
+      // collection and persists it as cukii-diagnostics.txt.
+      logLines: lines,
     };
   }
 

@@ -77,6 +77,8 @@ import {
 } from "../cukii/CukiiAutocompactRow";
 import { PermissionModeControl } from "./PermissionModeControl";
 
+const ISSUE_CAPABILITY_REFRESH_MS = 60_000;
+
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
   hideImageUpload?: boolean;
@@ -106,7 +108,7 @@ const commandSectionHeaderClass =
 const commandSectionDividerClass =
   "cukii-command-section-divider mx-0 my-1 border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)]";
 const activeCommandItemClass =
-  "cukii-command-menu-item-active bg-[var(--vscode-menu-selectionBackground)] text-[var(--vscode-menu-selectionForeground)] hover:bg-[var(--vscode-menu-selectionBackground)]";
+  "cukii-command-menu-item-active bg-[var(--vscode-list-activeSelectionBackground)] text-[var(--vscode-list-activeSelectionForeground)]";
 
 function CommandSectionHeader(props: { children: string; divided?: boolean }) {
   return (
@@ -190,6 +192,8 @@ function InputToolbar(props: InputToolbarProps) {
   const [reportIssueOpen, setReportIssueOpen] = useState(false);
   const [issueCapability, setIssueCapability] =
     useState<CukiiIssueReportCapability>();
+  const [reportIssueAvailableForOpenMenu, setReportIssueAvailableForOpenMenu] =
+    useState(false);
   const issueCapabilityGeneration = useRef(0);
   const [actionQuery, setActionQuery] = useState("");
   const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
@@ -204,10 +208,6 @@ function InputToolbar(props: InputToolbarProps) {
     async (force = false) => {
       if (!props.isMainInput) return;
       const generation = ++issueCapabilityGeneration.current;
-      // Fail closed while a forced board-access check is in flight. Keeping a
-      // previously successful capability here would briefly expose the action
-      // after the owner revoked the board share.
-      if (force) setIssueCapability(undefined);
       try {
         const response = await ideMessenger.request(
           "cukii/getIssueReportCapability",
@@ -230,7 +230,19 @@ function InputToolbar(props: InputToolbarProps) {
 
   useEffect(() => {
     void refreshIssueCapability();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        void refreshIssueCapability();
+      }
+    };
+    const interval = window.setInterval(
+      refreshWhenVisible,
+      ISSUE_CAPABILITY_REFRESH_MS,
+    );
+    window.addEventListener("focus", refreshWhenVisible);
     return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
       issueCapabilityGeneration.current += 1;
     };
   }, [refreshIssueCapability]);
@@ -426,7 +438,7 @@ function InputToolbar(props: InputToolbarProps) {
   useEffect(() => setActiveCommandAction(null), [actionQuery]);
   const commandActionProps = (label: string) => ({
     "data-cukii-command-action": label,
-    className: `${menuItemClass} ${activeCommandAction === label ? activeCommandItemClass : ""}`,
+    className: `${menuItemClass} cukii-command-menu-action ${activeCommandAction === label ? activeCommandItemClass : ""}`,
     onMouseEnter: () => setActiveCommandAction(label),
     onMouseLeave: (event: ReactMouseEvent<HTMLButtonElement>) => {
       if (document.activeElement !== event.currentTarget) {
@@ -550,7 +562,13 @@ function InputToolbar(props: InputToolbarProps) {
                 onClick={() => {
                   setActionQuery("");
                   setActiveCommandAction(null);
-                  void refreshIssueCapability(true);
+                  // Freeze membership for this opening. Capability probes run
+                  // ahead of the interaction and replace state atomically; an
+                  // async response must never insert/remove a row underneath
+                  // the pointer while the menu is already open.
+                  setReportIssueAvailableForOpenMenu(
+                    issueCapability?.available === true,
+                  );
                 }}
                 className="cukii-icon-button flex items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
                 aria-label="Commands and model"
@@ -733,7 +751,7 @@ function InputToolbar(props: InputToolbarProps) {
                       </button>
                     )}
                     {props.isMainInput &&
-                      issueCapability?.available &&
+                      reportIssueAvailableForOpenMenu &&
                       showAction("Report an issue") && (
                         <button
                           data-testid="cukii-report-issue-menu-item"

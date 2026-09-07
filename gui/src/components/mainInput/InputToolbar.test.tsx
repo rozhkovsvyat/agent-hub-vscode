@@ -644,7 +644,7 @@ describe("Cukii Claude-parity input toolbar", () => {
     },
   );
 
-  it("shows Report an issue last only after board access is verified", async () => {
+  it("shows Report an issue last from the prefetched board capability", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     const capabilityRequests: Array<{ force?: boolean } | undefined> = [];
     mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
@@ -660,6 +660,7 @@ describe("Cukii Claude-parity input toolbar", () => {
       mockIdeMessenger,
     });
 
+    await waitFor(() => expect(capabilityRequests).toHaveLength(1));
     await user.click(await getElementByTestId("broker-menu-button"));
     const report = await getElementByTestId("cukii-report-issue-menu-item");
     const menu = await getElementByTestId("cukii-slash-menu");
@@ -675,7 +676,7 @@ describe("Cukii Claude-parity input toolbar", () => {
           "Manage accounts",
       ),
     ).toBe(actions.length - 2);
-    expect(capabilityRequests.some((request) => request?.force)).toBe(true);
+    expect(capabilityRequests).toEqual([{ force: false }]);
 
     await user.click(report);
     expect(await getElementByText("Report an issue")).toBeDefined();
@@ -684,32 +685,41 @@ describe("Cukii Claude-parity input toolbar", () => {
     ).toBeNull();
   });
 
-  it("fails closed while board access is revalidated", async () => {
+  it("never inserts or removes Report an issue while the menu is open", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     let available = true;
+    const capabilityRequests: Array<{ force?: boolean } | undefined> = [];
     mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
-      async () =>
-        available
+      async (input) => {
+        capabilityRequests.push(input);
+        return available
           ? { available: true, reason: "available" }
           : { available: false, reason: "board_unavailable" };
+      };
     const { user } = await renderWithProviders(<InputToolbar {...props} />, {
       mockIdeMessenger,
     });
 
+    await waitFor(() => expect(capabilityRequests).toHaveLength(1));
     await user.click(await getElementByTestId("broker-menu-button"));
     expect(
       await getElementByTestId("cukii-report-issue-menu-item"),
     ).toBeDefined();
-    await user.keyboard("{Escape}");
 
     available = false;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(capabilityRequests).toHaveLength(2));
+    // The refreshed capability is unavailable, but the already open menu is
+    // immutable and therefore cannot jump underneath the pointer.
+    expect(
+      document.querySelector('[data-testid="cukii-report-issue-menu-item"]'),
+    ).not.toBeNull();
+
+    await user.keyboard("{Escape}");
     await user.click(await getElementByTestId("broker-menu-button"));
     expect(
       document.querySelector('[data-testid="cukii-report-issue-menu-item"]'),
     ).toBeNull();
-    await waitFor(() =>
-      expect(document.body.textContent).not.toContain("Report an issue…"),
-    );
   });
 
   it("keeps the slash panel as a bounded overlay for narrow and long-label layouts", async () => {
@@ -778,16 +788,12 @@ describe("Cukii Claude-parity input toolbar", () => {
 
   it("uses one blue active row for mouse and roving keyboard selection", async () => {
     document.documentElement.style.setProperty(
-      "--vscode-menu-selectionBackground",
-      "#123456",
-    );
-    document.documentElement.style.setProperty(
-      "--vscode-menu-selectionForeground",
-      "#ffffff",
-    );
-    document.documentElement.style.setProperty(
       "--vscode-list-activeSelectionBackground",
-      "#654321",
+      "#04395e",
+    );
+    document.documentElement.style.setProperty(
+      "--vscode-list-activeSelectionForeground",
+      "#ffffff",
     );
     const { user } = await renderWithProviders(<InputToolbar {...props} />);
     await user.click(await getElementByTestId("broker-menu-button"));
@@ -806,12 +812,14 @@ describe("Cukii Claude-parity input toolbar", () => {
     // The component carries the active semantic class; assert the canonical
     // stylesheet rule because this harness does not mount application CSS.
     const css = canonicalCss();
-    expect(css).toContain(".cukii-command-menu-item-active,");
+    expect(first).toHaveClass("cukii-command-menu-action");
+    expect(css).toContain(".cukii-menu-item.cukii-command-menu-item-active,");
+    expect(css).toContain("--vscode-list-activeSelectionBackground,");
     expect(css).toContain(
-      "background: var(--vscode-menu-selectionBackground) !important;",
+      "color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;",
     );
     expect(css).toContain(
-      "color: var(--vscode-menu-selectionForeground) !important;",
+      ".cukii-menu-item.cukii-command-menu-action:hover:not(:disabled),",
     );
     fireEvent.keyDown(first, { key: "ArrowDown" });
     expect(document.activeElement).toHaveAttribute(
@@ -835,13 +843,10 @@ describe("Cukii Claude-parity input toolbar", () => {
       document.querySelector('[data-testid="cukii-slash-menu"]'),
     ).toBeNull();
     document.documentElement.style.removeProperty(
-      "--vscode-menu-selectionBackground",
-    );
-    document.documentElement.style.removeProperty(
-      "--vscode-menu-selectionForeground",
-    );
-    document.documentElement.style.removeProperty(
       "--vscode-list-activeSelectionBackground",
+    );
+    document.documentElement.style.removeProperty(
+      "--vscode-list-activeSelectionForeground",
     );
   });
 });

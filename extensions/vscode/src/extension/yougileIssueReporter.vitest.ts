@@ -157,6 +157,42 @@ function fixture(
 }
 
 describe("YougileIssueReporter", () => {
+  it("prewarms board capability when the extension worker starts", async () => {
+    const fx = fixture();
+
+    fx.reporter.start();
+
+    await vi.waitFor(() => {
+      expect(fx.calls.some((call) => call.url.includes("/boards?"))).toBe(true);
+    });
+    const callsAfterWarmup = fx.calls.length;
+    await expect(fx.reporter.capability()).resolves.toMatchObject({
+      available: true,
+      reason: "available",
+    });
+    expect(fx.calls).toHaveLength(callsAfterWarmup);
+  });
+
+  it("previews the complete sanitized diagnostic collection", async () => {
+    const fx = fixture();
+    for (let index = 0; index < 35; index++) {
+      recordCukiiDiagnostic("bridge.test", { index });
+    }
+
+    const preview = await fx.reporter.prepare(
+      "session-test",
+      "codex-5-6-terra",
+    );
+
+    expect(preview.logLines.length).toBeGreaterThan(35);
+    expect(preview.logLines).toContainEqual(
+      expect.stringContaining('"index":0'),
+    );
+    expect(preview.logLines).toContainEqual(
+      expect.stringContaining('"index":34'),
+    );
+  });
+
   it("exposes Report an issue only when the exact Cukii Bugs board is visible", async () => {
     const unavailable = fixture({ boardVisible: false });
     await expect(unavailable.reporter.capability(true)).resolves.toEqual({

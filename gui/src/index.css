@@ -1832,10 +1832,16 @@ button.cukii-submit-button--stop:active {
   box-shadow: 0 0 0 1px var(--cukii-primary-action-background-hover) !important;
 }
 
-.cukii-command-menu-item-active,
-.cukii-command-menu-item-active:hover {
-  background: var(--vscode-menu-selectionBackground) !important;
-  color: var(--vscode-menu-selectionForeground) !important;
+.cukii-command-menu
+  .cukii-menu-item.cukii-command-menu-action:hover:not(:disabled),
+.cukii-command-menu .cukii-menu-item.cukii-command-menu-item-active,
+.cukii-command-menu
+  .cukii-menu-item.cukii-command-menu-item-active:hover:not(:disabled) {
+  /* Claude applies one list-active color from the first hover frame. Using a
+     generic list-hover utility first caused a light flash before React added
+     the blue roving-selection class. */
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
 }
 
 .thread-message {
@@ -2127,10 +2133,22 @@ button.cukii-submit-button--stop:active {
 
 .cukii-user-row--sticky .cukii-user-message,
 .cukii-user-row--sticky .cukii-user-message-bubble {
-  display: block;
-  width: 100%;
-  max-width: none;
   box-sizing: border-box;
+}
+
+/* Sticky positioning must not erase MAX's right-lane width cap. The previous
+   width:100%/max-width:none override turned long single-line prompts into a
+   full-transcript orange strip. */
+.cukii-user-row--sticky .cukii-user-message {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 70%;
+}
+
+.cukii-user-row--sticky .cukii-user-message-bubble {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
 }
 
 /* MAX-style grouping: adjacent user turns sit almost flush; only groups get

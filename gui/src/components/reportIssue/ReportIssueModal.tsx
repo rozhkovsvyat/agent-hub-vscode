@@ -18,6 +18,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
@@ -96,6 +97,7 @@ export function ReportIssueModal({
   const dialogRef = useRef<HTMLElement>(null);
   const resultCloseRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const openedAtRef = useRef(Date.now());
 
   attachmentsRef.current = attachments;
 
@@ -196,6 +198,30 @@ export function ReportIssueModal({
     if (phase !== "submitting") onClose();
   };
 
+  const closeFromBackdrop = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    // A double-click on the command-menu item mounts the dialog between the
+    // first and second press. That second press lands on the new backdrop and
+    // must not immediately close the form or steal focus from its first field.
+    if (event.detail > 1) {
+      event.preventDefault();
+      return;
+    }
+    close();
+  };
+
+  const suppressOpeningDoubleClick = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (event.detail > 1 && Date.now() - openedAtRef.current < 500) {
+      // The second press may land anywhere in the newly mounted dialog (the
+      // footer occupies the command item's old screen coordinates). Prevent
+      // its default focus transfer, but keep ordinary later double-click text
+      // selection intact.
+      event.preventDefault();
+    }
+  };
+
   const pickImages = async () => {
     setAttachmentError(undefined);
     const response = await ideMessenger.request("cukii/pickIssueImages", {
@@ -259,7 +285,8 @@ export function ReportIssueModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="cukii-report-title"
-      onMouseDown={close}
+      onMouseDownCapture={suppressOpeningDoubleClick}
+      onMouseDown={closeFromBackdrop}
     >
       <section
         ref={dialogRef}
@@ -489,6 +516,11 @@ export function ReportIssueModal({
                       <dt>Session</dt>
                       <dd>{diagnostics.sessionId}</dd>
                     </dl>
+                    <p className="cukii-report-muted">
+                      {diagnostics.logLines.length} sanitized diagnostic lines
+                      collected. Cukii refreshes them at send time and attaches
+                      the full set as cukii-diagnostics.txt.
+                    </p>
                     <pre>{diagnostics.logLines.join("\n")}</pre>
                   </div>
                 ) : (

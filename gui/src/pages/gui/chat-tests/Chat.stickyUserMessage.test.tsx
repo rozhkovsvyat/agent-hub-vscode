@@ -61,6 +61,12 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).toMatch(/\.cukii-transcript::before\s*\{[^}]*height:\s*20px/s);
   expect(css).toContain("padding-top: 14px");
   expect(css).toContain("padding-bottom: 12px");
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*max-width:\s*70%/s,
+  );
+  expect(css).not.toMatch(
+    /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
+  );
 });
 
 test("folds a long sticky prompt like Claude while keeping time and ticks in the footer", async () => {
