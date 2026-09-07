@@ -246,8 +246,8 @@ describe("Cukii saved-session loading", () => {
     });
     expectOnlyWindowRows(firstVisibleIndex, lastVisibleIndex + 1);
 
-    // Response actions are gone, so a row's successor no longer feeds its
-    // render inputs: updating the neighbour must not re-render any saved row.
+    // Editing one immutable saved row may render that row, but it must not
+    // invalidate the other 159 memoized markdown leaves in the same turn.
     markdownRenderSpy.mockClear();
     await act(async () => {
       store.dispatch(
@@ -255,14 +255,14 @@ describe("Cukii saved-session loading", () => {
           index: firstVisibleIndex + 1,
           updates: {
             message: {
-              id: `user-after-${firstVisibleIndex}`,
-              role: "user",
-              content: "Follow-up",
+              id: `assistant-${firstVisibleIndex + 1}`,
+              role: "assistant",
+              content: "Updated saved response",
             },
           },
         }),
       );
     });
-    expect(renderedStepIds()).toEqual([]);
+    expect(renderedStepIds()).toEqual(["Updated saved response"]);
   });
 });

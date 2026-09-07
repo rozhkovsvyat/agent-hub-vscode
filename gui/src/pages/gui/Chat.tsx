@@ -762,7 +762,10 @@ export function Chat() {
     const renderedEntries = transcriptHistory.map(renderTranscriptEntry);
     const turns: Array<{ key: string; rows: JSX.Element[] }> = [];
     let currentRows: JSX.Element[] = [];
-    let currentKey = `continuation-${transcriptStart}`;
+    // The leading continuation is the same logical turn while pagination
+    // reveals older rows. Its key must therefore stay stable: tying it to the
+    // moving window boundary remounts every already-visible saved response.
+    let currentKey = "continuation";
 
     renderedEntries.forEach((rows, relativeIndex) => {
       const item = transcriptHistory[relativeIndex];
