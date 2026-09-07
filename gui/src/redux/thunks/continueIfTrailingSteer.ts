@@ -1,5 +1,5 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
-import { stripImages } from "core/util/messageContent";
+import { hasImageAttachments, stripImages } from "core/util/messageContent";
 import {
   setSteerStatus,
   type ChatHistoryItemWithMessageId,
@@ -12,9 +12,10 @@ const MAX_QUEUED_FOLLOW_UP_BATCH_TURNS = 8;
 const drainingSessions = new Set<string>();
 
 function hasSupportedPayload(item: ChatHistoryItemWithMessageId): boolean {
-  // Stateless bridge transcripts currently replace images with a placeholder.
-  // Keep image-only follow-ups pending until the route carries image bytes.
-  return stripImages(item.message.content).trim().length > 0;
+  return (
+    stripImages(item.message.content).trim().length > 0 ||
+    hasImageAttachments(item.message.content)
+  );
 }
 
 /** Old assistant output may follow the bubble, so scan the whole timeline. */

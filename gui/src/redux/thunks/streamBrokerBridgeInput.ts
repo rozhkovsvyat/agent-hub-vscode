@@ -1,7 +1,11 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
 import type { CukiiBridgeStreamDisposition } from "core/protocol/ideWebview";
-import { renderChatMessage } from "core/util/messageContent";
+import {
+  hasImageAttachments,
+  renderChatMessage,
+  stripImages,
+} from "core/util/messageContent";
 import {
   acceptToolCall,
   addPromptCompletionPair,
@@ -191,7 +195,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   async (options, { dispatch, extra, getState }) => {
     const state = getState();
     const sessionId = state.session.id;
-    const queuedFollowUpMessageIds = Array.from(
+    const explicitlyQueuedFollowUpMessageIds = Array.from(
       new Set(
         (
           options?.queuedFollowUpMessageIds ??
@@ -201,6 +205,28 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         ).filter(Boolean),
       ),
     );
+    // A restored webview starts its trailing drain asynchronously. A new
+    // submit can otherwise win that race and silently filter every durable
+    // queued/deferred bubble out of the vendor request. Ordinary turns adopt
+    // the complete pending snapshot themselves so resume never depends on MCP
+    // availability or on which thunk happened to start first.
+    const implicitlyRecoveredFollowUps =
+      explicitlyQueuedFollowUpMessageIds.length === 0
+        ? state.session.history.filter(
+            (item) =>
+              item.isSteer &&
+              item.message.role === "user" &&
+              (item.steerStatus === "queued" ||
+                item.steerStatus === "deferred") &&
+              (stripImages(item.message.content).trim().length > 0 ||
+                hasImageAttachments(item.message.content)),
+          )
+        : [];
+    const queuedFollowUpMessageIds =
+      explicitlyQueuedFollowUpMessageIds.length > 0
+        ? explicitlyQueuedFollowUpMessageIds
+        : implicitlyRecoveredFollowUps.map((item) => item.message.id);
+    const preservesRecoveredTimeline = implicitlyRecoveredFollowUps.length > 0;
     const queuedFollowUpMessageId = queuedFollowUpMessageIds[0];
     const brokerModel = state.session.brokerModel ?? "fable-5";
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
@@ -242,20 +268,27 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       .filter(
         (item) =>
           !item.modelSwitch &&
-          !queuedFollowUpMessageIds.includes(item.message.id) &&
+          (preservesRecoveredTimeline ||
+            !queuedFollowUpMessageIds.includes(item.message.id)) &&
           !(
             item.isSteer &&
             (item.steerStatus === "queued" ||
-              item.steerStatus === "deferred" ||
-              // An explicit Stop cancelled this follow-up before the vendor
-              // accepted it. It must never reach a later turn either.
-              item.steerStatus === "cancelled")
+              item.steerStatus === "deferred") &&
+            !queuedFollowUpMessageIds.includes(item.message.id)
+          ) &&
+          !(
+            item.isSteer &&
+            // An explicit Stop cancelled this follow-up before the vendor
+            // accepted it. It must never reach a later turn either.
+            item.steerStatus === "cancelled"
           ),
       )
       .map((item) => item.message)
       .filter((message) => message.role !== "thinking");
-    for (const queuedFollowUp of queuedFollowUps) {
-      if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    if (!preservesRecoveredTimeline) {
+      for (const queuedFollowUp of queuedFollowUps) {
+        if (queuedFollowUp) messages.push(queuedFollowUp.message);
+      }
     }
     const historyLengthAtRunStart = state.session.history.length;
     // Long broker turns must not bet the whole tail on the end-of-turn save:

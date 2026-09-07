@@ -137,9 +137,9 @@ describe("hasTrailingSteerMessage", () => {
       async (data) => ({
         sessionId: data.sessionId,
         messageId: data.messageId,
-        status: (data.messageId === claimed.message.id
-          ? "read"
-          : "pending") as "read" | "pending",
+        status: (data.messageId === claimed.message.id ? "read" : "pending") as
+          | "read"
+          | "pending",
       }),
     );
     const store = setupStore({ ideMessenger: messenger });
@@ -542,7 +542,7 @@ describe("hasTrailingSteerMessage", () => {
     ).toBeUndefined();
   });
 
-  it("keeps an image-only follow-up pending until the route carries image bytes", () => {
+  it("drains an image-only follow-up through the materializing bridge route", () => {
     const deferred = item("user", "image", true);
     deferred.message.content = [
       {
@@ -557,6 +557,6 @@ describe("hasTrailingSteerMessage", () => {
         isStreaming: false,
         isInEdit: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

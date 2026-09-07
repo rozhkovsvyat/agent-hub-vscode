@@ -8,6 +8,7 @@ import {
   BridgeInboxWatch,
   bridgeInboxMessageStatus,
   bridgeInboxRoot,
+  markBridgeInboxMessagesRead,
   purgeUnreadBridgeInboxMessages,
   readBridgeInboxMessageIds,
   writeBridgeInboxMessage,
@@ -51,9 +52,7 @@ describe("bridgeInbox", () => {
 
   it("refuses traversal-shaped segments and empty text", () => {
     expect(writeBridgeInboxMessage("../evil", "msg-1", "нет")).toBe(false);
-    expect(writeBridgeInboxMessage("session-1", "../evil", "нет")).toBe(
-      false,
-    );
+    expect(writeBridgeInboxMessage("session-1", "../evil", "нет")).toBe(false);
     expect(writeBridgeInboxMessage("session-1", "msg-1", "   ")).toBe(false);
     expect(fs.existsSync(path.join(root, "session-1"))).toBe(false);
   });
@@ -72,9 +71,39 @@ describe("bridgeInbox", () => {
       "utf8",
     );
     expect(bridgeInboxMessageStatus("session-1", "msg-1")).toBe("read");
-    expect(readBridgeInboxMessageIds("session-1")).toEqual(
-      new Set(["msg-1"]),
+    expect(readBridgeInboxMessageIds("session-1")).toEqual(new Set(["msg-1"]));
+  });
+
+  it("acks a direct-prompt batch only when the vendor becomes active", () => {
+    writeBridgeInboxMessage("session-1", "msg-1", "первое");
+    writeBridgeInboxMessage("session-1", "msg-2", "второе");
+    const dir = path.join(root, "session-1");
+    const leasedFile = fs
+      .readdirSync(dir)
+      .find((name) => name.endsWith("-msg-1.json"))!;
+    const leasedPath = path.join(dir, leasedFile);
+    const leased = JSON.parse(fs.readFileSync(leasedPath, "utf8"));
+    fs.writeFileSync(
+      leasedPath,
+      JSON.stringify({
+        ...leased,
+        leaseOwner: "old-reader",
+        leasePid: 42,
+        leaseProcessStartToken: "old",
+        leaseUntilMs: Date.now() + 60_000,
+      }),
+      "utf8",
     );
+
+    expect(
+      markBridgeInboxMessagesRead("session-1", ["msg-1", "msg-2"]),
+    ).toEqual(["msg-1", "msg-2"]);
+    expect(readBridgeInboxMessageIds("session-1")).toEqual(
+      new Set(["msg-1", "msg-2"]),
+    );
+    const after = JSON.parse(fs.readFileSync(leasedPath, "utf8"));
+    expect(after).toMatchObject({ status: "read" });
+    expect(after).not.toHaveProperty("leaseOwner");
   });
 
   it("purges unread entries on explicit Stop but keeps claimed ones", () => {

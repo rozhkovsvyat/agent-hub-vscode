@@ -340,12 +340,7 @@ describe("streamBrokerBridgeInput controls", () => {
       captured[0].messages.map(
         (message: ChatMessage & { id?: string }) => message.id,
       ),
-    ).toEqual([
-      "original",
-      "old-assistant",
-      "follow-up-1",
-      "follow-up-2",
-    ]);
+    ).toEqual(["original", "old-assistant", "follow-up-1", "follow-up-2"]);
     expect(
       store
         .getState()
@@ -358,6 +353,109 @@ describe("streamBrokerBridgeInput controls", () => {
         .session.history.find((item) => item.message.id === "follow-up-2")
         ?.steerStatus,
     ).toBe("read");
+  });
+
+  it("adopts every pending follow-up on a normal submit after session restore", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: any[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [
+        {
+          role: "thinking",
+          content: "vendor accepted restored input",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "done", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "original task" },
+          "original",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "assistant", content: "work before reconnect" },
+          "old-assistant",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "first pending correction" },
+          "pending-text",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 1,
+      },
+      {
+        message: messageWithId(
+          {
+            role: "user",
+            content: [
+              {
+                type: "imageUrl",
+                imageUrl: { url: "data:image/png;base64,AQIDBA==" },
+              },
+            ],
+          },
+          "pending-image",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "queued",
+        steerSentAt: 2,
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "new submit after restore" },
+          "new-submit",
+        ),
+        contextItems: [],
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "restored-with-pending",
+        title: "Restored",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        mode: "broker",
+        brokerModel: "codex-5-6-sol",
+      }),
+    );
+
+    await store.dispatch(streamBrokerBridgeInput());
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].queuedFollowUpMessageIds).toEqual([
+      "pending-text",
+      "pending-image",
+    ]);
+    expect(
+      captured[0].messages.map(
+        (message: ChatMessage & { id?: string }) => message.id,
+      ),
+    ).toEqual([
+      "original",
+      "old-assistant",
+      "pending-text",
+      "pending-image",
+      "new-submit",
+    ]);
+    expect(
+      store
+        .getState()
+        .session.history.filter((item) => item.isSteer)
+        .map((item) => item.steerStatus),
+    ).toEqual(["read", "read"]);
   });
 
   it("normalizes terminal error decoration and repeated frames without merging distinct errors", () => {

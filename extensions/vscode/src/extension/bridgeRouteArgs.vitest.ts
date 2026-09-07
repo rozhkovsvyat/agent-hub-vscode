@@ -949,31 +949,30 @@ describe("native bridge argv", () => {
     ]);
   });
 
-  it("acknowledges a redelivered follow-up only after a live spawn", () => {
+  it("acknowledges a redelivered follow-up only after factual vendor stdout", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const handoffAt = source.indexOf("child.stdin.write(");
-    const spawnListenerAt = source.indexOf('child.once("spawn"');
+    const stdoutAt = source.indexOf('child.stdout.on("data"');
     const ackAt = source.indexOf(
       'queue.push({ kind: "steerRead", messageId });',
-      spawnListenerAt,
-    );
-    const parserAt = source.indexOf(
-      "const parser = new BridgeEventParser(route.format);",
+      stdoutAt,
     );
     expect(handoffAt).toBeGreaterThan(-1);
-    expect(spawnListenerAt).toBeGreaterThan(handoffAt);
-    expect(ackAt).toBeGreaterThan(spawnListenerAt);
-    expect(parserAt).toBeGreaterThan(ackAt);
-    // A launch failure must leave the bubble deferred and replayable, so the
-    // Every batch member is acknowledged only after spawn, unless already
-    // acknowledged by an exact vendor echo.
-    const ackBlock = source.slice(spawnListenerAt, ackAt);
-    expect(ackBlock).toContain("if (cancelled) return");
-    expect(ackBlock).toContain("for (const messageId of queuedFollowUpMessageIds)");
+    expect(stdoutAt).toBeGreaterThan(handoffAt);
+    expect(ackAt).toBeGreaterThan(stdoutAt);
+    // Spawn without output is not delivery. Every batch member is acknowledged
+    // only inside the first factual stdout branch.
+    const ackBlock = source.slice(stdoutAt, ackAt);
+    expect(ackBlock).toContain("if (firstOutputAt === undefined)");
+    expect(ackBlock).toContain("markBridgeInboxMessagesRead");
+    expect(ackBlock).toContain(
+      "for (const messageId of queuedFollowUpMessageIds)",
+    );
     expect(ackBlock).toContain("queuedFollowUpRead.has(messageId)");
+    expect(source).not.toContain('child.once("spawn"');
   });
 
   it("swallows a vendor echo of an already-acknowledged follow-up", () => {

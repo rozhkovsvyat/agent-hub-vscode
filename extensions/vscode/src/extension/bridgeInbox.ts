@@ -22,6 +22,10 @@ type InboxRecord = {
   createdMs: number;
   status: "read" | "pending";
   readAt?: string;
+  leaseOwner?: string;
+  leasePid?: number;
+  leaseProcessStartToken?: string;
+  leaseUntilMs?: number;
 };
 
 export function bridgeInboxRoot(): string {
@@ -116,6 +120,47 @@ export function bridgeInboxMessageStatus(
     if (record?.id === messageId) return record.status;
   }
   return "absent";
+}
+
+/**
+ * Direct prompt delivery is the durable fallback for MCP/hook failures. Mark
+ * its exact batch read only after factual vendor stdout, never at child spawn.
+ */
+export function markBridgeInboxMessagesRead(
+  sessionId: string,
+  messageIds: string[],
+): string[] {
+  const wanted = new Set(messageIds.filter((id) => SAFE_SEGMENT.test(id)));
+  if (!wanted.size) return [];
+  const acked: string[] = [];
+  for (const file of listSessionFiles(sessionId)) {
+    const record = readRecord(file);
+    if (record?.status !== "pending" || !wanted.has(record.id)) {
+      continue;
+    }
+    const updated: InboxRecord = {
+      ...record,
+      status: "read",
+      readAt: new Date().toISOString(),
+    };
+    delete updated.leaseOwner;
+    delete updated.leasePid;
+    delete updated.leaseProcessStartToken;
+    delete updated.leaseUntilMs;
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(updated), { encoding: "utf8" });
+      fs.renameSync(tmp, file);
+      acked.push(record.id);
+    } catch {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        // No temporary file was created.
+      }
+    }
+  }
+  return acked;
 }
 
 /** Explicit user Stop: unread inbox entries must not resurrect on the next run. */

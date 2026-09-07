@@ -13,6 +13,7 @@ import {
   ensureGrokBrokerRegistration,
   ensureKimiBrokerRegistration,
   ensureQwenBrokerRegistration,
+  registerBrokerSessionBinding,
   resetBrokerIntegrationMemoForTests,
   resolveBrokerDir,
 } from "./bridgeVendorMcp";
@@ -27,6 +28,7 @@ describe("bridgeVendorMcp", () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-vendor-home-"));
     brokerDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-broker-pkg-"));
     fs.writeFileSync(path.join(brokerDir, "mcp_server.py"), "", "utf8");
+    fs.writeFileSync(path.join(brokerDir, "session_identity.py"), "", "utf8");
     fs.mkdirSync(path.join(brokerDir, "hooks"));
     fs.writeFileSync(
       path.join(brokerDir, "hooks", "inbox_gate.py"),
@@ -73,6 +75,54 @@ describe("bridgeVendorMcp", () => {
     });
   });
 
+  describe("live session binding", () => {
+    it("registers the exact vendor pid and session through the broker-owned helper", () => {
+      const spawn = vi.fn().mockReturnValue({ status: 0 });
+      const result = registerBrokerSessionBinding(
+        4242,
+        "session-safe_1",
+        ["pending-1", "pending-2"],
+        {
+          userHome: home,
+          env: {
+            CUKII_BROKER_DIR: brokerDir,
+            CUKII_BINDING_DIR: "D:/bindings",
+          },
+          spawn: spawn as never,
+        },
+      );
+
+      expect(result).toBe(true);
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const [program, args, spawnOptions] = spawn.mock.calls[0];
+      expect(program).toBe("python");
+      expect(args).toEqual([
+        path.join(brokerDir, "session_identity.py"),
+        "--register",
+        "4242",
+        "session-safe_1",
+        "--message-id",
+        "pending-1",
+        "--message-id",
+        "pending-2",
+      ]);
+      expect(spawnOptions.env.CUKII_BINDING_DIR).toBe("D:/bindings");
+    });
+
+    it("fails open for an invalid pid or a rejected helper", () => {
+      const spawn = vi.fn().mockReturnValue({ status: 1 });
+      expect(registerBrokerSessionBinding(0, "session", [], options())).toBe(
+        false,
+      );
+      expect(
+        registerBrokerSessionBinding(4242, "session", [], {
+          ...options(),
+          spawn: spawn as never,
+        }),
+      ).toBe(false);
+    });
+  });
+
   describe("qwen registration", () => {
     const writeSettings = (body: unknown) => {
       fs.mkdirSync(path.join(home, ".qwen"), { recursive: true });
@@ -112,7 +162,12 @@ describe("bridgeVendorMcp", () => {
     it("keeps an existing PreToolUse list and only appends", () => {
       writeSettings({
         hooks: {
-          PreToolUse: [{ matcher: "write_file", hooks: [{ type: "command", command: "guard" }] }],
+          PreToolUse: [
+            {
+              matcher: "write_file",
+              hooks: [{ type: "command", command: "guard" }],
+            },
+          ],
         },
       });
       ensureQwenBrokerRegistration(brokerDir, options());
@@ -226,9 +281,9 @@ describe("bridgeVendorMcp", () => {
           "utf8",
         ),
       );
-      expect(
-        hookFile.hooks.PreToolUse[0].hooks[0].command,
-      ).toContain("-Harness grok");
+      expect(hookFile.hooks.PreToolUse[0].hooks[0].command).toContain(
+        "-Harness grok",
+      );
 
       const second = ensureGrokBrokerRegistration(brokerDir, {
         ...options(),
@@ -260,7 +315,11 @@ describe("bridgeVendorMcp", () => {
         JSON.stringify({ mcpServers: { memory: { command: "mem" } } }),
         "utf8",
       );
-      fs.writeFileSync(configPath(), 'default_model = "kimi-code/k3"\n', "utf8");
+      fs.writeFileSync(
+        configPath(),
+        'default_model = "kimi-code/k3"\n',
+        "utf8",
+      );
 
       const first = ensureKimiBrokerRegistration(brokerDir, options());
       expect(first).toMatchObject({ mcpAdded: true, hookAdded: true });
@@ -317,9 +376,9 @@ describe("bridgeVendorMcp", () => {
       fs.unlinkSync(path.join(home, ".qwen", "settings.json"));
       const second = ensureBrokerVendorIntegration("qwen3.8-max", options());
       expect(second).toBeUndefined();
-      expect(
-        fs.existsSync(path.join(home, ".qwen", "settings.json")),
-      ).toBe(false);
+      expect(fs.existsSync(path.join(home, ".qwen", "settings.json"))).toBe(
+        false,
+      );
     });
 
     it("skips claude models entirely", () => {
@@ -346,9 +405,7 @@ describe("bridgeVendorMcp", () => {
       fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
       const result = ensureBrokerVendorIntegration("composer-2-5", options());
       expect(result?.skipped).toBe("broker package not resolved");
-      expect(
-        fs.existsSync(path.join(home, ".cursor", "mcp.json")),
-      ).toBe(false);
+      expect(fs.existsSync(path.join(home, ".cursor", "mcp.json"))).toBe(false);
     });
   });
 });

@@ -24,7 +24,8 @@ describe("buildBridgeTranscript", () => {
     ]);
 
     expect(transcript.length).toBeLessThanOrEqual(MAX_BRIDGE_TRANSCRIPT_CHARS);
-    expect(transcript).toContain("Cukii transcript omitted");
+    expect(transcript).toContain("Only older Cukii history was omitted");
+    expect(transcript).toContain("authoritative continuation context");
     expect(transcript).toContain(latest);
   });
 

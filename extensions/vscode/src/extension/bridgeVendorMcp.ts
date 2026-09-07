@@ -54,7 +54,9 @@ function envOf(options?: BrokerIntegrationOptions): NodeJS.ProcessEnv {
  * machines). Returns undefined when nothing resolves — all registrations
  * then no-op and the drain fallback carries the guarantee alone.
  */
-export function resolveBrokerDir(options?: BrokerIntegrationOptions): string | undefined {
+export function resolveBrokerDir(
+  options?: BrokerIntegrationOptions,
+): string | undefined {
   const env = envOf(options);
   const candidates: string[] = [];
   const fromEnv = env.CUKII_BROKER_DIR;
@@ -67,7 +69,8 @@ export function resolveBrokerDir(options?: BrokerIntegrationOptions): string | u
     const args = parsed?.mcpServers?.[BROKER_MCP_NAME]?.args;
     if (Array.isArray(args)) {
       const script = args.find(
-        (arg): arg is string => typeof arg === "string" && arg.endsWith("mcp_server.py"),
+        (arg): arg is string =>
+          typeof arg === "string" && arg.endsWith("mcp_server.py"),
       );
       if (script) candidates.push(path.dirname(script));
     }
@@ -89,8 +92,54 @@ export function resolveBrokerDir(options?: BrokerIntegrationOptions): string | u
   return undefined;
 }
 
-export function brokerPythonCommand(options?: BrokerIntegrationOptions): string {
-  return envOf(options).CUKII_BROKER_PYTHON || (process.platform === "win32" ? "python" : "python3");
+export function brokerPythonCommand(
+  options?: BrokerIntegrationOptions,
+): string {
+  return (
+    envOf(options).CUKII_BROKER_PYTHON ||
+    (process.platform === "win32" ? "python" : "python3")
+  );
+}
+
+/**
+ * Bind one live vendor root to its Cukii session in broker-owned storage.
+ * Static MCP launchers are allowed to replace their child environment, so
+ * the Python broker validates this file against the OS process start token
+ * instead of trusting inherited env/argv. Failure is fail-open because the
+ * same pending batch is embedded directly into the next vendor prompt.
+ */
+export function registerBrokerSessionBinding(
+  vendorPid: number,
+  sessionId: string,
+  messageIds: string[] = [],
+  options?: BrokerIntegrationOptions,
+): boolean {
+  if (!Number.isSafeInteger(vendorPid) || vendorPid <= 0 || !sessionId) {
+    return false;
+  }
+  const brokerDir = resolveBrokerDir(options);
+  if (!brokerDir) return false;
+  try {
+    const spawnFn = options?.spawn ?? spawnSync;
+    const result = spawnFn(
+      brokerPythonCommand(options),
+      [
+        path.join(brokerDir, "session_identity.py"),
+        "--register",
+        String(vendorPid),
+        sessionId,
+        ...messageIds.flatMap((messageId) => ["--message-id", messageId]),
+      ],
+      {
+        timeout: 5000,
+        encoding: "utf8",
+        env: envOf(options),
+      },
+    );
+    return result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 function writeAtomic(target: string, body: string): void {
@@ -107,7 +156,11 @@ function mcpEntry(brokerDir: string, options?: BrokerIntegrationOptions) {
   };
 }
 
-function gateCommand(brokerDir: string, harness: string, options?: BrokerIntegrationOptions): string {
+function gateCommand(
+  brokerDir: string,
+  harness: string,
+  options?: BrokerIntegrationOptions,
+): string {
   const gate = path.join(brokerDir, "hooks", GATE_MARKER);
   return `${brokerPythonCommand(options)} "${gate}" -Harness ${harness}`;
 }
@@ -120,9 +173,16 @@ export function ensureQwenBrokerRegistration(
   const settingsPath = path.join(home(options), ".qwen", "settings.json");
   let settings: Record<string, unknown>;
   try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
   } catch {
-    return { mcpAdded: false, hookAdded: false, skipped: "qwen settings unreadable" };
+    return {
+      mcpAdded: false,
+      hookAdded: false,
+      skipped: "qwen settings unreadable",
+    };
   }
   let mcpAdded = false;
   let hookAdded = false;
@@ -146,14 +206,19 @@ export function ensureQwenBrokerRegistration(
       : [];
     preToolUse.push({
       hooks: [
-        { type: "command", command: gateCommand(brokerDir, "qwen", options), timeout: 15000 },
+        {
+          type: "command",
+          command: gateCommand(brokerDir, "qwen", options),
+          timeout: 15000,
+        },
       ],
     });
     hooks.PreToolUse = preToolUse;
     settings.hooks = hooks;
     hookAdded = true;
   }
-  if (mcpAdded || hookAdded) writeAtomic(settingsPath, JSON.stringify(settings, null, 2));
+  if (mcpAdded || hookAdded)
+    writeAtomic(settingsPath, JSON.stringify(settings, null, 2));
   return { mcpAdded, hookAdded };
 }
 
@@ -172,7 +237,10 @@ export function ensureCursorBrokerRegistration(
   }
   const servers = config.mcpServers ?? {};
   if (servers[BROKER_MCP_NAME]) return { mcpAdded: false, hookAdded: false };
-  config.mcpServers = { ...servers, [BROKER_MCP_NAME]: mcpEntry(brokerDir, options) };
+  config.mcpServers = {
+    ...servers,
+    [BROKER_MCP_NAME]: mcpEntry(brokerDir, options),
+  };
   fs.mkdirSync(cursorDir, { recursive: true });
   writeAtomic(configPath, JSON.stringify(config, null, 2));
   return { mcpAdded: true, hookAdded: false };
@@ -280,7 +348,11 @@ export function ensureGrokBrokerRegistration(
           PreToolUse: [
             {
               hooks: [
-                { type: "command", command: gateCommand(brokerDir, "grok", options), timeout: 15 },
+                {
+                  type: "command",
+                  command: gateCommand(brokerDir, "grok", options),
+                  timeout: 15,
+                },
               ],
             },
           ],
@@ -321,7 +393,10 @@ export function ensureKimiBrokerRegistration(
     }
     const servers = config.mcpServers ?? {};
     if (!servers[BROKER_MCP_NAME]) {
-      config.mcpServers = { ...servers, [BROKER_MCP_NAME]: mcpEntry(brokerDir, options) };
+      config.mcpServers = {
+        ...servers,
+        [BROKER_MCP_NAME]: mcpEntry(brokerDir, options),
+      };
       fs.mkdirSync(kimiDir, { recursive: true });
       writeAtomic(configPath, JSON.stringify(config, null, 2));
       mcpAdded = true;
@@ -366,7 +441,12 @@ export function ensureBrokerVendorIntegration(
     const key = `${vendor}:${home(options)}`;
     if (completed.has(key)) return undefined;
     const brokerDir = resolveBrokerDir(options);
-    if (!brokerDir) return { mcpAdded: false, hookAdded: false, skipped: "broker package not resolved" };
+    if (!brokerDir)
+      return {
+        mcpAdded: false,
+        hookAdded: false,
+        skipped: "broker package not resolved",
+      };
     let result: VendorRegistration | undefined;
     switch (vendor) {
       case "qwen":

@@ -35,7 +35,7 @@ export function buildBridgeTranscript(messages: ChatMessage[]): string {
   }
 
   const marker =
-    "[Cukii transcript omitted to keep native bridge latency bounded.]";
+    "[Only older Cukii history was omitted to bound latency. The complete newest retained turns follow and are authoritative continuation context.]";
   const currentTurnMarker = "\n[Current turn middle omitted.]\n";
   const retained: string[] = [];
   let used = marker.length + 2; // separator between marker and retained turns

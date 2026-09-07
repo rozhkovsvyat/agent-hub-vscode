@@ -23,7 +23,11 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
-import { ensureBrokerVendorIntegration } from "./bridgeVendorMcp";
+import { markBridgeInboxMessagesRead } from "./bridgeInbox";
+import {
+  ensureBrokerVendorIntegration,
+  registerBrokerSessionBinding,
+} from "./bridgeVendorMcp";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import { hasImageAttachment, materializeBridgeImages } from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
@@ -488,14 +492,14 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
   if (isClaudeNativeModel(model) || !supportsBrokerInbox(model)) return [];
   return [
     "The user can also publish follow-ups while you work; they land in a broker inbox instead of this transcript." +
-      " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call mcp__cukii-broker__broker_inbox." +
+      " At natural step boundaries (before starting a new significant step, or after a long tool sequence) call the available MCP tool whose base name is broker_inbox; its qualified prefix may be cukii-broker or agent-hub-broker." +
       " If it returns messages, that array is the complete accumulated FIFO batch: read and address every item together as immediate input before resuming your task." +
-      " Only after the entire batch is understood and every referenced @file is accessible, call mcp__cukii-broker__broker_inbox_ack with all exact messageId values; this acknowledgement is what permits read receipts and deduplication. If you fail before ack, the batch must be delivered again." +
+      " Only after the entire batch is understood and every referenced @file is accessible, call the available broker_inbox_ack tool with all exact messageId values; this acknowledgement is what permits read receipts and deduplication. If you fail before ack, the batch must be delivered again." +
       " Messages carry `from` — `user` for the human, `agent:<sessionId>` for parallel plugin sessions writing you through the same channel." +
       " Empty results are normal; never call it more than once per step boundary." +
       " Classify every incoming item by intent: an addition or correction augments the current task, so continue the same work after incorporating it; an explicit replacement switches the task; only an explicit stop/cancel request ends the run without another tool call. A normal follow-up must never stop the run." +
       " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason — act on it immediately, then continue unless that message explicitly told you to stop.",
-    "To coordinate with parallel sessions, the same channel is bidirectional: mcp__cukii-broker__broker_sessions lists live sessions and mcp__cukii-broker__broker_send writes one of them a message" +
+    "To coordinate with parallel sessions, the same channel is bidirectional: the available broker_sessions tool lists live sessions and broker_send writes one of them a message" +
       " (status or fact requests, handoff notes). Sending new work to a worker is still broker_delegate, never broker_send.",
   ];
 }
@@ -1603,13 +1607,20 @@ async function* launchBridgeChild(options: {
     env: {
       ...bridgeEnv(brokerModel, brokerSubagent),
       ...(await alibabaSpawnEnv(brokerModel)),
-      // Vendor MCP servers inherit this env: broker_inbox resolves which
-      // session's inbox it serves from it. Absent for probe spawns.
+      // Kept for vendors that preserve inherited env. The authoritative MCP
+      // binding is the pid + process-start-token record registered below.
       ...(sessionId ? { CUKII_SESSION_ID: sessionId } : {}),
     },
     shell: false,
     windowsHide: true,
   });
+  if (child.pid && sessionId) {
+    registerBrokerSessionBinding(
+      child.pid,
+      sessionId,
+      queuedFollowUpMessageIds,
+    );
+  }
   // The pid is the only handle a dispose-time retry has when the primary
   // teardown could not verify death. Report it before any await can race it.
   permissionTransport?.onChildSpawned?.(child.pid);
@@ -1713,24 +1724,6 @@ async function* launchBridgeChild(options: {
     }
   }
 
-  // A redelivered follow-up is physically inside the prompt handed to the
-  // child above (stdin or prompt file). Waiting for the vendor's first stdout
-  // leaves the bubble at one checkmark through the whole kill + cold-start
-  // gap, which reads as "the message was ignored". Acknowledge on the spawn
-  // event instead of immediately: a launch failure must leave the bubble
-  // deferred so the durable outbox drain replays it, never consume it with a
-  // read receipt for a process that never ran.
-  if (queuedFollowUpMessageIds.length > 0 && !cancelled) {
-    child.once("spawn", () => {
-      if (cancelled) return;
-      for (const messageId of queuedFollowUpMessageIds) {
-        if (queuedFollowUpRead.has(messageId)) continue;
-        queuedFollowUpRead.add(messageId);
-        queue.push({ kind: "steerRead", messageId });
-      }
-    });
-  }
-
   const parser = new BridgeEventParser(route.format);
   const toolNamesById = new Map<string, string>();
   const followers: NestedWorkerFollower[] = [];
@@ -1740,6 +1733,18 @@ async function* launchBridgeChild(options: {
     if (cancelled) return;
     if (firstOutputAt === undefined) {
       firstOutputAt = Date.now();
+      // Only factual vendor activity proves that the prompt carrying the
+      // recovered batch crossed the process boundary. Ack the shared inbox
+      // and emit one receipt per bubble here; a spawn followed by crash keeps
+      // every item pending for the next resume.
+      if (sessionId && queuedFollowUpMessageIds.length > 0) {
+        markBridgeInboxMessagesRead(sessionId, queuedFollowUpMessageIds);
+        for (const messageId of queuedFollowUpMessageIds) {
+          if (queuedFollowUpRead.has(messageId)) continue;
+          queuedFollowUpRead.add(messageId);
+          queue.push({ kind: "steerRead", messageId });
+        }
+      }
       queue.push({
         kind: "thinking",
         text: `Native bridge first output after ${((firstOutputAt - launchedAt) / 1000).toFixed(1)} s.\n`,
