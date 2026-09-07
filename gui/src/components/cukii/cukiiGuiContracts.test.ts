@@ -96,9 +96,12 @@ describe("Cukii GUI contracts", () => {
     expect(canonicalCss).toContain(
       "background: var(--cukii-primary-action-icon);",
     );
-    expect(canonicalCss).not.toMatch(
-      /cukii-submit-button[\s\S]{0,900}#(?:f48771|e9775f|fff(?:fff)?)/,
+    const submitRuleStart = canonicalCss.indexOf("button.cukii-submit-button,");
+    const submitRules = canonicalCss.slice(
+      submitRuleStart,
+      canonicalCss.indexOf(".cukii-command-menu", submitRuleStart),
     );
+    expect(submitRules).not.toMatch(/#(?:f48771|e9775f|fff(?:fff)?)/);
   });
 
   it("declares cookie-orange focus and semantic invalid-state precedence", () => {
@@ -302,8 +305,8 @@ describe("Cukii GUI contracts", () => {
     const chat = source("pages/gui/Chat.tsx");
 
     // Lane: right-aligned, MAX measures the sent bubble at 70% of the column.
-    const laneStart = css.indexOf(".cukii-user-message {");
-    const laneContract = css.slice(laneStart, laneStart + 320);
+    const laneContract =
+      css.match(/^\.cukii-user-message \{[^}]*\}/m)?.[0] ?? "";
     expect(laneContract).toContain("max-width: 70%;");
     expect(laneContract).toContain("margin-left: auto;");
 
@@ -598,7 +601,7 @@ describe("Cukii GUI contracts", () => {
     expect(style.transition).toContain("150ms");
   });
 
-  it("uses shared command sections, menu selection tokens, and no fake Rewind", () => {
+  it("uses shared command sections, Claude list-active selection tokens, and no fake Rewind", () => {
     const toolbar = source("components/mainInput/InputToolbar.tsx");
     const css = source("index.css");
     expect(toolbar).not.toContain('showAction("Rewind")');
@@ -614,9 +617,10 @@ describe("Cukii GUI contracts", () => {
       css.indexOf(".cukii-command-menu-item-active"),
       css.indexOf(".thread-message"),
     );
-    expect(selectionRule).toContain("--vscode-menu-selectionBackground");
-    expect(selectionRule).toContain("--vscode-menu-selectionForeground");
-    expect(selectionRule).not.toContain("--vscode-list-activeSelection");
+    expect(selectionRule).toContain("--vscode-list-activeSelectionBackground");
+    expect(selectionRule).toContain("--vscode-list-activeSelectionForeground");
+    expect(selectionRule).not.toContain("--vscode-list-hoverBackground");
+    expect(selectionRule).not.toContain("--vscode-menu-selectionBackground");
   });
 
   it("keeps assistant prose and tool rows on the same timeline axis", () => {
