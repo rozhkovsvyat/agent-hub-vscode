@@ -36,6 +36,34 @@ describe("Cukii GUI contracts", () => {
     );
   });
 
+  it("never revives the removed name-and-email feedback popup", () => {
+    const chat = source("pages/gui/Chat.tsx");
+    const localStorageContract = source("util/localStorage.ts");
+
+    expect(chat).not.toContain("FeedbackDialog");
+    expect(chat).not.toContain("mainTextEntryCounter");
+    expect(localStorageContract).not.toContain("mainTextEntryCounter");
+    expect(() => source("components/dialogs/FeedbackDialog.tsx")).toThrow();
+  });
+
+  it("keeps the issue form compact and single-scroll at every viewport", () => {
+    const css = source("index.css");
+    const modal = source("components/reportIssue/ReportIssueModal.tsx");
+    const dialogStart = css.indexOf(".cukii-report-dialog {");
+    const dialog = css.slice(dialogStart, css.indexOf("}", dialogStart) + 1);
+    const bodyStart = css.indexOf(".cukii-report-body {");
+    const body = css.slice(bodyStart, css.indexOf("}", bodyStart) + 1);
+
+    expect(dialog).toContain("width: min(480px, 100%);");
+    expect(dialog).toContain("max-height: min(680px, 100%);");
+    expect(body).toContain("overflow-x: hidden;");
+    expect(body).toContain("overflow-y: auto;");
+    expect(body).toContain("scrollbar-gutter: stable;");
+    expect(modal).toContain("rows={2}");
+    expect(modal).not.toContain("overflow-y-auto");
+    expect(modal).not.toContain("w-[520px]");
+  });
+
   it("uses shared cookie action tokens for both Start and Stop chips", () => {
     const css = source("index.css");
     const toolbar = source("components/mainInput/InputToolbar.tsx");

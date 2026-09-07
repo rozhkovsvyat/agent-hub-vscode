@@ -44,7 +44,6 @@ import {
 } from "./ToolCallDiv/NestedWorkerCard";
 
 import { useStore } from "react-redux";
-import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 
 import { FatalErrorIndicator } from "../../components/config/FatalErrorNotice";
 import InlineErrorMessage from "../../components/mainInput/InlineErrorMessage";
@@ -57,7 +56,6 @@ import {
 } from "../../redux/slices/uiSlice";
 import { RootState } from "../../redux/store";
 import { cancelStream } from "../../redux/thunks/cancelStream";
-import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
@@ -420,18 +418,6 @@ export function Chat() {
         if (editorToClearOnSend) {
           editorToClearOnSend.commands.clearContent();
         }
-      }
-
-      // Increment localstorage counter for popup
-      const currentCount = getLocalStorage("mainTextEntryCounter");
-      if (currentCount) {
-        setLocalStorage("mainTextEntryCounter", currentCount + 1);
-        if (currentCount === 300) {
-          dispatch(setDialogMessage(<FeedbackDialog />));
-          dispatch(setShowDialog(true));
-        }
-      } else {
-        setLocalStorage("mainTextEntryCounter", 1);
       }
     },
     [dispatch, ideMessenger, reduxStore],

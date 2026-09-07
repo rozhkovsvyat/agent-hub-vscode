@@ -192,14 +192,14 @@ export function ReportIssueModal({
 
   return (
     <div
-      className="cukii-report-overlay fixed inset-0 z-[100002] flex items-center justify-center overflow-y-auto"
+      className="cukii-report-overlay fixed inset-0 z-[100002] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="cukii-report-title"
       onMouseDown={close}
     >
       <section
-        className="cukii-report-dialog mx-4 my-8 flex max-h-[calc(100vh-48px)] w-[520px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-lg"
+        className="cukii-report-dialog flex flex-col overflow-hidden rounded-lg"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="cukii-report-header flex shrink-0 items-center justify-between">
@@ -310,7 +310,7 @@ export function ReportIssueModal({
                   <textarea
                     value={draft[key]}
                     maxLength={4000}
-                    rows={3}
+                    rows={2}
                     disabled={phase === "submitting"}
                     placeholder={placeholder}
                     onChange={(event) => updateDraft(key, event.target.value)}
