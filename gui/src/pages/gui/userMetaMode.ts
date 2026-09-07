@@ -49,7 +49,16 @@ export function userMetaFitsOnLastLine(
   bubble: HTMLElement,
   measuredMetaWidth = userMetaWidth(bubble),
 ): boolean {
-  if (bubble.dataset.cukiiCollapsible === "true") return false;
+  // A collapsed prompt exposes only a clipped 60px viewport, so the final
+  // document line is not the visible final line. Once expanded, however, the
+  // complete fold footer (chevron + receipt) follows the same MAX tail-fit
+  // rule as an ordinary receipt and must not reserve a needless extra row.
+  if (
+    bubble.dataset.cukiiCollapsible === "true" &&
+    !bubble.classList.contains("cukii-user-bubble--expanded")
+  ) {
+    return false;
+  }
   const prose = bubble.querySelector<HTMLElement>(".ProseMirror");
   const last = prose?.lastElementChild;
   if (!prose || !last || last.tagName !== "P" || measuredMetaWidth <= 0) {

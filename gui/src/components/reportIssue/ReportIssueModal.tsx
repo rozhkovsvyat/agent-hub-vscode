@@ -287,6 +287,14 @@ export function ReportIssueModal({
       aria-labelledby="cukii-report-title"
       onMouseDownCapture={suppressOpeningDoubleClick}
       onMouseDown={closeFromBackdrop}
+      onClick={(event) => {
+        // ReportIssueModal is rendered inside the main InputBoxDiv. React
+        // bubbles clicks through that component tree even though this is a
+        // full-screen modal; the parent click schedules TipTap.focus() on the
+        // next frame. Keep every field/select/button interaction inside the
+        // modal so the underlying composer cannot steal focus.
+        event.stopPropagation();
+      }}
     >
       <section
         ref={dialogRef}
@@ -559,7 +567,7 @@ export function ReportIssueModal({
                   }
                   onClick={() => void submit()}
                 >
-                  {phase === "submitting" ? "Sending…" : "Send report"}
+                  {phase === "submitting" ? "Sending…" : "Report"}
                 </button>
               </div>
             </footer>

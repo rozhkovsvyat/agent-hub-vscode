@@ -646,6 +646,7 @@ describe("Cukii Claude-parity input toolbar", () => {
 
   it("shows Report an issue last from the prefetched board capability", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
+    const composerClick = vi.fn();
     const capabilityRequests: Array<{ force?: boolean } | undefined> = [];
     mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
       async (input) => {
@@ -656,9 +657,12 @@ describe("Cukii Claude-parity input toolbar", () => {
           accountLabel: "tester@example.com",
         };
       };
-    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
-      mockIdeMessenger,
-    });
+    const { user } = await renderWithProviders(
+      <div onClick={composerClick}>
+        <InputToolbar {...props} />
+      </div>,
+      { mockIdeMessenger },
+    );
 
     await waitFor(() => expect(capabilityRequests).toHaveLength(1));
     await user.click(await getElementByTestId("broker-menu-button"));
@@ -678,11 +682,33 @@ describe("Cukii Claude-parity input toolbar", () => {
     ).toBe(actions.length - 2);
     expect(capabilityRequests).toEqual([{ force: false }]);
 
+    composerClick.mockClear();
     await user.click(report);
+    expect(composerClick).not.toHaveBeenCalled();
     expect(await getElementByText("Report an issue")).toBeDefined();
     expect(
       document.querySelector('[data-testid="cukii-slash-menu"]'),
     ).toBeNull();
+
+    // Closing the Headless UI popover must finish before the report dialog
+    // claims focus. Otherwise the popover's deferred focus restoration steals
+    // focus from every field (and closes a native select as soon as it opens).
+    const title = document.querySelector<HTMLInputElement>(
+      'input[placeholder="A short description of the problem"]',
+    );
+    const severity = document.querySelector<HTMLSelectElement>(
+      ".cukii-report-field select",
+    );
+    expect(title).not.toBeNull();
+    expect(severity).not.toBeNull();
+    await waitFor(() => expect(title).toHaveFocus());
+    await user.click(severity!);
+    expect(severity).toHaveFocus();
+    expect(composerClick).not.toHaveBeenCalled();
+    expect(document.querySelector(".cukii-report-overlay")).not.toBeNull();
+    await user.click(title!);
+    expect(title).toHaveFocus();
+    expect(composerClick).not.toHaveBeenCalled();
   });
 
   it("never inserts or removes Report an issue while the menu is open", async () => {

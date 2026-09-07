@@ -11,6 +11,7 @@ import {
   isBestModel,
   normalizeEffortForModel,
   presentVendorModels,
+  supportsNativeSpeed,
   supportsNativeThinking,
   VENDORS,
 } from "./vendors";
@@ -256,6 +257,13 @@ describe("Cukii model context labels", () => {
     expect(supportsNativeThinking("grok-4-6")).toBe(false);
     expect(supportsNativeThinking("cursor:claude-opus-5")).toBe(true);
     expect(supportsNativeThinking("cursor:gpt-5.6-luna")).toBe(false);
+  });
+
+  it("exposes Anthropic Fast mode only for the verified Opus 5 route", () => {
+    expect(supportsNativeSpeed("opus-5")).toBe(true);
+    expect(supportsNativeSpeed("sonnet-5")).toBe(false);
+    expect(supportsNativeSpeed("fable-5-1")).toBe(false);
+    expect(supportsNativeSpeed("haiku-4-5")).toBe(false);
   });
 
   it("renders only the effort levels supported by the selected route", () => {

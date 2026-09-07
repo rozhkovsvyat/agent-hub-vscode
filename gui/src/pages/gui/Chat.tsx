@@ -259,7 +259,22 @@ export function Chat() {
       entries.forEach((entry) => apply(entry.target as HTMLElement));
     });
     bubbles.forEach((bubble) => observer.observe(bubble));
-    return () => observer.disconnect();
+    // Expanding a folded prompt removes max-height. Chromium does not promise
+    // a ResizeObserver delivery for that style transition, so observe the
+    // component's collapsed/expanded class as the authoritative state edge.
+    const mutationObserver = new MutationObserver((entries) => {
+      entries.forEach((entry) => apply(entry.target as HTMLElement));
+    });
+    bubbles.forEach((bubble) =>
+      mutationObserver.observe(bubble, {
+        attributeFilter: ["class", "data-cukii-collapsible"],
+        attributes: true,
+      }),
+    );
+    return () => {
+      mutationObserver.disconnect();
+      observer.disconnect();
+    };
   }, [history, transcriptStart]);
 
   // Loading earlier messages prepends rows at the top of the transcript.
@@ -537,10 +552,42 @@ export function Chat() {
                 receiptStatus === "deferred"
               ? "sent"
               : undefined;
-        // MAX geometry: adjacent user turns form one visual group; corners
-        // facing a neighbor tighten while outer corners stay large.
-        const previousRole = history[historyIndex - 1]?.message.role;
-        const nextRole = history[historyIndex + 1]?.message.role;
+        // Group against the neighboring *rendered* transcript row. Broker
+        // transport records (system/tool and empty stream placeholders) are
+        // intentionally invisible; treating one as a visual boundary made
+        // identical user sequences group on one side of the transcript but
+        // not the other.
+        const neighboringVisibleRole = (direction: -1 | 1) => {
+          for (
+            let index = historyIndex + direction;
+            index >= 0 && index < history.length;
+            index += direction
+          ) {
+            const neighbor = history[index];
+            if (neighbor.modelSwitch) return "boundary";
+            const role = neighbor.message.role;
+            if (role === "system" || role === "tool") continue;
+            if (
+              role === "thinking" &&
+              !renderChatMessage(neighbor.message).trim()
+            ) {
+              continue;
+            }
+            if (
+              role === "assistant" &&
+              !assistantHasVisibleText(neighbor) &&
+              !neighbor.toolCallStates?.length
+            ) {
+              continue;
+            }
+            return role;
+          }
+          return undefined;
+        };
+        // MAX geometry: adjacent visible user turns form one visual group;
+        // corners facing a neighbor tighten while outer corners stay large.
+        const previousRole = neighboringVisibleRole(-1);
+        const nextRole = neighboringVisibleRole(1);
         const groupedWithPrevious = previousRole === "user";
         const groupedWithNext = nextRole === "user";
         const groupClass =
@@ -551,14 +598,20 @@ export function Chat() {
               : groupedWithPrevious
                 ? "cukii-user-bubble--group-end"
                 : "cukii-user-bubble--solo";
+        const rowGroupClass =
+          groupedWithPrevious && groupedWithNext
+            ? "cukii-user-row--group-middle"
+            : groupedWithNext
+              ? "cukii-user-row--group-start"
+              : groupedWithPrevious
+                ? "cukii-user-row--group-end"
+                : "cukii-user-row--solo";
         // MAX receipt flow is measured after render: inline on a paragraph
         // tail only when it fits, compact own-row for every other case.
         return [
           <div
             key={message.id}
-            className={`cukii-user-row cukii-user-row--sticky shrink-0 ${
-              groupedWithPrevious ? "cukii-user-row--grouped" : ""
-            }`}
+            className={`cukii-user-row cukii-user-row--sticky ${rowGroupClass} shrink-0`}
           >
             <div className="cukii-user-message">
               <CukiiStickyUserMessage

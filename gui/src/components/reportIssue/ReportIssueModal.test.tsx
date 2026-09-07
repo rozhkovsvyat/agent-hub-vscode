@@ -137,7 +137,7 @@ describe("ReportIssueModal", () => {
     );
     expect(sessionStorage.length).toBe(0);
     await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "Send report" }));
+    await user.click(screen.getByRole("button", { name: "Report" }));
 
     await screen.findByText("Report sent");
     expect(captureSnapshot).toHaveBeenCalledTimes(2);
@@ -170,9 +170,9 @@ describe("ReportIssueModal", () => {
       "YouGile returned 502",
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Send report" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Report" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "Send report" }));
+    await user.click(screen.getByRole("button", { name: "Report" }));
 
     await screen.findByText("Report queued");
     expect(screen.getByText(/stored locally/i)).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe("ReportIssueModal", () => {
       "Snapshot failed",
     );
     await screen.findByText("Canvas unavailable");
-    expect(screen.getByRole("button", { name: "Send report" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Report" })).toBeDisabled();
     expect(submit).not.toHaveBeenCalled();
   });
 

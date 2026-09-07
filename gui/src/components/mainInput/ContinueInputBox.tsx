@@ -17,6 +17,8 @@ import {
 import { defaultBorderRadius, vscBackground } from "..";
 import { CukiiActiveEditorSelectionState } from "../cukii/cukiiActiveEditorSelection";
 import { cukiiComposerPlaceholder } from "../cukii/cukiiComposerPlaceholder";
+import { CukiiUserAttachmentStrip } from "../cukii/CukiiUserAttachmentStrip";
+import { isFileAttachmentContextItem } from "../cukii/userAttachments";
 import { useAppSelector } from "../../redux/hooks";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useWebviewListener } from "../../hooks/useWebviewListener";
@@ -207,6 +209,9 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   }, [isInEdit, editModeState.applyState.status]);
 
   const { appliedRules = [], contextItems = [] } = props;
+  const remainingContextItems = props.isMainInput
+    ? contextItems
+    : contextItems.filter((item) => !isFileAttachmentContextItem(item));
 
   return (
     <div
@@ -215,6 +220,12 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
       }`}
       data-testid={`continue-input-box-${props.inputId}`}
     >
+      {!props.isMainInput && (
+        <CukiiUserAttachmentStrip
+          contextItems={contextItems}
+          editorState={props.editorState}
+        />
+      )}
       <div className="relative flex flex-col">
         {props.isMainInput && <Lump />}
         {props.isMainInput ? (
@@ -255,11 +266,11 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
         )}
       </div>
 
-      {(appliedRules.length > 0 || contextItems.length > 0) && (
+      {(appliedRules.length > 0 || remainingContextItems.length > 0) && (
         <div className="mt-2 flex flex-col">
           <RulesPeek appliedRules={props.appliedRules} />
           <ContextItemsPeek
-            contextItems={props.contextItems}
+            contextItems={remainingContextItems}
             isCurrentContextPeek={props.isLastUserInput}
           />
         </div>

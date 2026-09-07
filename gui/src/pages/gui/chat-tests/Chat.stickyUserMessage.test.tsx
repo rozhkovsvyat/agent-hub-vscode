@@ -73,6 +73,12 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).not.toMatch(
     /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
   );
+  expect(css).toMatch(
+    /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*1px/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*1px/s,
+  );
   const stickyRowRule = css.match(
     /\.cukii-user-row--sticky\s*\{([^}]*)\}/s,
   )?.[1];
@@ -205,6 +211,9 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
     );
     expect(css).not.toContain(".cukii-user-expand-button-container");
     expect(css).not.toContain(".cukii-user-collapse-button-container");
+    expect(css).toMatch(
+      /\.cukii-user-bubble--meta-inline\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute/s,
+    );
   } finally {
     if (scrollHeightDescriptor) {
       Object.defineProperty(
@@ -259,6 +268,27 @@ test("never clips a visual attachment inside the text fold", () => {
       Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
     }
   }
+});
+
+test("keeps attachments in one horizontally scrolling micro-preview row", () => {
+  const css = canonicalCss();
+  expect(css).toMatch(
+    /\.cukii-user-attachment-strip\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*none/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-attachment-strip::\-webkit-scrollbar\s*\{[^}]*display:\s*none/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-attachment-card\s*\{[^}]*max-width:\s*180px;[^}]*height:\s*24px/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-attachment-card > img\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-bubble \.ProseMirror img,\s*\.cukii-user-bubble \.cukii-file-attachment-node-view\s*\{[^}]*display:\s*none !important/s,
+  );
+  expect(css).not.toContain(".cukii-code-block-node-view");
+  expect(css).toContain(".cukii-image-lightbox");
 });
 
 test("does not render fold controls for a short prompt", async () => {

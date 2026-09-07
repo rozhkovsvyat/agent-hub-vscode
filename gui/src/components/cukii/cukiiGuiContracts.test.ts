@@ -337,8 +337,11 @@ describe("Cukii GUI contracts", () => {
       css.indexOf(".cukii-user-bubble--group-end {") + 120,
     );
     expect(groupEnd).toContain("border-top-right-radius: 6px;");
-    expect(css).toContain(".cukii-user-row--grouped {");
-    expect(css).toContain("margin-top: 3px;");
+    expect(css).toContain(".cukii-user-row--group-start,");
+    expect(css).toContain(".cukii-user-row--group-middle {");
+    expect(css).toContain("--cukii-user-row-padding-bottom: 1px");
+    expect(css).toContain("--cukii-user-row-padding-top: 1px");
+    expect(css).not.toContain(".cukii-user-row--grouped {");
 
     // Receipt flow stays stylesheet-driven: Chat only flags which receipts
     // exist (time, ticks); the absolute-meta + inline-spacer layout is pure
@@ -353,7 +356,9 @@ describe("Cukii GUI contracts", () => {
     expect(chat).toContain("cukii-user-bubble--group-middle");
     expect(chat).toContain("cukii-user-bubble--group-start");
     expect(chat).toContain("cukii-user-bubble--group-end");
-    expect(chat).toContain("cukii-user-row--grouped");
+    expect(chat).toContain("cukii-user-row--group-start");
+    expect(chat).toContain("cukii-user-row--group-middle");
+    expect(chat).toContain("cukii-user-row--group-end");
 
     // Agent capsules share the user-capsule geometry (16px corners, MAX
     // insets) and keep shrink-wrapping within the 70% lane; only longread

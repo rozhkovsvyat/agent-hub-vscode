@@ -13,6 +13,20 @@ import { setupStore } from "../redux/store";
 import "../index.css";
 
 const ideMessenger = new MockIdeMessenger();
+ideMessenger.responses["cukii/getIssueReportCapability"] = {
+  available: true,
+  reason: "available",
+  accountLabel: "acceptance@example.test",
+};
+ideMessenger.responses["cukii/prepareIssueReport"] = {
+  extensionVersion: "dev-harness",
+  operatingSystem: "Windows acceptance harness",
+  remote: "local",
+  workspace: ["sticky-message-harness"],
+  sessionId: "sticky-message-harness",
+  brokerModel: "opus-5",
+  logLines: Array.from({ length: 37 }, (_, index) => `event-${index + 1}`),
+};
 const store = setupStore({ ideMessenger });
 const SENT_AT = 1_700_000_000_000;
 const LONG_ANSWER =
@@ -23,15 +37,44 @@ const LONG_PROMPT =
   "A long user prompt demonstrates Claude's sixty-pixel fold. Its delivery footer must remain visible below the clipped content, including the timestamp and read checks. ".repeat(
     5,
   );
+const IMAGE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect width='320' height='180' fill='%23d97757'/%3E%3Ccircle cx='160' cy='90' r='42' fill='%23121314'/%3E%3C/svg%3E";
 
 const HISTORY = [
   {
-    message: { id: "sticky-first", role: "user", content: "First prompt" },
+    message: { id: "sticky-first", role: "user", content: "First capsule" },
     contextItems: [],
     messageReceipt: { sentAt: SENT_AT, status: "read" },
   },
   {
+    message: { id: "hidden-system", role: "system", content: "transport" },
+    contextItems: [],
+  },
+  {
+    message: { id: "hidden-tool", role: "tool", content: "transport" },
+    contextItems: [],
+  },
+  {
+    message: { id: "sticky-second", role: "user", content: "Second capsule" },
+    contextItems: [],
+    messageReceipt: { sentAt: SENT_AT + 30_000, status: "read" },
+  },
+  {
     message: { id: "answer-first", role: "assistant", content: LONG_ANSWER },
+    contextItems: [],
+  },
+  {
+    message: { id: "plain-first", role: "user", content: "Plain first" },
+    contextItems: [],
+    messageReceipt: { sentAt: SENT_AT + 45_000, status: "read" },
+  },
+  {
+    message: { id: "plain-second", role: "user", content: "Plain second" },
+    contextItems: [],
+    messageReceipt: { sentAt: SENT_AT + 50_000, status: "read" },
+  },
+  {
+    message: { id: "answer-plain", role: "assistant", content: LONG_ANSWER },
     contextItems: [],
   },
   {
@@ -41,6 +84,37 @@ const HISTORY = [
   },
   {
     message: { id: "answer-long", role: "assistant", content: LONG_ANSWER },
+    contextItems: [],
+  },
+  {
+    message: {
+      id: "sticky-attachments",
+      role: "user",
+      content: [
+        { type: "text", text: "Attachments stay in one line" },
+        ...Array.from({ length: 6 }, () => ({
+          type: "imageUrl",
+          imageUrl: { url: IMAGE },
+        })),
+      ],
+    },
+    contextItems: [
+      {
+        id: { providerTitle: "file", itemId: "fixture" },
+        name: "acceptance-notes.md",
+        description: "D:\\Scratch\\acceptance-notes.md",
+        content: "Attachment fixture",
+        uri: { type: "file", value: "D:\\Scratch\\acceptance-notes.md" },
+      },
+    ],
+    messageReceipt: { sentAt: SENT_AT + 90_000, status: "read" },
+  },
+  {
+    message: {
+      id: "answer-attachments",
+      role: "assistant",
+      content: LONG_ANSWER,
+    },
     contextItems: [],
   },
   {

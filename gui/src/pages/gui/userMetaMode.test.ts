@@ -93,10 +93,24 @@ describe("userMetaFitsOnLastLine", () => {
     ).toBe(false);
   });
 
-  it("keeps a collapsible prompt's toggle and receipt in one footer row", () => {
+  it("keeps a collapsed prompt footer on its own row", () => {
     const bubble = build({ lastLineRight: 100 });
     bubble.dataset.cukiiCollapsible = "true";
     expect(userMetaFitsOnLastLine(bubble)).toBe(false);
+  });
+
+  it("lets an expanded fold footer share the last text line when it fits", () => {
+    const bubble = build({ lastLineRight: 345 });
+    bubble.dataset.cukiiCollapsible = "true";
+    bubble.classList.add("cukii-user-bubble--expanded");
+    const metadata = bubble.querySelector(".cukii-user-metadata")!;
+    const footer = document.createElement("span");
+    footer.className = "cukii-user-fold-footer";
+    footer.getBoundingClientRect = () => rect(0, 58, 14);
+    metadata.replaceWith(footer);
+
+    expect(userMetaWidth(bubble)).toBe(58);
+    expect(userMetaFitsOnLastLine(bubble)).toBe(true);
   });
 
   it("NEGATIVE CONTROL: a wider receipt changes the fit decision", () => {

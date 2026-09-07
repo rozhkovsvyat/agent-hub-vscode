@@ -292,7 +292,11 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           if (result) {
             const [_, dataUrl] = result;
             const { schema } = editor.state;
-            const node = schema.nodes.image.create({ src: dataUrl });
+            const node = schema.nodes.image.create({
+              alt: file.name,
+              src: dataUrl,
+              title: file.name,
+            });
             const tr = editor.state.tr.insert(0, node);
             editor.view.dispatch(tr);
           }

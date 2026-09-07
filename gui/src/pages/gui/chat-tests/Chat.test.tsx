@@ -430,9 +430,9 @@ test("short, multiline and image user turns stay in the right bubble lane while 
     expect(bubble).not.toHaveClass("cukii-user-bubble--inline-meta");
     expect(bubble.querySelector(".cukii-user-metadata")).not.toBeNull();
   }
-  expect(userRows[0]).not.toHaveClass("cukii-user-row--grouped");
-  expect(userRows[1]).toHaveClass("cukii-user-row--grouped");
-  expect(userRows[2]).toHaveClass("cukii-user-row--grouped");
+  expect(userRows[0]).toHaveClass("cukii-user-row--group-start");
+  expect(userRows[1]).toHaveClass("cukii-user-row--group-middle");
+  expect(userRows[2]).toHaveClass("cukii-user-row--group-end");
   expect(
     container.querySelector('[data-testid="cukii-message-receipt-short"]'),
   ).not.toBeNull();
@@ -444,6 +444,125 @@ test("short, multiline and image user turns stay in the right bubble lane while 
   ).not.toBeNull();
   expect(container.querySelector('[data-testid="saved-row-3"]')).toBeNull();
   expect(container.textContent).toContain("Answer");
+});
+
+test("groups visually adjacent user capsules across hidden transport entries", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "visual-user-group",
+        title: "Visual user group",
+        history: [
+          {
+            message: { id: "first-visible", role: "user", content: "First" },
+            contextItems: [],
+          },
+          {
+            message: {
+              id: "hidden-system",
+              role: "system",
+              content: "internal",
+            },
+            contextItems: [],
+          },
+          {
+            message: { id: "hidden-tool", role: "tool", content: "transport" },
+            contextItems: [],
+          },
+          {
+            message: { id: "second-visible", role: "user", content: "Second" },
+            contextItems: [],
+          },
+        ],
+      },
+    });
+  });
+
+  const rows = container.querySelectorAll(".cukii-user-row");
+  const bubbles = container.querySelectorAll(".cukii-user-message-bubble");
+  expect(rows).toHaveLength(2);
+  expect(bubbles[0]).toHaveClass("cukii-user-bubble--group-start");
+  expect(bubbles[1]).toHaveClass("cukii-user-bubble--group-end");
+  expect(rows[0]).toHaveClass("cukii-user-row--group-start");
+  expect(rows[1]).toHaveClass("cukii-user-row--group-end");
+});
+
+test("renders user images as one horizontal attachment strip with a lightbox", async () => {
+  const { store, container, user } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "attachment-strip",
+        title: "Attachment strip",
+        history: [
+          {
+            message: {
+              id: "images",
+              role: "user",
+              content: [
+                { type: "text", text: "Look at these" },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2Ux" },
+                },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2Uy" },
+                },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2Uz" },
+                },
+              ],
+            },
+            contextItems: [
+              {
+                id: { providerTitle: "file", itemId: "notes" },
+                name: "notes.txt",
+                description: "C:\\workspace\\notes.txt",
+                content: "Attached local file: C:\\workspace\\notes.txt",
+                uri: { type: "file", value: "C:\\workspace\\notes.txt" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  const strip = container.querySelector(".cukii-user-attachment-strip");
+  expect(strip).not.toBeNull();
+  expect(strip?.querySelectorAll(".cukii-user-attachment-card")).toHaveLength(
+    4,
+  );
+  expect(strip?.querySelector('[aria-label="Open notes.txt"]')).not.toBeNull();
+  expect(
+    container.querySelector("[data-testid='context-items-peek-item']"),
+  ).toBeNull();
+  expect(
+    container.querySelectorAll(".cukii-user-bubble .ProseMirror > img"),
+  ).toHaveLength(0);
+
+  await user.click(
+    container.querySelectorAll<HTMLButtonElement>(
+      ".cukii-user-attachment-card",
+    )[1]!,
+  );
+  const dialog = document.querySelector(
+    '[role="dialog"][aria-label="Image preview"]',
+  );
+  expect(dialog).not.toBeNull();
+  expect(dialog?.querySelector("img")).toHaveAttribute(
+    "src",
+    "data:image/png;base64,aW1hZ2Uy",
+  );
+  await user.keyboard("{Escape}");
+  expect(
+    document.querySelector('[role="dialog"][aria-label="Image preview"]'),
+  ).toBeNull();
 });
 
 test("deferred image follow-up visibly reports that it will run next turn", async () => {

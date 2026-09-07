@@ -206,7 +206,9 @@ export function createEditorConfig(options: {
                       const [, dataUrl] = resp;
                       const { schema } = view.state;
                       const node = schema.nodes.image.create({
+                        alt: file.name,
                         src: dataUrl,
+                        title: file.name,
                       });
                       const tr = view.state.tr.insert(0, node);
                       view.dispatch(tr);

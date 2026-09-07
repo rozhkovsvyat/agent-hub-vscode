@@ -757,7 +757,14 @@ function InputToolbar(props: InputToolbarProps) {
                           data-testid="cukii-report-issue-menu-item"
                           {...commandActionProps("Report an issue")}
                           type="button"
-                          onClick={() => {
+                          onClick={(event) => {
+                            // The toolbar lives inside InputBoxDiv, whose click
+                            // handler focuses TipTap. Letting this command click
+                            // bubble schedules a requestAnimationFrame focus
+                            // after the modal has focused Title, so native
+                            // selects instantly close and text fields blur.
+                            event.preventDefault();
+                            event.stopPropagation();
                             close();
                             setReportIssueOpen(true);
                           }}

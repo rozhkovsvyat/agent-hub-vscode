@@ -2116,13 +2116,15 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-user-row--sticky {
+  --cukii-user-row-padding-top: 14px;
+  --cukii-user-row-padding-bottom: 12px;
   position: sticky;
   top: 0;
   z-index: 2;
   align-items: stretch;
   margin: 0;
-  padding-top: 14px;
-  padding-bottom: 12px;
+  padding-top: var(--cukii-user-row-padding-top);
+  padding-bottom: var(--cukii-user-row-padding-bottom);
   /* The sticky mask belongs to the same chat canvas as html/body/#root.
      VS Code's sidebar/editor tokens are lighter than Cukii's measured panel
      tones and painted a full-width grey strip around the orange capsule. */
@@ -2157,10 +2159,18 @@ button.cukii-submit-button--stop:active {
   max-width: 100%;
 }
 
-/* MAX-style grouping: adjacent user turns sit almost flush; only groups get
-   the breathing margin. */
-.cukii-user-row--grouped {
-  margin-top: 3px;
+/* MAX-style grouping: adjacent visible messages share a compact 2px seam.
+   Both sides of the seam participate; changing only margin-top left the
+   sticky row's 14px/12px padding intact and produced the oversized gaps from
+   the live transcript. */
+.cukii-user-row--group-start,
+.cukii-user-row--group-middle {
+  --cukii-user-row-padding-bottom: 1px;
+}
+
+.cukii-user-row--group-middle,
+.cukii-user-row--group-end {
+  --cukii-user-row-padding-top: 1px;
 }
 
 /* MAX-style message bubble: user turns own the right lane while the timeline
@@ -2283,7 +2293,16 @@ button.cukii-submit-button--stop:active {
   margin: 0;
 }
 
-.cukii-user-message-bubble[data-cukii-collapsible="true"]
+.cukii-user-bubble--meta-inline > .cukii-user-fold-footer {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+.cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
+    .cukii-user-bubble--expanded
+  )
   .ProseMirror
   p:last-child::after {
   display: none;
@@ -2377,11 +2396,164 @@ button.cukii-submit-button--stop:active {
   align-self: center;
 }
 
-.cukii-user-bubble .ProseMirror img,
-.cukii-user-bubble img {
+.cukii-user-attachment-strip {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 0 2px;
+  overscroll-behavior-inline: contain;
+  /* Claude keeps the attachment rail one pill high. It still scrolls with a
+     wheel/trackpad/keyboard, but a native horizontal scrollbar must not add a
+     second visual row below the 24px pills. */
+  scrollbar-width: none;
+}
+
+.cukii-user-attachment-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.cukii-user-attachment-card {
+  --cukii-attachment-pill-background: color-mix(
+    in srgb,
+    var(--cukii-text, #2c241c) 8%,
+    transparent
+  );
+  display: inline-flex;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 0;
+  max-width: 180px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 4px 6px 4px 4px;
+  color: var(--cukii-text, #2c241c);
+  background: var(--cukii-attachment-pill-background);
+  border: 1px solid
+    color-mix(in srgb, var(--cukii-text, #2c241c) 18%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.cukii-user-attachment-card:hover {
+  background: color-mix(in srgb, var(--cukii-text, #2c241c) 14%, transparent);
+}
+
+.cukii-user-attachment-card:focus-visible {
+  outline: 1px solid var(--cukii-text, #2c241c);
+  outline-offset: -2px;
+}
+
+.cukii-user-attachment-card > img {
   display: block;
-  margin-top: 8px;
-  margin-bottom: 8px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  margin: 0;
+  border-radius: 1px;
+  object-fit: cover;
+}
+
+.cukii-user-attachment-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.cukii-user-attachment-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.cukii-user-attachment-file-icon {
+  display: flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.cukii-user-attachment-file-icon > svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Historical editor state retains the original nodes so Edit/Retry cannot
+   lose attachments. The saved bubble replaces their large previews with the
+   single-line strip above. */
+.cukii-user-bubble .ProseMirror img,
+.cukii-user-bubble .cukii-file-attachment-node-view {
+  display: none !important;
+}
+
+.cukii-image-lightbox {
+  position: fixed;
+  z-index: 100003;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.cukii-image-lightbox-dialog {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+}
+
+.cukii-image-lightbox-dialog > button {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--vscode-menu-foreground, #cccccc);
+  background: var(--vscode-menu-background, #252526);
+  border: 1px solid var(--vscode-input-border, #454545);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.cukii-image-lightbox-dialog > button:hover {
+  background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.cukii-image-lightbox-dialog > button > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cukii-image-lightbox-dialog > img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  object-fit: contain;
 }
 
 .cukii-timeline-item {
