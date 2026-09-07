@@ -397,6 +397,16 @@ describe("streamBrokerBridgeInput controls", () => {
       {
         message: messageWithId(
           {
+            role: "assistant",
+            content: "late output from the old run without the correction",
+          },
+          "late-old-assistant",
+        ),
+        contextItems: [],
+      },
+      {
+        message: messageWithId(
+          {
             role: "user",
             content: [
               {
@@ -418,6 +428,10 @@ describe("streamBrokerBridgeInput controls", () => {
           "new-submit",
         ),
         contextItems: [],
+        messageReceipt: {
+          status: "queued",
+          sentAt: 3,
+        },
       },
     ];
     const store = setupStore({ ideMessenger });
@@ -446,6 +460,7 @@ describe("streamBrokerBridgeInput controls", () => {
     ).toEqual([
       "original",
       "old-assistant",
+      "late-old-assistant",
       "pending-text",
       "pending-image",
       "new-submit",
@@ -456,6 +471,12 @@ describe("streamBrokerBridgeInput controls", () => {
         .session.history.filter((item) => item.isSteer)
         .map((item) => item.steerStatus),
     ).toEqual(["read", "read"]);
+    expect(
+      store
+        .getState()
+        .session.history.find((item) => item.message.id === "new-submit")
+        ?.messageReceipt?.status,
+    ).toBe("read");
   });
 
   it("normalizes terminal error decoration and repeated frames without merging distinct errors", () => {

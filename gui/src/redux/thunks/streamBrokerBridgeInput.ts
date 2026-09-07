@@ -226,7 +226,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       explicitlyQueuedFollowUpMessageIds.length > 0
         ? explicitlyQueuedFollowUpMessageIds
         : implicitlyRecoveredFollowUps.map((item) => item.message.id);
-    const preservesRecoveredTimeline = implicitlyRecoveredFollowUps.length > 0;
+    const hasImplicitRecovery = implicitlyRecoveredFollowUps.length > 0;
     const queuedFollowUpMessageId = queuedFollowUpMessageIds[0];
     const brokerModel = state.session.brokerModel ?? "fable-5";
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
@@ -235,7 +235,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     const brokerAutocompact = state.session.brokerAutocompact;
     const thinkingEnabled = state.session.hasReasoningEnabled;
     const streamAborter = state.session.streamAborter;
-    const initialUserReceiptId = queuedFollowUpMessageId
+    const initialUserReceiptId = explicitlyQueuedFollowUpMessageIds.length > 0
       ? undefined
       : state.session.history.findLast(
           (item) => item.message.role === "user" && !item.isSteer,
@@ -262,14 +262,17 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     if (state.session.steerInterruptPending) {
       dispatch(clearSteerInterrupt());
     }
+    const currentSubmitId = hasImplicitRecovery
+      ? initialUserReceiptId
+      : undefined;
     const messages: ChatMessage[] = state.session.history
       // A model switch is a local timeline receipt. It must not become a
       // system turn in the next vendor request, even on the direct bridge path.
       .filter(
         (item) =>
           !item.modelSwitch &&
-          (preservesRecoveredTimeline ||
-            !queuedFollowUpMessageIds.includes(item.message.id)) &&
+          !queuedFollowUpMessageIds.includes(item.message.id) &&
+          item.message.id !== currentSubmitId &&
           !(
             item.isSteer &&
             (item.steerStatus === "queued" ||
@@ -285,10 +288,17 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       )
       .map((item) => item.message)
       .filter((message) => message.role !== "thinking");
-    if (!preservesRecoveredTimeline) {
-      for (const queuedFollowUp of queuedFollowUps) {
-        if (queuedFollowUp) messages.push(queuedFollowUp.message);
-      }
+    // Pending input was not visible to the old vendor output that may follow
+    // its bubbles in the UI timeline. Move the complete FIFO batch behind all
+    // previously produced output, then keep the user's new submit last.
+    for (const queuedFollowUp of queuedFollowUps) {
+      if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    }
+    if (currentSubmitId) {
+      const currentSubmit = state.session.history.find(
+        (item) => item.message.id === currentSubmitId,
+      );
+      if (currentSubmit) messages.push(currentSubmit.message);
     }
     const historyLengthAtRunStart = state.session.history.length;
     // Long broker turns must not bet the whole tail on the end-of-turn save:
@@ -455,7 +465,8 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             if (message.cukiiVendorActivity) {
               if (queuedFollowUpMessageIds.length > 0) {
                 await markAcceptedAndPersist(queuedFollowUpMessageIds);
-              } else if (initialUserReceiptId) {
+              }
+              if (initialUserReceiptId) {
                 dispatch(markSteerRead({ messageId: initialUserReceiptId }));
               }
             }

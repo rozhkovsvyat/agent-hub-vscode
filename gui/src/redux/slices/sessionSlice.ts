@@ -233,11 +233,12 @@ export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   };
   isSteer?: boolean;
   /**
-   * `delivered` means the native bridge accepted the follow-up. `read` is
-   * reserved for an explicit vendor echo of this exact input, never for an
-   * arbitrary later assistant/tool event. `cancelled` is a terminal state set
-   * by an explicit user Stop: the bubble stays visible, but no drain or late
-   * transport frame may revive it.
+   * `delivered` means the live/durable bridge transport accepted the
+   * follow-up. `read` requires an explicit inbox ack, a native echo, or
+   * structured activity from the exact turn whose prompt carries this
+   * message ID; raw stdout and local launch events never qualify. `cancelled`
+   * is terminal after an explicit user Stop: the bubble stays visible, but no
+   * drain or late transport frame may revive it.
    */
   steerStatus?:
     | "queued"

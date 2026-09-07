@@ -35,6 +35,7 @@ vi.mock("./permissionCapabilities", () => ({
 
 import {
   attachClaudePermissionTransport,
+  bridgeEventsProveInputAccepted,
   claudeInitialContent,
   claudeStreamingInput,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
@@ -949,7 +950,33 @@ describe("native bridge argv", () => {
     ]);
   });
 
-  it("acknowledges a redelivered follow-up only after factual vendor stdout", () => {
+  it("accepts only structured model activity, never startup/error stdout", () => {
+    expect(bridgeEventsProveInputAccepted([])).toBe(false);
+    expect(
+      bridgeEventsProveInputAccepted([{ kind: "error", text: "auth failed" }]),
+    ).toBe(false);
+    expect(
+      bridgeEventsProveInputAccepted([
+        { kind: "terminalError", text: "quota" },
+        { kind: "complete" },
+      ]),
+    ).toBe(false);
+    expect(
+      bridgeEventsProveInputAccepted([{ kind: "complete" }], true),
+    ).toBe(false);
+    expect(bridgeEventsProveInputAccepted([{ kind: "complete" }])).toBe(true);
+    expect(
+      bridgeEventsProveInputAccepted([{ kind: "thinking", text: "working" }]),
+    ).toBe(true);
+    expect(
+      bridgeEventsProveInputAccepted([
+        { kind: "text", text: "partial answer" },
+        { kind: "terminalError", text: "later failure" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("acknowledges a redelivered follow-up only after structured vendor acceptance", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "bridgeChatAdapter.ts"),
       "utf8",
@@ -963,15 +990,19 @@ describe("native bridge argv", () => {
     expect(handoffAt).toBeGreaterThan(-1);
     expect(stdoutAt).toBeGreaterThan(handoffAt);
     expect(ackAt).toBeGreaterThan(stdoutAt);
-    // Spawn without output is not delivery. Every batch member is acknowledged
-    // only inside the first factual stdout branch.
+    // Spawn or arbitrary stdout is not delivery. Every batch member is
+    // acknowledged only after the parser produced an accepting event.
     const ackBlock = source.slice(stdoutAt, ackAt);
-    expect(ackBlock).toContain("if (firstOutputAt === undefined)");
+    expect(ackBlock).toContain(
+      "bridgeEventsProveInputAccepted(events, inputFailureObserved)",
+    );
     expect(ackBlock).toContain("markBridgeInboxMessagesRead");
     expect(ackBlock).toContain(
       "for (const messageId of queuedFollowUpMessageIds)",
     );
     expect(ackBlock).toContain("queuedFollowUpRead.has(messageId)");
+    expect(ackBlock).toContain('status !== "read"');
+    expect(ackBlock).toContain('status !== "absent"');
     expect(source).not.toContain('child.once("spawn"');
   });
 

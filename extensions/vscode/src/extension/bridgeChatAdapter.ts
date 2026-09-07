@@ -23,7 +23,10 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
-import { markBridgeInboxMessagesRead } from "./bridgeInbox";
+import {
+  bridgeInboxMessageStatus,
+  markBridgeInboxMessagesRead,
+} from "./bridgeInbox";
 import {
   ensureBrokerVendorIntegration,
   registerBrokerSessionBinding,
@@ -1267,9 +1270,43 @@ export type CukiiBridgeChatMessage = ChatMessage & {
   cukiiTerminalError?: true;
   /** Exact follow-up that the native vendor echoed as input. */
   cukiiSteerReadMessageId?: string;
-  /** First factual stdout from the native CLI, never a local launch status. */
+  /** Structured vendor activity proving that this turn accepted its input. */
   cukiiVendorActivity?: true;
 };
+
+/**
+ * Raw stdout is not an input receipt: native CLIs can print startup/auth/quota
+ * failures before a model sees the prompt. Only a parsed model/tool event (or
+ * a clean terminal receipt with no failure in the same frame) proves that the
+ * restored batch crossed the vendor boundary.
+ */
+export function bridgeEventsProveInputAccepted(
+  events: BridgeEvent[],
+  priorFailure = false,
+): boolean {
+  const hasFailure =
+    priorFailure ||
+    events.some(
+      (event) => event.kind === "error" || event.kind === "terminalError",
+    );
+  return events.some((event) => {
+    switch (event.kind) {
+      case "text":
+      case "userEcho":
+      case "thinking":
+      case "toolStart":
+      case "toolResult":
+      case "wait":
+        return true;
+      case "complete":
+        return !hasFailure;
+      case "steerRead":
+      case "error":
+      case "terminalError":
+        return false;
+    }
+  });
+}
 
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
   switch (event.kind) {
@@ -1640,8 +1677,9 @@ async function* launchBridgeChild(options: {
           new Set(),
         );
         if (queuedMessageId && queuedFollowUpRead.has(queuedMessageId)) {
-          // Spawn already acknowledged this exact batch member. Its later
-          // vendor echo is private transport noise, never a second user turn.
+          // Structured vendor activity already acknowledged this exact batch
+          // member. Its later echo is private transport noise, never a second
+          // user turn.
           continue;
         }
         const messageId = queuedMessageId
@@ -1687,6 +1725,8 @@ async function* launchBridgeChild(options: {
   let rawStdout = "";
   const launchedAt = Date.now();
   let firstOutputAt: number | undefined;
+  let inputAccepted = false;
+  let inputFailureObserved = false;
 
   if (!route.noStdin && !cancelled) {
     child.stdin.write(
@@ -1733,25 +1773,9 @@ async function* launchBridgeChild(options: {
     if (cancelled) return;
     if (firstOutputAt === undefined) {
       firstOutputAt = Date.now();
-      // Only factual vendor activity proves that the prompt carrying the
-      // recovered batch crossed the process boundary. Ack the shared inbox
-      // and emit one receipt per bubble here; a spawn followed by crash keeps
-      // every item pending for the next resume.
-      if (sessionId && queuedFollowUpMessageIds.length > 0) {
-        markBridgeInboxMessagesRead(sessionId, queuedFollowUpMessageIds);
-        for (const messageId of queuedFollowUpMessageIds) {
-          if (queuedFollowUpRead.has(messageId)) continue;
-          queuedFollowUpRead.add(messageId);
-          queue.push({ kind: "steerRead", messageId });
-        }
-      }
       queue.push({
         kind: "thinking",
         text: `Native bridge first output after ${((firstOutputAt - launchedAt) / 1000).toFixed(1)} s.\n`,
-        // This is the first factual vendor activity. The earlier local
-        // "Launching native command" status must never upgrade a user
-        // receipt to the second checkmark.
-        vendorActivity: true,
       });
     }
     const text = chunk.toString("utf8");
@@ -1761,7 +1785,41 @@ async function* launchBridgeChild(options: {
     if (rawStdout.length < 2_000_000) {
       rawStdout += text;
     }
-    enqueueVisibleEvents(parser.push(text));
+    const events = parser.push(text);
+    if (
+      !inputAccepted &&
+      bridgeEventsProveInputAccepted(events, inputFailureObserved)
+    ) {
+      inputAccepted = true;
+      if (sessionId && queuedFollowUpMessageIds.length > 0) {
+        const acked = new Set(
+          markBridgeInboxMessagesRead(sessionId, queuedFollowUpMessageIds),
+        );
+        for (const messageId of queuedFollowUpMessageIds) {
+          const status = bridgeInboxMessageStatus(sessionId, messageId);
+          // A pending file that failed atomic replacement must stay at one
+          // checkmark and be replayed. Absent/already-read files are safe:
+          // the exact message is present in the persisted chat timeline.
+          if (
+            !acked.has(messageId) &&
+            status !== "read" &&
+            status !== "absent"
+          ) {
+            continue;
+          }
+          if (queuedFollowUpRead.has(messageId)) continue;
+          queuedFollowUpRead.add(messageId);
+          queue.push({ kind: "steerRead", messageId });
+        }
+      }
+      // The GUI upgrades the ordinary current message only on this private
+      // structured acceptance event, never on arbitrary stdout bytes.
+      queue.push({ kind: "thinking", text: "", vendorActivity: true });
+    }
+    inputFailureObserved ||= events.some(
+      (event) => event.kind === "error" || event.kind === "terminalError",
+    );
+    enqueueVisibleEvents(events);
   });
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8");
