@@ -67,6 +67,11 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).not.toMatch(
     /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
   );
+  const stickyRowRule = css.match(
+    /\.cukii-user-row--sticky\s*\{([^}]*)\}/s,
+  )?.[1];
+  expect(stickyRowRule).toContain("var(--cukii-chat-background)");
+  expect(stickyRowRule).not.toContain("--vscode-sideBar-background");
 });
 
 test("folds a long sticky prompt like Claude while keeping time and ticks in the footer", async () => {
