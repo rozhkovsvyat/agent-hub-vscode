@@ -134,8 +134,7 @@ describe("YouGile account row", () => {
     });
     expect(status.state).toBe("disconnected");
     expect(status.accountLabel).toBeUndefined();
-    // Both, because the stored key has to be clearable as well as replaceable.
-    expect(status.actions).toEqual(["login", "logout"]);
+    expect(status.actions).toEqual(["login"]);
   });
 
   it("NEGATIVE CONTROL: an unreachable API is not a revoked key", async () => {
@@ -156,6 +155,22 @@ describe("YouGile account row", () => {
     });
     expect(serverError.state).toBe("unknown");
     expect(serverError.accountLabel).toBe(OWNER);
+  });
+
+  it("NEGATIVE CONTROL: a machine key plus an unreachable API never becomes Not logged in + Log out", async () => {
+    const status = await yougileAccountStatus({
+      store: store(),
+      http: unreachable,
+      environment: machineWithToken,
+    });
+
+    expect(status).toMatchObject({
+      authenticated: false,
+      state: "unknown",
+      accountLabel: "Account status unavailable",
+      actions: ["logout"],
+    });
+    expect(status.accountLabel).not.toBe("Not logged in");
   });
 
   it("opens the browser and stores the key only after the API accepts it", async () => {

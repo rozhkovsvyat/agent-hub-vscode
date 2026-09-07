@@ -276,6 +276,8 @@ export async function yougileAccountStatus(
   if (verdict === "unreachable") {
     // The stored identity is still the truth we know; only its freshness is
     // unknown, so the row keeps the account and says so through its state.
+    // If this is a machine-discovered key there may be no cached identity yet;
+    // still never let the GUI infer "Not logged in" beside a Log out action.
     return {
       id: YOUGILE_ACCOUNT_ID,
       label: YOUGILE_ACCOUNT_LABEL,
@@ -283,7 +285,7 @@ export async function yougileAccountStatus(
       installed: true,
       authenticated: false,
       state: "unknown",
-      ...(label ? { accountLabel: label } : {}),
+      accountLabel: label ?? "Account status unavailable",
       actions: clearable ? ["logout"] : ["login"],
     };
   }
@@ -295,7 +297,10 @@ export async function yougileAccountStatus(
       installed: true,
       authenticated: false,
       state: "disconnected",
-      actions: clearable ? ["login", "logout"] : ["login"],
+      // A rejected credential is not a signed-in account. Replacing it is the
+      // only useful next action; offering Log out beside "Not logged in" is a
+      // contradictory state and was observed in the installed UI.
+      actions: ["login"],
     };
   }
   return {
@@ -306,7 +311,10 @@ export async function yougileAccountStatus(
     authenticated: true,
     state: "connected",
     ...(label ? { accountLabel: label } : {}),
-    actions: clearable ? ["logout"] : ["login"],
+    // Without a protected store we cannot persist a sign-out decision for a
+    // machine-owned key. No action is more truthful than offering Log in next
+    // to an already connected account.
+    actions: clearable ? ["logout"] : [],
   };
 }
 

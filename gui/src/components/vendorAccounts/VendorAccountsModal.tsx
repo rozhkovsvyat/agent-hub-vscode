@@ -20,6 +20,47 @@ const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
 };
 
 /**
+ * The subtitle and the action must describe the same account state. Hosts may
+ * be older than the webview, and a transient probe failure may produce an
+ * unknown state without an identity, so the renderer defends the invariant as
+ * well as the extension host.
+ */
+export function accountStatusSubtitle(
+  account: BrokerVendorAuthStatus,
+): string | undefined {
+  const label = account.accountLabel?.trim();
+  if (account.state === "connected") {
+    return label === "Not logged in" ? undefined : label;
+  }
+  if (account.state === "unknown") {
+    return label && label !== "Not logged in"
+      ? label
+      : "Account status unavailable";
+  }
+  if (account.state === "disconnected") return "Not logged in";
+  return label;
+}
+
+export function accountStatusActions(
+  account: BrokerVendorAuthStatus,
+): BrokerVendorAuthAction[] {
+  const allowed = new Set<BrokerVendorAuthAction>(
+    account.state === "connected"
+      ? ["logout"]
+      : account.state === "disconnected"
+        ? ["login"]
+        : account.state === "unavailable"
+          ? ["install"]
+          : account.state === "unknown"
+            ? account.actions.includes("logout")
+              ? ["logout"]
+              : ["login"]
+            : [],
+  );
+  return account.actions.filter((action) => allowed.has(action));
+}
+
+/**
  * Model vendors first, then accounts the plugin keeps for its own features.
  * A group with no rows is not rendered, so a host that predates grouping (all
  * rows default to "vendor") looks exactly as it did.
@@ -194,56 +235,63 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                   <div className="cukii-picker-section-header cursor-default select-none">
                     {label}
                   </div>
-                  {rows.map((account) => (
-                    <section
-                      key={account.id}
-                      data-testid={`cukii-vendor-account-${account.id}`}
-                      className="cukii-account-row"
-                    >
-                      <span
-                        className={`cukii-account-state cukii-vendor-state-${account.state}`}
-                        aria-label={account.state}
-                      />
-                      <span className="min-w-0 flex-1 leading-[19.5px]">
-                        <span className="block text-[13px] text-[var(--vscode-foreground)]">
-                          {account.label}
-                        </span>
-                        {/* The identity line always says something once the CLI is
+                  {rows.map((account) => {
+                    const subtitle = accountStatusSubtitle(account);
+                    const actions = accountStatusActions(account);
+                    return (
+                      <section
+                        key={account.id}
+                        data-testid={`cukii-vendor-account-${account.id}`}
+                        className="cukii-account-row"
+                      >
+                        <span
+                          className={`cukii-account-state cukii-vendor-state-${account.state}`}
+                          aria-label={account.state}
+                        />
+                        <span className="min-w-0 flex-1 leading-[19.5px]">
+                          <span className="block text-[13px] text-[var(--vscode-foreground)]">
+                            {account.label}
+                          </span>
+                          {/* The identity line always says something once the CLI is
                       there: the account, or that nobody is signed in. Only a
                       missing CLI leaves it blank, because "not logged in"
                       would be the wrong diagnosis. */}
-                        {(account.accountLabel ||
-                          (account.installed && !account.authenticated)) && (
-                          <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
-                            {account.accountLabel ?? "Not logged in"}
-                          </span>
-                        )}
-                      </span>
-                      <span className="flex shrink-0 items-center">
-                        {account.actions.map((action) => {
-                          const key = `${account.id}:${action}`;
-                          const isBusy = busy === key;
-                          return (
-                            <button
-                              key={action}
-                              type="button"
-                              disabled={busy !== undefined}
-                              className="cukii-vendor-action"
-                              aria-busy={isBusy}
-                              title={
-                                isBusy
-                                  ? "Waiting for the authentication flow to finish"
-                                  : undefined
-                              }
-                              onClick={() => void runAction(account, action)}
-                            >
-                              {isBusy ? <CukiiCrumbs /> : ACTION_LABELS[action]}
-                            </button>
-                          );
-                        })}
-                      </span>
-                    </section>
-                  ))}
+                          {subtitle && (
+                            <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
+                              {subtitle}
+                            </span>
+                          )}
+                        </span>
+                        <span className="flex shrink-0 items-center">
+                          {actions.map((action) => {
+                            const key = `${account.id}:${action}`;
+                            const isBusy = busy === key;
+                            return (
+                              <button
+                                key={action}
+                                type="button"
+                                disabled={busy !== undefined}
+                                className="cukii-vendor-action"
+                                aria-busy={isBusy}
+                                title={
+                                  isBusy
+                                    ? "Waiting for the authentication flow to finish"
+                                    : undefined
+                                }
+                                onClick={() => void runAction(account, action)}
+                              >
+                                {isBusy ? (
+                                  <CukiiCrumbs />
+                                ) : (
+                                  ACTION_LABELS[action]
+                                )}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      </section>
+                    );
+                  })}
                 </div>
               );
             })

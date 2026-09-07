@@ -311,6 +311,73 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Not installed");
   });
 
+  it("NEGATIVE CONTROL: never renders Not logged in beside Log out", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "yougile",
+        label: "YouGile",
+        group: "testing",
+        installed: true,
+        authenticated: false,
+        state: "unknown",
+        actions: ["logout"],
+      },
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("Account status unavailable");
+    await getElementByText("Log out");
+    expect(document.body.textContent).not.toContain("Not logged in");
+  });
+
+  it.each([
+    {
+      name: "connected plus Log in",
+      status: {
+        authenticated: true,
+        state: "connected" as const,
+        accountLabel: "owner@company.ru",
+        actions: ["login" as const],
+      },
+      absent: "Log in",
+    },
+    {
+      name: "disconnected plus Log out",
+      status: {
+        authenticated: false,
+        state: "disconnected" as const,
+        accountLabel: "Not logged in",
+        actions: ["logout" as const],
+      },
+      absent: "Log out",
+    },
+  ])(
+    "NEGATIVE CONTROL: filters $name from an inconsistent host",
+    async ({ status, absent }) => {
+      const ideMessenger = new MockIdeMessenger();
+      ideMessenger.responses["cukii/listVendorAccounts"] = [
+        {
+          id: "yougile",
+          label: "YouGile",
+          group: "testing",
+          installed: true,
+          ...status,
+        },
+      ];
+
+      await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+        mockIdeMessenger: ideMessenger,
+      });
+
+      await getElementByText("YouGile");
+      expect(document.body.textContent).not.toContain(absent);
+    },
+  );
+
   it("shows Alibaba with shared login copy and no token field", async () => {
     const ideMessenger = new MockIdeMessenger();
     ideMessenger.responses["cukii/listVendorAccounts"] = [
@@ -367,6 +434,9 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Log out");
     expect(document.body.textContent).not.toMatch(
       /Connected|identity unavailable|Email unavailable/i,
+    );
+    expect(document.body.textContent).not.toContain(
+      "Account status unavailable",
     );
   });
 
