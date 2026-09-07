@@ -2,8 +2,12 @@
 export const USER_META_INLINE_GAP_PX = 4;
 
 export function userMetaWidth(bubble: HTMLElement): number {
-  const meta = bubble.querySelector<HTMLElement>(".cukii-user-metadata");
-  return meta ? Math.ceil(meta.getBoundingClientRect().width) : 0;
+  const footerOrMeta = bubble.querySelector<HTMLElement>(
+    ".cukii-user-fold-footer, .cukii-user-metadata",
+  );
+  return footerOrMeta
+    ? Math.ceil(footerOrMeta.getBoundingClientRect().width)
+    : 0;
 }
 
 function innerWidth(element: HTMLElement): number {
@@ -45,6 +49,7 @@ export function userMetaFitsOnLastLine(
   bubble: HTMLElement,
   measuredMetaWidth = userMetaWidth(bubble),
 ): boolean {
+  if (bubble.dataset.cukiiCollapsible === "true") return false;
   const prose = bubble.querySelector<HTMLElement>(".ProseMirror");
   const last = prose?.lastElementChild;
   if (!prose || !last || last.tagName !== "P" || measuredMetaWidth <= 0) {

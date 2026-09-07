@@ -2238,52 +2238,49 @@ button.cukii-submit-button--stop:active {
   );
 }
 
-.cukii-user-expand-button-container {
-  position: absolute;
-  right: 0;
-  bottom: 0;
+.cukii-user-fold-footer {
   display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.cukii-user-content-shell:hover > .cukii-user-expand-button-container,
-.cukii-user-content-shell:focus-within > .cukii-user-expand-button-container {
-  opacity: 0.9;
-  pointer-events: auto;
-}
-
-.cukii-user-expand-button,
-.cukii-user-collapse-button {
-  display: flex;
+  width: fit-content;
   align-items: center;
-  margin: 4px;
-  padding: 8px;
-  color: var(--vscode-menu-background, #1e1e1e);
-  font-size: 0.85em;
-  background-color: var(--vscode-menu-foreground, #f0f0f0);
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  transition:
-    transform 200ms,
-    box-shadow 200ms;
-}
-
-.cukii-user-collapse-button-container {
-  display: flex;
-  align-items: flex-end;
   justify-content: flex-end;
-  opacity: 0.9;
+  gap: 2px;
+  margin: 2px 0 -6px auto;
+  line-height: 14px;
 }
 
-.cukii-user-message-bubble[data-cukii-collapsible="true"].cukii-user-bubble--meta-inline
-  > .cukii-user-metadata {
-  position: static;
-  margin: 2px 0 -6px auto;
+.cukii-user-fold-toggle {
+  display: inline-flex;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--cukii-text, #2c241c);
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  opacity: 0.68;
+  cursor: pointer;
+}
+
+.cukii-user-fold-toggle:hover {
+  opacity: 1;
+}
+
+.cukii-user-fold-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}
+
+.cukii-user-fold-toggle > svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.8;
+}
+
+.cukii-user-fold-footer > .cukii-user-metadata {
+  margin: 0;
 }
 
 .cukii-user-message-bubble[data-cukii-collapsible="true"]

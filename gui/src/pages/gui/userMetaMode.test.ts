@@ -93,6 +93,12 @@ describe("userMetaFitsOnLastLine", () => {
     ).toBe(false);
   });
 
+  it("keeps a collapsible prompt's toggle and receipt in one footer row", () => {
+    const bubble = build({ lastLineRight: 100 });
+    bubble.dataset.cukiiCollapsible = "true";
+    expect(userMetaFitsOnLastLine(bubble)).toBe(false);
+  });
+
   it("NEGATIVE CONTROL: a wider receipt changes the fit decision", () => {
     expect(
       userMetaFitsOnLastLine(build({ lastLineRight: 350, metaWidth: 70 })),

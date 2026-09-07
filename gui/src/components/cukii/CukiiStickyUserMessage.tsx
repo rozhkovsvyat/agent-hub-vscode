@@ -1,3 +1,4 @@
+import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 import {
   type MouseEvent,
   type ReactNode,
@@ -18,8 +19,8 @@ interface CukiiStickyUserMessageProps {
 
 /**
  * Claude Code keeps each prompt at the top of its turn and folds prompts taller
- * than 60px. Cukii keeps its delivery metadata outside that clipped content so
- * the timestamp and ticks remain visible in both folded and expanded states.
+ * than 60px. Cukii keeps the fold toggle and delivery metadata in one compact
+ * MAX-style footer so neither state creates a second toolbar row.
  */
 export function CukiiStickyUserMessage({
   bubbleClassName,
@@ -107,37 +108,31 @@ export function CukiiStickyUserMessage({
         {isCollapsed && (
           <div aria-hidden="true" className="cukii-user-truncation-gradient" />
         )}
-        {isCollapsed && (
-          <div className="cukii-user-expand-button-container">
-            <button
-              aria-expanded="false"
-              aria-label="Show more"
-              className="cukii-user-expand-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                expand();
-              }}
-              type="button"
-            >
-              Show more
-            </button>
-          </div>
-        )}
       </div>
-      {isExpanded && isCollapsible && (
-        <div className="cukii-user-collapse-button-container">
+      {isCollapsible ? (
+        <div className="cukii-user-fold-footer">
           <button
-            aria-expanded="true"
-            aria-label="Show less"
-            className="cukii-user-collapse-button"
-            onClick={collapse}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? "Show less" : "Show more"}
+            className="cukii-user-fold-toggle"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (isExpanded) collapse();
+              else expand();
+            }}
             type="button"
           >
-            Show less
+            {isExpanded ? (
+              <ChevronUpIcon aria-hidden="true" />
+            ) : (
+              <ChevronDownIcon aria-hidden="true" />
+            )}
           </button>
+          {metadata}
         </div>
+      ) : (
+        metadata
       )}
-      {metadata}
     </div>
   );
 }

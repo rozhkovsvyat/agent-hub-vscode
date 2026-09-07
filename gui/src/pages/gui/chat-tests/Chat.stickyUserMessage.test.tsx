@@ -64,6 +64,12 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).toMatch(
     /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*max-width:\s*70%/s,
   );
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*width:\s*fit-content/s,
+  );
+  expect(css).not.toMatch(
+    /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*width:\s*100%/s,
+  );
   expect(css).not.toMatch(
     /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
   );
@@ -141,22 +147,38 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
     expect(clippedContent).not.toBeNull();
     expect(receipt?.textContent).toBe("01:13");
     expect(clippedContent?.contains(receipt ?? null)).toBe(false);
-    expect(receipt?.parentElement).toBe(bubble);
     expect(
       receipt?.querySelector(
         '[data-testid="cukii-message-receipt-status-read"]',
       ),
     ).not.toBeNull();
 
-    await user.click(container.querySelector('[aria-label="Show more"]')!);
+    const collapsedToggle = container.querySelector('[aria-label="Show more"]');
+    const footer = bubble?.querySelector(".cukii-user-fold-footer");
+    expect(footer).not.toBeNull();
+    expect(collapsedToggle?.parentElement).toBe(footer);
+    expect(receipt?.parentElement).toBe(footer);
+    expect(footer?.firstElementChild).toBe(collapsedToggle);
+    expect(footer?.lastElementChild).toBe(receipt);
+    expect(collapsedToggle?.textContent).toBe("");
+    expect(
+      bubble?.querySelector(".cukii-user-expand-button-container"),
+    ).toBeNull();
+    expect(
+      bubble?.querySelector(".cukii-user-collapse-button-container"),
+    ).toBeNull();
+
+    await user.click(collapsedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--expanded");
     expect(
       bubble?.querySelector(".cukii-user-message-content--collapsed"),
     ).toBeNull();
-    expect(receipt?.parentElement).toBe(bubble);
-    expect(container.querySelector('[aria-label="Show less"]')).not.toBeNull();
+    expect(receipt?.parentElement).toBe(footer);
+    const expandedToggle = container.querySelector('[aria-label="Show less"]');
+    expect(expandedToggle?.parentElement).toBe(footer);
+    expect(expandedToggle?.getAttribute("aria-expanded")).toBe("true");
 
-    await user.click(container.querySelector('[aria-label="Show less"]')!);
+    await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
     await user.click(
@@ -172,6 +194,17 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
       /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*50px/s,
     );
     expect(css).toContain("transition: max-height 300ms ease-in-out");
+    expect(css).toMatch(
+      /\.cukii-user-fold-footer\s*\{[^}]*display:\s*flex;[^}]*line-height:\s*14px/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-fold-footer\s*\{[^}]*margin:\s*2px 0 -6px auto/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-fold-toggle\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;[^}]*padding:\s*0;[^}]*background:\s*transparent/s,
+    );
+    expect(css).not.toContain(".cukii-user-expand-button-container");
+    expect(css).not.toContain(".cukii-user-collapse-button-container");
   } finally {
     if (scrollHeightDescriptor) {
       Object.defineProperty(
