@@ -859,11 +859,14 @@ export class YougileIssueReporter {
   }
 
   private description(report: StoredIssueReport): string {
+    // Markdown link plus the bare URL: whichever the board's renderer keeps,
+    // the reader can still reach the file. A link title alone is worthless if
+    // the target is filtered away.
     const links = report.files
       .filter((file) => file.remoteUrl)
       .map(
         (file) =>
-          `- [${escapeMarkdown(file.name)}](${file.remoteUrl as string})`,
+          `- [${escapeMarkdown(file.name)}](${file.remoteUrl as string}) — ${file.remoteUrl as string}`,
       );
     const section = (title: string, body: string) =>
       `## ${title}\n${body || "_Not provided_"}`;
@@ -964,9 +967,23 @@ export class YougileIssueReporter {
         const diagnostics = report.files.find(
           (file) => file.kind === "diagnostics",
         );
-        const text = `Cukii report ${report.reportId}: screenshots and diagnostics`;
+        // Measured on a delivered report (task a4f22e6b, 2026-09-08): the
+        // board stores the anchor verbatim and both user-data URLs answer
+        // HTTP 200 — the .txt is 6509 bytes and downloads fine by address.
+        // What fails is the click: the chat client renders an `<a>` inside a
+        // message but never navigates it, so the file looked unreachable.
+        // A bare URL in the plain-text body is auto-linked by the client's own
+        // renderer, which does not depend on that handler.
+        const text = [
+          `Cukii report ${report.reportId}: screenshots and diagnostics`,
+          ...(diagnostics?.remoteUrl
+            ? ["", `${diagnostics.name}: ${diagnostics.remoteUrl}`]
+            : []),
+        ].join("\n");
         const textHtml = [
-          `<p>${escapeHtml(text)}</p>`,
+          `<p>${escapeHtml(
+            `Cukii report ${report.reportId}: screenshots and diagnostics`,
+          )}</p>`,
           ...imageFiles.map(
             (file) =>
               `<p><strong>${escapeHtml(file.name)}</strong></p><img src="${escapeHtml(file.remoteUrl as string)}" alt="${escapeHtml(file.name)}">`,
@@ -974,6 +991,7 @@ export class YougileIssueReporter {
           ...(diagnostics?.remoteUrl
             ? [
                 `<p><a href="${escapeHtml(diagnostics.remoteUrl)}">Download sanitized diagnostics</a></p>`,
+                `<p>${escapeHtml(diagnostics.name)}: ${escapeHtml(diagnostics.remoteUrl)}</p>`,
               ]
             : []),
         ].join("");

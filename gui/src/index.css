@@ -2055,11 +2055,12 @@ button.cukii-submit-button--stop:active {
   left: 0;
   z-index: 2;
   height: 150px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--cukii-chat-background, var(--vscode-editor-background, #1e1e1e)) 100%
-  );
+  /* Same rule as the sticky mask: one measured colour, alpha mask for the
+     fade. A colour stop here is what made the composer sit on a lighter
+     rectangle whose rounded corners stopped reading. */
+  background-color: var(--cukii-canvas, var(--cukii-chat-background));
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
   pointer-events: none;
 }
 
@@ -2131,12 +2132,34 @@ button.cukii-submit-button--stop:active {
   margin: 0;
   padding-top: var(--cukii-user-row-padding-top);
   padding-bottom: var(--cukii-user-row-padding-bottom);
-  /* The sticky mask belongs to the same chat canvas as html/body/#root.
-     VS Code's sidebar/editor tokens are lighter than Cukii's measured panel
-     tones and painted a full-width grey strip around the orange capsule. */
-  background-image: linear-gradient(
+}
+
+/* The sticky mask must equal whatever actually paints behind the transcript.
+   Naming a token twice is what kept breaking this: `sideBar-background` was
+   too light, and `--cukii-chat-background` (html/body/#root) is too dark
+   because a styled-component between #root and the transcript repaints the
+   canvas. `--cukii-canvas` is measured from that real ancestor at runtime and
+   refreshed on theme/tone changes, so the strip cannot drift again.
+
+   The colour lives in exactly one declaration: the soft bottom edge is an
+   alpha mask, not a second colour stop. Keeping the fade inside the row's own
+   box preserves the grouped-row geometry — a strip below the row would tint
+   the top of the next capsule. */
+.cukii-user-row--sticky::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background-color: var(--cukii-canvas, var(--cukii-chat-background));
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(
     to bottom,
-    var(--cukii-chat-background) calc(100% - 12px),
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 12px),
     transparent 100%
   );
 }
@@ -2216,15 +2239,15 @@ button.cukii-submit-button--stop:active {
 .cukii-user-content-shell {
   position: relative;
   width: 100%;
+  /* The prompt body is text, not a control. A pointer cursor over it promised
+     a click target that only the chevron and the attachment pills own, so the
+     whole click-the-text-to-expand affordance is gone. */
+  cursor: default;
 }
 
-.cukii-user-content-shell--clickable {
-  cursor: pointer;
-}
-
-.cukii-user-content-shell--clickable .cukii-input-box,
-.cukii-user-content-shell--clickable .ProseMirror {
-  cursor: pointer !important;
+.cukii-user-content-shell .cukii-input-box,
+.cukii-user-content-shell .ProseMirror {
+  cursor: default !important;
 }
 
 .cukii-user-message-content {
@@ -2439,7 +2462,10 @@ button.cukii-submit-button--stop:active {
   align-items: center;
   gap: 4px;
   overflow: hidden;
-  padding: 4px 6px 4px 4px;
+  /* No vertical padding: the pill is a fixed 24px and the label needs the
+     whole content box. With 4px top/bottom the line box was 14px, which clips
+     the descenders of g, p and y. */
+  padding: 0 6px 0 4px;
   color: var(--cukii-text, #2c241c);
   background: var(--cukii-attachment-pill-background);
   border: 1px solid
@@ -2469,6 +2495,9 @@ button.cukii-submit-button--stop:active {
   object-fit: cover;
 }
 
+/* line-height:1 makes the line box exactly the font size, so every descender
+   lands outside it and the pill's overflow:hidden cuts it off. 16px clears the
+   ~14.6px ink box of 11px UI text and still fits the 24px pill. */
 .cukii-user-attachment-label {
   min-width: 0;
   overflow: hidden;
@@ -2476,14 +2505,14 @@ button.cukii-submit-button--stop:active {
   white-space: nowrap;
   font-size: 11px;
   font-weight: 500;
-  line-height: 1;
+  line-height: 16px;
 }
 
 .cukii-user-attachment-meta {
   flex: 0 0 auto;
   white-space: nowrap;
   font-size: 11px;
-  line-height: 1;
+  line-height: 16px;
   opacity: 0.6;
 }
 
@@ -2507,6 +2536,80 @@ button.cukii-submit-button--stop:active {
 .cukii-user-bubble .ProseMirror img,
 .cukii-user-bubble .cukii-file-attachment-node-view {
   display: none !important;
+}
+
+/* Same rule for the live composer: the picture is still a document node (that
+   is what gets sent), but two screenshots as full-width cards used to push the
+   text field out of the panel. File previews keep their card — they carry
+   expandable content and their own delete. */
+.cukii-input-box .ProseMirror img {
+  display: none !important;
+}
+
+.cukii-composer-attachment-strip {
+  margin: 0 0 6px;
+  color: var(--vscode-input-foreground, #cccccc);
+}
+
+.cukii-composer-attachment-card {
+  --cukii-attachment-pill-background: var(
+    --vscode-input-background,
+    rgb(60 60 60 / 40%)
+  );
+  padding: 0;
+  color: inherit;
+  border-color: var(--vscode-input-border, rgb(127 127 127 / 35%));
+  cursor: default;
+}
+
+.cukii-composer-attachment-card:hover {
+  background: var(--vscode-list-hoverBackground, rgb(90 93 94 / 31%));
+}
+
+.cukii-composer-attachment-open {
+  display: inline-flex;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px 0 4px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.cukii-composer-attachment-open > img {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border-radius: 1px;
+  object-fit: cover;
+}
+
+.cukii-composer-attachment-remove {
+  display: inline-flex;
+  width: 16px;
+  height: 100%;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.cukii-composer-attachment-remove:hover {
+  opacity: 1;
+}
+
+.cukii-composer-attachment-remove > svg {
+  width: 11px;
+  height: 11px;
 }
 
 .cukii-image-lightbox {

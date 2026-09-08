@@ -1,6 +1,5 @@
 import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 import {
-  type MouseEvent,
   type ReactNode,
   useCallback,
   useLayoutEffect,
@@ -67,21 +66,6 @@ export function CukiiStickyUserMessage({
 
   const expand = useCallback(() => setIsExpanded(true), []);
   const collapse = useCallback(() => setIsExpanded(false), []);
-  const expandFromContent = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      if (!isCollapsed) return;
-      const selection = window.getSelection();
-      if (selection && !selection.isCollapsed) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (
-        target?.closest('button, a, input, textarea, select, [role="button"]')
-      ) {
-        return;
-      }
-      expand();
-    },
-    [expand, isCollapsed],
-  );
 
   return (
     <div
@@ -91,12 +75,9 @@ export function CukiiStickyUserMessage({
       data-cukii-collapsible={isCollapsible ? "true" : undefined}
       data-testid={`cukii-user-bubble-${messageId}`}
     >
-      <div
-        className={`cukii-user-content-shell ${
-          isCollapsed ? "cukii-user-content-shell--clickable" : ""
-        }`}
-        onClickCapture={expandFromContent}
-      >
+      {/* The body is not a control: only the chevron folds the prompt and only
+          the attachment pills open a preview. */}
+      <div className="cukii-user-content-shell">
         <div
           className={`cukii-user-message-content ${
             isCollapsed ? "cukii-user-message-content--collapsed" : ""

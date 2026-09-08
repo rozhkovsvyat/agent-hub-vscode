@@ -17,6 +17,7 @@ import { selectSelectedChatModel } from "../../../redux/slices/configSlice";
 import InputToolbar, { ToolbarOptions } from "../InputToolbar";
 import { ComboBoxItem } from "../types";
 import { VoiceInputButton } from "../VoiceInputButton";
+import { CukiiComposerImageStrip } from "../../cukii/CukiiComposerImageStrip";
 import { DragOverlay } from "./components/DragOverlay";
 import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
@@ -290,10 +291,11 @@ function TipTapEditorInner(props: TipTapEditorProps) {
             return;
           }
           if (result) {
-            const [_, dataUrl] = result;
+            const [_, dataUrl, displaySrc] = result;
             const { schema } = editor.state;
             const node = schema.nodes.image.create({
               alt: file.name,
+              displaySrc: displaySrc ?? null,
               src: dataUrl,
               title: file.name,
             });
@@ -321,6 +323,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
             }}
           />
         )}
+        <CukiiComposerImageStrip editor={editor} />
         <EditorContent
           className="scroll-container overflow-y-auto"
           spellCheck={false}

@@ -68,12 +68,51 @@ export function getDataUrlForFile(
   return last;
 }
 
+/**
+ * Largest attachment kept verbatim for on-screen preview. Broker transport
+ * shrinks pictures to 384px so they survive a Windows argv limit; that copy is
+ * unreadable when the user opens it, and it used to be the only copy we had.
+ * The display copy therefore lives beside it and never crosses the bridge.
+ */
+export const DISPLAY_ORIGINAL_MAX_BYTES = 2_500_000;
+const DISPLAY_FALLBACK_RESOLUTION = 1600;
+const DISPLAY_FALLBACK_QUALITY = 0.82;
+
+function readAsDataUrl(file: File): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => resolve(undefined);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * The picture the preview shows: the untouched original when it is small
+ * enough to keep in session history, otherwise a 1600px re-encode. Never the
+ * transport copy.
+ */
+export async function getDisplayDataUrlForFile(
+  file: File,
+  img: HTMLImageElement,
+): Promise<string | undefined> {
+  if (file.size <= DISPLAY_ORIGINAL_MAX_BYTES) {
+    const original = await readAsDataUrl(file);
+    if (original?.startsWith("data:image/")) return original;
+  }
+  return encodeJpegDataUrl(
+    img,
+    DISPLAY_FALLBACK_RESOLUTION,
+    DISPLAY_FALLBACK_QUALITY,
+  );
+}
+
 export async function handleImageFile(
   ideMessenger: IIdeMessenger,
   file: File,
   resolution = IMAGE_RESOLUTION,
   maxDataUrlChars?: number,
-): Promise<[HTMLImageElement, string] | undefined> {
+): Promise<[HTMLImageElement, string, string | undefined] | undefined> {
   let filesize = file.size / 1024 / 1024; // filesize in MB
   // check image type and size
   if (
@@ -104,11 +143,13 @@ export async function handleImageFile(
           return;
         }
 
-        let image = new window.Image();
-        image.src = dataUrl;
-        image.onload = function () {
-          resolve([image, dataUrl]);
-        };
+        void getDisplayDataUrlForFile(file, img).then((displayUrl) => {
+          let image = new window.Image();
+          image.src = dataUrl;
+          image.onload = function () {
+            resolve([image, dataUrl, displayUrl]);
+          };
+        });
       };
     });
   } else {

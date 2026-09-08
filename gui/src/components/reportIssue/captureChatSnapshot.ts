@@ -8,11 +8,22 @@ export type CukiiChatSnapshot = {
   byteLength: number;
 };
 
+/**
+ * Every property the clone needs to lay itself out identically inside an SVG
+ * foreignObject, where no stylesheet is available.
+ *
+ * `position` without `top/right/bottom/left` was the bug behind unusable
+ * reports: a positioned element kept `position` but lost its offsets, fell
+ * back to its static position, and the composer was drawn over the top of the
+ * transcript instead of at the bottom of the window.
+ */
 const STYLE_PROPERTIES = [
   "align-content",
   "align-items",
   "align-self",
   "background-color",
+  "background-image",
+  "bottom",
   "border-bottom-color",
   "border-bottom-left-radius",
   "border-bottom-right-radius",
@@ -31,9 +42,11 @@ const STYLE_PROPERTIES = [
   "border-top-width",
   "box-shadow",
   "box-sizing",
+  "clear",
   "color",
   "column-gap",
   "display",
+  "float",
   "flex",
   "flex-basis",
   "flex-direction",
@@ -49,6 +62,7 @@ const STYLE_PROPERTIES = [
   "grid-template-columns",
   "height",
   "justify-content",
+  "left",
   "letter-spacing",
   "line-height",
   "margin-bottom",
@@ -56,11 +70,14 @@ const STYLE_PROPERTIES = [
   "margin-right",
   "margin-top",
   "max-height",
+  "mask-image",
+  "-webkit-mask-image",
   "max-width",
   "min-height",
   "min-width",
   "object-fit",
   "opacity",
+  "order",
   "overflow",
   "overflow-wrap",
   "overflow-x",
@@ -70,11 +87,14 @@ const STYLE_PROPERTIES = [
   "padding-right",
   "padding-top",
   "position",
+  "right",
   "row-gap",
   "text-align",
   "text-decoration",
+  "text-indent",
   "text-overflow",
   "text-transform",
+  "top",
   "transform",
   "transform-origin",
   "vertical-align",

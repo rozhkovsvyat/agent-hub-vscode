@@ -166,6 +166,23 @@ export function createEditorConfig(options: {
       Document,
       History,
       Image.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            /**
+             * Full-resolution copy kept for the preview only. `src` stays the
+             * transport copy (384px in broker mode), so nothing here changes
+             * what the vendor receives — see processEditorContent, which reads
+             * `src`. It is deliberately not rendered into the DOM: the strip
+             * reads it from the node's JSON attributes.
+             */
+            displaySrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+          };
+        },
         addProseMirrorPlugins() {
           const pastePlugin = new Plugin({
             props: {
@@ -203,10 +220,11 @@ export function createEditorConfig(options: {
                       broker ? BROKER_IMAGE_MAX_DATA_URL_CHARS : undefined,
                     ).then((resp) => {
                       if (!resp) return;
-                      const [, dataUrl] = resp;
+                      const [, dataUrl, displaySrc] = resp;
                       const { schema } = view.state;
                       const node = schema.nodes.image.create({
                         alt: file.name,
+                        displaySrc: displaySrc ?? null,
                         src: dataUrl,
                         title: file.name,
                       });

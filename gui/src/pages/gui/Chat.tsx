@@ -66,6 +66,7 @@ import {
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
+import { useMeasuredCanvasBackground } from "../../components/cukii/useMeasuredCanvasBackground";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
@@ -172,6 +173,9 @@ export function Chat() {
    * prepends older rows, so the viewport can be re-pinned afterwards. */
   const loadEarlierAnchorRef = useRef<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  // Sticky masks and the composer fade paint `--cukii-canvas`; it is measured
+  // from whatever actually paints behind the transcript, never re-declared.
+  useMeasuredCanvasBackground(stepsDivRef);
   const history = useAppSelector((state) => state.session.history);
   const sessionId = useAppSelector((state) => state.session.id);
   const isSessionLoading = useAppSelector(

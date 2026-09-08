@@ -79,11 +79,22 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).toMatch(
     /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*1px/s,
   );
+  // The mask moved to ::before and now paints the measured canvas rather than
+  // re-declaring a surface token: `--cukii-chat-background` describes
+  // html/body/#root, which a styled-component repaints before the transcript
+  // ever sees it, so binding the mask to it produced a dark strip.
   const stickyRowRule = css.match(
     /\.cukii-user-row--sticky\s*\{([^}]*)\}/s,
   )?.[1];
-  expect(stickyRowRule).toContain("var(--cukii-chat-background)");
-  expect(stickyRowRule).not.toContain("--vscode-sideBar-background");
+  expect(stickyRowRule).not.toContain("linear-gradient");
+  const stickyMaskRule = css.match(
+    /\.cukii-user-row--sticky::before\s*\{([^}]*)\}/s,
+  )?.[1];
+  expect(stickyMaskRule).toContain(
+    "var(--cukii-canvas, var(--cukii-chat-background))",
+  );
+  expect(stickyMaskRule).toContain("mask-image");
+  expect(stickyMaskRule).not.toContain("--vscode-sideBar-background");
 });
 
 test("folds a long sticky prompt like Claude while keeping time and ticks in the footer", async () => {
@@ -187,10 +198,17 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
     await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
+    // The prompt body is text, not a control: only the chevron folds it. A
+    // click here used to expand the bubble, which is why the body advertised a
+    // pointer cursor it had no business showing.
     await user.click(
       bubble?.querySelector(".cukii-user-message-content") as HTMLElement,
     );
-    expect(bubble).toHaveClass("cukii-user-bubble--expanded");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(bubble).not.toHaveClass("cukii-user-bubble--expanded");
+    expect(canonicalCss()).toMatch(
+      /\.cukii-user-content-shell\s*\{[^}]*cursor:\s*default/s,
+    );
 
     const css = canonicalCss();
     expect(css).toMatch(

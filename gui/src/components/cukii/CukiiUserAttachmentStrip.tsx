@@ -19,7 +19,14 @@ interface ImageAttachment {
   kind: "image";
   key: string;
   name: string;
+  /** Transport copy — downscaled to fit the vendor channel. */
   src: string;
+  /**
+   * What the user actually sees. Broker transport shrinks pictures to 384px,
+   * so previewing `src` showed an unreadable thumbnail instead of the picture
+   * that was attached.
+   */
+  previewSrc: string;
 }
 
 interface FileAttachment {
@@ -57,7 +64,7 @@ function ImageAttachmentPill({
             setDimensions(`${image.naturalWidth}×${image.naturalHeight}`);
           }
         }}
-        src={attachment.src}
+        src={attachment.previewSrc}
       />
       <span className="cukii-user-attachment-label">{attachment.name}</span>
       {dimensions && (
@@ -127,6 +134,7 @@ function collectEditorAttachments(value: unknown): UserAttachment[] {
           kind: "image",
           key: `image-${imageIndex}-${src.slice(0, 48)}`,
           name,
+          previewSrc: src,
           src,
         });
         imageIndex += 1;
@@ -143,10 +151,15 @@ function collectEditorAttachments(value: unknown): UserAttachment[] {
           imageIndex,
           attrs?.title ?? attrs?.alt,
         );
+        const displaySrc =
+          typeof attrs?.displaySrc === "string" && attrs.displaySrc
+            ? attrs.displaySrc
+            : src;
         attachments.push({
           kind: "image",
           key: `image-${imageIndex}-${src.slice(0, 48)}`,
           name,
+          previewSrc: displaySrc,
           src,
         });
         imageIndex += 1;
@@ -307,7 +320,7 @@ export function CukiiUserAttachmentStrip({
               className="cukii-image-lightbox-dialog"
               role="dialog"
             >
-              <img alt={preview.name} src={preview.src} />
+              <img alt={preview.name} src={preview.previewSrc} />
               <button
                 aria-label="Close image preview"
                 onClick={closePreview}
