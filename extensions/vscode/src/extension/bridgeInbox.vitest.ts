@@ -106,55 +106,60 @@ describe("bridgeInbox", () => {
     });
   });
 
-  it("publishes an ownership marker beside an empty claim lock", () => {
+  it("holds the claim lock as bare state python can rmdir", () => {
     const originalRename = fs.renameSync.bind(fs);
-    let sawOwnerMarker = false;
     let lockEntries: string[] = ["<never entered>"];
+    let siblings: string[] = ["<never entered>"];
     const rename = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
-      if (String(to).endsWith("-owned-lock.json")) {
+      if (String(to).endsWith("-bare-lock.json")) {
         const dir = path.join(root, "session-1");
-        sawOwnerMarker = fs.existsSync(path.join(dir, ".claim-lock.owner"));
         lockEntries = fs.readdirSync(path.join(dir, ".claim-lock"));
+        siblings = fs
+          .readdirSync(dir)
+          .filter((name) => name.startsWith(".claim-lock"));
       }
       return originalRename(from, to);
     });
     try {
-      expect(
-        writeBridgeInboxMessage("session-1", "owned-lock", "payload"),
-      ).toBe(true);
-      expect(sawOwnerMarker).toBe(true);
-      // `broker/inbox.py` reclaims a stale lock with rmdir(): a file inside
-      // would strand this lock for the Python reader after a host crash.
+      expect(writeBridgeInboxMessage("session-1", "bare-lock", "payload")).toBe(
+        true,
+      );
+      // `broker/inbox.py` reclaims with rmdir(), which fails on a non-empty
+      // directory, and knows nothing about any companion file. State inside
+      // the lock would strand it after a crash; state beside it under a
+      // `.claim-lock*` name outlives the lock and would later be mistaken for
+      // a description of whoever holds it next.
       expect(lockEntries).toEqual([]);
+      expect(siblings).toEqual([".claim-lock"]);
     } finally {
       rename.mockRestore();
     }
   });
 
-  it("reclaims a lock whose owner died before the staleness window", () => {
+  it("reclaims the claim lock by age only, never by owner liveness", () => {
     const dir = path.join(root, "session-1");
     const lock = path.join(dir, ".claim-lock");
     fs.mkdirSync(lock, { recursive: true });
-    // Deliberately fresh mtime: only the dead owner may justify the reclaim,
-    // so age-only reclaim cannot make this pass.
-    fs.writeFileSync(
-      path.join(dir, ".claim-lock.owner"),
-      JSON.stringify({
-        token: "00000000-0000-4000-8000-000000000001",
-        pid: 2_000_000_000,
-        acquiredMs: Date.now(),
-      }),
-      "utf8",
-    );
 
-    expect(writeBridgeInboxMessage("session-1", "after-crash", "payload")).toBe(
+    // No process on this machine holds this lock, which is exactly how a
+    // Python holder looks to us: it publishes no liveness signal at all.
+    // Reclaiming it early would evict a live `_session_lock` critical section.
+    expect(writeBridgeInboxMessage("session-1", "still-held", "payload")).toBe(
+      false,
+    );
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(bridgeInboxMessageStatus("session-1", "still-held")).toBe("absent");
+
+    // Past the staleness window both languages agree the holder is gone.
+    const stale = new Date(Date.now() - 60_000);
+    fs.utimesSync(lock, stale, stale);
+    expect(writeBridgeInboxMessage("session-1", "after-stale", "payload")).toBe(
       true,
     );
-    expect(bridgeInboxMessageStatus("session-1", "after-crash")).toBe(
+    expect(bridgeInboxMessageStatus("session-1", "after-stale")).toBe(
       "pending",
     );
-    expect(fs.existsSync(path.join(dir, ".claim-lock"))).toBe(false);
-    expect(fs.existsSync(path.join(dir, ".claim-lock.owner"))).toBe(false);
+    expect(fs.existsSync(lock)).toBe(false);
   });
 
   it("refuses traversal-shaped segments and empty text", () => {

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,12 +21,6 @@ const LOCK_ATTEMPTS = 100;
 const LOCK_RETRY_MS = 10;
 const STOP_LOCK_WAIT_MS = LOCK_STALE_MS + 5_000;
 const CLAIM_LOCK = ".claim-lock";
-/**
- * The owner marker sits *beside* the lock, never inside it: `broker/inbox.py`
- * reclaims a stale lock with `rmdir()`, which fails on a non-empty directory,
- * so a file within would strand a crashed host's lock for the Python reader.
- */
-const CLAIM_LOCK_OWNER = ".claim-lock.owner";
 
 export type BridgeInboxStatus = "read" | "pending" | "absent";
 
@@ -115,59 +109,28 @@ function sleep(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
-type LockOwner = { token: string; pid: number; acquiredMs: number };
-
-function lockOwnerFile(dir: string): string {
-  return path.join(dir, CLAIM_LOCK_OWNER);
-}
-
-function readLockOwner(dir: string): LockOwner | undefined {
-  try {
-    const owner = JSON.parse(
-      fs.readFileSync(lockOwnerFile(dir), "utf8"),
-    ) as LockOwner;
-    if (typeof owner?.token === "string" && Number.isInteger(owner?.pid)) {
-      return owner;
-    }
-  } catch {
-    // No marker at all: a Python holder or a pre-upgrade host still owns it.
-  }
-  return undefined;
-}
-
-function ownerProcessAlive(owner: LockOwner): boolean {
-  if (owner.pid <= 0) return false;
-  if (owner.pid === process.pid) return true;
-  try {
-    process.kill(owner.pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the pid exists but belongs to another user.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 /**
- * Reclaim only a lock nobody can still be inside: its owner process is gone,
- * or it predates the shared staleness window. Never reclaim on age alone when
- * a live marker says the section is still held.
+ * Age is the only reclaim signal, byte for byte what `_session_lock` in
+ * `broker/inbox.py` does. Both parties must agree on when a lock is dead: a
+ * host that reclaims on some extra signal the other side never maintains
+ * (a liveness marker, an owner pid file) will evict the other's *live*
+ * critical section, because that signal outlives the lock it described.
+ * Widening this condition therefore requires changing both languages at once.
  */
-function reclaimStaleSessionLock(dir: string, lock: string): void {
+function reclaimStaleSessionLock(lock: string): void {
   try {
-    const before = readLockOwner(dir);
-    const crashed = before !== undefined && !ownerProcessAlive(before);
-    const expired = Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS;
-    if (!crashed && !expired) return;
-    // The holder may have released and a fresh owner may have taken the lock
-    // between the checks; reclaiming then would evict a live critical section.
-    if (readLockOwner(dir)?.token !== before?.token) return;
-    if (before) fs.rmSync(lockOwnerFile(dir), { force: true });
+    if (Date.now() - fs.statSync(lock).mtimeMs <= LOCK_STALE_MS) return;
     fs.rmdirSync(lock);
   } catch {
     // The owner may have released the lock between stat and reclaim.
   }
 }
 
+/**
+ * Nothing may be written inside the lock directory, nor beside it under a
+ * `.claim-lock*` name: Python reclaims with `rmdir()`, which fails on a
+ * non-empty directory, so any such state would strand a crashed host's lock.
+ */
 function tryAcquireSessionLock(dir: string): string | undefined {
   fs.mkdirSync(dir, { recursive: true });
   const lock = path.join(dir, CLAIM_LOCK);
@@ -175,31 +138,13 @@ function tryAcquireSessionLock(dir: string): string | undefined {
     fs.mkdirSync(lock);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    reclaimStaleSessionLock(dir, lock);
+    reclaimStaleSessionLock(lock);
     return undefined;
-  }
-  try {
-    fs.writeFileSync(
-      lockOwnerFile(dir),
-      JSON.stringify({
-        token: randomUUID(),
-        pid: process.pid,
-        acquiredMs: Date.now(),
-      } satisfies LockOwner),
-      "utf8",
-    );
-  } catch {
-    // A missing marker only costs the fast crash reclaim, never correctness.
   }
   return lock;
 }
 
 function releaseSessionLock(lock: string): void {
-  try {
-    fs.rmSync(lockOwnerFile(path.dirname(lock)), { force: true });
-  } catch {
-    // Losing the marker first keeps the lock dir rmdir-able for both readers.
-  }
   try {
     fs.rmdirSync(lock);
   } catch {
