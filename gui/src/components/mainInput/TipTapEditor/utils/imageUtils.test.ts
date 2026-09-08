@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
 
 import {
-  GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS,
   GROK_INLINE_ARGV_IMAGE_RESOLUTION,
   getDataUrlForFile,
   getOriginalDataUrlForFile,

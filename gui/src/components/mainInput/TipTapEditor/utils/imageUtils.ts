@@ -2,8 +2,6 @@ import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionM
 
 import { IIdeMessenger } from "../../../../context/IdeMessenger";
 
-export { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS };
-
 const IMAGE_RESOLUTION = 1024;
 const MAX_IMAGE_FILE_BYTES = 10_000_000;
 // Grok's only current image-input channel is an inline JSON argument. Windows
