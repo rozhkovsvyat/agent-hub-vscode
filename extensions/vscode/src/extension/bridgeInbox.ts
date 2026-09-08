@@ -542,10 +542,12 @@ export async function purgeUnreadBridgeInboxMessages(
         if (record?.status === "pending") {
           try {
             fs.unlinkSync(file);
-            removeRecordAttachmentScope(record, attachmentRoot);
-          } catch {
-            // Already claimed or removed.
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+              throw error;
+            }
           }
+          removeRecordAttachmentScope(record, attachmentRoot);
         }
       }
     });

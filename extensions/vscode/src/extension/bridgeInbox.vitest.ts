@@ -269,6 +269,26 @@ describe("bridgeInbox", () => {
     expect(bridgeInboxMessageStatus("session-1", "msg-2")).toBe("read");
   });
 
+  it("refuses to confirm explicit Stop when a pending record cannot be removed", async () => {
+    writeBridgeInboxMessage("session-1", "blocked-delete", "не воскресить");
+    const originalUnlink = fs.unlinkSync.bind(fs);
+    const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation((target) => {
+      if (String(target).endsWith("-blocked-delete.json")) {
+        throw Object.assign(new Error("record is busy"), { code: "EPERM" });
+      }
+      return originalUnlink(target);
+    });
+
+    try {
+      expect(await purgeUnreadBridgeInboxMessages("session-1")).toBe(false);
+      expect(bridgeInboxMessageStatus("session-1", "blocked-delete")).toBe(
+        "pending",
+      );
+    } finally {
+      unlink.mockRestore();
+    }
+  });
+
   it("waits for a live claim lock before confirming explicit Stop", async () => {
     writeBridgeInboxMessage("session-1", "stop-race", "не воскресить");
     const dir = path.join(root, "session-1");
