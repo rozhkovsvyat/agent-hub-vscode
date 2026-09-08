@@ -1156,7 +1156,7 @@ describe("native bridge argv", () => {
 
     const transportBlock = source.slice(selectAt, launchEnd);
     expect(transportBlock).toContain(
-      "materializeBridgeImages(transportMessages)",
+      "imageScope.materializeMessages(transportMessages)",
     );
     expect(transportBlock).toContain("hasImageAttachment(transportMessages)");
     expect(transportBlock).toContain(
@@ -1171,5 +1171,14 @@ describe("native bridge argv", () => {
       "materializeBridgeImages(args.messages)",
     );
     expect(transportBlock).not.toContain("hasImageAttachment(args.messages)");
+
+    const messengerSource = fs
+      .readFileSync(path.join(__dirname, "VsCodeMessenger.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
+    expect(messengerSource).toContain("imageScope,");
+    expect(messengerSource).toContain(
+      "run.imageScope.materializeMessageContent(msg.data.content)",
+    );
+    expect(messengerSource).toContain("imageScope.dispose()");
   });
 });

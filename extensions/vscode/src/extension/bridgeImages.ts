@@ -57,41 +57,153 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   "image/svg+xml": ".svg",
 };
 
-const MAX_STORED_ATTACHMENTS = 256;
+const RETAINED_SCOPE_MS = 7 * 24 * 60 * 60 * 1000;
+const RUN_SCOPE_NAME = /^run-(\d+)-[a-f0-9-]{36}$/i;
+const RELEASED_MARKER = ".released";
 
 export function bridgeAttachmentDir(): string {
   return path.join(getContinueGlobalPath(), "bridge-attachments");
 }
 
-function prune(dir: string, protectedFiles: ReadonlySet<string>): void {
+function isDirectChild(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    Boolean(relative) &&
+    !relative.startsWith("..") &&
+    !path.isAbsolute(relative) &&
+    !relative.includes(path.sep)
+  );
+}
+
+function processIsAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function removeOwnedScope(scopeDir: string, root: string): void {
+  const resolved = path.resolve(scopeDir);
+  if (!isDirectChild(resolved, root)) return;
+  try {
+    const stats = fs.lstatSync(resolved);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) return;
+    fs.rmSync(resolved, { recursive: true, force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      // Cleanup is best-effort. Leaving an owned directory behind is safer
+      // than letting housekeeping change delivery semantics.
+    }
+  }
+}
+
+/**
+ * Retire only run scopes that can no longer belong to a live bridge. A scope
+ * owned by another extension host is never inspected or pruned while that
+ * process is alive. Released/inbox scopes and crash remnants stay for the
+ * same seven-day window as their broker-inbox records.
+ */
+function pruneExpiredScopes(root: string): void {
+  const cutoff = Date.now() - RETAINED_SCOPE_MS;
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = fs.readdirSync(root, { withFileTypes: true });
   } catch {
     return;
   }
-  const files = entries.filter((entry) => entry.isFile());
-  if (files.length <= MAX_STORED_ATTACHMENTS) {
-    return;
-  }
-  const byMtime = files
-    .map((entry) => {
-      const full = path.join(dir, entry.name);
-      try {
-        return { full, mtime: fs.statSync(full).mtimeMs };
-      } catch {
-        return { full, mtime: 0 };
-      }
-    })
-    .filter((entry) => !protectedFiles.has(entry.full))
-    .sort((a, b) => a.mtime - b.mtime);
-  const totalExcess = files.length - MAX_STORED_ATTACHMENTS;
-  for (let index = 0; index < Math.min(totalExcess, byMtime.length); index++) {
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const match = entry.name.match(RUN_SCOPE_NAME);
+    if (!match) continue;
+    const scopeDir = path.join(root, entry.name);
+    const releasedMarker = path.join(scopeDir, RELEASED_MARKER);
+    let lastUseMs = 0;
+    let released = false;
     try {
-      fs.unlinkSync(byMtime[index].full);
+      const markerStats = fs.statSync(releasedMarker);
+      released = markerStats.isFile();
+      lastUseMs = markerStats.mtimeMs;
     } catch {
-      // Concurrently removed; nothing to clean.
+      try {
+        lastUseMs = fs.statSync(scopeDir).mtimeMs;
+      } catch {
+        continue;
+      }
     }
+    const ownerAlive = processIsAlive(Number(match[1]));
+    if (lastUseMs < cutoff && (released || !ownerAlive)) {
+      removeOwnedScope(scopeDir, root);
+    }
+  }
+}
+
+/**
+ * Owns every materialized image referenced by one native bridge run. Each run
+ * gets a separate directory, so another panel/process can clean its own files
+ * without invalidating paths that this vendor has not opened yet.
+ */
+export class BridgeImageScope {
+  private scopeDir: string | undefined;
+  private canonicalRoot: string | undefined;
+  private disposed = false;
+  private retainAfterDispose = false;
+
+  constructor(private readonly requestedRoot: string = bridgeAttachmentDir()) {}
+
+  get directory(): string {
+    if (this.disposed) {
+      throw new Error("Bridge image scope is already disposed");
+    }
+    if (this.scopeDir) return this.scopeDir;
+    fs.mkdirSync(this.requestedRoot, { recursive: true });
+    const root = fs.realpathSync.native(this.requestedRoot);
+    this.canonicalRoot = root;
+    pruneExpiredScopes(root);
+    const scopeDir = path.join(root, `run-${process.pid}-${randomUUID()}`);
+    fs.mkdirSync(scopeDir);
+    this.scopeDir = scopeDir;
+    return scopeDir;
+  }
+
+  materializeMessages(messages: ChatMessage[]): ChatMessage[] {
+    return materializeBridgeImages(messages, this.directory);
+  }
+
+  materializeMessageContent(content: MessageContent): string {
+    if (
+      Array.isArray(content) &&
+      content.some((part) => part.type === "imageUrl")
+    ) {
+      // The corresponding broker-inbox record can outlive the child that was
+      // active when the follow-up arrived. Keep its file path valid for the
+      // inbox retention window; the next scope creation performs cleanup.
+      this.retainAfterDispose = true;
+    }
+    return materializeBridgeMessageContent(content, this.directory);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const scopeDir = this.scopeDir;
+    const root = this.canonicalRoot;
+    if (!scopeDir || !root) return;
+    if (this.retainAfterDispose) {
+      try {
+        fs.writeFileSync(
+          path.join(scopeDir, RELEASED_MARKER),
+          new Date().toISOString(),
+          { encoding: "utf8", flag: "wx" },
+        );
+      } catch {
+        // A leak is safer than invalidating a path still present in inbox.
+      }
+      return;
+    }
+    removeOwnedScope(scopeDir, root);
   }
 }
 
@@ -118,7 +230,11 @@ function materializeDataUrl(url: string, dir: string): Materialized {
     const complete = () => {
       try {
         const stat = fs.statSync(filePath);
-        return stat.isFile() && stat.size === bytes.byteLength;
+        return (
+          stat.isFile() &&
+          stat.size === bytes.byteLength &&
+          fs.readFileSync(filePath).equals(bytes)
+        );
       } catch {
         return false;
       }
@@ -150,7 +266,6 @@ function renderImageReference(
   url: string | undefined,
   inline: boolean,
   dir: string,
-  protectedFiles: Set<string>,
 ): string {
   if (!url) {
     return "[image attached]";
@@ -160,7 +275,6 @@ function renderImageReference(
   }
   const materialized = materializeDataUrl(url, dir);
   if (materialized.kind === "file") {
-    protectedFiles.add(materialized.filePath);
     return inline
       ? `@${materialized.filePath}`
       : `[image saved at ${materialized.filePath}]`;
@@ -226,7 +340,6 @@ export function materializeBridgeImages(
     }
   }
 
-  const protectedFiles = new Set<string>();
   const materialized = messages.map((message, index) => {
     if (message.role !== "user" || typeof message.content === "string") {
       return message;
@@ -239,20 +352,12 @@ export function materializeBridgeImages(
       part.type === "imageUrl"
         ? {
             type: "text",
-            text: renderImageReference(
-              part.imageUrl?.url,
-              inline,
-              dir,
-              protectedFiles,
-            ),
+            text: renderImageReference(part.imageUrl?.url, inline, dir),
           }
         : part,
     );
     return { ...message, content };
   });
-  // Prune only after the whole prompt is materialized. Files referenced by
-  // this batch are protected even when a single turn contains >256 images.
-  prune(dir, protectedFiles);
   return materialized;
 }
 

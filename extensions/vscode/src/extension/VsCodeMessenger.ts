@@ -50,7 +50,7 @@ import { VsCodeIde } from "../VsCodeIde";
 import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
-import { materializeBridgeMessageContent } from "./bridgeImages";
+import { BridgeImageScope } from "./bridgeImages";
 import {
   isClaudeNativeModel,
   streamBridgeChat,
@@ -128,6 +128,7 @@ type ActiveBridgeRun = BridgeRunIdentity & {
   done: Promise<CukiiBridgeRunCompletion>;
   steering: BridgeSteeringController;
   cancellation: BridgeRunCancellation;
+  imageScope: BridgeImageScope;
 };
 
 /**
@@ -1122,6 +1123,7 @@ export class VsCodeMessenger {
         msg.data.sessionId,
         isClaudeNativeModel(msg.data.brokerModel),
       );
+      const imageScope = new BridgeImageScope();
       // Vendors without a live stdin channel can still pull follow-ups from
       // the broker inbox mid-run; the watch surfaces the vendor's claim as a
       // read receipt instead of leaving the bubble "queued" until turn end.
@@ -1148,6 +1150,7 @@ export class VsCodeMessenger {
         brokerModel: msg.data.brokerModel,
         steering,
         cancellation,
+        imageScope,
       };
       const permissionTransport: ClaudePermissionTransport = {
         panelId: this.panelIdForProtocol(protocol),
@@ -1192,6 +1195,7 @@ export class VsCodeMessenger {
           // The coordinator reclaims zombie slots by probing this pid.
           run.childPid = pid;
         },
+        imageScope,
         abortSignal: controller.signal,
       };
       const stream = streamBridgeChat(msg.data, permissionTransport);
@@ -1255,6 +1259,7 @@ export class VsCodeMessenger {
       void done.finally(() => {
         steering.close();
         inboxWatch?.close();
+        imageScope.dispose();
       });
       return wrapped;
     });
@@ -1277,7 +1282,7 @@ export class VsCodeMessenger {
           writeBridgeInboxMessage(
             run.sessionId,
             msg.data.messageId,
-            materializeBridgeMessageContent(msg.data.content),
+            run.imageScope.materializeMessageContent(msg.data.content),
           );
         }
         return run.steering.deliver(msg.data);

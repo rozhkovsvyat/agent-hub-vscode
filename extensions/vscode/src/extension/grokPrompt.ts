@@ -15,8 +15,15 @@ export const MAX_GROK_PROMPT_JSON_BYTES = 28_000;
 export function grokImageBlock(
   url: string | undefined,
 ): GrokPromptBlock | undefined {
-  if (!url || /^https?:\/\//i.test(url)) {
-    return undefined;
+  if (!url) {
+    throw new Error(
+      "Grok received an image attachment without a payload. Cukii did not drop the attachment or start the vendor.",
+    );
+  }
+  if (/^https?:\/\//i.test(url)) {
+    throw new Error(
+      "Grok cannot receive a remote image URL through Windows inline argv. Reattach the image bytes or select another broker model; Cukii did not drop the attachment.",
+    );
   }
   const parsed = parseSupportedVisionDataUrl(url);
   if (!parsed) {

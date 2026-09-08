@@ -154,6 +154,25 @@ describe("grokPromptJson", () => {
     ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
   });
 
+  it("rejects remote image URLs instead of silently omitting the attachment", () => {
+    expect(() =>
+      grokPromptJson(
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "imageUrl",
+                imageUrl: { url: "https://example.com/screenshot.png" },
+              },
+            ],
+          },
+        ],
+        "C:\\tmp\\transcript.txt",
+      ),
+    ).toThrow(/remote image URL.*did not drop/i);
+  });
+
   it("rejects an aggregate overflow without silently dropping later images", () => {
     expect(() =>
       grokPromptJson(

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  BridgeImageScope,
   hasImageAttachment,
   materializeBridgeImages,
   materializeBridgeMessageContent,
@@ -137,7 +138,99 @@ describe("materializeBridgeImages", () => {
     expect(fs.readdirSync(dir)).toHaveLength(1);
   });
 
-  it("keeps every path referenced by one prompt above the prune ceiling", () => {
+  it("repairs a same-size corrupt cache entry before returning its path", () => {
+    const first = materializeBridgeMessageContent(
+      [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      dir,
+    );
+    const referenced = first.slice(1);
+    const original = Buffer.from(PIXEL, "base64");
+    fs.writeFileSync(referenced, Buffer.alloc(original.byteLength, 0xa5));
+    expect(fs.readFileSync(referenced).equals(original)).toBe(false);
+
+    const second = materializeBridgeMessageContent(
+      [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      dir,
+    );
+
+    expect(second).toBe(first);
+    expect(fs.readFileSync(referenced).equals(original)).toBe(true);
+  });
+
+  it("isolates concurrent run scopes until their own lifecycle ends", () => {
+    const firstScope = new BridgeImageScope(dir);
+    const [firstMessage] = firstScope.materializeMessages([
+      {
+        role: "user",
+        content: [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      },
+    ]);
+    const firstPath = (
+      firstMessage.content as Array<{ type: string; text: string }>
+    )[0].text.slice(1);
+    const olderThanRetention = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(firstScope.directory, olderThanRetention, olderThanRetention);
+
+    const competingContent = Array.from({ length: 257 }, (_, index) => ({
+      type: "imageUrl" as const,
+      imageUrl: {
+        url: `data:image/png;base64,${Buffer.from([
+          0xff,
+          index >> 8,
+          index & 0xff,
+        ]).toString("base64")}`,
+      },
+    }));
+    const competingScope = new BridgeImageScope(dir);
+    competingScope.materializeMessages([
+      { role: "user", content: competingContent },
+    ]);
+
+    expect(path.dirname(firstPath)).not.toBe(competingScope.directory);
+    expect(fs.existsSync(firstPath)).toBe(true);
+    expect(fs.readFileSync(firstPath).toString("base64")).toBe(PIXEL);
+    competingScope.dispose();
+    expect(fs.existsSync(firstPath)).toBe(true);
+    firstScope.dispose();
+    expect(fs.existsSync(firstPath)).toBe(false);
+  });
+
+  it("retains inbox image paths for the inbox retention window", () => {
+    const scope = new BridgeImageScope(dir);
+    const rendered = scope.materializeMessageContent([
+      { type: "imageUrl", imageUrl: { url: DATA_URL } },
+    ]);
+    const referenced = rendered.slice(1);
+
+    scope.dispose();
+
+    expect(fs.existsSync(referenced)).toBe(true);
+    expect(
+      fs.existsSync(path.join(path.dirname(referenced), ".released")),
+    ).toBe(true);
+  });
+
+  it("prunes an expired released inbox scope without touching live scopes", () => {
+    const releasedScope = new BridgeImageScope(dir);
+    const releasedPath = releasedScope
+      .materializeMessageContent([
+        { type: "imageUrl", imageUrl: { url: DATA_URL } },
+      ])
+      .slice(1);
+    const releasedDir = path.dirname(releasedPath);
+    releasedScope.dispose();
+    const marker = path.join(releasedDir, ".released");
+    const olderThanRetention = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(marker, olderThanRetention, olderThanRetention);
+
+    const cleanupTrigger = new BridgeImageScope(dir);
+    void cleanupTrigger.directory;
+
+    expect(fs.existsSync(releasedDir)).toBe(false);
+    cleanupTrigger.dispose();
+  });
+
+  it("keeps every path referenced by one prompt above 256 images", () => {
     const content = Array.from({ length: 257 }, (_, index) => ({
       type: "imageUrl" as const,
       imageUrl: {

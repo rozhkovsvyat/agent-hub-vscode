@@ -33,8 +33,8 @@ import {
 } from "./bridgeVendorMcp";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import {
+  BridgeImageScope,
   hasImageAttachment,
-  materializeBridgeImages,
   parseSupportedVisionDataUrl,
   selectBridgeImageSources,
 } from "./bridgeImages";
@@ -147,6 +147,8 @@ export type ClaudePermissionTransport = {
   onTerminationResult?: (terminated: boolean) => void;
   /** Reports the vendor child pid once known; undefined on spawn failure. */
   onChildSpawned?: (pid: number | undefined) => void;
+  /** Run-owned files referenced by cold-start and broker-inbox image prompts. */
+  imageScope?: BridgeImageScope;
   abortSignal?: AbortSignal;
 };
 
@@ -1459,7 +1461,18 @@ export async function* streamBridgeChat(
 ): AsyncGenerator<ChatMessage, PromptLog> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const cwd = workspaceFolder?.uri.fsPath ?? process.cwd();
-  return yield* streamBridgeChatWithSteer(args, cwd, permissionTransport);
+  const imageScope = permissionTransport?.imageScope ?? new BridgeImageScope();
+  const ownsImageScope = !permissionTransport?.imageScope;
+  try {
+    return yield* streamBridgeChatWithSteer(
+      args,
+      cwd,
+      imageScope,
+      permissionTransport,
+    );
+  } finally {
+    if (ownsImageScope) imageScope.dispose();
+  }
 }
 
 async function* streamBridgeChatWithSteer(
@@ -1478,6 +1491,7 @@ async function* streamBridgeChatWithSteer(
     steerInterrupt?: boolean;
   },
   cwd: string,
+  imageScope: BridgeImageScope,
   permissionTransport?: ClaudePermissionTransport,
 ): AsyncGenerator<ChatMessage, PromptLog> {
   // The model picker fills this cache in the normal path. A restored saved
@@ -1506,7 +1520,7 @@ async function* streamBridgeChatWithSteer(
     args.brokerModel,
   );
   const prompt = buildPrompt(
-    materializeBridgeImages(transportMessages),
+    imageScope.materializeMessages(transportMessages),
     args.brokerModel,
     args.brokerSubagent,
     cwd,
