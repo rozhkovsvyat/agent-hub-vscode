@@ -1312,6 +1312,18 @@ export function bridgeEventsProveInputAccepted(
   });
 }
 
+/**
+ * A native protocol receipt settles the turn even when Cukii must terminate a
+ * CLI that lingers after emitting it. The resulting non-zero process code is
+ * teardown metadata, not a second vendor outcome.
+ */
+export function bridgeProcessExitIsFailure(
+  code: number | null,
+  protocolTerminalReceived: boolean,
+): boolean {
+  return !protocolTerminalReceived && code !== null && code !== 0;
+}
+
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
   switch (event.kind) {
     case "text":
@@ -1672,11 +1684,17 @@ async function* launchBridgeChild(options: {
   canary?.record("bridge_dispatch");
   let cancelled = false;
   let done = false;
+  let protocolTerminalReceived = false;
   const queue: BridgeEvent[] = [];
   let canaryResponse = "";
   const queuedFollowUpRead = new Set<string>();
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
+      if (event.kind === "complete") {
+        // The child can close before the generator drains this queue. Record
+        // the receipt at parse time so teardown cannot overwrite the turn.
+        protocolTerminalReceived = true;
+      }
       if (event.kind === "userEcho") {
         const queuedMessageId = queuedFollowUpEchoMessageId(
           messages,
@@ -1846,7 +1864,10 @@ async function* launchBridgeChild(options: {
       return;
     }
     enqueueVisibleEvents(parser.flush());
-    if (!cancelled && code && code !== 0) {
+    if (
+      !cancelled &&
+      bridgeProcessExitIsFailure(code, protocolTerminalReceived)
+    ) {
       const detail = stderr.trim() || stdoutTail.trim();
       // Name the real cause instead of dumping a raw native error that reads
       // like noise. Order matters: the Codex models-cache warning is logged
@@ -1962,7 +1983,7 @@ async function* launchBridgeChild(options: {
     }
   }
 
-  if (error && !cancelled) {
+  if (error && !cancelled && !protocolTerminalReceived) {
     throw error;
   }
 

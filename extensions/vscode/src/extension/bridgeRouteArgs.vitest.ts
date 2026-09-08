@@ -36,6 +36,7 @@ vi.mock("./permissionCapabilities", () => ({
 import {
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
+  bridgeProcessExitIsFailure,
   claudeInitialContent,
   claudeStreamingInput,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
@@ -78,6 +79,44 @@ function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
 }
 
 describe("native bridge argv", () => {
+  it("does not let a teardown exit code overwrite an explicit terminal receipt", () => {
+    expect(bridgeProcessExitIsFailure(1, false)).toBe(true);
+    expect(bridgeProcessExitIsFailure(1, true)).toBe(false);
+    expect(bridgeProcessExitIsFailure(0, false)).toBe(false);
+    expect(bridgeProcessExitIsFailure(null, false)).toBe(false);
+
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    const enqueueAt = source.indexOf(
+      "const enqueueVisibleEvents = (events: BridgeEvent[]) => {",
+    );
+    const closeAt = source.indexOf('child.once("close"', enqueueAt);
+    const finalThrowAt = source.indexOf(
+      "if (error && !cancelled && !protocolTerminalReceived)",
+      closeAt,
+    );
+
+    expect(enqueueAt).toBeGreaterThan(-1);
+    expect(closeAt).toBeGreaterThan(enqueueAt);
+    expect(finalThrowAt).toBeGreaterThan(closeAt);
+    expect(source.slice(enqueueAt, closeAt)).toContain(
+      'if (event.kind === "complete")',
+    );
+    expect(source.slice(enqueueAt, closeAt)).toContain(
+      "protocolTerminalReceived = true",
+    );
+    expect(source.slice(closeAt, finalThrowAt)).toContain(
+      "bridgeProcessExitIsFailure(code, protocolTerminalReceived)",
+    );
+    // Failed teardown still throws independently inside `finally`; only the
+    // duplicate process-exit verdict is subordinated to the receipt.
+    expect(source.slice(closeAt, finalThrowAt)).toContain(
+      "Native bridge process tree did not terminate within the safety budget",
+    );
+  });
+
   it("emits a queued read receipt only for one exact vendor user echo", () => {
     const messages: Array<ChatMessage & { id: string }> = [
       { role: "user", content: "original", id: "original" },
@@ -1032,10 +1071,9 @@ describe("native bridge argv", () => {
   });
 
   it("selects the image carrier before prompt, route, and process launch", () => {
-    const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
-      "utf8",
-    );
+    const source = fs
+      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
     const selectAt = source.indexOf(
       "const transportMessages = selectBridgeImageSources(",
     );
