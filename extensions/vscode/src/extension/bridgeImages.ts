@@ -141,9 +141,9 @@ function pruneExpiredScopes(root: string): void {
 }
 
 /**
- * Owns every materialized image referenced by one native bridge run. Each run
- * gets a separate directory, so another panel/process can clean its own files
- * without invalidating paths that this vendor has not opened yet.
+ * Owns every materialized image referenced by one bridge consumer lifetime.
+ * Run history gets one scope; each durable inbox record gets an isolated peer
+ * so retaining that record can never pin unrelated history files.
  */
 export class BridgeImageScope {
   private scopeDir: string | undefined;
@@ -172,17 +172,41 @@ export class BridgeImageScope {
     return materializeBridgeImages(messages, this.directory);
   }
 
-  materializeMessageContent(content: MessageContent): string {
-    if (
+  /**
+   * Persist one live inbox message with a peer scope that contains only the
+   * files referenced by that record. Cold-start/history images stay owned by
+   * this run and are removed at its teardown. A failed inbox write removes the
+   * peer immediately because no durable record can reference its paths.
+   */
+  persistInboxMessage(
+    content: MessageContent,
+    persist: (materializedContent: string) => boolean,
+  ): boolean {
+    const needsFiles =
       Array.isArray(content) &&
-      content.some((part) => part.type === "imageUrl")
-    ) {
-      // The corresponding broker-inbox record can outlive the child that was
-      // active when the follow-up arrived. Keep its file path valid for the
-      // inbox retention window; the next scope creation performs cleanup.
-      this.retainAfterDispose = true;
+      content.some(
+        (part) =>
+          part.type === "imageUrl" &&
+          DATA_IMAGE_URL.test(part.imageUrl?.url ?? ""),
+      );
+    if (!needsFiles) {
+      return persist(
+        materializeBridgeMessageContent(content, this.requestedRoot),
+      );
     }
-    return materializeBridgeMessageContent(content, this.directory);
+
+    const inboxScope = new BridgeImageScope(this.requestedRoot);
+    try {
+      const rendered = materializeBridgeMessageContent(
+        content,
+        inboxScope.directory,
+      );
+      const written = persist(rendered);
+      if (written) inboxScope.retainAfterDispose = true;
+      return written;
+    } finally {
+      inboxScope.dispose();
+    }
   }
 
   dispose(): void {

@@ -195,28 +195,95 @@ describe("materializeBridgeImages", () => {
     expect(fs.existsSync(firstPath)).toBe(false);
   });
 
-  it("retains inbox image paths for the inbox retention window", () => {
+  it("retains only inbox image paths and removes cold-start history", () => {
     const scope = new BridgeImageScope(dir);
-    const rendered = scope.materializeMessageContent([
-      { type: "imageUrl", imageUrl: { url: DATA_URL } },
+    const [history] = scope.materializeMessages([
+      {
+        role: "user",
+        content: [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      },
     ]);
-    const referenced = rendered.slice(1);
+    const historyPath = (
+      history.content as Array<{ type: string; text: string }>
+    )[0].text.slice(1);
+    let inboxPath = "";
+
+    expect(
+      scope.persistInboxMessage(
+        [
+          {
+            type: "imageUrl",
+            imageUrl: {
+              url: `data:image/png;base64,${Buffer.from([1, 2, 3]).toString("base64")}`,
+            },
+          },
+        ],
+        (rendered) => {
+          inboxPath = rendered.slice(1);
+          return true;
+        },
+      ),
+    ).toBe(true);
+    expect(path.dirname(inboxPath)).not.toBe(path.dirname(historyPath));
 
     scope.dispose();
 
-    expect(fs.existsSync(referenced)).toBe(true);
+    expect(fs.existsSync(historyPath)).toBe(false);
+    expect(fs.existsSync(inboxPath)).toBe(true);
+    expect(fs.existsSync(path.join(path.dirname(inboxPath), ".released"))).toBe(
+      true,
+    );
+    expect(fs.readdirSync(dir)).toEqual([
+      path.basename(path.dirname(inboxPath)),
+    ]);
+    expect(fs.readdirSync(path.dirname(inboxPath)).sort()).toEqual([
+      ".released",
+      path.basename(inboxPath),
+    ]);
+  });
+
+  it("removes inbox image files immediately when the record write fails", () => {
+    const scope = new BridgeImageScope(dir);
+    const [history] = scope.materializeMessages([
+      {
+        role: "user",
+        content: [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      },
+    ]);
+    const historyPath = (
+      history.content as Array<{ type: string; text: string }>
+    )[0].text.slice(1);
+    let rejectedPath = "";
+
     expect(
-      fs.existsSync(path.join(path.dirname(referenced), ".released")),
-    ).toBe(true);
+      scope.persistInboxMessage(
+        [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+        (rendered) => {
+          rejectedPath = rendered.slice(1);
+          return false;
+        },
+      ),
+    ).toBe(false);
+
+    expect(rejectedPath).not.toBe("");
+    expect(fs.existsSync(rejectedPath)).toBe(false);
+    expect(fs.existsSync(path.dirname(rejectedPath))).toBe(false);
+    expect(fs.existsSync(historyPath)).toBe(true);
+    scope.dispose();
+    expect(fs.existsSync(historyPath)).toBe(false);
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 
   it("prunes an expired released inbox scope without touching live scopes", () => {
     const releasedScope = new BridgeImageScope(dir);
-    const releasedPath = releasedScope
-      .materializeMessageContent([
-        { type: "imageUrl", imageUrl: { url: DATA_URL } },
-      ])
-      .slice(1);
+    let releasedPath = "";
+    releasedScope.persistInboxMessage(
+      [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+      (rendered) => {
+        releasedPath = rendered.slice(1);
+        return true;
+      },
+    );
     const releasedDir = path.dirname(releasedPath);
     releasedScope.dispose();
     const marker = path.join(releasedDir, ".released");

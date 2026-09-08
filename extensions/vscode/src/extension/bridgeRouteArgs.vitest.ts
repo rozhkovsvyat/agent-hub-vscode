@@ -121,14 +121,16 @@ describe("native bridge argv", () => {
     );
   });
 
-  it("flushes a newline-less Codex terminal receipt before settling child error", () => {
+  it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {
     const parser = new BridgeEventParser("codex-thread");
-    expect(parser.push('{"type":"turn.completed"}')).toEqual([]);
+    expect(parser.push('{"type":"turn.completed"}')).toEqual([
+      { kind: "complete" },
+    ]);
     const nativeError = new Error("late process error");
 
-    const settlement = settleBridgeChildError(parser, nativeError, false);
+    const settlement = settleBridgeChildError(parser, nativeError, true);
 
-    expect(settlement.events).toEqual([{ kind: "complete" }]);
+    expect(settlement.events).toEqual([]);
     expect(settlement.protocolTerminalReceived).toBe(true);
     expect(settlement.error).toBeUndefined();
   });
@@ -1176,9 +1178,20 @@ describe("native bridge argv", () => {
       .readFileSync(path.join(__dirname, "VsCodeMessenger.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     expect(messengerSource).toContain("imageScope,");
-    expect(messengerSource).toContain(
-      "run.imageScope.materializeMessageContent(msg.data.content)",
+    const persistInboxAt = messengerSource.indexOf(
+      "run.imageScope.persistInboxMessage(",
     );
+    const deliverAt = messengerSource.indexOf(
+      "return run.steering.deliver(msg.data);",
+      persistInboxAt,
+    );
+    expect(persistInboxAt).toBeGreaterThan(-1);
+    expect(deliverAt).toBeGreaterThan(persistInboxAt);
+    const persistInboxBlock = messengerSource.slice(persistInboxAt, deliverAt);
+    expect(persistInboxBlock).toContain("(materializedContent) =>");
+    expect(persistInboxBlock).toContain("writeBridgeInboxMessage(");
+    expect(persistInboxBlock).toContain("materializedContent,");
+    expect(persistInboxBlock).not.toContain("materializeMessageContent(");
     expect(messengerSource).toContain("imageScope.dispose()");
   });
 });

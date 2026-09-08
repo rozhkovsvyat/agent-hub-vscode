@@ -425,7 +425,21 @@ export class BridgeEventParser {
     this.buffer += chunk;
     const lines = this.buffer.split("\n");
     this.buffer = lines.pop() ?? "";
-    return lines.flatMap((line) => this.line(line));
+    const events = lines.flatMap((line) => this.line(line));
+
+    // A terminal protocol receipt must not depend on the producer writing a
+    // trailing newline or closing stdout. Codex can leave its CLI alive after
+    // emitting one complete JSON object; consume that object as soon as it is
+    // syntactically complete so the adapter can begin its own teardown.
+    const tail = this.buffer.trim();
+    if (!tail || tail[0] !== "{") return events;
+    try {
+      JSON.parse(tail);
+    } catch {
+      return events;
+    }
+    this.buffer = "";
+    return [...events, ...this.line(tail)];
   }
 
   /** Хвост без завершающего перевода строки в конце процесса. */

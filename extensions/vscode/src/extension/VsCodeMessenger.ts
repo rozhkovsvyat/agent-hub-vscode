@@ -1279,10 +1279,14 @@ export class VsCodeMessenger {
           // Fast path for stdin-less vendors: the agent can claim this mid-run
           // through broker_inbox. The durable GUI outbox stays the fallback and
           // dedups itself against the inbox read mark at the turn boundary.
-          writeBridgeInboxMessage(
-            run.sessionId,
-            msg.data.messageId,
-            run.imageScope.materializeMessageContent(msg.data.content),
+          run.imageScope.persistInboxMessage(
+            msg.data.content,
+            (materializedContent) =>
+              writeBridgeInboxMessage(
+                run.sessionId,
+                msg.data.messageId,
+                materializedContent,
+              ),
           );
         }
         return run.steering.deliver(msg.data);

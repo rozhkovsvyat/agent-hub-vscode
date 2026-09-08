@@ -139,6 +139,15 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("emits a complete Codex receipt without waiting for newline or process exit", () => {
+    const parser = new BridgeEventParser("codex-thread");
+
+    expect(parser.push('{"type":"turn.completed"}')).toEqual([
+      { kind: "complete" },
+    ]);
+    expect(parser.flush()).toEqual([]);
+  });
+
   it("помечает только доказуемый standalone sleep как ожидание", () => {
     const { events } = collect("codex-thread", [
       '{"type":"item.started","item":{"id":"sleep_1","type":"command_execution","command":"sleep 12","status":"in_progress"}}',
