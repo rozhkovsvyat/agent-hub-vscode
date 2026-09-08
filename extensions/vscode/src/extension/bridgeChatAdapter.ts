@@ -260,7 +260,10 @@ function grokNativeModel(model: BrokerModel): string | undefined {
 // Kimi CLI documents -p/--prompt, but not an stdin input mode. Check the
 // complete quoted CreateProcess command line below before anything launches.
 /** CreateProcess permits 32,767 UTF-16 code units including its NUL terminator. */
-export const KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 = 32_766;
+const WINDOWS_CREATEPROCESS_SAFE_UTF16 = 32_766;
+const WINDOWS_CMD_SAFE_UTF16 = 8_190;
+export const KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 =
+  WINDOWS_CREATEPROCESS_SAFE_UTF16;
 
 function isKimiModel(model: BrokerModel): boolean {
   return (
@@ -308,13 +311,33 @@ function assertKimiWindowsCommandLine(program: string, args: string[]): void {
     return;
   }
   const length = windowsCommandLineUtf16Length(program, args);
-  if (length > KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16) {
+  if (length > WINDOWS_CREATEPROCESS_SAFE_UTF16) {
     throw new Error(
       "Kimi command line is " +
         length +
         " UTF-16 code units after Windows quoting; the safe CreateProcess limit is " +
-        KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 +
+        WINDOWS_CREATEPROCESS_SAFE_UTF16 +
         ".",
+    );
+  }
+}
+
+function assertGrokWindowsCommandLine(program: string, args: string[]): void {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const length = windowsCommandLineUtf16Length(program, args);
+  const safeLimit =
+    path.basename(program).toLowerCase() === "cmd.exe"
+      ? WINDOWS_CMD_SAFE_UTF16
+      : WINDOWS_CREATEPROCESS_SAFE_UTF16;
+  if (length > safeLimit) {
+    throw new Error(
+      "Grok command line is " +
+        length +
+        " UTF-16 code units after Windows quoting; the safe CreateProcess limit is " +
+        safeLimit +
+        ". The vendor did not start. Send fewer images or select another broker model.",
     );
   }
 }
@@ -813,6 +836,46 @@ function kimiRoute(
   };
 }
 
+function grokRoute(
+  label: string,
+  nativeModel: string,
+  cwd: string,
+  prompt: string,
+  messages: ChatMessage[],
+  controls: BridgeControlResolution,
+  permissionArgs: string[],
+  logFile: string | undefined,
+): BridgeRoute {
+  const promptFile = writeBridgeScratchFile("grok-transcript", prompt);
+  try {
+    const promptJson = grokPromptJson(messages, promptFile);
+    const args = [
+      "--model",
+      nativeModel,
+      ...grokControlArgs(controls),
+      ...permissionArgs,
+      "--cwd",
+      cwd,
+      "--prompt-json",
+      promptJson,
+      "--output-format",
+      "streaming-messages-json",
+    ];
+    assertGrokWindowsCommandLine("grok", args);
+    return {
+      label,
+      program: "grok",
+      args,
+      format: "anthropic-envelope",
+      promptFile,
+      logFile,
+    };
+  } catch (error) {
+    removeBridgeScratchFile(promptFile);
+    throw error;
+  }
+}
+
 function appendPathSegment(
   segments: string[],
   candidate: string | undefined,
@@ -962,33 +1025,16 @@ export function routeForModel(
   }
   const nativeGrokModel = grokNativeModel(model);
   if (nativeGrokModel) {
-    const promptFile = writeBridgeScratchFile("grok-transcript", prompt);
-    let promptJson: string;
-    try {
-      promptJson = grokPromptJson(messages, promptFile);
-    } catch (error) {
-      removeBridgeScratchFile(promptFile);
-      throw error;
-    }
-    return {
-      label: displayBridgeModel(model),
-      program: "grok",
-      args: [
-        "--model",
-        nativeGrokModel,
-        ...grokControlArgs(controls),
-        ...permissionArgs,
-        "--cwd",
-        cwd,
-        "--prompt-json",
-        promptJson,
-        "--output-format",
-        "streaming-messages-json",
-      ],
-      format: "anthropic-envelope",
-      promptFile,
+    return grokRoute(
+      displayBridgeModel(model),
+      nativeGrokModel,
+      cwd,
+      prompt,
+      messages,
+      controls,
+      permissionArgs,
       logFile,
-    };
+    );
   }
   const nativeCursorModel = resolveCursorCatalogModel(
     model,
@@ -1157,34 +1203,16 @@ export function routeForModel(
         logFile,
       };
     case "grok-4-6":
-      const promptFile = writeBridgeScratchFile("grok-transcript", prompt);
-      let promptJson: string;
-      try {
-        promptJson = grokPromptJson(messages, promptFile);
-      } catch (error) {
-        removeBridgeScratchFile(promptFile);
-        throw error;
-      }
-      return {
-        label: displayBridgeModel(model),
-        program: "grok",
-        args: [
-          "--model",
-          "grok-4.6",
-          ...grokControlArgs(controls),
-          ...permissionArgs,
-          "--cwd",
-          cwd,
-          "--prompt-json",
-          promptJson,
-          "--output-format",
-          "streaming-messages-json",
-        ],
-        // Проверено прогоном: grok отдаёт тот же конверт, что claude stream-json.
-        format: "anthropic-envelope",
-        promptFile,
+      return grokRoute(
+        displayBridgeModel(model),
+        "grok-4.6",
+        cwd,
+        prompt,
+        messages,
+        controls,
+        permissionArgs,
         logFile,
-      };
+      );
     case "composer-2-5":
       const cursorModel = cursorModelId(controls);
       return {
@@ -1597,6 +1625,12 @@ async function* streamBridgeChatWithSteer(
   let command: ResolvedCommand;
   try {
     command = ensureProgramAvailable(route);
+    if (brokerVendorForModel(args.brokerModel) === "grok") {
+      // `resolveCommand` can replace the short `grok` token with an absolute
+      // native path (or a cmd shim plus prefix args). The last pre-spawn check
+      // must therefore measure that fully resolved Windows command line.
+      assertGrokWindowsCommandLine(command.program, command.args);
+    }
   } catch (err) {
     if (route.promptFile) removeBridgeScratchFile(route.promptFile);
     if (permissionBroker) {

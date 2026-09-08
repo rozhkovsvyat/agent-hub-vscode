@@ -5,6 +5,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  markBridgeInboxMessagesRead,
+  writeBridgeInboxMessage,
+  writeBridgeInboxMessageWithReceipt,
+} from "./bridgeInbox";
+import {
   BridgeImageScope,
   hasImageAttachment,
   materializeBridgeImages,
@@ -214,7 +219,9 @@ describe("materializeBridgeImages", () => {
           {
             type: "imageUrl",
             imageUrl: {
-              url: `data:image/png;base64,${Buffer.from([1, 2, 3]).toString("base64")}`,
+              url: `data:image/png;base64,${Buffer.from([1, 2, 3]).toString(
+                "base64",
+              )}`,
             },
           },
         ],
@@ -295,6 +302,141 @@ describe("materializeBridgeImages", () => {
 
     expect(fs.existsSync(releasedDir)).toBe(false);
     cleanupTrigger.dispose();
+  });
+
+  it("keeps an expired image scope while its leased inbox record is pending", () => {
+    const previousInboxRoot = process.env.CUKII_INBOX_DIR;
+    const inboxRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "cukii-bridge-image-inbox-"),
+    );
+    process.env.CUKII_INBOX_DIR = inboxRoot;
+    try {
+      const scope = new BridgeImageScope(dir);
+      let referenced = "";
+      expect(
+        scope.persistInboxMessage(
+          [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+          (rendered) => {
+            referenced = rendered.slice(1);
+            return writeBridgeInboxMessage(
+              "session-1",
+              "leased-image",
+              rendered,
+            );
+          },
+          { sessionId: "session-1", messageId: "leased-image" },
+        ),
+      ).toBe(true);
+      scope.dispose();
+      const marker = path.join(path.dirname(referenced), ".released");
+      const olderThanRetention = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(marker, olderThanRetention, olderThanRetention);
+      const recordPath = fs
+        .readdirSync(path.join(inboxRoot, "session-1"))
+        .filter((name) => name.endsWith("-leased-image.json"))
+        .map((name) => path.join(inboxRoot, "session-1", name))[0];
+      const record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+      fs.writeFileSync(
+        recordPath,
+        JSON.stringify({
+          ...record,
+          leaseOwner: "reader",
+          leasePid: process.pid,
+          leaseProcessStartToken: "live",
+          leaseUntilMs: Date.now() + 60_000,
+        }),
+        "utf8",
+      );
+
+      const whilePending = new BridgeImageScope(dir);
+      void whilePending.directory;
+      expect(fs.existsSync(referenced)).toBe(true);
+      whilePending.dispose();
+
+      markBridgeInboxMessagesRead("session-1", ["leased-image"]);
+      const afterRead = new BridgeImageScope(dir);
+      void afterRead.directory;
+      expect(fs.existsSync(referenced)).toBe(false);
+      afterRead.dispose();
+    } finally {
+      if (previousInboxRoot === undefined) delete process.env.CUKII_INBOX_DIR;
+      else process.env.CUKII_INBOX_DIR = previousInboxRoot;
+      fs.rmSync(inboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates image retries by original payload and removes retry scopes", () => {
+    const previousInboxRoot = process.env.CUKII_INBOX_DIR;
+    const inboxRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "cukii-bridge-image-retry-"),
+    );
+    process.env.CUKII_INBOX_DIR = inboxRoot;
+    try {
+      const scope = new BridgeImageScope(dir);
+      const reference = { sessionId: "session-1", messageId: "same-image" };
+      const persist = (
+        rendered: string,
+        metadata?: Parameters<typeof writeBridgeInboxMessageWithReceipt>[3],
+      ) =>
+        writeBridgeInboxMessageWithReceipt(
+          reference.sessionId,
+          reference.messageId,
+          rendered,
+          metadata,
+        );
+      const content = [
+        { type: "imageUrl" as const, imageUrl: { url: DATA_URL } },
+      ];
+
+      expect(scope.persistInboxMessage(content, persist, reference)).toBe(true);
+      expect(scope.persistInboxMessage(content, persist, reference)).toBe(true);
+      expect(
+        scope.persistInboxMessage(
+          [
+            {
+              type: "imageUrl",
+              imageUrl: {
+                url: `data:image/png;base64,${Buffer.from([9, 8, 7]).toString(
+                  "base64",
+                )}`,
+              },
+            },
+          ],
+          persist,
+          reference,
+        ),
+      ).toBe(false);
+
+      expect(fs.readdirSync(dir)).toHaveLength(1);
+      const records = fs
+        .readdirSync(path.join(inboxRoot, reference.sessionId))
+        .filter((name) => name.endsWith(`-${reference.messageId}.json`));
+      expect(records).toHaveLength(1);
+      const record = JSON.parse(
+        fs.readFileSync(
+          path.join(inboxRoot, reference.sessionId, records[0]),
+          "utf8",
+        ),
+      );
+      expect(record).toMatchObject({
+        id: reference.messageId,
+        attachmentScope: path.join(
+          fs.realpathSync.native(dir),
+          fs.readdirSync(dir)[0],
+        ),
+      });
+      expect(fs.existsSync(record.text.slice(1))).toBe(true);
+      fs.rmSync(record.attachmentScope, { recursive: true, force: true });
+      expect(scope.persistInboxMessage(content, persist, reference)).toBe(
+        false,
+      );
+      expect(fs.readdirSync(dir)).toEqual([]);
+      scope.dispose();
+    } finally {
+      if (previousInboxRoot === undefined) delete process.env.CUKII_INBOX_DIR;
+      else process.env.CUKII_INBOX_DIR = previousInboxRoot;
+      fs.rmSync(inboxRoot, { recursive: true, force: true });
+    }
   });
 
   it("keeps every path referenced by one prompt above 256 images", () => {

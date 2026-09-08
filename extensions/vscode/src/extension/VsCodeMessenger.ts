@@ -61,7 +61,7 @@ import {
   BridgeInboxWatch,
   bridgeInboxMessageStatus,
   purgeUnreadBridgeInboxMessages,
-  writeBridgeInboxMessage,
+  writeBridgeInboxMessageWithReceipt,
 } from "./bridgeInbox";
 import type { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { exportAutocompactForHarness } from "./cukiiAutocompactExport";
@@ -1281,12 +1281,14 @@ export class VsCodeMessenger {
           // dedups itself against the inbox read mark at the turn boundary.
           run.imageScope.persistInboxMessage(
             msg.data.content,
-            (materializedContent) =>
-              writeBridgeInboxMessage(
+            (materializedContent, metadata) =>
+              writeBridgeInboxMessageWithReceipt(
                 run.sessionId,
                 msg.data.messageId,
                 materializedContent,
+                metadata,
               ),
+            { sessionId: run.sessionId, messageId: msg.data.messageId },
           );
         }
         return run.steering.deliver(msg.data);

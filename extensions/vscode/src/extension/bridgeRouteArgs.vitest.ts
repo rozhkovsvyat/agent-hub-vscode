@@ -885,6 +885,39 @@ describe("native bridge argv", () => {
     expect(controls.effectiveSpeed).toBe("standard");
   });
 
+  it("rejects a Grok route above the fully quoted Windows argv limit", () => {
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: Array.from({ length: 515 }, () => ({
+          type: "imageUrl" as const,
+          imageUrl: { url: "data:image/png;base64,AA==" },
+        })),
+      },
+    ];
+    let returnedPromptFile: string | undefined;
+    let thrown: unknown;
+    try {
+      const route = routeForModel(
+        "grok-4-6",
+        "D:/Brain/vault",
+        "prompt",
+        messages,
+        resolveBridgeControls("grok-4-6", "max", "standard"),
+      );
+      returnedPromptFile = route.promptFile;
+    } catch (error) {
+      thrown = error;
+    } finally {
+      if (returnedPromptFile) promptFiles.push(returnedPromptFile);
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(
+      /Grok command line.*UTF-16.*did not start/i,
+    );
+  });
+
   it("routes a newly discovered xAI model with its exact native id", () => {
     const [catalogModel] = grokCatalogFromOutput("  - grok-4.7\n");
     expect(catalogModel.value).toBe("grok:grok-4.7");
@@ -1188,10 +1221,30 @@ describe("native bridge argv", () => {
     expect(persistInboxAt).toBeGreaterThan(-1);
     expect(deliverAt).toBeGreaterThan(persistInboxAt);
     const persistInboxBlock = messengerSource.slice(persistInboxAt, deliverAt);
-    expect(persistInboxBlock).toContain("(materializedContent) =>");
-    expect(persistInboxBlock).toContain("writeBridgeInboxMessage(");
+    expect(persistInboxBlock).toContain("(materializedContent, metadata) =>");
+    expect(persistInboxBlock).toContain("writeBridgeInboxMessageWithReceipt(");
     expect(persistInboxBlock).toContain("materializedContent,");
+    expect(persistInboxBlock).toContain("metadata,");
+    expect(persistInboxBlock).toContain("sessionId: run.sessionId");
     expect(persistInboxBlock).not.toContain("materializeMessageContent(");
     expect(messengerSource).toContain("imageScope.dispose()");
+  });
+
+  it("rechecks Grok after resolving its final Windows executable", () => {
+    const source = fs
+      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
+    const resolveAt = source.indexOf(
+      "command = ensureProgramAvailable(route);",
+    );
+    const assertAt = source.indexOf(
+      "assertGrokWindowsCommandLine(command.program, command.args);",
+      resolveAt,
+    );
+    const launchAt = source.indexOf("const launchOptions = {", resolveAt);
+
+    expect(resolveAt).toBeGreaterThan(-1);
+    expect(assertAt).toBeGreaterThan(resolveAt);
+    expect(launchAt).toBeGreaterThan(assertAt);
   });
 });

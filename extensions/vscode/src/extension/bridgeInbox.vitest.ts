@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -72,12 +73,37 @@ describe("bridgeInbox", () => {
       expect(
         writeBridgeInboxMessage("session-1", "same-id", "другой payload"),
       ).toBe(false);
-      expect(bridgeInboxMessageStatus("session-1", "same-id")).toBe(
-        "pending",
-      );
+      expect(bridgeInboxMessageStatus("session-1", "same-id")).toBe("pending");
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it("waits for the cross-process claim lock before writing", async () => {
+    const dir = path.join(root, "session-1");
+    const lock = path.join(dir, ".claim-lock");
+    fs.mkdirSync(lock, { recursive: true });
+    const releaser = spawn(
+      process.execPath,
+      [
+        "-e",
+        "setTimeout(() => require('node:fs').rmdirSync(process.argv[1]), 150)",
+        lock,
+      ],
+      { stdio: "ignore" },
+    );
+
+    const startedAt = Date.now();
+    expect(writeBridgeInboxMessage("session-1", "locked", "payload")).toBe(
+      true,
+    );
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(75);
+    await new Promise<void>((resolve, reject) => {
+      releaser.once("error", reject);
+      releaser.once("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`releaser exited ${code}`)),
+      );
+    });
   });
 
   it("refuses traversal-shaped segments and empty text", () => {
@@ -155,6 +181,58 @@ describe("bridgeInbox", () => {
 
     expect(bridgeInboxMessageStatus("session-1", "msg-1")).toBe("absent");
     expect(bridgeInboxMessageStatus("session-1", "msg-2")).toBe("read");
+  });
+
+  it("removes the image scope referenced by a purged unread record", () => {
+    const attachments = path.join(root, "attachments");
+    const scope = path.join(
+      attachments,
+      "run-123-00000000-0000-4000-8000-000000000001",
+    );
+    fs.mkdirSync(scope, { recursive: true });
+    fs.writeFileSync(path.join(scope, "image.png"), "image");
+    writeBridgeInboxMessage("session-1", "with-image", `@${scope}\\image.png`);
+    const recordPath = fs
+      .readdirSync(path.join(root, "session-1"))
+      .filter((name) => name.endsWith("-with-image.json"))
+      .map((name) => path.join(root, "session-1", name))[0];
+    const record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+    fs.writeFileSync(
+      recordPath,
+      JSON.stringify({ ...record, attachmentScope: scope }),
+      "utf8",
+    );
+
+    purgeUnreadBridgeInboxMessages("session-1", attachments);
+
+    expect(fs.existsSync(recordPath)).toBe(false);
+    expect(fs.existsSync(scope)).toBe(false);
+  });
+
+  it("never removes an attachment scope outside the trusted root", () => {
+    const attachments = path.join(root, "attachments");
+    const outside = path.join(root, "outside");
+    fs.mkdirSync(attachments, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "keep.txt"), "keep");
+    writeBridgeInboxMessage("session-1", "untrusted-image", "@outside");
+    const recordPath = fs
+      .readdirSync(path.join(root, "session-1"))
+      .filter((name) => name.endsWith("-untrusted-image.json"))
+      .map((name) => path.join(root, "session-1", name))[0];
+    const record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+    fs.writeFileSync(
+      recordPath,
+      JSON.stringify({ ...record, attachmentScope: outside }),
+      "utf8",
+    );
+
+    purgeUnreadBridgeInboxMessages("session-1", attachments);
+
+    expect(fs.existsSync(recordPath)).toBe(false);
+    expect(fs.readFileSync(path.join(outside, "keep.txt"), "utf8")).toBe(
+      "keep",
+    );
   });
 
   it("watch reports each claimed message exactly once", () => {

@@ -4,8 +4,14 @@ import path from "node:path";
 
 import { ChatMessage, MessageContent, MessagePart } from "core";
 import { brokerImageCarrierForModel } from "core/cukiiPermissionModes";
-import type { BrokerModel } from "core/protocol/ideWebview";
 import { getContinueGlobalPath } from "core/util/paths";
+
+import {
+  bridgeInboxMessageStatus,
+  type BridgeInboxWriteMetadata,
+  type BridgeInboxWriteReceipt,
+} from "./bridgeInbox";
+import type { BrokerModel } from "core/protocol/ideWebview";
 
 /**
  * Text-only native bridges cannot carry bitmap blocks, so the transcript used
@@ -61,6 +67,11 @@ const RETAINED_SCOPE_MS = 7 * 24 * 60 * 60 * 1000;
 const RUN_SCOPE_NAME = /^run-(\d+)-[a-f0-9-]{36}$/i;
 const RELEASED_MARKER = ".released";
 
+export type BridgeInboxImageReference = {
+  sessionId: string;
+  messageId: string;
+};
+
 export function bridgeAttachmentDir(): string {
   return path.join(getContinueGlobalPath(), "bridge-attachments");
 }
@@ -100,6 +111,25 @@ function removeOwnedScope(scopeDir: string, root: string): void {
   }
 }
 
+function readReleasedReference(
+  marker: string,
+): BridgeInboxImageReference | undefined {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(marker, "utf8"),
+    ) as Partial<BridgeInboxImageReference>;
+    if (
+      typeof parsed.sessionId === "string" &&
+      typeof parsed.messageId === "string"
+    ) {
+      return { sessionId: parsed.sessionId, messageId: parsed.messageId };
+    }
+  } catch {
+    // Legacy markers contain an ISO timestamp rather than structured JSON.
+  }
+  return undefined;
+}
+
 /**
  * Retire only run scopes that can no longer belong to a live bridge. A scope
  * owned by another extension host is never inspected or pruned while that
@@ -134,7 +164,18 @@ function pruneExpiredScopes(root: string): void {
       }
     }
     const ownerAlive = processIsAlive(Number(match[1]));
-    if (lastUseMs < cutoff && (released || !ownerAlive)) {
+    if (lastUseMs >= cutoff || (!released && ownerAlive)) continue;
+    const reference = released
+      ? readReleasedReference(releasedMarker)
+      : undefined;
+    if (
+      reference &&
+      bridgeInboxMessageStatus(reference.sessionId, reference.messageId) ===
+        "pending"
+    ) {
+      continue;
+    }
+    if (released || !ownerAlive) {
       removeOwnedScope(scopeDir, root);
     }
   }
@@ -180,7 +221,11 @@ export class BridgeImageScope {
    */
   persistInboxMessage(
     content: MessageContent,
-    persist: (materializedContent: string) => boolean,
+    persist: (
+      materializedContent: string,
+      metadata?: BridgeInboxWriteMetadata,
+    ) => boolean | BridgeInboxWriteReceipt,
+    reference?: BridgeInboxImageReference,
   ): boolean {
     const needsFiles =
       Array.isArray(content) &&
@@ -190,9 +235,10 @@ export class BridgeImageScope {
           DATA_IMAGE_URL.test(part.imageUrl?.url ?? ""),
       );
     if (!needsFiles) {
-      return persist(
+      const persisted = persist(
         materializeBridgeMessageContent(content, this.requestedRoot),
       );
+      return typeof persisted === "boolean" ? persisted : persisted.accepted;
     }
 
     const inboxScope = new BridgeImageScope(this.requestedRoot);
@@ -201,9 +247,30 @@ export class BridgeImageScope {
         content,
         inboxScope.directory,
       );
-      const written = persist(rendered);
-      if (written) inboxScope.retainAfterDispose = true;
-      return written;
+      const metadata = reference
+        ? {
+            attachmentScope: inboxScope.directory,
+            payloadDigest: createHash("sha256")
+              .update(JSON.stringify(content))
+              .digest("hex"),
+          }
+        : undefined;
+      if (reference) {
+        fs.writeFileSync(
+          path.join(inboxScope.directory, RELEASED_MARKER),
+          JSON.stringify(reference),
+          { encoding: "utf8", flag: "wx" },
+        );
+      }
+      const persisted = persist(rendered, metadata);
+      const receipt =
+        typeof persisted === "boolean"
+          ? { accepted: persisted, created: persisted }
+          : persisted;
+      if (receipt.accepted && receipt.created) {
+        inboxScope.retainAfterDispose = true;
+      }
+      return receipt.accepted;
     } finally {
       inboxScope.dispose();
     }
@@ -216,6 +283,7 @@ export class BridgeImageScope {
     const root = this.canonicalRoot;
     if (!scopeDir || !root) return;
     if (this.retainAfterDispose) {
+      if (fs.existsSync(path.join(scopeDir, RELEASED_MARKER))) return;
       try {
         fs.writeFileSync(
           path.join(scopeDir, RELEASED_MARKER),
