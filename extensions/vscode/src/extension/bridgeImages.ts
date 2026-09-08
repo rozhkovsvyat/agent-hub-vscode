@@ -249,7 +249,14 @@ export class BridgeImageScope {
       );
       const metadata = reference
         ? {
+            attachmentRoot: path.dirname(inboxScope.directory),
             attachmentScope: inboxScope.directory,
+            attachmentFiles: fs
+              .readdirSync(inboxScope.directory, { withFileTypes: true })
+              .filter(
+                (entry) => entry.isFile() && entry.name !== RELEASED_MARKER,
+              )
+              .map((entry) => path.join(inboxScope.directory, entry.name)),
             payloadDigest: createHash("sha256")
               .update(JSON.stringify(content))
               .digest("hex"),

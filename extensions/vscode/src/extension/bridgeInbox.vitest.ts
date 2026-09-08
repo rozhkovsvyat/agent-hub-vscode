@@ -106,6 +106,57 @@ describe("bridgeInbox", () => {
     });
   });
 
+  it("publishes an ownership marker beside an empty claim lock", () => {
+    const originalRename = fs.renameSync.bind(fs);
+    let sawOwnerMarker = false;
+    let lockEntries: string[] = ["<never entered>"];
+    const rename = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(to).endsWith("-owned-lock.json")) {
+        const dir = path.join(root, "session-1");
+        sawOwnerMarker = fs.existsSync(path.join(dir, ".claim-lock.owner"));
+        lockEntries = fs.readdirSync(path.join(dir, ".claim-lock"));
+      }
+      return originalRename(from, to);
+    });
+    try {
+      expect(
+        writeBridgeInboxMessage("session-1", "owned-lock", "payload"),
+      ).toBe(true);
+      expect(sawOwnerMarker).toBe(true);
+      // `broker/inbox.py` reclaims a stale lock with rmdir(): a file inside
+      // would strand this lock for the Python reader after a host crash.
+      expect(lockEntries).toEqual([]);
+    } finally {
+      rename.mockRestore();
+    }
+  });
+
+  it("reclaims a lock whose owner died before the staleness window", () => {
+    const dir = path.join(root, "session-1");
+    const lock = path.join(dir, ".claim-lock");
+    fs.mkdirSync(lock, { recursive: true });
+    // Deliberately fresh mtime: only the dead owner may justify the reclaim,
+    // so age-only reclaim cannot make this pass.
+    fs.writeFileSync(
+      path.join(dir, ".claim-lock.owner"),
+      JSON.stringify({
+        token: "00000000-0000-4000-8000-000000000001",
+        pid: 2_000_000_000,
+        acquiredMs: Date.now(),
+      }),
+      "utf8",
+    );
+
+    expect(writeBridgeInboxMessage("session-1", "after-crash", "payload")).toBe(
+      true,
+    );
+    expect(bridgeInboxMessageStatus("session-1", "after-crash")).toBe(
+      "pending",
+    );
+    expect(fs.existsSync(path.join(dir, ".claim-lock"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, ".claim-lock.owner"))).toBe(false);
+  });
+
   it("refuses traversal-shaped segments and empty text", () => {
     expect(writeBridgeInboxMessage("../evil", "msg-1", "нет")).toBe(false);
     expect(writeBridgeInboxMessage("session-1", "../evil", "нет")).toBe(false);
@@ -162,7 +213,7 @@ describe("bridgeInbox", () => {
     expect(after).not.toHaveProperty("leaseOwner");
   });
 
-  it("purges unread entries on explicit Stop but keeps claimed ones", () => {
+  it("purges unread entries on explicit Stop but keeps claimed ones", async () => {
     writeBridgeInboxMessage("session-1", "msg-1", "заберут");
     writeBridgeInboxMessage("session-1", "msg-2", "останется");
     const dir = path.join(root, "session-1");
@@ -177,13 +228,39 @@ describe("bridgeInbox", () => {
       "utf8",
     );
 
-    purgeUnreadBridgeInboxMessages("session-1");
+    await purgeUnreadBridgeInboxMessages("session-1");
 
     expect(bridgeInboxMessageStatus("session-1", "msg-1")).toBe("absent");
     expect(bridgeInboxMessageStatus("session-1", "msg-2")).toBe("read");
   });
 
-  it("removes the image scope referenced by a purged unread record", () => {
+  it("waits for a live claim lock before confirming explicit Stop", async () => {
+    writeBridgeInboxMessage("session-1", "stop-race", "не воскресить");
+    const dir = path.join(root, "session-1");
+    const lock = path.join(dir, ".claim-lock");
+    fs.mkdirSync(lock);
+    const releaser = spawn(
+      process.execPath,
+      [
+        "-e",
+        "setTimeout(() => require('node:fs').rmdirSync(process.argv[1]), 1500)",
+        lock,
+      ],
+      { stdio: "ignore" },
+    );
+
+    await purgeUnreadBridgeInboxMessages("session-1");
+    await new Promise<void>((resolve, reject) => {
+      releaser.once("error", reject);
+      releaser.once("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`releaser exited ${code}`)),
+      );
+    });
+
+    expect(bridgeInboxMessageStatus("session-1", "stop-race")).toBe("absent");
+  });
+
+  it("removes the image scope referenced by a purged unread record", async () => {
     const attachments = path.join(root, "attachments");
     const scope = path.join(
       attachments,
@@ -203,13 +280,13 @@ describe("bridgeInbox", () => {
       "utf8",
     );
 
-    purgeUnreadBridgeInboxMessages("session-1", attachments);
+    await purgeUnreadBridgeInboxMessages("session-1", attachments);
 
     expect(fs.existsSync(recordPath)).toBe(false);
     expect(fs.existsSync(scope)).toBe(false);
   });
 
-  it("never removes an attachment scope outside the trusted root", () => {
+  it("never removes an attachment scope outside the trusted root", async () => {
     const attachments = path.join(root, "attachments");
     const outside = path.join(root, "outside");
     fs.mkdirSync(attachments, { recursive: true });
@@ -227,7 +304,7 @@ describe("bridgeInbox", () => {
       "utf8",
     );
 
-    purgeUnreadBridgeInboxMessages("session-1", attachments);
+    await purgeUnreadBridgeInboxMessages("session-1", attachments);
 
     expect(fs.existsSync(recordPath)).toBe(false);
     expect(fs.readFileSync(path.join(outside, "keep.txt"), "utf8")).toBe(

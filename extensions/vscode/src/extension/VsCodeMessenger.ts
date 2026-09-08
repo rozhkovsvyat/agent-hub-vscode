@@ -1312,7 +1312,13 @@ export class VsCodeMessenger {
       async (msg): Promise<CukiiCancelReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
         const run = this.bridgeRuns.activeFor(protocol);
+        const purge = purgeUnreadBridgeInboxMessages(msg.data.sessionId);
         if (!run || run.sessionId !== msg.data.sessionId) {
+          if (!(await purge)) {
+            throw new Error(
+              "Cukii could not retire unread inbox messages for the cancelled run",
+            );
+          }
           return {
             requestId: msg.data.requestId,
             sessionId: msg.data.sessionId,
@@ -1323,8 +1329,16 @@ export class VsCodeMessenger {
         // Explicit Stop cancels the queued bubbles on the GUI side; unread
         // inbox entries must die with them or the next run would resurrect
         // stale instructions the user already withdrew.
-        purgeUnreadBridgeInboxMessages(msg.data.sessionId);
-        return this.cancelBridgeRun(protocol, run, msg.data.requestId);
+        const [receipt, purged] = await Promise.all([
+          this.cancelBridgeRun(protocol, run, msg.data.requestId),
+          purge,
+        ]);
+        if (!purged) {
+          throw new Error(
+            "Cukii cancelled the bridge run but could not retire its unread inbox messages",
+          );
+        }
+        return receipt;
       },
     );
     this.onWebviewOrCore("getSearchResults", async (msg) => {

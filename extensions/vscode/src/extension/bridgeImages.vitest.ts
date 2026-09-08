@@ -425,12 +425,41 @@ describe("materializeBridgeImages", () => {
           fs.readdirSync(dir)[0],
         ),
       });
-      expect(fs.existsSync(record.text.slice(1))).toBe(true);
-      fs.rmSync(record.attachmentScope, { recursive: true, force: true });
-      expect(scope.persistInboxMessage(content, persist, reference)).toBe(
-        false,
+      const originalScope = record.attachmentScope as string;
+      const originalImage = record.text.slice(1) as string;
+      expect(fs.existsSync(originalImage)).toBe(true);
+      fs.unlinkSync(originalImage);
+      expect(fs.existsSync(originalScope)).toBe(true);
+
+      expect(scope.persistInboxMessage(content, persist, reference)).toBe(true);
+      const repaired = JSON.parse(
+        fs.readFileSync(
+          path.join(inboxRoot, reference.sessionId, records[0]),
+          "utf8",
+        ),
       );
-      expect(fs.readdirSync(dir)).toEqual([]);
+      expect(repaired.attachmentScope).not.toBe(originalScope);
+      expect(fs.existsSync(repaired.text.slice(1))).toBe(true);
+      expect(fs.existsSync(originalScope)).toBe(false);
+      expect(fs.readdirSync(dir)).toHaveLength(1);
+
+      const repairedScope = repaired.attachmentScope as string;
+      const repairedImage = repaired.text.slice(1) as string;
+      fs.writeFileSync(
+        repairedImage,
+        Buffer.alloc(fs.statSync(repairedImage).size, 0),
+      );
+      expect(scope.persistInboxMessage(content, persist, reference)).toBe(true);
+      const rehashed = JSON.parse(
+        fs.readFileSync(
+          path.join(inboxRoot, reference.sessionId, records[0]),
+          "utf8",
+        ),
+      );
+      expect(rehashed.attachmentScope).not.toBe(repairedScope);
+      expect(fs.existsSync(rehashed.text.slice(1))).toBe(true);
+      expect(fs.existsSync(repairedScope)).toBe(false);
+      expect(fs.readdirSync(dir)).toHaveLength(1);
       scope.dispose();
     } finally {
       if (previousInboxRoot === undefined) delete process.env.CUKII_INBOX_DIR;

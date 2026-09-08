@@ -53,4 +53,13 @@ describe("VsCodeMessenger native bridge run contract", () => {
     expect(source).toContain("isBridgePidAlive(");
     expect(source).toContain("replacement is blocked");
   });
+
+  it("does not acknowledge explicit Stop before pending inbox messages are retired", () => {
+    expect(source).toMatch(
+      /const purge = purgeUnreadBridgeInboxMessages\(msg\.data\.sessionId\);\s*if \(!run \|\| run\.sessionId !== msg\.data\.sessionId\) \{\s*if \(!\(await purge\)\)/,
+    );
+    expect(source).toMatch(
+      /const \[receipt, purged\] = await Promise\.all\(\[\s*this\.cancelBridgeRun\([\s\S]*?purge,\s*\]\);[\s\S]*?if \(!purged\) \{[\s\S]*?return receipt;/,
+    );
+  });
 });
