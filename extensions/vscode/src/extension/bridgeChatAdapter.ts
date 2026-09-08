@@ -1319,9 +1319,10 @@ export function bridgeEventsProveInputAccepted(
  */
 export function bridgeProcessExitIsFailure(
   code: number | null,
+  signal: NodeJS.Signals | null,
   protocolTerminalReceived: boolean,
 ): boolean {
-  return !protocolTerminalReceived && code !== null && code !== 0;
+  return !protocolTerminalReceived && (code !== 0 || signal !== null);
 }
 
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
@@ -1857,7 +1858,7 @@ async function* launchBridgeChild(options: {
     error = err;
     done = true;
   });
-  child.once("close", (code) => {
+  child.once("close", (code, signal) => {
     child.stdin.end();
     if (cancelled) {
       done = true;
@@ -1866,7 +1867,7 @@ async function* launchBridgeChild(options: {
     enqueueVisibleEvents(parser.flush());
     if (
       !cancelled &&
-      bridgeProcessExitIsFailure(code, protocolTerminalReceived)
+      bridgeProcessExitIsFailure(code, signal, protocolTerminalReceived)
     ) {
       const detail = stderr.trim() || stdoutTail.trim();
       // Name the real cause instead of dumping a raw native error that reads
@@ -1891,7 +1892,9 @@ async function* launchBridgeChild(options: {
         );
       } else {
         error = new Error(
-          `${route.label} bridge exited with code ${code}.` +
+          `${route.label} bridge exited ${
+            signal ? `after signal ${signal}` : `with code ${code}`
+          }.` +
             (detail
               ? ` ${detail}`
               : " Native CLI stopped before returning a normal response.") +

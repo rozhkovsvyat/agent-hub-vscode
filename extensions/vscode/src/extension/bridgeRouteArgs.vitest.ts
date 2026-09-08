@@ -80,10 +80,12 @@ function fakeStats(type: "directory" | "file", symbolicLink = false): fs.Stats {
 
 describe("native bridge argv", () => {
   it("does not let a teardown exit code overwrite an explicit terminal receipt", () => {
-    expect(bridgeProcessExitIsFailure(1, false)).toBe(true);
-    expect(bridgeProcessExitIsFailure(1, true)).toBe(false);
-    expect(bridgeProcessExitIsFailure(0, false)).toBe(false);
-    expect(bridgeProcessExitIsFailure(null, false)).toBe(false);
+    expect(bridgeProcessExitIsFailure(1, null, false)).toBe(true);
+    expect(bridgeProcessExitIsFailure(null, "SIGKILL", false)).toBe(true);
+    expect(bridgeProcessExitIsFailure(null, null, false)).toBe(true);
+    expect(bridgeProcessExitIsFailure(1, null, true)).toBe(false);
+    expect(bridgeProcessExitIsFailure(null, "SIGKILL", true)).toBe(false);
+    expect(bridgeProcessExitIsFailure(0, null, false)).toBe(false);
 
     const source = fs.readFileSync(
       path.join(__dirname, "bridgeChatAdapter.ts"),
@@ -108,7 +110,7 @@ describe("native bridge argv", () => {
       "protocolTerminalReceived = true",
     );
     expect(source.slice(closeAt, finalThrowAt)).toContain(
-      "bridgeProcessExitIsFailure(code, protocolTerminalReceived)",
+      "bridgeProcessExitIsFailure(code, signal, protocolTerminalReceived)",
     );
     // Failed teardown still throws independently inside `finally`; only the
     // duplicate process-exit verdict is subordinated to the receipt.
