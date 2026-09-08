@@ -15,6 +15,48 @@ import {
   writeBridgeInboxMessage,
 } from "./bridgeInbox";
 
+function spawnLockReleaser(lockPath: string, delayMs: number) {
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      [
+        "const fs = require('node:fs');",
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => fs.rmdirSync(process.argv[1]), Number(process.argv[2]));",
+      ].join(" "),
+      lockPath,
+      String(delayMs),
+    ],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+
+  const ready = new Promise<void>((resolve, reject) => {
+    let output = "";
+    child.stdout!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
+      output += chunk;
+      if (output.includes("ready\n")) {
+        resolve();
+      }
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (!output.includes("ready\n")) {
+        reject(new Error(`releaser exited ${code} before ready`));
+      }
+    });
+  });
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`releaser exited ${code}`)),
+    );
+  });
+
+  return { ready, closed };
+}
+
 describe("bridgeInbox", () => {
   let previousRoot: string | undefined;
   let root: string;
@@ -83,27 +125,15 @@ describe("bridgeInbox", () => {
     const dir = path.join(root, "session-1");
     const lock = path.join(dir, ".claim-lock");
     fs.mkdirSync(lock, { recursive: true });
-    const releaser = spawn(
-      process.execPath,
-      [
-        "-e",
-        "setTimeout(() => require('node:fs').rmdirSync(process.argv[1]), 150)",
-        lock,
-      ],
-      { stdio: "ignore" },
-    );
+    const releaser = spawnLockReleaser(lock, 150);
+    await releaser.ready;
 
     const startedAt = Date.now();
     expect(writeBridgeInboxMessage("session-1", "locked", "payload")).toBe(
       true,
     );
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(75);
-    await new Promise<void>((resolve, reject) => {
-      releaser.once("error", reject);
-      releaser.once("close", (code) =>
-        code === 0 ? resolve() : reject(new Error(`releaser exited ${code}`)),
-      );
-    });
+    await releaser.closed;
   });
 
   it("holds the claim lock as bare state python can rmdir", () => {
@@ -244,23 +274,11 @@ describe("bridgeInbox", () => {
     const dir = path.join(root, "session-1");
     const lock = path.join(dir, ".claim-lock");
     fs.mkdirSync(lock);
-    const releaser = spawn(
-      process.execPath,
-      [
-        "-e",
-        "setTimeout(() => require('node:fs').rmdirSync(process.argv[1]), 1500)",
-        lock,
-      ],
-      { stdio: "ignore" },
-    );
+    const releaser = spawnLockReleaser(lock, 1500);
+    await releaser.ready;
 
     await purgeUnreadBridgeInboxMessages("session-1");
-    await new Promise<void>((resolve, reject) => {
-      releaser.once("error", reject);
-      releaser.once("close", (code) =>
-        code === 0 ? resolve() : reject(new Error(`releaser exited ${code}`)),
-      );
-    });
+    await releaser.closed;
 
     expect(bridgeInboxMessageStatus("session-1", "stop-race")).toBe("absent");
   });
