@@ -44,11 +44,13 @@ import {
   nativePromptCacheArgs,
   queuedFollowUpEchoMessageId,
   routeForModel,
+  settleBridgeChildError,
   toChatMessages,
   windowsCommandLineUtf16Length,
 } from "./bridgeChatAdapter";
 import { ClaudePermissionBroker } from "./claudePermissionBroker";
 import { resolveBridgeControls } from "./bridgeControls";
+import { BridgeEventParser } from "./bridgeEvents";
 import {
   cursorCatalogFromOutput,
   grokCatalogFromOutput,
@@ -117,6 +119,29 @@ describe("native bridge argv", () => {
     expect(source.slice(closeAt, finalThrowAt)).toContain(
       "Native bridge process tree did not terminate within the safety budget",
     );
+  });
+
+  it("flushes a newline-less Codex terminal receipt before settling child error", () => {
+    const parser = new BridgeEventParser("codex-thread");
+    expect(parser.push('{"type":"turn.completed"}')).toEqual([]);
+    const nativeError = new Error("late process error");
+
+    const settlement = settleBridgeChildError(parser, nativeError, false);
+
+    expect(settlement.events).toEqual([{ kind: "complete" }]);
+    expect(settlement.protocolTerminalReceived).toBe(true);
+    expect(settlement.error).toBeUndefined();
+  });
+
+  it("keeps child error fatal when parser flush has no terminal receipt", () => {
+    const parser = new BridgeEventParser("codex-thread");
+    expect(parser.push('{"type":"turn.started"}')).toEqual([]);
+    const nativeError = new Error("spawn failed");
+
+    const settlement = settleBridgeChildError(parser, nativeError, false);
+
+    expect(settlement.protocolTerminalReceived).toBe(false);
+    expect(settlement.error).toBe(nativeError);
   });
 
   it("emits a queued read receipt only for one exact vendor user echo", () => {
@@ -487,13 +512,37 @@ describe("native bridge argv", () => {
     });
   });
 
+  it("canonicalizes the legacy image/jpg label at Claude's live boundary", () => {
+    const frame = claudeStreamingInput([
+      {
+        type: "imageUrl",
+        imageUrl: { url: "data:image/jpg;base64,aW1hZ2U=" },
+      },
+    ]);
+
+    expect(JSON.parse(frame).message.content[0].source.media_type).toBe(
+      "image/jpeg",
+    );
+  });
+
+  it("rejects SVG at Claude's live vision boundary instead of mislabelling it", () => {
+    expect(() =>
+      claudeStreamingInput([
+        {
+          type: "imageUrl",
+          imageUrl: { url: "data:image/svg+xml;base64,PHN2Zy8+" },
+        },
+      ]),
+    ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
+  });
+
   it("rejects an unsupported live image before a text-only envelope can be written", () => {
     expect(() =>
       claudeStreamingInput([
         { type: "text", text: "inspect this" },
         { type: "imageUrl", imageUrl: { url: "file:///D:/image.png" } },
       ]),
-    ).toThrow(/only data-URL image attachments/i);
+    ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
   });
 
   it("re-attaches the current turn's data-URL images to the Claude cold start", () => {
@@ -528,6 +577,22 @@ describe("native bridge argv", () => {
         ],
       },
     });
+  });
+
+  it("rejects a restored SVG before constructing Claude's cold-start envelope", () => {
+    expect(() =>
+      claudeInitialContent("transcript prompt", [
+        {
+          role: "user",
+          content: [
+            {
+              type: "imageUrl",
+              imageUrl: { url: "data:image/svg+xml;base64,PHN2Zy8+" },
+            },
+          ],
+        },
+      ]),
+    ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
   });
 
   it("adds the real Claude MCP permission transport without leaking its token", async () => {

@@ -149,6 +149,13 @@ export function brokerVendorForModel(model: BrokerModel): BrokerVendorId {
  */
 export type BrokerImageCarrier = "inline-argv" | "out-of-band";
 
+/**
+ * Hard per-image ceiling for Grok's Windows `--prompt-json` carrier. The GUI
+ * encoder targets this value, while the extension enforces it again at the
+ * final process boundary so restored/legacy sessions cannot bypass it.
+ */
+export const GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS = 10_000;
+
 export function brokerImageCarrierForModel(
   model: BrokerModel,
 ): BrokerImageCarrier {

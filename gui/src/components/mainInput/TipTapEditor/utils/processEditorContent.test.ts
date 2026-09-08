@@ -304,7 +304,7 @@ describe("processEditorContent", () => {
     });
   });
 
-  test("keeps legacy image nodes usable when alternate sources are absent", () => {
+  test("preserves a missing fresh Grok alternate instead of restoring the larger src", () => {
     const editorState: JSONContent = {
       type: "doc",
       content: [
@@ -319,7 +319,6 @@ describe("processEditorContent", () => {
       type: "imageUrl",
       imageUrl: {
         url: "data:image/jpeg;base64,legacy",
-        inlineArgvUrl: "data:image/jpeg;base64,legacy",
       },
     });
   });

@@ -8,6 +8,7 @@ import {
   hasImageAttachment,
   materializeBridgeImages,
   materializeBridgeMessageContent,
+  parseSupportedVisionDataUrl,
   selectBridgeImageSources,
 } from "./bridgeImages";
 
@@ -136,6 +137,38 @@ describe("materializeBridgeImages", () => {
     expect(fs.readdirSync(dir)).toHaveLength(1);
   });
 
+  it("keeps every path referenced by one prompt above the prune ceiling", () => {
+    const content = Array.from({ length: 257 }, (_, index) => ({
+      type: "imageUrl" as const,
+      imageUrl: {
+        url: `data:image/png;base64,${Buffer.from([
+          index >> 8,
+          index & 0xff,
+        ]).toString("base64")}`,
+      },
+    }));
+
+    const [message] = materializeBridgeImages([{ role: "user", content }], dir);
+    const references = (
+      message.content as Array<{ type: string; text: string }>
+    ).map((part) => part.text.slice(1));
+
+    expect(references).toHaveLength(257);
+    expect(references.every((file) => fs.existsSync(file))).toBe(true);
+  });
+
+  it("fails closed when original image bytes cannot be written", () => {
+    const notADirectory = path.join(dir, "blocked-by-file");
+    fs.writeFileSync(notADirectory, "not a directory");
+
+    expect(() =>
+      materializeBridgeMessageContent(
+        [{ type: "imageUrl", imageUrl: { url: DATA_URL } }],
+        notADirectory,
+      ),
+    ).toThrow(/could not materialize.*silently dropping/i);
+  });
+
   it("passes remote URLs through without writing anything", () => {
     const [message] = materializeBridgeImages(
       [
@@ -192,6 +225,20 @@ describe("materializeBridgeImages", () => {
   });
 });
 
+describe("parseSupportedVisionDataUrl", () => {
+  it("canonicalizes image/jpg without changing its payload", () => {
+    expect(
+      parseSupportedVisionDataUrl(`data:image/jpg;base64,${PIXEL}`),
+    ).toEqual({ mimeType: "image/jpeg", data: PIXEL });
+  });
+
+  it("rejects SVG at the native vision boundary", () => {
+    expect(
+      parseSupportedVisionDataUrl("data:image/svg+xml;base64,PHN2Zy8+"),
+    ).toBeUndefined();
+  });
+});
+
 describe("selectBridgeImageSources", () => {
   const messages = [
     {
@@ -237,7 +284,7 @@ describe("selectBridgeImageSources", () => {
     ]);
   });
 
-  it("keeps legacy attachments when no bounded alternate exists", () => {
+  it("keeps legacy attachments for final boundary validation", () => {
     const selected = selectBridgeImageSources(
       [
         {

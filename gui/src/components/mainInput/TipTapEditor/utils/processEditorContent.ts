@@ -113,12 +113,20 @@ export function processEditorContent(
         // whose only image URL was the 384px transport copy.
         const originalUrl =
           p.attrs?.originalSrc ?? p.attrs?.displaySrc ?? p.attrs?.src;
+        // A missing fresh alternate means the encoder could not satisfy
+        // Grok's argv ceiling. Preserve that absence so the final transport
+        // boundary can reject the request instead of silently falling back to
+        // the larger 1024px copy. Only 2.0.114 nodes have `displaySrc`; their
+        // `src` is the already-bounded legacy transport image.
+        const inlineArgvUrl =
+          p.attrs?.inlineArgvSrc ??
+          (p.attrs?.displaySrc ? p.attrs?.src : undefined);
         parts.push({
           type: "imageUrl",
           imageUrl: brokerMode
             ? {
                 url: originalUrl,
-                inlineArgvUrl: p.attrs?.inlineArgvSrc ?? p.attrs?.src,
+                ...(inlineArgvUrl ? { inlineArgvUrl } : {}),
               }
             : { url: p.attrs?.src },
         });

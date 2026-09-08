@@ -1,10 +1,11 @@
 import { ChatMessage } from "core";
+import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
+
+import { parseSupportedVisionDataUrl } from "./bridgeImages";
 
 export type GrokPromptBlock =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
-
-const DATA_IMAGE_URL = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
 
 // Windows CreateProcess limits argv to 32,767 UTF-16 code units. Keep a
 // margin for the executable and fixed CLI arguments instead of silently
@@ -14,15 +15,26 @@ export const MAX_GROK_PROMPT_JSON_BYTES = 28_000;
 export function grokImageBlock(
   url: string | undefined,
 ): GrokPromptBlock | undefined {
-  const matched = url?.match(DATA_IMAGE_URL);
-  if (!matched) {
+  if (!url || /^https?:\/\//i.test(url)) {
     return undefined;
+  }
+  const parsed = parseSupportedVisionDataUrl(url);
+  if (!parsed) {
+    throw new Error(
+      "Grok accepts only JPEG, PNG, GIF, or WebP data-URL image attachments. Cukii did not drop the unsupported image.",
+    );
+  }
+  if (url.length > GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS) {
+    throw new Error(
+      `Grok cannot receive this image attachment in Windows inline argv: ${url.length} characters exceeds the per-image limit ${GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS}. ` +
+        "Reattach a smaller image or select another broker model; Cukii did not drop the attachment.",
+    );
   }
 
   return {
     type: "image",
-    mimeType: matched[1].toLowerCase(),
-    data: matched[2].replace(/\s/g, ""),
+    mimeType: parsed.mimeType,
+    data: parsed.data,
   };
 }
 

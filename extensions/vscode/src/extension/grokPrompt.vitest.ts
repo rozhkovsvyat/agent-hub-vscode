@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
 
 import {
   describeBridgeLaunch,
@@ -59,8 +60,8 @@ describe("grokPromptJson", () => {
           role: "user",
           content: [
             { type: "text", text: "look at both screenshots" },
-            { type: "imageUrl", imageUrl: { url: jpegDataUrl(8_000) } },
-            { type: "imageUrl", imageUrl: { url: jpegDataUrl(6_000) } },
+            { type: "imageUrl", imageUrl: { url: jpegDataUrl(6_500) } },
+            { type: "imageUrl", imageUrl: { url: jpegDataUrl(5_500) } },
           ],
         },
       ],
@@ -90,7 +91,67 @@ describe("grokPromptJson", () => {
         ],
         "C:\\tmp\\transcript.txt",
       ),
-    ).toThrow(/cannot receive 1 image attachment/);
+    ).toThrow(/cannot receive this image attachment.*did not drop/i);
+  });
+
+  it("rejects one image above its own cap even when aggregate JSON fits", () => {
+    const prefix = "data:image/jpeg;base64,";
+    const oversizedByOne =
+      prefix +
+      "A".repeat(GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS - prefix.length + 1);
+    expect(Buffer.byteLength(oversizedByOne, "utf8")).toBeLessThan(
+      MAX_GROK_PROMPT_JSON_BYTES,
+    );
+
+    expect(() =>
+      grokPromptJson(
+        [
+          {
+            role: "user",
+            content: [{ type: "imageUrl", imageUrl: { url: oversizedByOne } }],
+          },
+        ],
+        "C:\\tmp\\transcript.txt",
+      ),
+    ).toThrow(/per-image limit.*did not drop/i);
+  });
+
+  it("canonicalizes image/jpg and rejects SVG at Grok's final boundary", () => {
+    const jpeg = grokPromptJson(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "imageUrl",
+              imageUrl: { url: "data:image/jpg;base64,aW1hZ2U=" },
+            },
+          ],
+        },
+      ],
+      "C:\\tmp\\transcript.txt",
+    );
+    expect(
+      JSON.parse(jpeg).find((block: { type: string }) => block.type === "image")
+        .mimeType,
+    ).toBe("image/jpeg");
+
+    expect(() =>
+      grokPromptJson(
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "imageUrl",
+                imageUrl: { url: "data:image/svg+xml;base64,PHN2Zy8+" },
+              },
+            ],
+          },
+        ],
+        "C:\\tmp\\transcript.txt",
+      ),
+    ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
   });
 
   it("rejects an aggregate overflow without silently dropping later images", () => {

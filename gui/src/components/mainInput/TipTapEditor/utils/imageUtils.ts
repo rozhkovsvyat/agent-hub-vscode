@@ -1,4 +1,8 @@
+import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
+
 import { IIdeMessenger } from "../../../../context/IdeMessenger";
+
+export { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS };
 
 const IMAGE_RESOLUTION = 1024;
 const MAX_IMAGE_FILE_BYTES = 10_000_000;
@@ -9,7 +13,6 @@ const MAX_IMAGE_FILE_BYTES = 10_000_000;
 export const GROK_INLINE_ARGV_IMAGE_RESOLUTION = 384;
 // Two screenshots at 384px JPEG still overflow argv if quality stays high.
 // Cap the data-URL so two attachments plus the text block stay under 28 KB.
-export const GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS = 10_000;
 
 const SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
@@ -96,9 +99,9 @@ function readAsDataUrl(file: File): Promise<string | undefined> {
 
 /**
  * Exact attachment bytes shared by the preview and every out-of-band broker
- * carrier. The accepted file is already bounded to 10 MB, so silently
- * replacing larger screenshots with a 1600px JPEG only loses information the
- * vendor channel can carry.
+ * carrier. The accepted file is already bounded to 10 MB, so replacing a
+ * screenshot with a 1600px JPEG would only lose information the vendor channel
+ * can carry.
  */
 export async function getOriginalDataUrlForFile(
   file: File,

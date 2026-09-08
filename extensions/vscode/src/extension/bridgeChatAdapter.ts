@@ -35,6 +35,7 @@ import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import {
   hasImageAttachment,
   materializeBridgeImages,
+  parseSupportedVisionDataUrl,
   selectBridgeImageSources,
 } from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
@@ -600,9 +601,6 @@ export function nativePromptCacheArgs(model: BrokerModel): string[] {
 // (Claude Code SDK, "Streaming JSON input"). Keeping stdin open is required
 // for its realtime multi-turn transport; it is closed only on CLI completion
 // or cancellation below.
-const CLAUDE_DATA_IMAGE_URL =
-  /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
-
 /**
  * Claude's streaming input accepts the same text/image blocks that the GUI
  * stores. Reject an unsupported image before writing any part of its follow-up
@@ -619,18 +617,18 @@ export function claudeStreamingInput(content: MessageContent): string {
       role: "user",
       content: parts.map((part) => {
         if (part.type === "text") return part;
-        const match = part.imageUrl.url.match(CLAUDE_DATA_IMAGE_URL);
-        if (!match) {
+        const parsed = parseSupportedVisionDataUrl(part.imageUrl.url);
+        if (!parsed) {
           throw new Error(
-            "Live steering supports only data-URL image attachments for Claude.",
+            "Claude accepts only JPEG, PNG, GIF, or WebP data-URL image attachments. Cukii did not drop the unsupported image.",
           );
         }
         return {
           type: "image",
           source: {
             type: "base64",
-            media_type: match[1].toLowerCase(),
-            data: match[2].replace(/\s/g, ""),
+            media_type: parsed.mimeType,
+            data: parsed.data,
           },
         };
       }),
@@ -659,11 +657,16 @@ export function claudeInitialContent(
   }
   if (lastUser && typeof lastUser.content !== "string") {
     for (const part of lastUser.content) {
-      if (
-        part.type === "imageUrl" &&
-        CLAUDE_DATA_IMAGE_URL.test(part.imageUrl?.url ?? "")
-      ) {
-        parts.push(part);
+      if (part.type === "imageUrl") {
+        const url = part.imageUrl?.url;
+        const parsed = parseSupportedVisionDataUrl(url);
+        if (parsed) {
+          parts.push(part);
+        } else if (/^data:image\//i.test(url ?? "")) {
+          throw new Error(
+            "Claude accepts only JPEG, PNG, GIF, or WebP data-URL image attachments. Cukii did not drop the unsupported image.",
+          );
+        }
       }
     }
   }
@@ -1325,6 +1328,34 @@ export function bridgeProcessExitIsFailure(
   return !protocolTerminalReceived && (code !== 0 || signal !== null);
 }
 
+export type BridgeChildErrorSettlement = {
+  events: BridgeEvent[];
+  error: Error | undefined;
+  protocolTerminalReceived: boolean;
+};
+
+/**
+ * `error` may arrive while the final NDJSON receipt is still buffered because
+ * it had no trailing newline. Flush before settling the process outcome: an
+ * explicit protocol terminal is authoritative, while a genuine spawn/stream
+ * error without such a receipt remains fatal.
+ */
+export function settleBridgeChildError(
+  parser: Pick<BridgeEventParser, "flush">,
+  childError: Error,
+  priorProtocolTerminalReceived: boolean,
+): BridgeChildErrorSettlement {
+  const events = parser.flush();
+  const protocolTerminalReceived =
+    priorProtocolTerminalReceived ||
+    events.some((event) => event.kind === "complete");
+  return {
+    events,
+    error: protocolTerminalReceived ? undefined : childError,
+    protocolTerminalReceived,
+  };
+}
+
 export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
   switch (event.kind) {
     case "text":
@@ -1855,7 +1886,14 @@ async function* launchBridgeChild(options: {
   });
   child.once("error", (err) => {
     if (cancelled) return;
-    error = err;
+    const settlement = settleBridgeChildError(
+      parser,
+      err,
+      protocolTerminalReceived,
+    );
+    enqueueVisibleEvents(settlement.events);
+    protocolTerminalReceived = settlement.protocolTerminalReceived;
+    error = settlement.error;
     done = true;
   });
   child.once("close", (code, signal) => {

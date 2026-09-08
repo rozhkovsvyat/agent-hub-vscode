@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -17,6 +17,36 @@ import { getContinueGlobalPath } from "core/util/paths";
 
 const DATA_IMAGE_URL = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
 
+const SUPPORTED_NATIVE_VISION_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+export type ParsedVisionDataUrl = {
+  mimeType: string;
+  data: string;
+};
+
+/**
+ * Parse the formats accepted by the native Claude/Grok vision transports.
+ * This is deliberately enforced again in the extension: restored session
+ * data did not necessarily pass through the current GUI's ingress checks.
+ */
+export function parseSupportedVisionDataUrl(
+  url: string | undefined,
+): ParsedVisionDataUrl | undefined {
+  const matched = url?.match(DATA_IMAGE_URL);
+  if (!matched) return undefined;
+  const mimeType =
+    matched[1].toLowerCase() === "image/jpg"
+      ? "image/jpeg"
+      : matched[1].toLowerCase();
+  if (!SUPPORTED_NATIVE_VISION_MIME_TYPES.has(mimeType)) return undefined;
+  return { mimeType, data: matched[2].replace(/\s/g, "") };
+}
+
 const EXTENSION_BY_MIME: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
@@ -33,7 +63,7 @@ export function bridgeAttachmentDir(): string {
   return path.join(getContinueGlobalPath(), "bridge-attachments");
 }
 
-function prune(dir: string): void {
+function prune(dir: string, protectedFiles: ReadonlySet<string>): void {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -53,9 +83,10 @@ function prune(dir: string): void {
         return { full, mtime: 0 };
       }
     })
+    .filter((entry) => !protectedFiles.has(entry.full))
     .sort((a, b) => a.mtime - b.mtime);
-  const excess = byMtime.length - MAX_STORED_ATTACHMENTS;
-  for (let index = 0; index < excess; index++) {
+  const totalExcess = files.length - MAX_STORED_ATTACHMENTS;
+  for (let index = 0; index < Math.min(totalExcess, byMtime.length); index++) {
     try {
       fs.unlinkSync(byMtime[index].full);
     } catch {
@@ -78,14 +109,39 @@ function materializeDataUrl(url: string, dir: string): Materialized {
   const extension = EXTENSION_BY_MIME[mime] ?? ".img";
   const digest = createHash("sha256").update(bytes).digest("hex");
   const filePath = path.join(dir, `${digest}${extension}`);
+  const temporaryPath = path.join(
+    dir,
+    `.${digest}.${process.pid}.${randomUUID()}.tmp`,
+  );
   try {
     fs.mkdirSync(dir, { recursive: true });
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, bytes);
-      prune(dir);
+    const complete = () => {
+      try {
+        const stat = fs.statSync(filePath);
+        return stat.isFile() && stat.size === bytes.byteLength;
+      } catch {
+        return false;
+      }
+    };
+    if (!complete()) {
+      fs.writeFileSync(temporaryPath, bytes, { flag: "wx" });
+      if (!complete()) {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        fs.renameSync(temporaryPath, filePath);
+      }
     }
-  } catch {
-    return { kind: "unsupported" };
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `Cukii could not materialize an image attachment in ${dir}: ${detail}. ` +
+        "The vendor was not started because silently dropping the image would change the request.",
+    );
+  } finally {
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch {
+      // Best-effort cleanup only; the final content-addressed file is intact.
+    }
   }
   return { kind: "file", filePath };
 }
@@ -94,6 +150,7 @@ function renderImageReference(
   url: string | undefined,
   inline: boolean,
   dir: string,
+  protectedFiles: Set<string>,
 ): string {
   if (!url) {
     return "[image attached]";
@@ -103,6 +160,7 @@ function renderImageReference(
   }
   const materialized = materializeDataUrl(url, dir);
   if (materialized.kind === "file") {
+    protectedFiles.add(materialized.filePath);
     return inline
       ? `@${materialized.filePath}`
       : `[image saved at ${materialized.filePath}]`;
@@ -168,7 +226,8 @@ export function materializeBridgeImages(
     }
   }
 
-  return messages.map((message, index) => {
+  const protectedFiles = new Set<string>();
+  const materialized = messages.map((message, index) => {
     if (message.role !== "user" || typeof message.content === "string") {
       return message;
     }
@@ -180,12 +239,21 @@ export function materializeBridgeImages(
       part.type === "imageUrl"
         ? {
             type: "text",
-            text: renderImageReference(part.imageUrl?.url, inline, dir),
+            text: renderImageReference(
+              part.imageUrl?.url,
+              inline,
+              dir,
+              protectedFiles,
+            ),
           }
         : part,
     );
     return { ...message, content };
   });
+  // Prune only after the whole prompt is materialized. Files referenced by
+  // this batch are protected even when a single turn contains >256 images.
+  prune(dir, protectedFiles);
+  return materialized;
 }
 
 /**

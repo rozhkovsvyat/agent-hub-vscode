@@ -46,15 +46,20 @@ export function getPlaceholderText(
 
 /**
  * Checks if the editor content is valid for submission.
- * A valid submission can contain either text content or prompt/code blocks
+ * A valid submission can contain text, an image, or prompt/code blocks.
  *
  * @param json The editor JSON content
  * @returns true if the content is valid for submission, false otherwise
  */
 export function hasValidEditorContent(json: JSONContent): boolean {
-  // Check for prompt or code blocks
-  const hasPromptOrCodeBlock = json.content?.some(
-    (c) => c.type === PromptBlock.name || c.type === CodeBlock.name,
+  // Images inserted by paste/drop are top-level nodes, just like prompt and
+  // code blocks. Treating only nested text as content made an attachment-only
+  // Send button look active while `onEnter` silently returned.
+  const hasStandaloneContent = json.content?.some(
+    (c) =>
+      c.type === PromptBlock.name ||
+      c.type === CodeBlock.name ||
+      c.type === Image.name,
   );
 
   // Check for non-whitespace text content
@@ -71,8 +76,7 @@ export function hasValidEditorContent(json: JSONContent): boolean {
     }),
   );
 
-  // Content is valid if it has either non-whitespace text or special blocks
-  return hasNonWhitespaceText || hasPromptOrCodeBlock || false;
+  return hasNonWhitespaceText || hasStandaloneContent || false;
 }
 
 /**
