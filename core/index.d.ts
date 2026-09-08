@@ -368,7 +368,11 @@ export type TextMessagePart = {
 
 export type ImageMessagePart = {
   type: "imageUrl";
-  imageUrl: { url: string };
+  imageUrl: {
+    url: string;
+    /** Alternate copy bounded for Grok's Windows inline-argv carrier. */
+    inlineArgvUrl?: string;
+  };
 };
 
 export type MessagePart = TextMessagePart | ImageMessagePart;

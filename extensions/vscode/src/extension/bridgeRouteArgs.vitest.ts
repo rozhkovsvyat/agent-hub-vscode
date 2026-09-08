@@ -961,9 +961,9 @@ describe("native bridge argv", () => {
         { kind: "complete" },
       ]),
     ).toBe(false);
-    expect(
-      bridgeEventsProveInputAccepted([{ kind: "complete" }], true),
-    ).toBe(false);
+    expect(bridgeEventsProveInputAccepted([{ kind: "complete" }], true)).toBe(
+      false,
+    );
     expect(bridgeEventsProveInputAccepted([{ kind: "complete" }])).toBe(true);
     expect(
       bridgeEventsProveInputAccepted([{ kind: "thinking", text: "working" }]),
@@ -1029,5 +1029,42 @@ describe("native bridge argv", () => {
     );
     expect(matcherCall).toContain("queuedFollowUpRead,");
     expect(matcherCall).not.toContain("new Set(),");
+  });
+
+  it("selects the image carrier before prompt, route, and process launch", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    const selectAt = source.indexOf(
+      "const transportMessages = selectBridgeImageSources(",
+    );
+    const promptAt = source.indexOf("const prompt = buildPrompt(", selectAt);
+    const routeAt = source.indexOf("const route = routeForModel(", promptAt);
+    const launchAt = source.indexOf("const launchOptions = {", routeAt);
+    const launchEnd = source.indexOf("let codexCacheRetried", launchAt);
+
+    expect(selectAt).toBeGreaterThan(-1);
+    expect(promptAt).toBeGreaterThan(selectAt);
+    expect(routeAt).toBeGreaterThan(promptAt);
+    expect(launchAt).toBeGreaterThan(routeAt);
+
+    const transportBlock = source.slice(selectAt, launchEnd);
+    expect(transportBlock).toContain(
+      "materializeBridgeImages(transportMessages)",
+    );
+    expect(transportBlock).toContain("hasImageAttachment(transportMessages)");
+    expect(transportBlock).toContain(
+      `routeForModel(
+    args.brokerModel,
+    cwd,
+    prompt,
+    transportMessages,`,
+    );
+    expect(transportBlock).toContain("messages: transportMessages");
+    expect(transportBlock).not.toContain(
+      "materializeBridgeImages(args.messages)",
+    );
+    expect(transportBlock).not.toContain("hasImageAttachment(args.messages)");
   });
 });

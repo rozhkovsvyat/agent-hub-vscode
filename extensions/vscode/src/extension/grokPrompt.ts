@@ -1,7 +1,5 @@
 import { ChatMessage } from "core";
 
-import { contentToText } from "./bridgeTranscript";
-
 export type GrokPromptBlock =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
@@ -41,13 +39,12 @@ export function grokPromptJson(
   const latestUser = [...messages]
     .reverse()
     .find((message) => message.role === "user");
-  const latestText = latestUser ? contentToText(latestUser.content) : "";
   const blocks: GrokPromptBlock[] = [
     {
       type: "text",
       text:
         "Read the complete Cukii broker transcript from this local file before answering: " +
-        `${transcriptPath}\n\nLatest user request:\n${latestText}`,
+        transcriptPath,
     },
   ];
 
@@ -67,10 +64,14 @@ export function grokPromptJson(
   }
 
   const serialized = JSON.stringify(blocks);
-  if (Buffer.byteLength(serialized, "utf8") > MAX_GROK_PROMPT_JSON_BYTES) {
+  const serializedBytes = Buffer.byteLength(serialized, "utf8");
+  if (serializedBytes > MAX_GROK_PROMPT_JSON_BYTES) {
+    const imageCount = blocks.filter((block) => block.type === "image").length;
     throw new Error(
-      "Grok image attachment is too large for the Windows native bridge. " +
-        "Attach a smaller image (Broker mode creates compatible attachments automatically).",
+      `Grok cannot receive ${imageCount} image attachment${imageCount === 1 ? "" : "s"} ` +
+        `in one Windows inline-argv request: ${serializedBytes} bytes exceeds ` +
+        `${MAX_GROK_PROMPT_JSON_BYTES}. Send fewer images or select another ` +
+        "broker model; Cukii did not drop any attachment.",
     );
   }
   return serialized;

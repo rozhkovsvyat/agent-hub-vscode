@@ -4,6 +4,7 @@ import {
   CUKII_PERMISSION_MODE_COPY,
   CUKII_PERMISSION_MODE_ORDER,
   VENDOR_CLI_HELP_FIXTURES,
+  brokerImageCarrierForModel,
   cyclePermissionMode,
   coerceStoredPermissionMode,
   defaultVendorPermissionCapabilities,
@@ -14,6 +15,21 @@ import {
 } from "./cukiiPermissionModes";
 
 describe("Cukii permission modes", () => {
+  it("limits only Grok images to the inline argv carrier", () => {
+    expect(brokerImageCarrierForModel("grok-4-6")).toBe("inline-argv");
+    expect(brokerImageCarrierForModel("grok:4-5")).toBe("inline-argv");
+
+    for (const model of [
+      "opus-5",
+      "codex-5-6-sol",
+      "qwen-3-8-max",
+      "kimi-k3",
+      "composer-2-5",
+    ] as const) {
+      expect(brokerImageCarrierForModel(model)).toBe("out-of-band");
+    }
+  });
+
   it("keeps exact Cukii copy and order", () => {
     expect(CUKII_PERMISSION_MODE_ORDER).toEqual([
       "manual",

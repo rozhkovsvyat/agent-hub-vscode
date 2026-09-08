@@ -23,9 +23,9 @@ function collectImages(editor: Editor): ComposerImage[] {
     const src = typeof node.attrs.src === "string" ? node.attrs.src : "";
     if (!src) return;
     const displaySrc =
-      typeof node.attrs.displaySrc === "string" && node.attrs.displaySrc
-        ? node.attrs.displaySrc
-        : src;
+      (typeof node.attrs.originalSrc === "string" && node.attrs.originalSrc) ||
+      (typeof node.attrs.displaySrc === "string" && node.attrs.displaySrc) ||
+      src;
     const label =
       (typeof node.attrs.title === "string" && node.attrs.title) ||
       (typeof node.attrs.alt === "string" && node.attrs.alt) ||

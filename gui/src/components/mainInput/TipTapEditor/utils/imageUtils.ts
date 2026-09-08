@@ -1,25 +1,40 @@
 import { IIdeMessenger } from "../../../../context/IdeMessenger";
 
 const IMAGE_RESOLUTION = 1024;
+const MAX_IMAGE_FILE_BYTES = 10_000_000;
 // Grok's only current image-input channel is an inline JSON argument. Windows
-// limits a child process command line to 32,767 characters, so Broker mode
-// needs a deliberately smaller attachment before it crosses the bridge.
-export const BROKER_IMAGE_RESOLUTION = 384;
+// limits a child process command line to 32,767 characters, so that one
+// carrier needs a deliberately smaller alternate copy. Other broker vendors
+// receive the original data URL through stdin or a materialized file.
+export const GROK_INLINE_ARGV_IMAGE_RESOLUTION = 384;
 // Two screenshots at 384px JPEG still overflow argv if quality stays high.
 // Cap the data-URL so two attachments plus the text block stay under 28 KB.
-export const BROKER_IMAGE_MAX_DATA_URL_CHARS = 10_000;
+export const GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS = 10_000;
 
-export function brokerImageEncodePlan(
-  startResolution = BROKER_IMAGE_RESOLUTION,
+const SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+export function supportsOriginalImageMimeType(mimeType: string): boolean {
+  return SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES.has(mimeType.toLowerCase());
+}
+
+export function grokInlineArgvImageEncodePlan(
+  startResolution = GROK_INLINE_ARGV_IMAGE_RESOLUTION,
   startQuality = 0.7,
 ): Array<{ resolution: number; quality: number }> {
   const plan: Array<{ resolution: number; quality: number }> = [];
   let resolution = startResolution;
   let quality = startQuality;
-  for (let i = 0; i < 8; i++) {
+  for (;;) {
     plan.push({ resolution, quality });
-    quality = Math.max(0.35, quality - 0.1);
-    resolution = Math.max(160, Math.floor(resolution * 0.8));
+    if (resolution === 32 && quality === 0.15) break;
+    quality = Math.max(0.15, Number((quality - 0.08).toFixed(2)));
+    resolution = Math.max(32, Math.floor(resolution * 0.75));
   }
   return plan;
 }
@@ -58,25 +73,17 @@ export function getDataUrlForFile(
     return encodeJpegDataUrl(img, resolution, 0.7);
   }
 
-  let last: string | undefined;
-  for (const step of brokerImageEncodePlan(resolution)) {
-    last = encodeJpegDataUrl(img, step.resolution, step.quality);
-    if (last && last.length <= maxDataUrlChars) {
-      return last;
+  for (const step of grokInlineArgvImageEncodePlan(resolution)) {
+    const candidate = encodeJpegDataUrl(img, step.resolution, step.quality);
+    if (candidate && candidate.length <= maxDataUrlChars) {
+      return candidate;
     }
   }
-  return last;
+  // The limit is a transport invariant, not a preference. Returning the last
+  // oversized attempt makes the call site believe argv is safe and merely
+  // delays the failure until CreateProcess. Fail closed instead.
+  return undefined;
 }
-
-/**
- * Largest attachment kept verbatim for on-screen preview. Broker transport
- * shrinks pictures to 384px so they survive a Windows argv limit; that copy is
- * unreadable when the user opens it, and it used to be the only copy we had.
- * The display copy therefore lives beside it and never crosses the bridge.
- */
-export const DISPLAY_ORIGINAL_MAX_BYTES = 2_500_000;
-const DISPLAY_FALLBACK_RESOLUTION = 1600;
-const DISPLAY_FALLBACK_QUALITY = 0.82;
 
 function readAsDataUrl(file: File): Promise<string | undefined> {
   return new Promise((resolve) => {
@@ -88,43 +95,32 @@ function readAsDataUrl(file: File): Promise<string | undefined> {
 }
 
 /**
- * The picture the preview shows: the untouched original when it is small
- * enough to keep in session history, otherwise a 1600px re-encode. Never the
- * transport copy.
+ * Exact attachment bytes shared by the preview and every out-of-band broker
+ * carrier. The accepted file is already bounded to 10 MB, so silently
+ * replacing larger screenshots with a 1600px JPEG only loses information the
+ * vendor channel can carry.
  */
-export async function getDisplayDataUrlForFile(
+export async function getOriginalDataUrlForFile(
   file: File,
-  img: HTMLImageElement,
 ): Promise<string | undefined> {
-  if (file.size <= DISPLAY_ORIGINAL_MAX_BYTES) {
-    const original = await readAsDataUrl(file);
-    if (original?.startsWith("data:image/")) return original;
-  }
-  return encodeJpegDataUrl(
-    img,
-    DISPLAY_FALLBACK_RESOLUTION,
-    DISPLAY_FALLBACK_QUALITY,
-  );
+  const original = await readAsDataUrl(file);
+  if (!original?.startsWith("data:image/")) return undefined;
+  // `image/jpg` is a common browser/file-picker alias, but Claude's native
+  // image block accepts the canonical `image/jpeg`. Relabeling the data URL
+  // changes no payload bytes.
+  return file.type.toLowerCase() === "image/jpg"
+    ? original.replace(/^data:image\/jpg(?=[;,])/i, "data:image/jpeg")
+    : original;
 }
 
 export async function handleImageFile(
   ideMessenger: IIdeMessenger,
   file: File,
-  resolution = IMAGE_RESOLUTION,
-  maxDataUrlChars?: number,
-): Promise<[HTMLImageElement, string, string | undefined] | undefined> {
-  let filesize = file.size / 1024 / 1024; // filesize in MB
+): Promise<[HTMLImageElement, string, string, string | undefined] | undefined> {
   // check image type and size
   if (
-    [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/gif",
-      "image/svg",
-      "image/webp",
-    ].includes(file.type) &&
-    filesize < 10
+    supportsOriginalImageMimeType(file.type) &&
+    file.size <= MAX_IMAGE_FILE_BYTES
   ) {
     // check dimensions
     let _URL = window.URL || window.webkitURL;
@@ -133,21 +129,31 @@ export async function handleImageFile(
 
     return await new Promise((resolve) => {
       img.onload = function () {
-        const dataUrl = getDataUrlForFile(
+        const dataUrl = getDataUrlForFile(file, img);
+        const inlineArgvSrc = getDataUrlForFile(
           file,
           img,
-          resolution,
-          maxDataUrlChars,
+          GROK_INLINE_ARGV_IMAGE_RESOLUTION,
+          GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS,
         );
         if (!dataUrl) {
+          resolve(undefined);
           return;
         }
 
-        void getDisplayDataUrlForFile(file, img).then((displayUrl) => {
+        void getOriginalDataUrlForFile(file).then((originalSrc) => {
+          if (!originalSrc) {
+            ideMessenger.post("showToast", [
+              "error",
+              "The original image could not be read.",
+            ]);
+            resolve(undefined);
+            return;
+          }
           let image = new window.Image();
           image.src = dataUrl;
           image.onload = function () {
-            resolve([image, dataUrl, displayUrl]);
+            resolve([image, dataUrl, originalSrc, inlineArgvSrc]);
           };
         });
       };
@@ -155,7 +161,7 @@ export async function handleImageFile(
   } else {
     ideMessenger.post("showToast", [
       "error",
-      "Images need to be in jpg or png format and less than 10MB in size.",
+      "Images need to be JPEG, PNG, GIF, or WebP and at most 10MB in size.",
     ]);
   }
 }

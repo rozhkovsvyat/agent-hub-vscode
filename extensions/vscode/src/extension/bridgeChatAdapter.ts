@@ -32,7 +32,11 @@ import {
   registerBrokerSessionBinding,
 } from "./bridgeVendorMcp";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
-import { hasImageAttachment, materializeBridgeImages } from "./bridgeImages";
+import {
+  hasImageAttachment,
+  materializeBridgeImages,
+  selectBridgeImageSources,
+} from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
 import {
   closeFollowers,
@@ -1453,21 +1457,25 @@ async function* streamBridgeChatWithSteer(
     args.thinkingEnabled,
     args.brokerAutocompact,
   );
+  const transportMessages = selectBridgeImageSources(
+    args.messages,
+    args.brokerModel,
+  );
   const prompt = buildPrompt(
-    materializeBridgeImages(args.messages),
+    materializeBridgeImages(transportMessages),
     args.brokerModel,
     args.brokerSubagent,
     cwd,
     controls,
     args.brokerPermissionMode,
-    hasImageAttachment(args.messages),
+    hasImageAttachment(transportMessages),
     args.steerInterrupt,
   );
   const route = routeForModel(
     args.brokerModel,
     cwd,
     prompt,
-    args.messages,
+    transportMessages,
     controls,
     args.brokerPermissionMode,
   );
@@ -1551,7 +1559,7 @@ async function* streamBridgeChatWithSteer(
     route,
     cwd,
     prompt,
-    messages: args.messages,
+    messages: transportMessages,
     sessionId: args.sessionId,
     brokerModel: args.brokerModel,
     brokerSubagent: args.brokerSubagent,

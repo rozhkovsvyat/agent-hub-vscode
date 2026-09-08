@@ -19,12 +19,10 @@ interface ImageAttachment {
   kind: "image";
   key: string;
   name: string;
-  /** Transport copy — downscaled to fit the vendor channel. */
+  /** Standard or argv-safe copy retained for compatibility. */
   src: string;
   /**
-   * What the user actually sees. Broker transport shrinks pictures to 384px,
-   * so previewing `src` showed an unreadable thumbnail instead of the picture
-   * that was attached.
+   * Exact original used by the preview and out-of-band broker transports.
    */
   previewSrc: string;
 }
@@ -152,9 +150,9 @@ function collectEditorAttachments(value: unknown): UserAttachment[] {
           attrs?.title ?? attrs?.alt,
         );
         const displaySrc =
-          typeof attrs?.displaySrc === "string" && attrs.displaySrc
-            ? attrs.displaySrc
-            : src;
+          (typeof attrs?.originalSrc === "string" && attrs.originalSrc) ||
+          (typeof attrs?.displaySrc === "string" && attrs.displaySrc) ||
+          src;
         attachments.push({
           kind: "image",
           key: `image-${imageIndex}-${src.slice(0, 48)}`,

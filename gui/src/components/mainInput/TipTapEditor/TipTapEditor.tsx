@@ -23,11 +23,7 @@ import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
 import "./TipTapEditor.css";
 import { createEditorConfig, getPlaceholderText } from "./utils/editorConfig";
-import {
-  BROKER_IMAGE_MAX_DATA_URL_CHARS,
-  BROKER_IMAGE_RESOLUTION,
-  handleImageFile,
-} from "./utils/imageUtils";
+import { handleImageFile } from "./utils/imageUtils";
 import { useEditorEventHandlers } from "./utils/keyHandlers";
 
 export interface TipTapEditorProps {
@@ -72,11 +68,6 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       defaultModel?.title,
       defaultModel?.capabilities,
     );
-  const imageResolution =
-    mode === "broker" ? BROKER_IMAGE_RESOLUTION : undefined;
-  const imageMaxChars =
-    mode === "broker" ? BROKER_IMAGE_MAX_DATA_URL_CHARS : undefined;
-
   const { editor, onEnter } = createEditorConfig({
     props,
     ideMessenger,
@@ -281,21 +272,17 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           return;
         }
         let file = event.dataTransfer.files[0];
-        void handleImageFile(
-          ideMessenger,
-          file,
-          imageResolution,
-          imageMaxChars,
-        ).then((result) => {
+        void handleImageFile(ideMessenger, file).then((result) => {
           if (!editor) {
             return;
           }
           if (result) {
-            const [_, dataUrl, displaySrc] = result;
+            const [_, dataUrl, originalSrc, inlineArgvSrc] = result;
             const { schema } = editor.state;
             const node = schema.nodes.image.create({
               alt: file.name,
-              displaySrc: displaySrc ?? null,
+              inlineArgvSrc: inlineArgvSrc ?? null,
+              originalSrc,
               src: dataUrl,
               title: file.name,
             });

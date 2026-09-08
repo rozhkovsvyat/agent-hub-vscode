@@ -8,6 +8,7 @@ import {
   hasImageAttachment,
   materializeBridgeImages,
   materializeBridgeMessageContent,
+  selectBridgeImageSources,
 } from "./bridgeImages";
 
 // 1x1 red PNG.
@@ -45,6 +46,21 @@ describe("materializeBridgeImages", () => {
     expect(fs.existsSync(referenced)).toBe(true);
     expect(referenced.endsWith(".png")).toBe(true);
     expect(fs.readFileSync(referenced).toString("base64")).toBe(PIXEL);
+  });
+
+  it("materializes the image/jpg alias as a jpg without changing bytes", () => {
+    const rendered = materializeBridgeMessageContent(
+      [
+        {
+          type: "imageUrl",
+          imageUrl: { url: `data:image/jpg;base64,${PIXEL}` },
+        },
+      ],
+      dir,
+    );
+
+    expect(rendered).toMatch(/^@.*\.jpg$/);
+    expect(fs.readFileSync(rendered.slice(1)).toString("base64")).toBe(PIXEL);
   });
 
   it("materializes a live inbox follow-up byte-for-byte without resizing or recompression", () => {
@@ -173,6 +189,75 @@ describe("materializeBridgeImages", () => {
     ]);
     expect(messages[1].content).toBe("just text");
     expect(fs.readdirSync(dir)).toHaveLength(0);
+  });
+});
+
+describe("selectBridgeImageSources", () => {
+  const messages = [
+    {
+      role: "user" as const,
+      content: [
+        {
+          type: "imageUrl" as const,
+          imageUrl: {
+            url: "data:image/png;base64,original-full-size",
+            inlineArgvUrl: "data:image/jpeg;base64,grok-384",
+          },
+        },
+      ],
+    },
+  ];
+
+  it("keeps the exact original for every out-of-band vendor", () => {
+    for (const model of [
+      "opus-5",
+      "codex-5-6-sol",
+      "qwen-3-8-max",
+      "kimi-k3",
+      "composer-2-5",
+    ] as const) {
+      const selected = selectBridgeImageSources(messages, model);
+      expect(selected[0].content).toEqual([
+        {
+          type: "imageUrl",
+          imageUrl: { url: "data:image/png;base64,original-full-size" },
+        },
+      ]);
+    }
+    expect(messages[0].content[0].imageUrl.url).toContain("original-full-size");
+  });
+
+  it("substitutes the bounded alternate only for Grok inline argv", () => {
+    const selected = selectBridgeImageSources(messages, "grok-4-6");
+    expect(selected[0].content).toEqual([
+      {
+        type: "imageUrl",
+        imageUrl: { url: "data:image/jpeg;base64,grok-384" },
+      },
+    ]);
+  });
+
+  it("keeps legacy attachments when no bounded alternate exists", () => {
+    const selected = selectBridgeImageSources(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "imageUrl",
+              imageUrl: { url: "data:image/jpeg;base64,legacy" },
+            },
+          ],
+        },
+      ],
+      "grok-4-6",
+    );
+    expect(selected[0].content).toEqual([
+      {
+        type: "imageUrl",
+        imageUrl: { url: "data:image/jpeg;base64,legacy" },
+      },
+    ]);
   });
 });
 

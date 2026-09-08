@@ -12,6 +12,46 @@ function jpegDataUrl(byteLength: number): string {
 }
 
 describe("grokPromptJson", () => {
+  it("keeps a long text-only request in the transcript file, not argv", () => {
+    const latestText = "Ж".repeat(15_000);
+    const serialized = grokPromptJson(
+      [{ role: "user", content: latestText }],
+      "C:\\tmp\\transcript.txt",
+    );
+
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
+      MAX_GROK_PROMPT_JSON_BYTES,
+    );
+    expect(serialized).toContain("C:\\\\tmp\\\\transcript.txt");
+    expect(serialized).not.toContain("Ж");
+  });
+
+  it("does not let a long latest text steal the mixed image budget", () => {
+    const serialized = grokPromptJson(
+      [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Ж".repeat(15_000) },
+            { type: "imageUrl", imageUrl: { url: jpegDataUrl(7_000) } },
+            { type: "imageUrl", imageUrl: { url: jpegDataUrl(7_000) } },
+          ],
+        },
+      ],
+      "C:\\tmp\\transcript.txt",
+    );
+
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
+      MAX_GROK_PROMPT_JSON_BYTES,
+    );
+    expect(serialized).not.toContain("Ж");
+    expect(
+      JSON.parse(serialized).filter(
+        (block: { type: string }) => block.type === "image",
+      ),
+    ).toHaveLength(2);
+  });
+
   it("keeps a compact two-image broker payload under the Windows argv budget", () => {
     const serialized = grokPromptJson(
       [
@@ -50,7 +90,27 @@ describe("grokPromptJson", () => {
         ],
         "C:\\tmp\\transcript.txt",
       ),
-    ).toThrow(/too large for the Windows native bridge/);
+    ).toThrow(/cannot receive 1 image attachment/);
+  });
+
+  it("rejects an aggregate overflow without silently dropping later images", () => {
+    expect(() =>
+      grokPromptJson(
+        [
+          {
+            role: "user",
+            content: [
+              { type: "imageUrl", imageUrl: { url: jpegDataUrl(7_400) } },
+              { type: "imageUrl", imageUrl: { url: jpegDataUrl(7_400) } },
+              { type: "imageUrl", imageUrl: { url: jpegDataUrl(7_400) } },
+            ],
+          },
+        ],
+        "C:\\tmp\\transcript.txt",
+      ),
+    ).toThrow(
+      /cannot receive 3 image attachments.*Send fewer images or select another broker model.*did not drop any attachment/,
+    );
   });
 
   it("does not replay historical images from earlier turns", () => {

@@ -52,7 +52,10 @@ function resolveParagraph(p: JSONContent): [string, GetContextRequest[]] {
   return [text, contextRequests];
 }
 
-export function processEditorContent(editorState: JSONContent) {
+export function processEditorContent(
+  editorState: JSONContent,
+  brokerMode = false,
+) {
   const contextRequests: GetContextRequest[] = [];
   const selectedCode: RangeInFile[] = [];
   let slashCommandName: string | undefined;
@@ -105,9 +108,19 @@ export function processEditorContent(editorState: JSONContent) {
         }
         break;
       case Image.name:
+        // `displaySrc` can recover a 2.0.114 editor node when it is converted
+        // again. It cannot reconstruct an already-serialized old ChatMessage,
+        // whose only image URL was the 384px transport copy.
+        const originalUrl =
+          p.attrs?.originalSrc ?? p.attrs?.displaySrc ?? p.attrs?.src;
         parts.push({
           type: "imageUrl",
-          imageUrl: { url: p.attrs?.src },
+          imageUrl: brokerMode
+            ? {
+                url: originalUrl,
+                inlineArgvUrl: p.attrs?.inlineArgvSrc ?? p.attrs?.src,
+              }
+            : { url: p.attrs?.src },
         });
         break;
       default: {

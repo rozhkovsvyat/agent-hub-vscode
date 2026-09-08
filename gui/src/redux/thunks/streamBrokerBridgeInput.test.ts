@@ -411,7 +411,10 @@ describe("streamBrokerBridgeInput controls", () => {
             content: [
               {
                 type: "imageUrl",
-                imageUrl: { url: "data:image/png;base64,AQIDBA==" },
+                imageUrl: {
+                  url: "data:image/png;base64,AQIDBA==",
+                  inlineArgvUrl: "data:image/jpeg;base64,argv-copy",
+                },
               },
             ],
           },
@@ -464,6 +467,19 @@ describe("streamBrokerBridgeInput controls", () => {
       "pending-text",
       "pending-image",
       "new-submit",
+    ]);
+    const recoveredImage = captured[0].messages.find(
+      (message: ChatMessage & { id?: string }) =>
+        message.id === "pending-image",
+    );
+    expect(recoveredImage?.content).toEqual([
+      {
+        type: "imageUrl",
+        imageUrl: {
+          url: "data:image/png;base64,AQIDBA==",
+          inlineArgvUrl: "data:image/jpeg;base64,argv-copy",
+        },
+      },
     ]);
     expect(
       store

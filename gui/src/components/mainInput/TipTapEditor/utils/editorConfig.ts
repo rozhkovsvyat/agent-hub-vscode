@@ -29,11 +29,7 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import {
-  BROKER_IMAGE_MAX_DATA_URL_CHARS,
-  BROKER_IMAGE_RESOLUTION,
-  handleImageFile,
-} from "./imageUtils";
+import { handleImageFile } from "./imageUtils";
 
 export function getPlaceholderText(
   placeholder: TipTapEditorProps["placeholder"],
@@ -169,14 +165,23 @@ export function createEditorConfig(options: {
         addAttributes() {
           return {
             ...this.parent?.(),
-            /**
-             * Full-resolution copy kept for the preview only. `src` stays the
-             * transport copy (384px in broker mode), so nothing here changes
-             * what the vendor receives — see processEditorContent, which reads
-             * `src`. It is deliberately not rendered into the DOM: the strip
-             * reads it from the node's JSON attributes.
-             */
+            /** Legacy preview source retained for 2.0.114 editor nodes. */
             displaySrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+            /**
+             * Exact original used by previews and out-of-band broker
+             * transports. It stays in editor JSON, never in rendered markup.
+             */
+            originalSrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+            /** Small alternate used only by Grok's inline argv carrier. */
+            inlineArgvSrc: {
               default: null,
               parseHTML: () => null,
               renderHTML: () => ({}),
@@ -213,18 +218,14 @@ export function createEditorConfig(options: {
                       continue;
                     }
                     handled = true;
-                    void handleImageFile(
-                      ideMessenger,
-                      file,
-                      broker ? BROKER_IMAGE_RESOLUTION : undefined,
-                      broker ? BROKER_IMAGE_MAX_DATA_URL_CHARS : undefined,
-                    ).then((resp) => {
+                    void handleImageFile(ideMessenger, file).then((resp) => {
                       if (!resp) return;
-                      const [, dataUrl, displaySrc] = resp;
+                      const [, dataUrl, originalSrc, inlineArgvSrc] = resp;
                       const { schema } = view.state;
                       const node = schema.nodes.image.create({
                         alt: file.name,
-                        displaySrc: displaySrc ?? null,
+                        inlineArgvSrc: inlineArgvSrc ?? null,
+                        originalSrc,
                         src: dataUrl,
                         title: file.name,
                       });

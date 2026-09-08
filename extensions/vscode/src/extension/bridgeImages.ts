@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ChatMessage, MessageContent, MessagePart } from "core";
+import { brokerImageCarrierForModel } from "core/cukiiPermissionModes";
+import type { BrokerModel } from "core/protocol/ideWebview";
 import { getContinueGlobalPath } from "core/util/paths";
 
 /**
@@ -18,6 +20,7 @@ const DATA_IMAGE_URL = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i;
 const EXTENSION_BY_MIME: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
   "image/gif": ".gif",
   "image/webp": ".webp",
   "image/bmp": ".bmp",
@@ -115,6 +118,44 @@ export function hasImageAttachment(messages: ChatMessage[]): boolean {
   );
 }
 
+/**
+ * Bind image bytes to the route that will actually carry them. Session
+ * history keeps the exact original in `url` so switching vendors cannot
+ * destroy detail retroactively; only Grok's one-shot `--prompt-json` route
+ * substitutes the bounded alternate immediately before process launch.
+ */
+export function selectBridgeImageSources(
+  messages: ChatMessage[],
+  model: BrokerModel,
+): ChatMessage[] {
+  const carrier = brokerImageCarrierForModel(model);
+  return messages.map((message) => {
+    if (
+      message.role === "system" ||
+      message.role === "tool" ||
+      typeof message.content === "string"
+    ) {
+      return message;
+    }
+
+    let changed = false;
+    const content: MessagePart[] = message.content.map((part) => {
+      if (part.type !== "imageUrl") return part;
+      changed = true;
+      return {
+        type: "imageUrl",
+        imageUrl: {
+          url:
+            carrier === "inline-argv"
+              ? (part.imageUrl.inlineArgvUrl ?? part.imageUrl.url)
+              : part.imageUrl.url,
+        },
+      };
+    });
+    return changed ? { ...message, content } : message;
+  });
+}
+
 export function materializeBridgeImages(
   messages: ChatMessage[],
   dir: string = bridgeAttachmentDir(),
@@ -158,14 +199,12 @@ export function materializeBridgeMessageContent(
   dir: string = bridgeAttachmentDir(),
 ): string {
   if (typeof content === "string") return content;
-  const [message] = materializeBridgeImages(
-    [{ role: "user", content }],
-    dir,
-  );
+  const [message] = materializeBridgeImages([{ role: "user", content }], dir);
   if (typeof message.content === "string") return message.content;
   return message.content
-    .filter((part): part is Extract<MessagePart, { type: "text" }> =>
-      part.type === "text",
+    .filter(
+      (part): part is Extract<MessagePart, { type: "text" }> =>
+        part.type === "text",
     )
     .map((part) => part.text)
     .join("\n");

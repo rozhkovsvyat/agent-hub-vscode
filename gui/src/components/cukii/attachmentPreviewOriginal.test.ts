@@ -23,15 +23,23 @@ const processEditorContent = readFileSync(
   ),
   "utf8",
 );
+const resolveEditorContent = readFileSync(
+  join(
+    GUI_SRC,
+    "components/mainInput/TipTapEditor/utils/resolveEditorContent.ts",
+  ),
+  "utf8",
+);
 
 describe("просмотр показывает оригинал, а не транспортную копию", () => {
   it("сохраняется отдельная полноразмерная копия", () => {
-    expect(imageUtils).toContain("getDisplayDataUrlForFile");
-    expect(imageUtils).toContain("DISPLAY_ORIGINAL_MAX_BYTES");
+    expect(imageUtils).toContain("getOriginalDataUrlForFile");
+    expect(imageUtils).not.toContain("DISPLAY_ORIGINAL_MAX_BYTES");
+    expect(imageUtils).not.toContain("DISPLAY_FALLBACK_RESOLUTION");
   });
 
-  it("узел картинки несёт displaySrc", () => {
-    expect(editorConfig).toContain("displaySrc");
+  it("узел картинки несёт originalSrc", () => {
+    expect(editorConfig).toContain("originalSrc");
     // Данные, а не DOM-атрибут: иначе data-URL оригинала удвоится в разметке.
     expect(editorConfig).toContain("renderHTML: () => ({})");
   });
@@ -43,9 +51,13 @@ describe("просмотр показывает оригинал, а не тра
     expect(strip).not.toContain("src={preview.src}");
   });
 
-  it("вендор по-прежнему получает транспортную копию", () => {
-    // Полноразмерная копия не должна попасть в запрос к модели: 384px нужны
-    // из-за предела argv, а не по прихоти.
-    expect(processEditorContent).not.toContain("displaySrc");
+  it("новый broker turn несёт оригинал и отдельную argv-копию", () => {
+    expect(processEditorContent).toContain("attrs?.originalSrc");
+    expect(processEditorContent).toContain("attrs?.displaySrc");
+    expect(processEditorContent).toContain("attrs?.inlineArgvSrc");
+    expect(resolveEditorContent).toContain('session.mode === "broker"');
+    expect(resolveEditorContent).toContain(
+      "processEditorContent(editorState, brokerMode)",
+    );
   });
 });

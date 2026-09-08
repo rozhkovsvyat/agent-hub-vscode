@@ -52,12 +52,14 @@ export async function resolveEditorContent({
   dispatch,
   getState,
 }: ResolveEditorContentInput): Promise<ResolveEditorContentOutput> {
+  const session = getState().session;
+  const brokerMode = session.mode === "broker";
   const {
     parts,
     contextRequests: editorContextRequests,
     selectedCode,
     slashCommandName,
-  } = processEditorContent(editorState);
+  } = processEditorContent(editorState, brokerMode);
 
   const {
     slashedParts,

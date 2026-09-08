@@ -7,7 +7,11 @@ import type { BrokerVendorId } from "./cukiiVendorRegistry";
 
 /** Canonical Cukii permission modes (Claude-parity ids). */
 export type CukiiPermissionMode =
-  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
+  | "manual"
+  | "editAutomatically"
+  | "plan"
+  | "auto"
+  | "bypass";
 
 export const CUKII_PERMISSION_MODE_ORDER: readonly CukiiPermissionMode[] = [
   "manual",
@@ -126,6 +130,29 @@ export function brokerVendorForModel(model: BrokerModel): BrokerVendorId {
     return "qwen";
   }
   return "claude";
+}
+
+/**
+ * How an attachment physically reaches a broker vendor.
+ *
+ * `inline-argv` — the bytes are serialized into the child process command line
+ * (Grok's `--prompt-json`). Windows caps argv at 32,767 UTF-16 units, so this
+ * carrier genuinely needs a small attachment.
+ * `out-of-band` — the bytes never touch the command line: Claude streams
+ * base64 blocks over stdin (`--input-format stream-json`) and every remaining
+ * vendor reads a file materialized on disk. Neither has an argv budget, so
+ * shrinking here only destroys the detail the worker was asked to read.
+ *
+ * The argv limit belongs to one vendor's channel, not to Broker mode as a
+ * whole; treating it as a mode-wide rule is what silently sent 384px
+ * screenshots to workers that could have received the original.
+ */
+export type BrokerImageCarrier = "inline-argv" | "out-of-band";
+
+export function brokerImageCarrierForModel(
+  model: BrokerModel,
+): BrokerImageCarrier {
+  return brokerVendorForModel(model) === "grok" ? "inline-argv" : "out-of-band";
 }
 
 function helpIncludes(help: string, fragment: string): boolean {

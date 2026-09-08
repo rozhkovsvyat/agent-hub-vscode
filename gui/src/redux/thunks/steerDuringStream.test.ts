@@ -53,9 +53,7 @@ function createStoreWithChatModel(
     title,
     model: "claude-test",
     provider: "anthropic",
-  } as NonNullable<
-    typeof state.config.config.selectedModelByRole.chat
-  >;
+  } as NonNullable<typeof state.config.config.selectedModelByRole.chat>;
   state.session.brokerModel = brokerModel;
   return createMockStore(state, mockIdeMessenger);
 }
@@ -89,7 +87,9 @@ describe("steerDuringStream", () => {
   });
 
   it("falls back to a normal turn when the run ends during context resolution", async () => {
-    let releaseContext!: (value: Awaited<ReturnType<typeof resolveEditorContent>>) => void;
+    let releaseContext!: (
+      value: Awaited<ReturnType<typeof resolveEditorContent>>,
+    ) => void;
     vi.mocked(resolveEditorContent).mockImplementationOnce(
       () => new Promise((resolve) => (releaseContext = resolve)),
     );
@@ -187,7 +187,10 @@ describe("steerDuringStream", () => {
         { type: "text", text: "inspect this" },
         {
           type: "imageUrl",
-          imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+          imageUrl: {
+            url: "data:image/png;base64,aW1hZ2U=",
+            inlineArgvUrl: "data:image/jpeg;base64,argv-copy",
+          },
         },
       ],
       legacyCommandWithInput: undefined,
@@ -206,7 +209,10 @@ describe("steerDuringStream", () => {
           { type: "text", text: "inspect this" },
           {
             type: "imageUrl",
-            imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+            imageUrl: {
+              url: "data:image/png;base64,aW1hZ2U=",
+              inlineArgvUrl: "data:image/jpeg;base64,argv-copy",
+            },
           },
         ],
       }),
