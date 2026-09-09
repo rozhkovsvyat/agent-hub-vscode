@@ -212,7 +212,9 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
-    row.getBoundingClientRect = () => ({ top: 40 }) as DOMRect;
+    // The end of a turn pushes its formerly sticky row above the viewport.
+    // A one-sided `<=` check misclassified this negative top as still pinned.
+    row.getBoundingClientRect = () => ({ top: -20 }) as DOMRect;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
       expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed"),

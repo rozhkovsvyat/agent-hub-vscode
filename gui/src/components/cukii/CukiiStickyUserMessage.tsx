@@ -75,8 +75,10 @@ export function CukiiStickyUserMessage({
     const measurePinned = () => {
       const next =
         transcript.scrollTop > 0 &&
-        row.getBoundingClientRect().top <=
-          transcript.getBoundingClientRect().top + 1;
+        Math.abs(
+          row.getBoundingClientRect().top -
+            transcript.getBoundingClientRect().top,
+        ) <= 1;
       setIsPinned(next);
       if (!next) setIsExpanded(false);
     };
