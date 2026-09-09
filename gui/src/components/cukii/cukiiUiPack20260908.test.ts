@@ -86,7 +86,10 @@ describe("диагностика в карточке достижима без �
     // HTTP 200, txt весит 6509 байт. Не работает клик по <a> внутри чата,
     // поэтому адрес обязан быть и в простом тексте, где клиент линкует сам.
     expect(reporter).toContain(
-      "`${diagnostics.name}: ${diagnostics.remoteUrl}`",
+      '...(diagnostics?.remoteUrl ? [diagnostics.remoteUrl, ""] : [])',
+    );
+    expect(reporter).toContain(
+      '<p><a href="${escapeHtml(diagnostics.remoteUrl)}">${escapeHtml(diagnostics.remoteUrl)}</a></p>',
     );
   });
 
