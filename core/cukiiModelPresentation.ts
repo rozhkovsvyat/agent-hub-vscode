@@ -121,7 +121,6 @@ export function cukiiCapabilityRating(
   if (
     matches(/gpt[-\s]?6[-\s]?astra/) ||
     matches(/fable[-\s]?5[.-]1/) ||
-    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]sol/) ||
     matches(/qwen[-\s]?3[.-]8[-\s]max/)
   ) {
     return 3;
@@ -130,6 +129,7 @@ export function cukiiCapabilityRating(
   // Opus 4.5-4.8, and a superseded generation is not a Milky route. Kimi K3 is
   // rated, but its quota-saving K3-256K sibling is not.
   if (
+    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]sol/) ||
     matches(/(?:^|[-\s.])opus[-\s.]?5(?![\d.])/) ||
     (matches(/kimi[-\s]?k3/) && !matches(/256k?(?:[-\s.]|$)/))
   ) {

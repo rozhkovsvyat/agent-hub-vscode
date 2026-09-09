@@ -2128,10 +2128,13 @@ button.cukii-submit-button--stop:active {
   position: sticky;
   top: 0;
   z-index: 15;
-  align-items: stretch;
+  box-sizing: border-box;
+  min-height: var(--cukii-sticky-flow-height, auto);
+  align-items: flex-start;
   margin: 0;
   padding-top: var(--cukii-user-row-padding-top);
   padding-bottom: var(--cukii-user-row-padding-bottom);
+  pointer-events: none;
 }
 
 /* The sticky mask must equal whatever actually paints behind the transcript.
@@ -2149,7 +2152,8 @@ button.cukii-submit-button--stop:active {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: 0;
+  inset: 0 0 auto;
+  height: var(--cukii-sticky-mask-height, 100%);
   background-color: var(--cukii-canvas, var(--cukii-chat-background));
   pointer-events: none;
   -webkit-mask-image: linear-gradient(
@@ -2180,6 +2184,7 @@ button.cukii-submit-button--stop:active {
   display: inline-flex;
   width: fit-content;
   max-width: 70%;
+  pointer-events: auto;
 }
 
 .cukii-user-row--sticky .cukii-user-message-bubble {
@@ -2257,15 +2262,15 @@ button.cukii-submit-button--stop:active {
   overflow-y: hidden;
   white-space: pre-wrap;
   word-break: break-word;
-  transition: max-height 300ms ease-in-out;
 }
 
-.cukii-user-message-content--collapsed {
+.cukii-user-message-content[data-cukii-scroll-folding="true"] {
   position: relative;
-  max-height: 20px;
+  max-height: var(--cukii-sticky-visible-height);
 }
 
 .cukii-user-truncation-gradient {
+  display: none;
   position: absolute;
   right: 0;
   bottom: 0;
@@ -2277,6 +2282,13 @@ button.cukii-submit-button--stop:active {
     transparent 0%,
     var(--cukii-primary-action-background, #e3a867) 100%
   );
+}
+
+.cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
+    .cukii-user-bubble--expanded
+  )
+  .cukii-user-truncation-gradient {
+  display: block;
 }
 
 .cukii-user-fold-footer {
@@ -2329,6 +2341,17 @@ button.cukii-submit-button--stop:active {
   right: 10px;
   bottom: 4px;
   margin: 0;
+}
+
+/* A long prompt keeps one footer geometry before, during and after its sticky
+   fold. Receipt remeasurement may still toggle `meta-inline`, but it must not
+   turn this footer from in-flow into absolute while the wheel is moving. */
+.cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  > .cukii-user-fold-footer {
+  position: static;
+  right: auto;
+  bottom: auto;
+  margin: 2px 0 -6px auto;
 }
 
 .cukii-user-message-bubble[data-cukii-collapsible="true"]:not(

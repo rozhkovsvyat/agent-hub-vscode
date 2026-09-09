@@ -2,7 +2,10 @@ import { act, render, waitFor } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { renderWithProviders } from "../../../util/test/render";
-import { CukiiStickyUserMessage } from "../../../components/cukii/CukiiStickyUserMessage";
+import {
+  CukiiStickyUserMessage,
+  resolveStickyCollapseGeometry,
+} from "../../../components/cukii/CukiiStickyUserMessage";
 import { Chat } from "../Chat";
 
 const canonicalCss = () =>
@@ -97,6 +100,49 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(stickyMaskRule).not.toContain("--vscode-sideBar-background");
 });
 
+test("maps scroll distance to a reversible pixel-by-pixel sticky fold", () => {
+  const fullHeight = 140;
+  const forward = [100, 120, 140, 180, 220].map((scrollTop) =>
+    resolveStickyCollapseGeometry({
+      fullHeight,
+      isAtStickyEdge: true,
+      scrollTop,
+      stickyStartScrollTop: 100,
+    }),
+  );
+
+  expect(forward.map(({ visibleHeight }) => visibleHeight)).toEqual([
+    140, 120, 100, 60, 20,
+  ]);
+  expect(forward.map(({ phase }) => phase)).toEqual([
+    "folding",
+    "folding",
+    "folding",
+    "folding",
+    "collapsed",
+  ]);
+
+  const reverse = [220, 180, 140, 120, 100].map(
+    (scrollTop) =>
+      resolveStickyCollapseGeometry({
+        fullHeight,
+        isAtStickyEdge: true,
+        scrollTop,
+        stickyStartScrollTop: 100,
+      }).visibleHeight,
+  );
+  expect(reverse).toEqual([20, 60, 100, 120, 140]);
+
+  expect(
+    resolveStickyCollapseGeometry({
+      fullHeight,
+      isAtStickyEdge: false,
+      scrollTop: 220,
+      stickyStartScrollTop: 100,
+    }),
+  ).toEqual({ phase: "flow", progress: 0, visibleHeight: 140 });
+});
+
 test("folds a long prompt only after it actually sticks to the transcript top", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -154,17 +200,64 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     );
     expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
     expect(container.querySelector('[aria-label="Show more"]')).toBeNull();
+    const stableFooter = bubble?.querySelector(".cukii-user-fold-footer");
+    expect(stableFooter).not.toBeNull();
 
     const transcript =
       container.querySelector<HTMLElement>(".cukii-transcript")!;
     const row = bubble?.closest<HTMLElement>(".cukii-user-row--sticky")!;
+    const content = bubble?.querySelector<HTMLElement>(
+      ".cukii-user-message-content",
+    )!;
     Object.defineProperty(transcript, "scrollTop", {
       configurable: true,
       value: 100,
       writable: true,
     });
+    Object.defineProperty(row, "offsetTop", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(row, "offsetParent", {
+      configurable: true,
+      value: transcript,
+    });
     transcript.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
-    row.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    let rowTop = 40;
+    row.getBoundingClientRect = () => ({ top: rowTop }) as DOMRect;
+    transcript.scrollTop = 60;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+
+    rowTop = 0;
+    transcript.scrollTop = 100;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+
+    // Touching the sticky edge starts at the full height. Each subsequent
+    // scroll pixel clips one content pixel while the row's flow height stays
+    // fixed, so the transcript anchor cannot jump.
+    await waitFor(() =>
+      expect(content.dataset.cukiiScrollFolding).toBe("true"),
+    );
+    expect(
+      content.style.getPropertyValue("--cukii-sticky-visible-height"),
+    ).toBe("140px");
+    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    const stableFlowHeight = row.style.getPropertyValue(
+      "--cukii-sticky-flow-height",
+    );
+
+    transcript.scrollTop = 140;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(
+        content.style.getPropertyValue("--cukii-sticky-visible-height"),
+      ).toBe("100px"),
+    );
+    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
+      stableFlowHeight,
+    );
+
+    transcript.scrollTop = 220;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
       expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
@@ -176,6 +269,12 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
       '[data-testid="cukii-message-receipt-long-user"]',
     );
     expect(clippedContent).not.toBeNull();
+    expect(
+      content.style.getPropertyValue("--cukii-sticky-visible-height"),
+    ).toBe("20px");
+    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
+      stableFlowHeight,
+    );
     expect(receipt?.textContent).toBe("01:13");
     expect(clippedContent?.contains(receipt ?? null)).toBe(false);
     expect(
@@ -187,6 +286,7 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     const collapsedToggle = container.querySelector('[aria-label="Show more"]');
     const footer = bubble?.querySelector(".cukii-user-fold-footer");
     expect(footer).not.toBeNull();
+    expect(footer).toBe(stableFooter);
     expect(collapsedToggle?.parentElement).toBe(footer);
     expect(receipt?.parentElement).toBe(footer);
     expect(footer?.firstElementChild).toBe(collapsedToggle);
@@ -212,9 +312,22 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
+    // Reversing the wheel reveals the same pixels in reverse and still does
+    // not alter the row's document-flow height.
+    transcript.scrollTop = 180;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(
+        content.style.getPropertyValue("--cukii-sticky-visible-height"),
+      ).toBe("60px"),
+    );
+    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
+      stableFlowHeight,
+    );
+
     // The end of a turn pushes its formerly sticky row above the viewport.
     // A one-sided `<=` check misclassified this negative top as still pinned.
-    row.getBoundingClientRect = () => ({ top: -20 }) as DOMRect;
+    rowTop = -20;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
       expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed"),
@@ -236,17 +349,23 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
 
     const css = canonicalCss();
     expect(css).toMatch(
-      /\.cukii-user-message-content--collapsed\s*\{[^}]*max-height:\s*20px/s,
+      /\.cukii-user-message-content\[data-cukii-scroll-folding="true"\]\s*\{[^}]*max-height:\s*var\(--cukii-sticky-visible-height\)/s,
     );
     expect(css).toMatch(
       /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*20px/s,
     );
-    expect(css).toContain("transition: max-height 300ms ease-in-out");
+    expect(css).not.toContain("transition: max-height");
+    expect(css).toMatch(
+      /\.cukii-user-row--sticky\s*\{[^}]*min-height:\s*var\(--cukii-sticky-flow-height/s,
+    );
     expect(css).toMatch(
       /\.cukii-user-fold-footer\s*\{[^}]*display:\s*flex;[^}]*line-height:\s*14px/s,
     );
     expect(css).toMatch(
       /\.cukii-user-fold-footer\s*\{[^}]*margin:\s*2px 0 -6px auto/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*static/s,
     );
     expect(css).toMatch(
       /\.cukii-user-fold-toggle\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;[^}]*padding:\s*0;[^}]*background:\s*transparent/s,

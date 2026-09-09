@@ -9,6 +9,57 @@ import {
 
 export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 20;
 
+type StickyCollapsePhase = "flow" | "folding" | "collapsed";
+
+interface StickyCollapseGeometryArgs {
+  fullHeight: number;
+  isAtStickyEdge: boolean;
+  scrollTop: number;
+  stickyStartScrollTop: number;
+}
+
+export function resolveStickyCollapseGeometry({
+  fullHeight,
+  isAtStickyEdge,
+  scrollTop,
+  stickyStartScrollTop,
+}: StickyCollapseGeometryArgs): {
+  phase: StickyCollapsePhase;
+  progress: number;
+  visibleHeight: number;
+} {
+  const naturalHeight = Math.max(
+    CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
+    fullHeight,
+  );
+  const collapseDistance =
+    naturalHeight - CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
+  if (!isAtStickyEdge || collapseDistance <= 0) {
+    return { phase: "flow", progress: 0, visibleHeight: naturalHeight };
+  }
+
+  const consumed = Math.max(
+    0,
+    Math.min(collapseDistance, scrollTop - stickyStartScrollTop),
+  );
+  const progress = consumed / collapseDistance;
+  return {
+    phase: consumed >= collapseDistance ? "collapsed" : "folding",
+    progress,
+    visibleHeight: naturalHeight - consumed,
+  };
+}
+
+function offsetTopInside(element: HTMLElement, ancestor: HTMLElement) {
+  let node: HTMLElement | null = element;
+  let offset = 0;
+  while (node && node !== ancestor) {
+    offset += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+  }
+  return node === ancestor ? offset : undefined;
+}
+
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
   children: ReactNode;
@@ -29,10 +80,7 @@ export function CukiiStickyUserMessage({
 }: CukiiStickyUserMessageProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isLongPrompt, setIsLongPrompt] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const isCollapsible = isPinned && isLongPrompt;
-  const isCollapsed = isCollapsible && !isExpanded;
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -70,32 +118,167 @@ export function CukiiStickyUserMessage({
     const content = contentRef.current;
     const row = content?.closest<HTMLElement>(".cukii-user-row--sticky");
     const transcript = content?.closest<HTMLElement>(".cukii-transcript");
-    if (!row || !transcript) return;
+    const bubble = content?.closest<HTMLElement>(".cukii-user-message-bubble");
+    if (!content || !row || !transcript || !bubble) return;
 
-    const measurePinned = () => {
-      const next =
-        transcript.scrollTop > 0 &&
-        Math.abs(
-          row.getBoundingClientRect().top -
-            transcript.getBoundingClientRect().top,
-        ) <= 1;
-      setIsPinned(next);
-      if (!next) setIsExpanded(false);
+    let stickyStartScrollTop: number | undefined;
+    let stableFlowHeight = 0;
+
+    const clearFold = () => {
+      delete content.dataset.cukiiScrollFolding;
+      content.style.removeProperty("--cukii-sticky-visible-height");
+      content.classList.remove("cukii-user-message-content--collapsed");
+      bubble.removeAttribute("data-cukii-collapsible");
+      bubble.classList.remove("cukii-user-bubble--collapsed");
+      const toggle = bubble.querySelector<HTMLButtonElement>(
+        ".cukii-user-fold-toggle",
+      );
+      if (toggle) {
+        toggle.disabled = true;
+        toggle.tabIndex = -1;
+        toggle.style.visibility = "hidden";
+        toggle.setAttribute("aria-hidden", "true");
+        toggle.removeAttribute("aria-label");
+      }
+      row.style.removeProperty("--cukii-sticky-flow-height");
+      row.style.removeProperty("--cukii-sticky-mask-height");
+      row.removeAttribute("data-cukii-collapse-progress");
     };
 
-    measurePinned();
-    transcript.addEventListener("scroll", measurePinned, { passive: true });
+    const syncFoldWithScroll = () => {
+      const fullHeight = content.scrollHeight;
+      if (
+        !isLongPrompt ||
+        fullHeight <= CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX
+      ) {
+        clearFold();
+        return;
+      }
+
+      const transcriptRect = transcript.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTopFromScrollport = rowRect.top - transcriptRect.top;
+      const isAtStickyEdge =
+        transcript.scrollTop > 0 && Math.abs(rowTopFromScrollport) <= 1;
+
+      // Chromium reports a sticky element's *painted* offsetTop after it pins,
+      // so recomputing the threshold at every scroll frame chases scrollTop
+      // forever. Refresh it only while the row is still in normal flow, then
+      // hold that value for the whole forward/reverse sticky cycle.
+      if (rowTopFromScrollport > 1) {
+        stickyStartScrollTop = transcript.scrollTop + rowTopFromScrollport;
+      } else if (stickyStartScrollTop === undefined) {
+        stickyStartScrollTop =
+          offsetTopInside(row, transcript) ?? transcript.scrollTop;
+      }
+      const geometry = resolveStickyCollapseGeometry({
+        fullHeight,
+        isAtStickyEdge,
+        scrollTop: transcript.scrollTop,
+        stickyStartScrollTop,
+      });
+      const visibleHeight =
+        isExpanded || geometry.phase === "flow"
+          ? fullHeight
+          : geometry.visibleHeight;
+
+      // The scrollport's layout height stays equal to the fully expanded row.
+      // Only the painted/clipped bubble changes height, so Chromium never has
+      // to compensate scrollTop while the sticky header folds.
+      const contentHeight = content.getBoundingClientRect().height;
+      const bubbleOverhead = Math.max(
+        0,
+        bubble.getBoundingClientRect().height - contentHeight,
+      );
+      const rowStyle = getComputedStyle(row);
+      const rowPaddingTop = Number.parseFloat(rowStyle.paddingTop) || 0;
+      const rowPaddingBottom = Number.parseFloat(rowStyle.paddingBottom) || 0;
+      const measuredFlowHeight =
+        rowPaddingTop + rowPaddingBottom + bubbleOverhead + fullHeight;
+      // Receipt layout can still change when the inline-fit observer runs.
+      // Never let that state edge shrink the document-flow box: a changing
+      // scrollHeight is exactly what made the wheel feel stuck.
+      stableFlowHeight = Math.max(stableFlowHeight, measuredFlowHeight);
+      const paintedRowHeight =
+        rowPaddingTop + rowPaddingBottom + bubbleOverhead + visibleHeight;
+      row.style.setProperty(
+        "--cukii-sticky-flow-height",
+        `${Math.ceil(stableFlowHeight)}px`,
+      );
+      row.style.setProperty(
+        "--cukii-sticky-mask-height",
+        `${Math.ceil(paintedRowHeight)}px`,
+      );
+      row.setAttribute(
+        "data-cukii-collapse-progress",
+        geometry.progress.toFixed(4),
+      );
+
+      if (geometry.phase !== "flow" && !isExpanded) {
+        content.dataset.cukiiScrollFolding = "true";
+        content.style.setProperty(
+          "--cukii-sticky-visible-height",
+          `${geometry.visibleHeight}px`,
+        );
+      } else {
+        delete content.dataset.cukiiScrollFolding;
+        content.style.removeProperty("--cukii-sticky-visible-height");
+      }
+
+      const isCollapsible = geometry.phase !== "flow";
+      if (isCollapsible) {
+        if (bubble.dataset.cukiiCollapsible !== "true") {
+          bubble.setAttribute("data-cukii-collapsible", "true");
+        }
+      } else if (bubble.hasAttribute("data-cukii-collapsible")) {
+        bubble.removeAttribute("data-cukii-collapsible");
+      }
+      bubble.classList.toggle(
+        "cukii-user-bubble--collapsed",
+        geometry.phase === "collapsed" && !isExpanded,
+      );
+      content.classList.toggle(
+        "cukii-user-message-content--collapsed",
+        geometry.phase === "collapsed" && !isExpanded,
+      );
+      const toggle = bubble.querySelector<HTMLButtonElement>(
+        ".cukii-user-fold-toggle",
+      );
+      if (toggle) {
+        toggle.disabled = !isCollapsible;
+        toggle.tabIndex = isCollapsible ? 0 : -1;
+        toggle.style.visibility = isCollapsible ? "visible" : "hidden";
+        toggle.toggleAttribute("aria-hidden", !isCollapsible);
+        if (isCollapsible) {
+          toggle.setAttribute(
+            "aria-label",
+            isExpanded ? "Show less" : "Show more",
+          );
+        } else {
+          toggle.removeAttribute("aria-label");
+        }
+      }
+      if (geometry.phase === "flow" && isExpanded) setIsExpanded(false);
+    };
+
+    syncFoldWithScroll();
+    transcript.addEventListener("scroll", syncFoldWithScroll, {
+      passive: true,
+    });
     const observer =
       typeof ResizeObserver === "undefined"
         ? undefined
-        : new ResizeObserver(measurePinned);
-    observer?.observe(row);
+        : new ResizeObserver(syncFoldWithScroll);
     observer?.observe(transcript);
+    if (content.firstElementChild) {
+      observer?.observe(content.firstElementChild);
+    }
     return () => {
-      transcript.removeEventListener("scroll", measurePinned);
+      transcript.removeEventListener("scroll", syncFoldWithScroll);
       observer?.disconnect();
+      clearFold();
     };
-  }, [messageId]);
+  }, [isExpanded, isLongPrompt, messageId]);
 
   const expand = useCallback(() => setIsExpanded(true), []);
   const collapse = useCallback(() => setIsExpanded(false), []);
@@ -103,37 +286,34 @@ export function CukiiStickyUserMessage({
   return (
     <div
       className={`${bubbleClassName} ${
-        isCollapsed ? "cukii-user-bubble--collapsed" : ""
-      } ${isExpanded ? "cukii-user-bubble--expanded" : ""}`}
-      data-cukii-collapsible={isCollapsible ? "true" : undefined}
+        isExpanded ? "cukii-user-bubble--expanded" : ""
+      }`}
+      data-cukii-long-prompt={isLongPrompt ? "true" : undefined}
       data-testid={`cukii-user-bubble-${messageId}`}
     >
       {/* The body is not a control: only the chevron folds the prompt and only
           the attachment pills open a preview. */}
       <div className="cukii-user-content-shell">
-        <div
-          className={`cukii-user-message-content ${
-            isCollapsed ? "cukii-user-message-content--collapsed" : ""
-          }`}
-          ref={contentRef}
-        >
+        <div className="cukii-user-message-content" ref={contentRef}>
           {children}
         </div>
-        {isCollapsed && (
+        {isLongPrompt && (
           <div aria-hidden="true" className="cukii-user-truncation-gradient" />
         )}
       </div>
-      {isCollapsible ? (
+      {isLongPrompt ? (
         <div className="cukii-user-fold-footer">
           <button
             aria-expanded={isExpanded}
-            aria-label={isExpanded ? "Show less" : "Show more"}
+            aria-hidden="true"
             className="cukii-user-fold-toggle"
             onClick={(event) => {
               event.stopPropagation();
               if (isExpanded) collapse();
               else expand();
             }}
+            style={{ visibility: "hidden" }}
+            tabIndex={-1}
             type="button"
           >
             {isExpanded ? (
