@@ -2431,19 +2431,12 @@ button.cukii-submit-button--stop:active {
   max-width: 100%;
   flex-wrap: nowrap;
   gap: 4px;
-  margin: 0 0 4px;
+  margin: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 0 2px;
+  padding: 0 0 6px;
   overscroll-behavior-inline: contain;
-  /* Claude keeps the attachment rail one pill high. It still scrolls with a
-     wheel/trackpad/keyboard, but a native horizontal scrollbar must not add a
-     second visual row below the 24px pills. */
-  scrollbar-width: none;
-}
-
-.cukii-user-attachment-strip::-webkit-scrollbar {
-  display: none;
+  scrollbar-width: thin;
 }
 
 .cukii-user-attachment-card {
@@ -2547,7 +2540,10 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-composer-attachment-strip {
-  margin: 0 0 6px;
+  width: auto;
+  margin: 0;
+  padding: 6px 4px 4px 8px;
+  z-index: 5;
   color: var(--vscode-input-foreground, #cccccc);
 }
 

@@ -748,6 +748,29 @@ describe("native bridge argv", () => {
     },
   );
 
+  it("routes a live GPT-6 Astra catalog id with native effort and Fast", () => {
+    const model = "codex:gpt-6-astra";
+    const route = routeForModel(
+      model,
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls(model, "ultra", "fast"),
+      "bypass",
+    );
+    expect(route.args.slice(0, 9)).toEqual([
+      "-m",
+      "gpt-6-astra",
+      "-c",
+      'model_reasoning_effort="max"',
+      "-c",
+      'service_tier="priority"',
+      "exec",
+      "--json",
+      "--dangerously-bypass-approvals-and-sandbox",
+    ]);
+  });
+
   it("disables Codex reasoning through the real native none value", () => {
     const route = routeForModel(
       "codex-5-6-terra",

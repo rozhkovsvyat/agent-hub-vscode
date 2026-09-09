@@ -535,6 +535,12 @@ test("renders user images as one horizontal attachment strip with a lightbox", a
 
   const strip = container.querySelector(".cukii-user-attachment-strip");
   expect(strip).not.toBeNull();
+  expect(
+    container.querySelectorAll(".cukii-user-attachment-strip"),
+  ).toHaveLength(1);
+  expect(
+    container.querySelector(".cukii-composer-attachment-strip"),
+  ).toBeNull();
   expect(strip?.querySelectorAll(".cukii-user-attachment-card")).toHaveLength(
     4,
   );

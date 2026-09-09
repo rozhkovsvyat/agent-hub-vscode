@@ -264,10 +264,19 @@ describe("Cukii model context labels", () => {
     expect(supportsNativeSpeed("sonnet-5")).toBe(false);
     expect(supportsNativeSpeed("fable-5-1")).toBe(false);
     expect(supportsNativeSpeed("haiku-4-5")).toBe(false);
+    expect(supportsNativeSpeed("codex:gpt-6-astra")).toBe(true);
   });
 
   it("renders only the effort levels supported by the selected route", () => {
     expect(effortLevelsForModel("codex-5-6-sol")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra",
+    ]);
+    expect(effortLevelsForModel("codex:gpt-6-astra")).toEqual([
       "low",
       "medium",
       "high",

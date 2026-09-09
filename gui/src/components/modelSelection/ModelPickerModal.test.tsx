@@ -5,6 +5,7 @@ import { ModelPickerModal } from "./ModelPickerModal";
 import { getElementByText } from "../../util/test/utils";
 import { setMode } from "../../redux/slices/sessionSlice";
 import {
+  setBrokerModel,
   setBrokerModelScope,
   setBrokerPermissionMode,
 } from "../../redux/slices/sessionSlice";
@@ -166,6 +167,34 @@ describe("ModelPickerModal", () => {
       "cukii/setBrokerPreferences",
       expect.objectContaining({ brokerEffort: "medium", mode: "broker" }),
     );
+  });
+
+  it("offers Fast in the model-pill menu only when the selected route supports it", async () => {
+    const { store, ideMessenger, user } = await renderWithProviders(
+      <ModelPickerModal onClose={vi.fn()} />,
+    );
+    const postSpy = vi.spyOn(ideMessenger, "post");
+    await act(async () => {
+      store.dispatch(setBrokerModel("codex:gpt-6-astra"));
+    });
+
+    const toggle = await screen.findByTestId("cukii-model-fast-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    expect(store.getState().session.brokerSpeed).toBe("fast");
+    expect(postSpy).toHaveBeenCalledWith(
+      "cukii/setBrokerPreferences",
+      expect.objectContaining({
+        brokerModel: "codex:gpt-6-astra",
+        brokerSpeed: "fast",
+        mode: "broker",
+      }),
+    );
+
+    await act(async () => {
+      store.dispatch(setBrokerModel("kimi-k3"));
+    });
+    expect(screen.queryByTestId("cukii-model-fast-toggle")).toBeNull();
   });
 
   it("lists vendors alphabetically, matching account management", async () => {

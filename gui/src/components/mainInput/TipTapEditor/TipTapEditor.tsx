@@ -310,7 +310,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
             }}
           />
         )}
-        <CukiiComposerImageStrip editor={editor} />
+        {props.isMainInput && <CukiiComposerImageStrip editor={editor} />}
         <EditorContent
           className="scroll-container overflow-y-auto"
           spellCheck={false}

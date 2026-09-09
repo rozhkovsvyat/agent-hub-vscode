@@ -8,11 +8,17 @@ import {
   setBrokerEffort,
   setBrokerPermissionMode,
   setBrokerModelScope,
+  setBrokerSpeed,
   setBrokerSubagent,
   type BrokerModel,
   type BrokerSubagent,
 } from "../../redux/slices/sessionSlice";
-import { applyRuntimeVendorCatalog, isBestModel, VENDORS } from "./vendors";
+import {
+  applyRuntimeVendorCatalog,
+  isBestModel,
+  supportsNativeSpeed,
+  VENDORS,
+} from "./vendors";
 import { ModelCapabilityRating } from "./ModelCapabilityRating";
 import { CukiiAutocompactRow } from "../cukii/CukiiAutocompactRow";
 import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
@@ -228,6 +234,40 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
               sits directly above Effort here, exactly as in the "/" menu — one
               order for the setting wherever it is shown. */}
           <div className="border-t border-[var(--vscode-widget-border)] px-1 pb-1 pt-1">
+            {supportsNativeSpeed(currentModel) && (
+              <button
+                data-testid="cukii-model-fast-toggle"
+                type="button"
+                role="switch"
+                aria-checked={brokerSpeed === "fast"}
+                title="Use the vendor's native accelerated service tier"
+                className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const nextSpeed =
+                    brokerSpeed === "fast" ? "standard" : "fast";
+                  dispatch(setBrokerSpeed(nextSpeed));
+                  ideMessenger.post("cukii/setBrokerPreferences", {
+                    brokerModel: currentModel,
+                    brokerSubagent: "auto",
+                    brokerEffort,
+                    brokerSpeed: nextSpeed,
+                    brokerAutocompact,
+                    thinkingEnabled,
+                    brokerPermissionMode,
+                    mode: "broker",
+                  });
+                }}
+              >
+                <span>Fast mode</span>
+                <span
+                  className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                >
+                  <span className="cukii-toggle-thumb" />
+                </span>
+              </button>
+            )}
             <CukiiAutocompactRow
               className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
               autocompact={brokerAutocompact}
