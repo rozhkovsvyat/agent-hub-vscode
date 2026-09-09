@@ -9,6 +9,8 @@ import {
   type VendorPermissionCapabilities,
 } from "core/cukiiPermissionModes";
 
+import { windowsVendorCliCandidates } from "./vendorCliCandidates";
+
 const VENDOR_PROGRAMS: Record<BrokerVendorId, string | undefined> = {
   claude: "claude",
   codex: "codex",
@@ -115,28 +117,7 @@ function commandCandidates(program: string): string[] {
   if (process.platform !== "win32") return [program];
   const home = os.homedir();
   return [
-    ...(program === "grok"
-      ? [path.join(home, ".grok", "bin", "grok.exe")]
-      : []),
-    ...(program === "kimi"
-      ? [path.join(home, ".kimi-code", "bin", "kimi.exe")]
-      : []),
-    ...(program === "agent"
-      ? [
-          path.join(home, ".cursor", "bin", "agent.exe"),
-          path.join(
-            home,
-            "AppData",
-            "Local",
-            "Programs",
-            "Cursor",
-            "resources",
-            "app",
-            "bin",
-            "agent.exe",
-          ),
-        ]
-      : []),
+    ...windowsVendorCliCandidates(program, home),
     path.join(
       home,
       "scoop",

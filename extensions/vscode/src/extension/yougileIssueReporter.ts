@@ -455,7 +455,7 @@ export class YougileIssueReporter {
       `Session: ${sessionId}`,
       `Model: ${brokerModel}`,
     ];
-    const ring = recentCukiiDiagnostics(120);
+    const ring = recentCukiiDiagnostics(120, sessionId);
     const disk: string[] = [];
     let remaining = 64 * 1024;
     for (const file of await logFiles(this.host.logRoot)) {

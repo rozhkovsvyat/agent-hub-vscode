@@ -13,7 +13,26 @@ function jpegDataUrl(byteLength: number): string {
 }
 
 describe("grokPromptJson", () => {
-  it("keeps a long text-only request in the transcript file, not argv", () => {
+  it("carries the latest request inline beside the transcript pointer", () => {
+    const serialized = grokPromptJson(
+      [
+        { role: "user", content: "старая задача" },
+        { role: "assistant", content: "сделано" },
+        { role: "user", content: "теперь собери новую поставку" },
+      ],
+      "C:\\tmp\\transcript.txt",
+    );
+
+    expect(serialized).toContain("C:\\\\tmp\\\\transcript.txt");
+    // The pointer alone made Grok answer from whatever part of the file it
+    // read, restarting finished work instead of the turn actually asked.
+    expect(serialized).toContain("теперь собери новую поставку");
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
+      MAX_GROK_PROMPT_JSON_BYTES,
+    );
+  });
+
+  it("truncates an oversized latest request on the byte budget", () => {
     const latestText = "Ж".repeat(15_000);
     const serialized = grokPromptJson(
       [{ role: "user", content: latestText }],
@@ -24,7 +43,9 @@ describe("grokPromptJson", () => {
       MAX_GROK_PROMPT_JSON_BYTES,
     );
     expect(serialized).toContain("C:\\\\tmp\\\\transcript.txt");
-    expect(serialized).not.toContain("Ж");
+    // Two bytes per character: a character-wise slice would have overflowed.
+    expect(serialized).toContain("Ж");
+    expect(serialized).toContain("Latest turn truncated");
   });
 
   it("does not let a long latest text steal the mixed image budget", () => {
@@ -45,7 +66,8 @@ describe("grokPromptJson", () => {
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
       MAX_GROK_PROMPT_JSON_BYTES,
     );
-    expect(serialized).not.toContain("Ж");
+    // Images keep first claim on the argv budget; the request text is appended
+    // only from what is left, so neither attachment is dropped.
     expect(
       JSON.parse(serialized).filter(
         (block: { type: string }) => block.type === "image",

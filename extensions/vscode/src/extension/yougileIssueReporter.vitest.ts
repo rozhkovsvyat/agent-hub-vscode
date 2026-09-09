@@ -193,6 +193,28 @@ describe("YougileIssueReporter", () => {
     );
   });
 
+  it("scopes the delivered diagnostics file to the reporting session", async () => {
+    const fx = fixture({ failUploads: true });
+    recordCukiiDiagnostic("bridge.run.started", { sessionId: "session-test" });
+    recordCukiiDiagnostic("bridge.run.failed", {
+      sessionId: "session-neighbour",
+      note: "neighbour-only-marker",
+    });
+
+    await fx.reporter.submit(submission("report-scope"));
+
+    const diagnostics = fs.readFileSync(
+      path.join(fx.root, "pending", "report-scope", "cukii-diagnostics.txt"),
+      "utf8",
+    );
+    expect(diagnostics).toContain("session-test");
+    // One extension host serves every window, so an unscoped ring published a
+    // neighbouring conversation's lifecycle onto this bug card and pushed the
+    // reported session's own history out of the collection.
+    expect(diagnostics).not.toContain("neighbour-only-marker");
+    expect(diagnostics).not.toContain("session-neighbour");
+  });
+
   it("exposes Report an issue only when the exact Cukii Bugs board is visible", async () => {
     const unavailable = fixture({ boardVisible: false });
     await expect(unavailable.reporter.capability(true)).resolves.toEqual({

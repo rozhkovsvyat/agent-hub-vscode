@@ -39,6 +39,7 @@ import {
   selectBridgeImageSources,
 } from "./bridgeImages";
 import { buildBridgeTranscript } from "./bridgeTranscript";
+import { windowsVendorCliCandidates } from "./vendorCliCandidates";
 import {
   closeFollowers,
   drainFollowers,
@@ -710,26 +711,9 @@ function commandCandidates(program: string): string[] {
   const home = os.homedir();
   return [
     // Avoid the npm .cmd shim for `--prompt-json`: cmd.exe has a much smaller
-    // command-line budget than the native Grok executable.
-    ...(program === "grok"
-      ? [path.join(home, ".grok", "bin", "grok.exe")]
-      : []),
-    ...(program === "agent"
-      ? [
-          path.join(home, ".cursor", "bin", "agent.exe"),
-          path.join(
-            home,
-            "AppData",
-            "Local",
-            "Programs",
-            "Cursor",
-            "resources",
-            "app",
-            "bin",
-            "agent.exe",
-          ),
-        ]
-      : []),
+    // command-line budget than the native Grok executable. The shared list puts
+    // the native Grok executable first for exactly that reason.
+    ...windowsVendorCliCandidates(program, home),
     path.join(
       home,
       "scoop",

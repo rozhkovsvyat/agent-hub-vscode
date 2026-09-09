@@ -2,6 +2,7 @@ import { ChatMessage } from "core";
 import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
 
 import { parseSupportedVisionDataUrl } from "./bridgeImages";
+import { contentToText } from "./bridgeTranscript";
 
 export type GrokPromptBlock =
   | { type: "text"; text: string }
@@ -58,14 +59,10 @@ export function grokPromptJson(
   const latestUser = [...messages]
     .reverse()
     .find((message) => message.role === "user");
-  const blocks: GrokPromptBlock[] = [
-    {
-      type: "text",
-      text:
-        "Read the complete Cukii broker transcript from this local file before answering: " +
-        transcriptPath,
-    },
-  ];
+  const pointer =
+    "Read the complete Cukii broker transcript from this local file before answering: " +
+    transcriptPath;
+  const blocks: GrokPromptBlock[] = [{ type: "text", text: pointer }];
 
   // Replaying every historical bitmap makes Windows argv grow without bound;
   // fresh attachments live in the latest user turn. Earlier turns remain in
@@ -79,6 +76,45 @@ export function grokPromptJson(
           blocks.push(image);
         }
       }
+    }
+  }
+
+  // 🔴 The current request must never live only inside the transcript file.
+  // When the pointer was the whole prompt, Grok answered from whichever part of
+  // that file it happened to read, so it restarted finished work and replied to
+  // superseded turns — deterministically, which is why restarting the agent
+  // reproduced the same wrong path. Images keep first claim on the Windows argv
+  // budget; the verbatim request is appended from whatever remains.
+  const latestUserText = latestUser ? contentToText(latestUser.content) : "";
+  if (latestUserText.trim()) {
+    const preamble =
+      "\n\nThat file is history and context only. The request to answer is the " +
+      "latest user turn, repeated here verbatim so it cannot be missed or " +
+      "confused with an older one:\n\n";
+    const truncationNote =
+      "\n[Latest turn truncated; full text is in the file.]";
+    // Measure the payload that actually reaches argv. A raw byte count of the
+    // request underestimates it, because JSON escaping expands newlines and
+    // quotes after the budget would have been checked.
+    const measure = (body: string): number => {
+      blocks[0] = { type: "text", text: pointer + preamble + body };
+      return Buffer.byteLength(JSON.stringify(blocks), "utf8");
+    };
+    let keep = latestUserText.length;
+    let size = measure(latestUserText);
+    while (size > MAX_GROK_PROMPT_JSON_BYTES && keep > 0) {
+      // Shrinking a character count by a byte overflow over-trims for Cyrillic
+      // rather than under-trimming, so the loop always converges downwards.
+      keep = Math.max(0, keep - (size - MAX_GROK_PROMPT_JSON_BYTES) - 64);
+      size =
+        keep > 0
+          ? measure(latestUserText.slice(0, keep) + truncationNote)
+          : Number.NaN;
+    }
+    if (!(keep > 0)) {
+      // Attachments alone already fill the budget. Restore the bare pointer so
+      // the existing oversized-attachment error still names the real cause.
+      blocks[0] = { type: "text", text: pointer };
     }
   }
 

@@ -53,6 +53,46 @@ describe("account-scoped model discovery", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
+  it("follows a Cursor family that the vendor renamed under its own prefix", async () => {
+    listAccounts.mockResolvedValue([{ id: "cursor", state: "connected" }]);
+    execFile.mockImplementation(
+      (
+        _program: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: Error | null, result: { stdout: string }) => void,
+      ) =>
+        callback(null, {
+          stdout: [
+            "cursor-grok-4.6-low - Cursor Grok 4.6 Low",
+            "cursor-grok-4.6-high - Cursor Grok 4.6",
+          ].join("\n"),
+        }),
+    );
+
+    // Cursor renamed `grok-4.6` to `cursor-grok-4.6` in place. A session saved
+    // before the rename used to hard-fail and demand a manual re-pick.
+    await expect(
+      ensureCursorCatalogVariants("cursor:grok-4.6"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still refuses a saved family that is not merely a rename", async () => {
+    listAccounts.mockResolvedValue([{ id: "cursor", state: "connected" }]);
+    execFile.mockImplementation(
+      (
+        _program: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: Error | null, result: { stdout: string }) => void,
+      ) => callback(null, { stdout: "cursor-grok-4.6-high - Cursor Grok 4.6" }),
+    );
+
+    await expect(
+      ensureCursorCatalogVariants("cursor:composer-9.9"),
+    ).rejects.toThrow(/no longer exposes/);
+  });
+
   it("allows a connected native Cursor account to use restored variants", async () => {
     listAccounts.mockResolvedValue([{ id: "cursor", state: "connected" }]);
     execFile.mockImplementation(

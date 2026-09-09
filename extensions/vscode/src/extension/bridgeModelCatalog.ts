@@ -283,11 +283,33 @@ export async function ensureCursorCatalogVariants(
   const base = model.slice("cursor:".length);
   if (cursorVariantsByBase.has(base)) return;
   await liveModels("cursor", true);
-  if (!cursorVariantsByBase.has(base)) {
-    throw new Error(
-      `Cursor no longer exposes the saved model family "${base}". Open the model picker and select an available Cursor model.`,
+  if (cursorVariantsByBase.has(base)) return;
+  const renamed = cursorRenamedBase(base);
+  if (renamed) {
+    // Cursor renames a family in place — `grok-4.6` became `cursor-grok-4.6`
+    // with the same variants. Saved sessions used to hard-fail on that rename
+    // and demanded a manual re-pick, so alias the successor instead.
+    cursorVariantsByBase.set(
+      base,
+      cursorVariantsByBase.get(renamed) as string[],
     );
+    return;
   }
+  throw new Error(
+    `Cursor no longer exposes the saved model family "${base}". Open the model picker and select an available Cursor model.`,
+  );
+}
+
+/**
+ * The successor of a saved Cursor family after a vendor-side rename, or
+ * undefined. Only the vendor-prefix form is accepted: guessing more broadly
+ * would silently route a session to a different model than the one it saved.
+ */
+function cursorRenamedBase(base: string): string | undefined {
+  const candidates = base.startsWith("cursor-")
+    ? [base.slice("cursor-".length)]
+    : [`cursor-${base}`];
+  return candidates.find((candidate) => cursorVariantsByBase.has(candidate));
 }
 
 function contextLabel(tokens: number | undefined): string {

@@ -87,7 +87,7 @@
       "properties": {
         "continue.telemetryEnabled": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "markdownDescription": "Cukii collects anonymous usage data, cleaned of PII, to help us improve the product for our users. Read more  at [continue.dev › Telemetry](https://docs.continue.dev/telemetry).",
           "markdownDeprecationMessage": "This setting is deprecated and will be removed in a later version. Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page.",
           "deprecationMessage": "Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page."
@@ -109,12 +109,12 @@
         },
         "continue.enableTabAutocomplete": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "markdownDescription": "Enable Cukii's tab autocomplete feature. Read our walkthrough to learn about configuration and how to share feedback: [continue.dev › Walkthrough: Tab Autocomplete (beta)](https://docs.continue.dev/features/tab-autocomplete)"
         },
         "continue.enableNextEdit": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "markdownDescription": "Enable Cukii's next edit feature. Read our docs to learn about configuration and how to share feedback: [continue.dev › Features › Autocomplete › Next Edit (experimental)](https://docs.continue.dev/features/autocomplete/next-edit)"
         },
         "continue.pauseTabAutocompleteOnBattery": {
@@ -124,7 +124,7 @@
         },
         "continue.pauseCodebaseIndexOnStart": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "markdownDescription": "Pause Cukii's codebase index on start."
         },
         "continue.enableConsole": {
