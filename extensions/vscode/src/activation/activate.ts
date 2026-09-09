@@ -1,4 +1,4 @@
-import { getContinueRcPath, getTsConfigPath } from "core/util/paths";
+import { getContinueRcPath } from "core/util/paths";
 import * as vscode from "vscode";
 
 import { VsCodeExtension } from "../extension/VsCodeExtension";
@@ -27,8 +27,11 @@ export async function activateExtension(context: vscode.ExtensionContext) {
     );
   }
 
-  // Add necessary files
-  getTsConfigPath();
+  // 🔴 Only the files Cukii itself uses. `tsconfig.json` exists solely for the
+  // deprecated `config.ts` API, which Cukii never loads; scaffolding it left an
+  // orphan in ~/.continue that helper agents then asked the owner about during
+  // a fresh install. `getConfigTsPath()` is deliberately not called here for
+  // the same reason — it would write config.ts, package.json and types/core.
   getContinueRcPath();
 
   // Register commands and providers
@@ -46,31 +49,12 @@ export async function activateExtension(context: vscode.ExtensionContext) {
     void context.globalState.update("hasBeenInstalled", true);
   }
 
-  // Register config.yaml schema by removing old entries and adding new one (uri.fsPath changes with each version)
-  const yamlMatcher = ".continue/**/*.yaml";
-  const yamlConfig = vscode.workspace.getConfiguration("yaml");
-  const yamlSchemas = yamlConfig.get<object>("schemas", {});
-
-  const newPath = vscode.Uri.joinPath(
-    context.extension.extensionUri,
-    "config-yaml-schema.json",
-  ).toString();
-
-  try {
-    await yamlConfig.update(
-      "schemas",
-      {
-        ...yamlSchemas,
-        [newPath]: [yamlMatcher],
-      },
-      vscode.ConfigurationTarget.Global,
-    );
-  } catch (error) {
-    console.error(
-      "Failed to register Continue config.yaml schema, most likely, YAML extension is not installed",
-      error,
-    );
-  }
+  // 🔴 No global-settings side effect. Registering the schema rewrote the
+  // owner's user settings.json with a versioned extension path on every
+  // install, leaving stale `yaml.schemas` entries that look like leftovers and
+  // invited questions about configuring models by hand. Cukii's models are
+  // chosen in its own picker, so the editor-side schema hint is not worth
+  // mutating user settings for.
 
   const api = new VsCodeContinueApi(vscodeExtension);
   const continuePublicApi = {

@@ -795,12 +795,19 @@ export class VsCodeExtension {
       },
     );
 
-    fs.watchFile(getConfigTsPath(), { interval: 1000 }, (stats) => {
-      if (stats.size === 0) {
-        return;
-      }
-      void this.configHandler.reloadConfig("config.ts updated - fs file watch");
-    });
+    // Watch the deprecated config.ts only when the owner actually has one:
+    // getConfigTsPath() creates it (plus package.json and types/core) as a side
+    // effect, and Cukii must not scaffold Continue leftovers into ~/.continue.
+    if (fs.existsSync(path.join(getContinueGlobalPath(), "config.ts"))) {
+      fs.watchFile(getConfigTsPath(), { interval: 1000 }, (stats) => {
+        if (stats.size === 0) {
+          return;
+        }
+        void this.configHandler.reloadConfig(
+          "config.ts updated - fs file watch",
+        );
+      });
+    }
 
     // watch global rules directory for changes
     const globalRulesDir = path.join(getContinueGlobalPath(), "rules");

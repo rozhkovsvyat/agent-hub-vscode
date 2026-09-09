@@ -81,19 +81,19 @@ describe("диагностика в карточке достижима без �
     "utf8",
   );
 
-  it("URL диагностики остаётся ровно в одном HTML-carrier без anchor", () => {
+  // Контракт уточнён по факту: YouGile показывает HTML-вариант сообщения, а
+  // Telegram сворачивал <a> в подпись — рядом с рабочим адресом оставалась
+  // вторая, нерабочая «кнопка». Поэтому адрес обязан быть ровно один раз и
+  // обычным текстом: клиент линкует его сам, а дубля создать неоткуда.
+  it("URL диагностики стоит в сообщении ровно один раз и без anchor", () => {
     expect(reporter).toContain("`<p>${escapeHtml(diagnostics.remoteUrl)}</p>`");
     expect(reporter).not.toContain('[diagnostics.remoteUrl, ""]');
-    expect(reporter).not.toContain(
-      '<p><a href="${escapeHtml(diagnostics.remoteUrl)}">',
-    );
+    expect(reporter).not.toContain('<a href="${escapeHtml(diagnostics');
   });
 
-  it("в описании карточки для каждого файла остаётся один голый URL", () => {
-    expect(reporter).toContain(
-      ".map((file) => `- ${file.remoteUrl as string}`)",
-    );
-    expect(reporter).not.toMatch(/\[\$\{file\.name\}\]\(\$\{file\.remoteUrl/);
+  it("в описании карточки стоит голый URL, а не markdown-ссылка", () => {
+    expect(reporter).toContain("`- ${file.remoteUrl as string}`");
+    expect(reporter).not.toMatch(/\[\$\{file\.name[^\]]*\}\]\(/);
   });
 });
 

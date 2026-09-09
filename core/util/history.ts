@@ -44,6 +44,13 @@ export class HistoryIntegrityError extends Error {
   }
 }
 
+/**
+ * Upper bound for the write-ahead log. Large enough that a single save of a
+ * long session still commits without an intermediate checkpoint, small enough
+ * that the file cannot reach the gigabyte scale observed in the field.
+ */
+export const HISTORY_WAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
+
 export class HistoryManager {
   private connection?: Promise<Database>;
   /** sqlite permits one writer; serialize one manager's async BEGIN/COMMIT
@@ -108,6 +115,20 @@ export class HistoryManager {
     await db.exec(
       "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
     );
+    // 🔴 A session is stored as one body_json blob and rewritten in full on
+    // every save, so a long conversation pushes hundreds of megabytes through
+    // the WAL. With several Cukii windows holding read snapshots, the automatic
+    // checkpoint can never truncate, and the WAL on this machine had grown to
+    // 1.13 GB beside a 1.08 GB database. The size limit makes SQLite truncate
+    // the WAL after each successful checkpoint instead of letting it grow
+    // without bound; the explicit checkpoint reclaims what earlier runs left.
+    await db.exec(`PRAGMA journal_size_limit=${HISTORY_WAL_SIZE_LIMIT_BYTES};`);
+    try {
+      await db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    } catch {
+      // A concurrent reader can block a truncating checkpoint. That is not a
+      // failure: the size limit still applies to every later checkpoint.
+    }
     const journal = await db.get<{ journal_mode: string }>(
       "PRAGMA journal_mode",
     );
@@ -566,14 +587,16 @@ export class HistoryManager {
         >
       >
     >(sql, args);
-    return rows.map((r): BaseSessionMetadata => ({
-      sessionId: r.id,
-      title: r.title,
-      dateCreated: r.created_at,
-      workspaceDirectory: r.workspace,
-      messageCount: r.message_count,
-      revision: r.revision,
-    }));
+    return rows.map(
+      (r): BaseSessionMetadata => ({
+        sessionId: r.id,
+        title: r.title,
+        dateCreated: r.created_at,
+        workspaceDirectory: r.workspace,
+        messageCount: r.message_count,
+        revision: r.revision,
+      }),
+    );
   }
   async load(id: string) {
     this.validId(id);

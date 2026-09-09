@@ -417,7 +417,9 @@ export function Chat() {
         ? (selectedModelByRole.edit ?? selectedModelByRole.chat)
         : selectedModelByRole.chat;
 
-      if (!model) {
+      // Broker turns are routed to a vendor CLI, not to a Continue model, so an
+      // empty config must not swallow the send. See streamResponse.ts.
+      if (!model && currentMode !== "broker") {
         return;
       }
 

@@ -71,6 +71,11 @@ beforeEach(() => {
 describe("streamResponseThunk", () => {
   it("should throw error when no chat model is selected", async () => {
     const noModelState = getEmptyRootState();
+    // This contract belongs to the Continue chat path. The default session mode
+    // is "broker", which routes to a vendor CLI and needs no Continue model —
+    // leaving the default here quietly asserted the fresh-install defect where
+    // a broker turn refused to send. See brokerWithoutContinueModel.test.ts.
+    noModelState.session.mode = "chat";
     noModelState.session.history = [
       {
         message: { id: "1", role: "user", content: "Hello" },
