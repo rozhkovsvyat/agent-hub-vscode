@@ -960,13 +960,11 @@ export class YougileIssueReporter {
         const diagnostics = report.files.find(
           (file) => file.kind === "diagnostics",
         );
-        // A bare URL in the plain-text body is auto-linked by YouGile and its
-        // Telegram bridge. Do not duplicate it as an HTML anchor: the bridge
-        // shows that anchor as a second, non-working download link.
+        // A bare URL is auto-linked by YouGile and its Telegram bridge. Keep
+        // it in the HTML carrier only: the bridge
+        // concatenates the two alternatives and would otherwise show it twice.
         const text = [
-          ...(diagnostics?.remoteUrl ? [diagnostics.remoteUrl, ""] : []),
           `Cukii report ${report.reportId}: screenshots and diagnostics`,
-          ...(diagnostics?.remoteUrl ? [`File: ${diagnostics.name}`] : []),
         ].join("\n");
         const textHtml = [
           `<p>${escapeHtml(
@@ -977,7 +975,10 @@ export class YougileIssueReporter {
               `<p><strong>${escapeHtml(file.name)}</strong></p><img src="${escapeHtml(file.remoteUrl as string)}" alt="${escapeHtml(file.name)}">`,
           ),
           ...(diagnostics?.remoteUrl
-            ? [`<p>File: ${escapeHtml(diagnostics.name)}</p>`]
+            ? [
+                `<p>${escapeHtml(diagnostics.remoteUrl)}</p>`,
+                `<p>File: ${escapeHtml(diagnostics.name)}</p>`,
+              ]
             : []),
         ].join("");
         await this.requestJson(

@@ -271,15 +271,20 @@ describe("YougileIssueReporter", () => {
       textHtml: string;
     };
     expect(messageBody.textHtml).toContain("<img src=");
-    const diagnosticsUrl = messageBody.text.split("\n", 1)[0];
-    expect(diagnosticsUrl).toMatch(
-      /^https:\/\/yougile\.com\/user-data\/report\/file-\d+$/,
-    );
-    expect(messageBody.text.startsWith(diagnosticsUrl)).toBe(true);
-    expect(messageBody.textHtml).not.toContain("<a ");
     const taskBody = JSON.parse(String(taskCalls[0].body)) as {
       description: string;
     };
+    const diagnosticsUrl = taskBody.description.match(
+      /https:\/\/yougile\.com\/user-data\/report\/file-\d+/,
+    )?.[0];
+    expect(diagnosticsUrl).toMatch(
+      /^https:\/\/yougile\.com\/user-data\/report\/file-\d+$/,
+    );
+    expect(messageBody.text).not.toContain(diagnosticsUrl);
+    expect(messageBody.textHtml).not.toContain("<a ");
+    expect(messageBody.textHtml.split(diagnosticsUrl as string)).toHaveLength(
+      2,
+    );
     expect(taskBody.description).toContain(`- ${diagnosticsUrl}`);
     expect(taskBody.description).not.toContain("](");
     expect(
