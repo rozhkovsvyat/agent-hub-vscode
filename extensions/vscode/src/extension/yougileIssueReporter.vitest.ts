@@ -266,7 +266,22 @@ describe("YougileIssueReporter", () => {
     expect(JSON.parse(String(message?.body))).toMatchObject({
       label: "Cukii diagnostics",
     });
-    expect(JSON.parse(String(message?.body)).textHtml).toContain("<img src=");
+    const messageBody = JSON.parse(String(message?.body)) as {
+      text: string;
+      textHtml: string;
+    };
+    expect(messageBody.textHtml).toContain("<img src=");
+    const diagnosticsUrl = messageBody.text.split("\n", 1)[0];
+    expect(diagnosticsUrl).toMatch(
+      /^https:\/\/yougile\.com\/user-data\/report\/file-\d+$/,
+    );
+    expect(messageBody.text.startsWith(diagnosticsUrl)).toBe(true);
+    expect(messageBody.textHtml).toContain(
+      `<a href="${diagnosticsUrl}">${diagnosticsUrl}</a>`,
+    );
+    expect(messageBody.textHtml).not.toContain(
+      ">Download sanitized diagnostics</a>",
+    );
     expect(
       fx.calls.map((call) => String(call.body ?? "")).join("\n"),
     ).not.toContain("typed-secret-value");

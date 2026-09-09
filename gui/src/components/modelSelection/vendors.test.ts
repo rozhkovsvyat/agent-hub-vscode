@@ -33,6 +33,7 @@ describe("Cukii model context labels", () => {
       "fable-5-1": "Fable 5.1",
       "fable-5": "Fable 5",
       "haiku-4-5": "Haiku 4.5",
+      "codex:gpt-6-astra": "GPT-6 Astra",
       "codex-5-6-sol": "GPT-5.6 Sol",
       "codex-5-6-terra": "GPT-5.6 Terra",
       "codex-5-6-luna": "GPT-5.6 Luna",
@@ -69,6 +70,7 @@ describe("Cukii model context labels", () => {
 
   it("uses the known Codex CLI route capacity as the static fallback", () => {
     for (const value of [
+      "codex:gpt-6-astra",
       "codex-5-6-sol",
       "codex-5-6-terra",
       "codex-5-6-luna",
@@ -104,6 +106,7 @@ describe("Cukii model context labels", () => {
       "qwen-deepseek-v4-pro-0813",
       "fable-5-1",
       "opus-5",
+      "codex:gpt-6-astra",
       "codex-5-6-sol",
       "codex-5-6-terra",
       "grok-4-6",
@@ -141,6 +144,7 @@ describe("Cukii model context labels", () => {
     const expectedModelOrderByVendor = {
       claude: ["fable-5-1", "opus-5", "sonnet-5", "fable-5", "haiku-4-5"],
       codex: [
+        "codex:gpt-6-astra",
         "codex-5-6-sol",
         "codex-5-6-terra",
         "codex-5-6-luna",
@@ -314,6 +318,7 @@ describe("Cukii model context labels", () => {
   });
 
   it.each([
+    ["codex:gpt-6-astra", "GPT-6 Astra", 3],
     ["fable-5-1", "Fable 5.1", 3],
     ["cursor:claude-fable-5-1", "Dynamic Cursor model", 3],
     ["codex-5-6-sol", "GPT-5.6 Sol", 3],
@@ -466,6 +471,7 @@ describe("Cukii model context labels", () => {
         (model) => model.value,
       ),
     ).toEqual([
+      "codex:gpt-6-astra",
       "codex-5-6-sol",
       "codex-5-6-terra",
       "codex-5-6-luna",

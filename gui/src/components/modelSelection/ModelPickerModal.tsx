@@ -229,45 +229,9 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
             ))}
           </div>
 
-          {/* Claude keeps its effort control as the last row of the model menu;
-              the shared slider rows give Cukii the same footer. Autocompact
-              sits directly above Effort here, exactly as in the "/" menu — one
-              order for the setting wherever it is shown. */}
+          {/* Keep the model pill footer in the requested stable order:
+              Autocompact, Effort, then Fast when the route supports it. */}
           <div className="border-t border-[var(--vscode-widget-border)] px-1 pb-1 pt-1">
-            {supportsNativeSpeed(currentModel) && (
-              <button
-                data-testid="cukii-model-fast-toggle"
-                type="button"
-                role="switch"
-                aria-checked={brokerSpeed === "fast"}
-                title="Use the vendor's native accelerated service tier"
-                className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const nextSpeed =
-                    brokerSpeed === "fast" ? "standard" : "fast";
-                  dispatch(setBrokerSpeed(nextSpeed));
-                  ideMessenger.post("cukii/setBrokerPreferences", {
-                    brokerModel: currentModel,
-                    brokerSubagent: "auto",
-                    brokerEffort,
-                    brokerSpeed: nextSpeed,
-                    brokerAutocompact,
-                    thinkingEnabled,
-                    brokerPermissionMode,
-                    mode: "broker",
-                  });
-                }}
-              >
-                <span>Fast mode</span>
-                <span
-                  className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
-                >
-                  <span className="cukii-toggle-thumb" />
-                </span>
-              </button>
-            )}
             <CukiiAutocompactRow
               className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
               autocompact={brokerAutocompact}
@@ -303,6 +267,40 @@ export function ModelPickerModal({ onClose, onSelect }: ModelPickerModalProps) {
                 });
               }}
             />
+            {supportsNativeSpeed(currentModel) && (
+              <button
+                data-testid="cukii-model-fast-toggle"
+                type="button"
+                role="switch"
+                aria-checked={brokerSpeed === "fast"}
+                title="Use the vendor's native accelerated service tier"
+                className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const nextSpeed =
+                    brokerSpeed === "fast" ? "standard" : "fast";
+                  dispatch(setBrokerSpeed(nextSpeed));
+                  ideMessenger.post("cukii/setBrokerPreferences", {
+                    brokerModel: currentModel,
+                    brokerSubagent: "auto",
+                    brokerEffort,
+                    brokerSpeed: nextSpeed,
+                    brokerAutocompact,
+                    thinkingEnabled,
+                    brokerPermissionMode,
+                    mode: "broker",
+                  });
+                }}
+              >
+                <span>Fast mode</span>
+                <span
+                  className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                >
+                  <span className="cukii-toggle-thumb" />
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>

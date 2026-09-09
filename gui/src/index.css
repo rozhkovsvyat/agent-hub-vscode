@@ -2233,7 +2233,9 @@ button.cukii-submit-button--stop:active {
   border-radius: 16px;
 }
 
-/* Claude's prompt fold: 60px of content, a 50px fade, and a 300ms expansion.
+/* A prompt folds to one line only while its row is actually pinned at the
+   transcript's top edge. In-flow messages remain fully readable and expose no
+   manual fold control. Delivery metadata stays outside the clipped shell.
    Delivery metadata remains a sibling below this clipped shell, never inside
    it, so time and ticks are always visible. */
 .cukii-user-content-shell {
@@ -2260,7 +2262,7 @@ button.cukii-submit-button--stop:active {
 
 .cukii-user-message-content--collapsed {
   position: relative;
-  max-height: 60px;
+  max-height: 20px;
 }
 
 .cukii-user-truncation-gradient {
@@ -2268,7 +2270,7 @@ button.cukii-submit-button--stop:active {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 50px;
+  height: 20px;
   pointer-events: none;
   background: linear-gradient(
     to bottom,
@@ -2471,6 +2473,19 @@ button.cukii-submit-button--stop:active {
 
 .cukii-user-attachment-card:hover {
   background: color-mix(in srgb, var(--cukii-text, #2c241c) 14%, transparent);
+}
+
+.cukii-user-attachment-card--image {
+  --cukii-attachment-pill-background: var(
+    --vscode-input-background,
+    rgb(60 60 60 / 72%)
+  );
+  color: var(--vscode-input-foreground, #cccccc);
+  border-color: var(--vscode-input-border, rgb(127 127 127 / 35%));
+}
+
+.cukii-user-attachment-card--image:hover {
+  background: var(--vscode-list-hoverBackground, rgb(90 93 94 / 48%));
 }
 
 .cukii-user-attachment-card:focus-visible {

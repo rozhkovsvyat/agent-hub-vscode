@@ -79,6 +79,17 @@ export function hasValidEditorContent(json: JSONContent): boolean {
   return hasNonWhitespaceText || hasStandaloneContent || false;
 }
 
+/** Clear the live composer immediately after its captured JSON is submitted. */
+export function clearSubmittedMainComposer(
+  editor: Editor,
+  isMainInput: boolean,
+  isInEdit: boolean,
+): void {
+  if (isMainInput && !isInEdit) {
+    editor.commands.clearContent();
+  }
+}
+
 /**
  * This function is called only once, so we need to use refs to pass in the latest values
  */
@@ -491,6 +502,7 @@ export function createEditorConfig(options: {
     }
 
     props.onEnter(json, modifiers, editor);
+    clearSubmittedMainComposer(editor, props.isMainInput, isInEdit);
   };
 
   return { editor, onEnter };

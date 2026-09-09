@@ -975,10 +975,9 @@ export class YougileIssueReporter {
         // A bare URL in the plain-text body is auto-linked by the client's own
         // renderer, which does not depend on that handler.
         const text = [
+          ...(diagnostics?.remoteUrl ? [diagnostics.remoteUrl, ""] : []),
           `Cukii report ${report.reportId}: screenshots and diagnostics`,
-          ...(diagnostics?.remoteUrl
-            ? ["", `${diagnostics.name}: ${diagnostics.remoteUrl}`]
-            : []),
+          ...(diagnostics?.remoteUrl ? [`File: ${diagnostics.name}`] : []),
         ].join("\n");
         const textHtml = [
           `<p>${escapeHtml(
@@ -990,8 +989,8 @@ export class YougileIssueReporter {
           ),
           ...(diagnostics?.remoteUrl
             ? [
-                `<p><a href="${escapeHtml(diagnostics.remoteUrl)}">Download sanitized diagnostics</a></p>`,
-                `<p>${escapeHtml(diagnostics.name)}: ${escapeHtml(diagnostics.remoteUrl)}</p>`,
+                `<p><a href="${escapeHtml(diagnostics.remoteUrl)}">${escapeHtml(diagnostics.remoteUrl)}</a></p>`,
+                `<p>File: ${escapeHtml(diagnostics.name)}</p>`,
               ]
             : []),
         ].join("");

@@ -180,6 +180,14 @@ describe("ModelPickerModal", () => {
 
     const toggle = await screen.findByTestId("cukii-model-fast-toggle");
     expect(toggle).toHaveAttribute("aria-checked", "false");
+    const effortRow = screen
+      .getByTestId("cukii-effort-slider")
+      .closest(".cukii-effort-menu-row");
+    const autocompactRow = screen
+      .getByTestId("cukii-autocompact-slider")
+      .closest(".cukii-effort-menu-row");
+    expect(toggle.previousElementSibling).toBe(effortRow);
+    expect(effortRow?.previousElementSibling).toBe(autocompactRow);
     await user.click(toggle);
     expect(store.getState().session.brokerSpeed).toBe("fast");
     expect(postSpy).toHaveBeenCalledWith(

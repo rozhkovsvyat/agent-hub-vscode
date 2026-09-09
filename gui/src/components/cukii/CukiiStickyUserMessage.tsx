@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 
-export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 60;
+export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 20;
 
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
@@ -17,9 +17,9 @@ interface CukiiStickyUserMessageProps {
 }
 
 /**
- * Claude Code keeps each prompt at the top of its turn and folds prompts taller
- * than 60px. Cukii keeps the fold toggle and delivery metadata in one compact
- * MAX-style footer so neither state creates a second toolbar row.
+ * Long prompts fold to one line only while their row is physically pinned to
+ * the transcript top. Cukii keeps the fold toggle and delivery metadata in one
+ * compact MAX-style footer so neither state creates a second toolbar row.
  */
 export function CukiiStickyUserMessage({
   bubbleClassName,
@@ -28,8 +28,10 @@ export function CukiiStickyUserMessage({
   metadata,
 }: CukiiStickyUserMessageProps) {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
+  const [isLongPrompt, setIsLongPrompt] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const isCollapsible = isPinned && isLongPrompt;
   const isCollapsed = isCollapsible && !isExpanded;
 
   useLayoutEffect(() => {
@@ -43,7 +45,7 @@ export function CukiiStickyUserMessage({
       const next =
         !containsVisualAttachment &&
         content.scrollHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
-      setIsCollapsible(next);
+      setIsLongPrompt(next);
       if (!next) setIsExpanded(false);
     };
 
@@ -61,6 +63,35 @@ export function CukiiStickyUserMessage({
     return () => {
       content.removeEventListener("load", measure, true);
       resizeObserver?.disconnect();
+    };
+  }, [messageId]);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const row = content?.closest<HTMLElement>(".cukii-user-row--sticky");
+    const transcript = content?.closest<HTMLElement>(".cukii-transcript");
+    if (!row || !transcript) return;
+
+    const measurePinned = () => {
+      const next =
+        transcript.scrollTop > 0 &&
+        row.getBoundingClientRect().top <=
+          transcript.getBoundingClientRect().top + 1;
+      setIsPinned(next);
+      if (!next) setIsExpanded(false);
+    };
+
+    measurePinned();
+    transcript.addEventListener("scroll", measurePinned, { passive: true });
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measurePinned);
+    observer?.observe(row);
+    observer?.observe(transcript);
+    return () => {
+      transcript.removeEventListener("scroll", measurePinned);
+      observer?.disconnect();
     };
   }, [messageId]);
 

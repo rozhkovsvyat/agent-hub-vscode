@@ -55,6 +55,11 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "codex",
     label: "OpenAI",
     models: [
+      {
+        value: "codex:gpt-6-astra",
+        label: "GPT-6 Astra",
+        contextWindowLabel: "272K",
+      },
       // Match the currently usable Codex CLI route; live metadata can raise it.
       {
         value: "codex-5-6-sol",
@@ -190,6 +195,7 @@ export const BEST_MODELS: readonly BrokerModel[] = [
   "qwen-deepseek-v4-pro-0813",
   "fable-5-1",
   "opus-5",
+  "codex:gpt-6-astra",
   "codex-5-6-sol",
   "codex-5-6-terra",
   "grok-4-6",
@@ -224,10 +230,22 @@ export function applyRuntimeVendorCatalog(
       const fallback = FALLBACK_VENDORS.find(
         (vendor) => vendor.id === registered.id,
       );
+      const liveModels = live?.models ?? fallback?.models ?? [];
+      const models =
+        registered.id === "codex" && live
+          ? [
+              ...(fallback?.models.filter(
+                (model) => model.value === "codex:gpt-6-astra",
+              ) ?? []),
+              ...liveModels.filter(
+                (model) => model.value !== "codex:gpt-6-astra",
+              ),
+            ]
+          : liveModels;
       return {
         id: registered.id,
         label: registered.label,
-        models: presentVendorModels(live?.models ?? fallback?.models ?? [], {
+        models: presentVendorModels(models, {
           groupByUpstreamVendor: registered.id === "cursor",
         }),
       };

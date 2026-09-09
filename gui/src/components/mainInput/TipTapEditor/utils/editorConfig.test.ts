@@ -1,7 +1,12 @@
 import type { JSONContent } from "@tiptap/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { hasValidEditorContent } from "./editorConfig";
+import type { Editor } from "@tiptap/core";
+
+import {
+  clearSubmittedMainComposer,
+  hasValidEditorContent,
+} from "./editorConfig";
 
 describe("hasValidEditorContent", () => {
   it("accepts a top-level attachment as an image-only submission", () => {
@@ -28,5 +33,26 @@ describe("hasValidEditorContent", () => {
         ],
       }),
     ).toBe(false);
+  });
+});
+
+describe("clearSubmittedMainComposer", () => {
+  it("removes image nodes from the live composer after a normal submit", () => {
+    const clearContent = vi.fn();
+    const editor = { commands: { clearContent } } as unknown as Editor;
+
+    clearSubmittedMainComposer(editor, true, false);
+
+    expect(clearContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves historical and edit-mode editor state", () => {
+    const clearContent = vi.fn();
+    const editor = { commands: { clearContent } } as unknown as Editor;
+
+    clearSubmittedMainComposer(editor, false, false);
+    clearSubmittedMainComposer(editor, true, true);
+
+    expect(clearContent).not.toHaveBeenCalled();
   });
 });

@@ -97,7 +97,7 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(stickyMaskRule).not.toContain("--vscode-sideBar-background");
 });
 
-test("folds a long sticky prompt like Claude while keeping time and ticks in the footer", async () => {
+test("folds a long prompt only after it actually sticks to the transcript top", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
@@ -152,6 +152,20 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
     const bubble = container.querySelector(
       '[data-testid="cukii-user-bubble-long-user"]',
     );
+    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    expect(container.querySelector('[aria-label="Show more"]')).toBeNull();
+
+    const transcript =
+      container.querySelector<HTMLElement>(".cukii-transcript")!;
+    const row = bubble?.closest<HTMLElement>(".cukii-user-row--sticky")!;
+    Object.defineProperty(transcript, "scrollTop", {
+      configurable: true,
+      value: 100,
+      writable: true,
+    });
+    transcript.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    row.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
       expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
     );
@@ -198,13 +212,21 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
     await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
-    // The prompt body is text, not a control: only the chevron folds it. A
-    // click here used to expand the bubble, which is why the body advertised a
-    // pointer cursor it had no business showing.
+    row.getBoundingClientRect = () => ({ top: 40 }) as DOMRect;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed"),
+    );
+    expect(container.querySelector('[aria-label="Show more"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Show less"]')).toBeNull();
+
+    // The prompt body is text, not a control. Once the row leaves the sticky
+    // edge it stays fully expanded and clicking the ordinary chat message can
+    // neither collapse it nor bring the chevron back.
     await user.click(
       bubble?.querySelector(".cukii-user-message-content") as HTMLElement,
     );
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
     expect(bubble).not.toHaveClass("cukii-user-bubble--expanded");
     expect(canonicalCss()).toMatch(
       /\.cukii-user-content-shell\s*\{[^}]*cursor:\s*default/s,
@@ -212,10 +234,10 @@ test("folds a long sticky prompt like Claude while keeping time and ticks in the
 
     const css = canonicalCss();
     expect(css).toMatch(
-      /\.cukii-user-message-content--collapsed\s*\{[^}]*max-height:\s*60px/s,
+      /\.cukii-user-message-content--collapsed\s*\{[^}]*max-height:\s*20px/s,
     );
     expect(css).toMatch(
-      /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*50px/s,
+      /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*20px/s,
     );
     expect(css).toContain("transition: max-height 300ms ease-in-out");
     expect(css).toMatch(
@@ -301,6 +323,9 @@ test("keeps attachments in one horizontally scrolling micro-preview row", () => 
   );
   expect(css).toMatch(
     /\.cukii-user-attachment-card > img\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-attachment-card--image\s*\{[^}]*--cukii-attachment-pill-background:\s*var\(\s*--vscode-input-background/s,
   );
   expect(css).toMatch(
     /\.cukii-user-bubble \.ProseMirror img,\s*\.cukii-user-bubble \.cukii-file-attachment-node-view\s*\{[^}]*display:\s*none !important/s,

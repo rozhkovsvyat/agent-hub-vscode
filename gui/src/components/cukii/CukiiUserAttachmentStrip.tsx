@@ -47,7 +47,7 @@ function ImageAttachmentPill({
   return (
     <button
       aria-label={`Preview ${attachment.name}`}
-      className="cukii-user-attachment-card"
+      className="cukii-user-attachment-card cukii-user-attachment-card--image"
       onClick={onPreview}
       role="listitem"
       title={attachment.name}

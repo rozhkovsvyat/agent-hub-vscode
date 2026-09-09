@@ -119,6 +119,7 @@ export function cukiiCapabilityRating(
     pattern.test(stableId) || pattern.test(fallbackLabel);
 
   if (
+    matches(/gpt[-\s]?6[-\s]?astra/) ||
     matches(/fable[-\s]?5[.-]1/) ||
     matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]sol/) ||
     matches(/qwen[-\s]?3[.-]8[-\s]max/)
