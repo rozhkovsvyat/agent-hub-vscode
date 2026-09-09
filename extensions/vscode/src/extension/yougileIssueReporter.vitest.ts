@@ -276,12 +276,12 @@ describe("YougileIssueReporter", () => {
       /^https:\/\/yougile\.com\/user-data\/report\/file-\d+$/,
     );
     expect(messageBody.text.startsWith(diagnosticsUrl)).toBe(true);
-    expect(messageBody.textHtml).toContain(
-      `<a href="${diagnosticsUrl}">${diagnosticsUrl}</a>`,
-    );
-    expect(messageBody.textHtml).not.toContain(
-      ">Download sanitized diagnostics</a>",
-    );
+    expect(messageBody.textHtml).not.toContain("<a ");
+    const taskBody = JSON.parse(String(taskCalls[0].body)) as {
+      description: string;
+    };
+    expect(taskBody.description).toContain(`- ${diagnosticsUrl}`);
+    expect(taskBody.description).not.toContain("](");
     expect(
       fx.calls.map((call) => String(call.body ?? "")).join("\n"),
     ).not.toContain("typed-secret-value");

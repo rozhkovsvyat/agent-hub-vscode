@@ -136,10 +136,6 @@ function safeFileName(name: string): string {
   return cleaned.slice(0, 120) || "attachment";
 }
 
-function escapeMarkdown(value: string): string {
-  return value.replace(/[\\`*_[\]<>]/g, "\\$&");
-}
-
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -859,15 +855,12 @@ export class YougileIssueReporter {
   }
 
   private description(report: StoredIssueReport): string {
-    // Markdown link plus the bare URL: whichever the board's renderer keeps,
-    // the reader can still reach the file. A link title alone is worthless if
-    // the target is filtered away.
+    // Keep exactly one carrier per file. YouGile and its Telegram bridge render
+    // markdown/HTML anchors separately from the plain-text URL, producing a
+    // dead decorative link next to the working download address.
     const links = report.files
       .filter((file) => file.remoteUrl)
-      .map(
-        (file) =>
-          `- [${escapeMarkdown(file.name)}](${file.remoteUrl as string}) — ${file.remoteUrl as string}`,
-      );
+      .map((file) => `- ${file.remoteUrl as string}`);
     const section = (title: string, body: string) =>
       `## ${title}\n${body || "_Not provided_"}`;
     return [
@@ -967,13 +960,9 @@ export class YougileIssueReporter {
         const diagnostics = report.files.find(
           (file) => file.kind === "diagnostics",
         );
-        // Measured on a delivered report (task a4f22e6b, 2026-09-08): the
-        // board stores the anchor verbatim and both user-data URLs answer
-        // HTTP 200 — the .txt is 6509 bytes and downloads fine by address.
-        // What fails is the click: the chat client renders an `<a>` inside a
-        // message but never navigates it, so the file looked unreachable.
-        // A bare URL in the plain-text body is auto-linked by the client's own
-        // renderer, which does not depend on that handler.
+        // A bare URL in the plain-text body is auto-linked by YouGile and its
+        // Telegram bridge. Do not duplicate it as an HTML anchor: the bridge
+        // shows that anchor as a second, non-working download link.
         const text = [
           ...(diagnostics?.remoteUrl ? [diagnostics.remoteUrl, ""] : []),
           `Cukii report ${report.reportId}: screenshots and diagnostics`,
@@ -988,10 +977,7 @@ export class YougileIssueReporter {
               `<p><strong>${escapeHtml(file.name)}</strong></p><img src="${escapeHtml(file.remoteUrl as string)}" alt="${escapeHtml(file.name)}">`,
           ),
           ...(diagnostics?.remoteUrl
-            ? [
-                `<p><a href="${escapeHtml(diagnostics.remoteUrl)}">${escapeHtml(diagnostics.remoteUrl)}</a></p>`,
-                `<p>File: ${escapeHtml(diagnostics.name)}</p>`,
-              ]
+            ? [`<p>File: ${escapeHtml(diagnostics.name)}</p>`]
             : []),
         ].join("");
         await this.requestJson(
