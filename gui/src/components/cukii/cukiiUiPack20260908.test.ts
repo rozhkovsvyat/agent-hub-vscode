@@ -81,20 +81,19 @@ describe("диагностика в карточке достижима без �
     "utf8",
   );
 
-  it("URL диагностики попадает в простой текст сообщения", () => {
-    // Файл цел: измерено на доставленном отчёте — оба user-data URL отдают
-    // HTTP 200, txt весит 6509 байт. Не работает клик по <a> внутри чата,
-    // поэтому адрес обязан быть и в простом тексте, где клиент линкует сам.
-    expect(reporter).toContain(
-      '...(diagnostics?.remoteUrl ? [diagnostics.remoteUrl, ""] : [])',
-    );
-    expect(reporter).toContain(
-      '<p><a href="${escapeHtml(diagnostics.remoteUrl)}">${escapeHtml(diagnostics.remoteUrl)}</a></p>',
+  it("URL диагностики остаётся ровно в одном HTML-carrier без anchor", () => {
+    expect(reporter).toContain("`<p>${escapeHtml(diagnostics.remoteUrl)}</p>`");
+    expect(reporter).not.toContain('[diagnostics.remoteUrl, ""]');
+    expect(reporter).not.toContain(
+      '<p><a href="${escapeHtml(diagnostics.remoteUrl)}">',
     );
   });
 
-  it("в описании карточки рядом с markdown-ссылкой стоит голый URL", () => {
-    expect(reporter).toMatch(/\}\) — \$\{file\.remoteUrl as string\}/);
+  it("в описании карточки для каждого файла остаётся один голый URL", () => {
+    expect(reporter).toContain(
+      ".map((file) => `- ${file.remoteUrl as string}`)",
+    );
+    expect(reporter).not.toMatch(/\[\$\{file\.name\}\]\(\$\{file\.remoteUrl/);
   });
 });
 
