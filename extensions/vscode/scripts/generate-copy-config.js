@@ -20,11 +20,13 @@ async function generateConfigYamlSchema({
 } = {}) {
   const packageDir = path.join(continueRoot, "packages", "config-yaml");
   changeDirectory(packageDir);
-  if (!skipInstall) {
+  if (skipInstall) {
+    execCommand("node dist/scripts/generateJsonSchema.js");
+  } else {
     execCommand("npm install");
+    execCommand("npm run build");
+    execCommand("npm run generate-schema");
   }
-  execCommand("npm run build");
-  execCommand("npm run generate-schema");
   copyFile(
     path.join(packageDir, "schema", "config-yaml-schema.json"),
     path.join(continueRoot, "extensions", "vscode", "config-yaml-schema.json"),

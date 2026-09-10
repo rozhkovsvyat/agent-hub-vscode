@@ -109,7 +109,7 @@ test("skip-install schema generation runs build without installing and copies JS
       },
       execCommand(command) {
         commands.push(command);
-        if (command === "npm run generate-schema") {
+        if (command === "node dist/scripts/generateJsonSchema.js") {
           fs.writeFileSync(
             schemaPath,
             JSON.stringify({ title: "Cukii schema" }),
@@ -118,7 +118,7 @@ test("skip-install schema generation runs build without installing and copies JS
       },
     });
 
-    assert.deepEqual(commands, ["npm run build", "npm run generate-schema"]);
+    assert.deepEqual(commands, ["node dist/scripts/generateJsonSchema.js"]);
     assert.deepEqual(
       JSON.parse(
         fs.readFileSync(
