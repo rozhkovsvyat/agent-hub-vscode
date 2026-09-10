@@ -10,6 +10,7 @@ import type {
   CukiiIssueDiagnosticsPreview,
   CukiiIssuePickedImage,
   CukiiIssueReportReceipt,
+  CukiiIssueReportSubmission,
   CukiiIssueSeverity,
 } from "core/protocol/ideWebview";
 import {
@@ -112,6 +113,7 @@ export function ReportIssueModal({
   const [phase, setPhase] = useState<SubmitPhase>("idle");
   const [receipt, setReceipt] = useState<CukiiIssueReportReceipt>();
   const reportIdRef = useRef(crypto.randomUUID());
+  const submissionRef = useRef<CukiiIssueReportSubmission>();
   const submittingRef = useRef(false);
   const attachmentsRef = useRef<CukiiIssuePickedImage[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -268,18 +270,19 @@ export function ReportIssueModal({
     setPhase("submitting");
     setSubmitError(undefined);
     try {
-      const currentSnapshot = await withIssueReportTimeout(
-        refreshSnapshot(),
-        ISSUE_SNAPSHOT_TIMEOUT_MS,
-        "Chat snapshot timed out. The form is unlocked; try again.",
-      );
-      if (!currentSnapshot) {
-        throw new Error(
-          "Cukii could not reconstruct the sanitized chat snapshot. Try again.",
+      let submission = submissionRef.current;
+      if (!submission) {
+        const currentSnapshot = await withIssueReportTimeout(
+          refreshSnapshot(),
+          ISSUE_SNAPSHOT_TIMEOUT_MS,
+          "Chat snapshot timed out. The form is unlocked; try again.",
         );
-      }
-      const response = await withIssueReportTimeout(
-        ideMessenger.request("cukii/submitIssueReport", {
+        if (!currentSnapshot) {
+          throw new Error(
+            "Cukii could not reconstruct the sanitized chat snapshot. Try again.",
+          );
+        }
+        submission = {
           reportId: reportIdRef.current,
           ...draft,
           sessionId,
@@ -291,9 +294,13 @@ export function ReportIssueModal({
             height: currentSnapshot.height,
             sanitizer: "cukii-report-v1",
           },
-        }),
+        };
+        submissionRef.current = submission;
+      }
+      const response = await withIssueReportTimeout(
+        ideMessenger.request("cukii/submitIssueReport", submission),
         ISSUE_SUBMIT_TIMEOUT_MS,
-        "Report submission timed out. The form is unlocked; retrying reuses the same report ID.",
+        "Report submission timed out. Retry is enabled and resends the original captured report with the same report ID; fields remain locked to prevent duplicates.",
       );
       if (response.status === "error") throw new Error(response.error);
       attachmentsRef.current = [];
@@ -307,6 +314,8 @@ export function ReportIssueModal({
       submittingRef.current = false;
     }
   };
+
+  const submissionLocked = Boolean(submissionRef.current);
 
   return (
     <div
@@ -392,7 +401,7 @@ export function ReportIssueModal({
                   ref={titleRef}
                   value={draft.title}
                   maxLength={160}
-                  disabled={phase === "submitting"}
+                  disabled={phase === "submitting" || submissionLocked}
                   placeholder="A short description of the problem"
                   onChange={(event) => updateDraft("title", event.target.value)}
                 />
@@ -403,7 +412,7 @@ export function ReportIssueModal({
                   <span>Severity</span>
                   <select
                     value={draft.severity}
-                    disabled={phase === "submitting"}
+                    disabled={phase === "submitting" || submissionLocked}
                     onChange={(event) =>
                       updateDraft(
                         "severity",
@@ -440,7 +449,7 @@ export function ReportIssueModal({
                     value={draft[key]}
                     maxLength={4000}
                     rows={2}
-                    disabled={phase === "submitting"}
+                    disabled={phase === "submitting" || submissionLocked}
                     placeholder={placeholder}
                     onChange={(event) => updateDraft(key, event.target.value)}
                   />
@@ -459,7 +468,11 @@ export function ReportIssueModal({
                   <button
                     type="button"
                     className="cukii-report-secondary"
-                    disabled={phase === "submitting" || attachments.length >= 3}
+                    disabled={
+                      phase === "submitting" ||
+                      submissionLocked ||
+                      attachments.length >= 3
+                    }
                     onClick={() => void pickImages()}
                   >
                     <PaperClipIcon aria-hidden="true" />
@@ -488,7 +501,11 @@ export function ReportIssueModal({
                         className="cukii-report-icon-button"
                         aria-label="Reconstruct chat snapshot"
                         title="Reconstruct snapshot"
-                        disabled={snapshotBusy || phase === "submitting"}
+                        disabled={
+                          snapshotBusy ||
+                          phase === "submitting" ||
+                          submissionLocked
+                        }
                         onClick={() => void refreshSnapshot()}
                       >
                         <ArrowPathIcon
@@ -515,7 +532,7 @@ export function ReportIssueModal({
                           className="cukii-report-icon-button"
                           aria-label={`Remove ${image.name}`}
                           title="Remove"
-                          disabled={phase === "submitting"}
+                          disabled={phase === "submitting" || submissionLocked}
                           onClick={() => removeImage(image.id)}
                         >
                           <TrashIcon />

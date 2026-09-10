@@ -48,6 +48,8 @@ function getSuggestion(
 
           if (!container) {
             console.log("no container");
+            component.destroy();
+            component = undefined;
             return;
           }
 
@@ -66,25 +68,28 @@ function getSuggestion(
         },
 
         onUpdate(props: any) {
-          component.updateProps({ ...props, enterSubmenu });
+          component?.updateProps({ ...props, enterSubmenu });
 
-          if (!props.clientRect) {
+          const popupInstance = popup?.[0];
+          if (!props.clientRect || !popupInstance) {
             return;
           }
 
-          popup[0].setProps({
+          popupInstance.setProps({
             getReferenceClientRect: props.clientRect,
           });
         },
 
         onKeyDown(props: any) {
+          const popupInstance = popup?.[0];
           if (props.event.key === "Escape") {
-            popup[0].hide();
+            if (!popupInstance) return false;
+            popupInstance.hide();
 
             return true;
           }
 
-          return component.ref?.onKeyDown(props);
+          return component?.ref?.onKeyDown(props) ?? false;
         },
 
         onExit,

@@ -2,14 +2,34 @@ const TERMINAL_TOOL_STATUSES = new Set(["done", "errored", "canceled"]);
 
 type PersistableSession = {
   history: Array<{
-    message: { role: string; toolCallId?: string };
+    message: { role: string; content?: unknown; toolCallId?: string };
     toolCallStates?: Array<{
       status: string;
       toolCallId?: string;
       toolCall?: { id?: string };
+      output?: Array<{ content?: unknown }>;
     }>;
   }>;
 };
+
+type ToolResultEvidence = {
+  outputText?: string;
+  terminal: boolean;
+};
+
+function textContent(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function stateOutputText(
+  output: Array<{ content?: unknown }> | undefined,
+): string | undefined {
+  if (!output?.length) return undefined;
+  const parts = output.map((item) => textContent(item.content));
+  return parts.some((part) => part === undefined)
+    ? undefined
+    : (parts as string[]).join("\n");
+}
 
 /**
  * Tool results are represented twice while a turn is streaming: once as an
@@ -25,22 +45,30 @@ type PersistableSession = {
 export function compactSessionForPersistence<T extends PersistableSession>(
   session: T,
 ): T {
-  const terminalToolCallIds = new Set<string>();
-  for (const item of session.history) {
-    for (const state of item.toolCallStates ?? []) {
-      if (!TERMINAL_TOOL_STATUSES.has(String(state.status))) continue;
-      const id = String(state.toolCall?.id ?? state.toolCallId ?? "");
-      if (id) terminalToolCallIds.add(id);
-    }
-  }
-
-  if (!terminalToolCallIds.size) return session;
+  const latestToolEvidence = new Map<string, ToolResultEvidence>();
+  let changed = false;
   const history = session.history.filter((item) => {
+    if (item.message.role === "user") latestToolEvidence.clear();
+    for (const state of item.toolCallStates ?? []) {
+      const id = String(state.toolCall?.id ?? state.toolCallId ?? "");
+      if (!id) continue;
+      latestToolEvidence.set(id, {
+        terminal: TERMINAL_TOOL_STATUSES.has(String(state.status)),
+        outputText: stateOutputText(state.output),
+      });
+    }
     if (item.message.role !== "tool") return true;
     const toolCallId = String(item.message.toolCallId ?? "");
-    return !toolCallId || !terminalToolCallIds.has(toolCallId);
+    const evidence = latestToolEvidence.get(toolCallId);
+    const toolText = textContent(item.message.content);
+    const isProvenDuplicate =
+      Boolean(toolCallId) &&
+      evidence?.terminal === true &&
+      evidence.outputText !== undefined &&
+      toolText !== undefined &&
+      evidence.outputText === toolText;
+    if (isProvenDuplicate) changed = true;
+    return !isProvenDuplicate;
   });
-  return history.length === session.history.length
-    ? session
-    : ({ ...session, history } as T);
+  return changed ? ({ ...session, history } as T) : session;
 }

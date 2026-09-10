@@ -102,4 +102,123 @@ describe("compactSessionForPersistence", () => {
 
     expect(compactSessionForPersistence(original)).toBe(original);
   });
+
+  it("preserves the only result when a terminal state has no matching output", () => {
+    const original = session([
+      {
+        message: { role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "item_0",
+            toolCall: {
+              id: "item_0",
+              type: "function",
+              function: { name: "shell", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+          },
+        ],
+      },
+      {
+        message: {
+          role: "tool",
+          content: "ONLY_COPY",
+          toolCallId: "item_0",
+        },
+        contextItems: [],
+      },
+    ]);
+
+    expect(compactSessionForPersistence(original)).toBe(original);
+  });
+
+  it("does not let an old terminal id delete a newer running result", () => {
+    const original = session([
+      {
+        message: { role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "item_0",
+            toolCall: {
+              id: "item_0",
+              type: "function",
+              function: { name: "old", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            // IDs and payload bytes can both repeat across vendor turns. The
+            // newer calling state must still supersede this old evidence.
+            output: [
+              {
+                name: "old",
+                description: "",
+                content: "NEW_PARTIAL_ONLY_COPY",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        message: { role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "item_0",
+            toolCall: {
+              id: "item_0",
+              type: "function",
+              function: { name: "new", arguments: "{}" },
+            },
+            status: "calling",
+            parsedArgs: {},
+          },
+        ],
+      },
+      {
+        message: {
+          role: "tool",
+          content: "NEW_PARTIAL_ONLY_COPY",
+          toolCallId: "item_0",
+        },
+        contextItems: [],
+      },
+    ]);
+
+    expect(compactSessionForPersistence(original)).toBe(original);
+  });
+
+  it("preserves a terminal row when its payload differs from stored output", () => {
+    const original = session([
+      {
+        message: { role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "call-1",
+            toolCall: {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            output: [{ name: "file", description: "", content: "OLD" }],
+          },
+        ],
+      },
+      {
+        message: {
+          role: "tool",
+          content: "NEW",
+          toolCallId: "call-1",
+        },
+        contextItems: [],
+      },
+    ]);
+
+    expect(compactSessionForPersistence(original)).toBe(original);
+  });
 });

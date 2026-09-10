@@ -182,8 +182,17 @@ describe("ReportIssueModal", () => {
   it("unlocks a submission that never receives an extension-host response", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     const messenger = new MockIdeMessenger();
-    messenger.responseHandlers["cukii/submitIssueReport"] = () =>
-      new Promise(() => undefined);
+    const submissions: CukiiIssueReportSubmission[] = [];
+    messenger.responseHandlers["cukii/submitIssueReport"] = (input) => {
+      submissions.push(input);
+      if (submissions.length === 1) return new Promise(() => undefined);
+      return Promise.resolve({
+        reportId: input.reportId,
+        status: "sent" as const,
+        taskId: "task-after-timeout",
+        message: "Report sent to the Cukii Bugs board.",
+      });
+    };
     renderForm(messenger);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Report" })).toBeDisabled(),
@@ -212,8 +221,21 @@ describe("ReportIssueModal", () => {
       expect(screen.getByText(/submission timed out/i)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Report" })).toBeEnabled();
       expect(
+        screen.getByPlaceholderText("A short description of the problem"),
+      ).toBeDisabled();
+      expect(
         screen.getByRole("button", { name: "Close issue report" }),
       ).toBeEnabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Report" }));
+      await act(async () => {
+        await vi.runAllTicks();
+      });
+
+      expect(screen.getByText("Report sent")).toBeInTheDocument();
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1]).toEqual(submissions[0]);
+      expect(captureSnapshot).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

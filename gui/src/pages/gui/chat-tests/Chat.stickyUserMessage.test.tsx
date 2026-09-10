@@ -216,7 +216,10 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     });
     Object.defineProperty(row, "offsetTop", {
       configurable: true,
-      value: 100,
+      // Blink reports a sticky row's painted offset after it pins. Recreating
+      // the scroll effect on Show more/less must not adopt that moving value
+      // as a new collapse origin.
+      get: () => transcript.scrollTop,
     });
     Object.defineProperty(row, "offsetParent", {
       configurable: true,
@@ -311,6 +314,9 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
 
     await user.click(expandedToggle!);
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(
+      content.style.getPropertyValue("--cukii-sticky-visible-height"),
+    ).toBe("20px");
 
     // Reversing the wheel reveals the same pixels in reverse and still does
     // not alter the row's document-flow height.

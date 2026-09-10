@@ -81,6 +81,9 @@ export function CukiiStickyUserMessage({
   const contentRef = useRef<HTMLDivElement>(null);
   const [isLongPrompt, setIsLongPrompt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const isExpandedRef = useRef(isExpanded);
+  const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
+  isExpandedRef.current = isExpanded;
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -178,7 +181,7 @@ export function CukiiStickyUserMessage({
         stickyStartScrollTop,
       });
       const visibleHeight =
-        isExpanded || geometry.phase === "flow"
+        isExpandedRef.current || geometry.phase === "flow"
           ? fullHeight
           : geometry.visibleHeight;
 
@@ -214,7 +217,7 @@ export function CukiiStickyUserMessage({
         geometry.progress.toFixed(4),
       );
 
-      if (geometry.phase !== "flow" && !isExpanded) {
+      if (geometry.phase !== "flow" && !isExpandedRef.current) {
         content.dataset.cukiiScrollFolding = "true";
         content.style.setProperty(
           "--cukii-sticky-visible-height",
@@ -235,11 +238,11 @@ export function CukiiStickyUserMessage({
       }
       bubble.classList.toggle(
         "cukii-user-bubble--collapsed",
-        geometry.phase === "collapsed" && !isExpanded,
+        geometry.phase === "collapsed" && !isExpandedRef.current,
       );
       content.classList.toggle(
         "cukii-user-message-content--collapsed",
-        geometry.phase === "collapsed" && !isExpanded,
+        geometry.phase === "collapsed" && !isExpandedRef.current,
       );
       const toggle = bubble.querySelector<HTMLButtonElement>(
         ".cukii-user-fold-toggle",
@@ -252,15 +255,19 @@ export function CukiiStickyUserMessage({
         if (isCollapsible) {
           toggle.setAttribute(
             "aria-label",
-            isExpanded ? "Show less" : "Show more",
+            isExpandedRef.current ? "Show less" : "Show more",
           );
         } else {
           toggle.removeAttribute("aria-label");
         }
       }
-      if (geometry.phase === "flow" && isExpanded) setIsExpanded(false);
+      if (geometry.phase === "flow" && isExpandedRef.current) {
+        isExpandedRef.current = false;
+        setIsExpanded(false);
+      }
     };
 
+    syncFoldWithScrollRef.current = syncFoldWithScroll;
     syncFoldWithScroll();
     transcript.addEventListener("scroll", syncFoldWithScroll, {
       passive: true,
@@ -274,11 +281,16 @@ export function CukiiStickyUserMessage({
       observer?.observe(content.firstElementChild);
     }
     return () => {
+      syncFoldWithScrollRef.current = undefined;
       transcript.removeEventListener("scroll", syncFoldWithScroll);
       observer?.disconnect();
       clearFold();
     };
-  }, [isExpanded, isLongPrompt, messageId]);
+  }, [isLongPrompt, messageId]);
+
+  useLayoutEffect(() => {
+    syncFoldWithScrollRef.current?.();
+  }, [isExpanded]);
 
   const expand = useCallback(() => setIsExpanded(true), []);
   const collapse = useCallback(() => setIsExpanded(false), []);
