@@ -1,10 +1,17 @@
+import fs from "node:fs";
+
 import { ALIBABA_TOKEN_PLAN_COMPATIBLE_ENDPOINT } from "core/cukiiAlibabaCatalog";
+import {
+  bridgeStorageEnvOverrides,
+  resolveBridgeStorageLayout,
+  type BridgeStorageOptions,
+} from "./bridgeStorageEnv";
 
 export interface BridgeTerminalLaunchSpec {
   program: string;
   args: string[];
   cwd: string;
-  env: Record<string, string>;
+  env: Record<string, string | null>;
 }
 
 /**
@@ -21,6 +28,9 @@ export function bridgeTerminalLaunchSpec(
   role: string,
   scope: string,
   platform: NodeJS.Platform = process.platform,
+  storageOptions: BridgeStorageOptions & {
+    ensureDirectory?: (candidate: string) => void;
+  } = {},
 ): BridgeTerminalLaunchSpec {
   const program =
     agent === "cursor"
@@ -38,11 +48,20 @@ export function bridgeTerminalLaunchSpec(
           ? ["--model", "qwen3.8-max"]
           : [];
 
+  const storageOptionsForPlatform = { ...storageOptions, platform };
+  if (platform === "win32") {
+    const storage = resolveBridgeStorageLayout(storageOptionsForPlatform);
+    (storageOptions.ensureDirectory ?? ((candidate) => fs.mkdirSync(candidate, { recursive: true })))(
+      storage.tempDir,
+    );
+  }
+
   return {
     program,
     args,
     cwd: root,
     env: {
+      ...bridgeStorageEnvOverrides(storageOptionsForPlatform),
       AGENT_HUB_BRIDGE_SESSION: bridgeSessionId,
       AGENT_HUB_BRIDGE_ROLE: role,
       AGENT_HUB_BRIDGE_SCOPE: scope,

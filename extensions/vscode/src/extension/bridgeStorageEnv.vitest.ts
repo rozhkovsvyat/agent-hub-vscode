@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bridgeStorageEnvOverrides,
+  bridgeStorageProcessEnv,
   removeCaseInsensitiveEnvKeys,
   resolveBridgeStorageLayout,
 } from "./bridgeStorageEnv";
+
+const identityWindowsFs = {
+  pathIsDirectory: (_candidate: string) => true,
+  realPath: (candidate: string) => candidate,
+};
 
 describe("resolveBridgeStorageLayout", () => {
   it("uses the canonical KOMPUTER scratch and pnpm roots when present", () => {
@@ -12,6 +19,7 @@ describe("resolveBridgeStorageLayout", () => {
       env: {},
       pathExists: (candidate) =>
         candidate === "D:\\Scratch" || candidate === "D:\\PnpmStore",
+      ...identityWindowsFs,
       systemTempDir: "C:\\Users\\owner\\AppData\\Local\\Temp",
     });
 
@@ -28,7 +36,11 @@ describe("resolveBridgeStorageLayout", () => {
         CUKII_SCRATCH_DIR: "E:\\AgentScratch",
         npm_config_store_dir: "E:\\PnpmStore",
       },
-      pathExists: () => false,
+      pathExists: (candidate) =>
+        candidate === "E:\\AgentScratch" ||
+        candidate === "E:\\PnpmStore" ||
+        candidate === "C:\\Temp",
+      ...identityWindowsFs,
       systemTempDir: "C:\\Temp",
     });
 
@@ -47,6 +59,7 @@ describe("resolveBridgeStorageLayout", () => {
       },
       pathExists: (candidate) =>
         candidate === "D:\\Scratch" || candidate === "D:\\PnpmStore",
+      ...identityWindowsFs,
       systemTempDir: "C:\\Temp",
     });
 
@@ -64,11 +77,12 @@ describe("resolveBridgeStorageLayout", () => {
         npm_config_store_dir: "D:\\Brain\\pnpm-store",
       },
       pathExists: () => false,
+      ...identityWindowsFs,
       systemTempDir: "D:\\tmp",
     });
 
     expect(result).toEqual({
-      tempDir: "D:\\Scratch\\cukii-vendor-runtime",
+      tempDir: "C:\\Temp\\cukii-vendor-runtime",
     });
   });
 
@@ -80,10 +94,11 @@ describe("resolveBridgeStorageLayout", () => {
         npm_config_store_dir: "D:\\Brain\\pnpm-store\\v3",
       },
       pathExists: () => false,
+      ...identityWindowsFs,
       systemTempDir: "D:\\Brain\\tmp\\vendor",
     });
 
-    expect(result).toEqual({ tempDir: "D:\\Scratch\\cukii-vendor-runtime" });
+    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
   });
 
   it("removes inherited environment keys case-insensitively", () => {
@@ -104,10 +119,115 @@ describe("resolveBridgeStorageLayout", () => {
       platform: "win32",
       env: { CUKII_SCRATCH_DIR: "relative", npm_config_store_dir: "relative" },
       pathExists: () => false,
+      ...identityWindowsFs,
       systemTempDir: "C:\\Temp",
     });
 
     expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it.each([
+    "\\\\?\\D:\\tmp",
+    "\\\\localhost\\d$\\tmp",
+    "D:\\tmp.\\nested",
+    "D:\\safe \\nested",
+  ])("rejects Windows namespace or trailing-alias root %s", (unsafeRoot) => {
+    const result = resolveBridgeStorageLayout({
+      platform: "win32",
+      env: {
+        CUKII_SCRATCH_DIR: unsafeRoot,
+        npm_config_store_dir: unsafeRoot,
+      },
+      pathExists: (candidate) =>
+        candidate === unsafeRoot || candidate === "C:\\Temp",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Temp",
+    });
+
+    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it("rejects a permitted-looking junction whose physical target is forbidden", () => {
+    const result = resolveBridgeStorageLayout({
+      platform: "win32",
+      env: {
+        CUKII_SCRATCH_DIR: "E:\\AgentScratch",
+        npm_config_store_dir: "E:\\PnpmStore",
+      },
+      pathExists: (candidate) => candidate !== "D:\\Scratch" && candidate !== "D:\\PnpmStore",
+      pathIsDirectory: () => true,
+      realPath: (candidate) =>
+        candidate === "E:\\AgentScratch" || candidate === "E:\\PnpmStore"
+          ? "D:\\tmp"
+          : candidate,
+      systemTempDir: "C:\\Temp",
+    });
+
+    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it("fails closed when directory inspection or realpath fails", () => {
+    const common = {
+      platform: "win32" as const,
+      env: { CUKII_SCRATCH_DIR: "E:\\AgentScratch" },
+      pathExists: (candidate: string) =>
+        candidate !== "D:\\Scratch" && candidate !== "D:\\PnpmStore",
+      systemTempDir: "C:\\Temp",
+    };
+    const statFailure = resolveBridgeStorageLayout({
+      ...common,
+      pathIsDirectory: (candidate) => {
+        if (candidate === "E:\\AgentScratch") throw new Error("locked");
+        return true;
+      },
+      realPath: (candidate) => candidate,
+    });
+    const realPathFailure = resolveBridgeStorageLayout({
+      ...common,
+      pathIsDirectory: () => true,
+      realPath: (candidate) => {
+        if (candidate === "E:\\AgentScratch") throw new Error("unresolved");
+        return candidate;
+      },
+    });
+
+    expect(statFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+    expect(realPathFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it("sanitizes mixed-case terminal and process storage variables", () => {
+    const options = {
+      platform: "win32" as const,
+      env: {
+        TeMp: "D:\\tmp",
+        tmp: "D:\\Brain\\tmp",
+        NPM_CONFIG_STORE_DIR: "D:\\Brain\\pnpm-store",
+        Path: "C:\\Windows",
+      },
+      pathExists: (candidate: string) =>
+        candidate === "D:\\Scratch" || candidate === "D:\\PnpmStore",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Temp",
+    };
+
+    expect(bridgeStorageEnvOverrides(options)).toMatchObject({
+      TeMp: "D:\\Scratch\\cukii-vendor-runtime",
+      tmp: "D:\\Scratch\\cukii-vendor-runtime",
+      NPM_CONFIG_STORE_DIR: "D:\\PnpmStore",
+      TEMP: "D:\\Scratch\\cukii-vendor-runtime",
+      TMP: "D:\\Scratch\\cukii-vendor-runtime",
+      TMPDIR: "D:\\Scratch\\cukii-vendor-runtime",
+      npm_config_store_dir: "D:\\PnpmStore",
+    });
+    expect(bridgeStorageProcessEnv(options)).toMatchObject({
+      Path: "C:\\Windows",
+      TEMP: "D:\\Scratch\\cukii-vendor-runtime",
+      TMP: "D:\\Scratch\\cukii-vendor-runtime",
+      TMPDIR: "D:\\Scratch\\cukii-vendor-runtime",
+      npm_config_store_dir: "D:\\PnpmStore",
+    });
+    expect(Object.keys(bridgeStorageProcessEnv(options))).not.toContain("TeMp");
+    expect(Object.keys(bridgeStorageProcessEnv(options))).not.toContain("NPM_CONFIG_STORE_DIR");
   });
 
   it("keeps non-Windows vendors under their normal temporary root", () => {

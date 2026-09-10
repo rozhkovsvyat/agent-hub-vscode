@@ -4,6 +4,19 @@ import { describe, expect, it } from "vitest";
 
 import { bridgeTerminalLaunchSpec } from "./bridgeTerminalCommand";
 
+const windowsStorageOptions = {
+  env: {
+    TeMp: "D:\\tmp",
+    NPM_CONFIG_STORE_DIR: "D:\\Brain\\pnpm-store",
+  },
+  pathExists: (candidate: string) =>
+    candidate === "D:\\Scratch" || candidate === "D:\\PnpmStore",
+  pathIsDirectory: (_candidate: string) => true,
+  realPath: (candidate: string) => candidate,
+  systemTempDir: "C:\\Temp",
+  ensureDirectory: (_candidate: string) => {},
+};
+
 describe("interactive bridge terminal command", () => {
   it("uses Cursor's native Windows agent CLI with no wrapper argv", () => {
     const spec = bridgeTerminalLaunchSpec(
@@ -13,6 +26,7 @@ describe("interactive bridge terminal command", () => {
       "subagent",
       "module",
       "win32",
+      windowsStorageOptions,
     );
     expect(spec).toEqual({
       program: "agent",
@@ -22,6 +36,12 @@ describe("interactive bridge terminal command", () => {
         AGENT_HUB_BRIDGE_SESSION: "bridge-session",
         AGENT_HUB_BRIDGE_ROLE: "subagent",
         AGENT_HUB_BRIDGE_SCOPE: "module",
+        TeMp: "D:\\Scratch\\cukii-vendor-runtime",
+        NPM_CONFIG_STORE_DIR: "D:\\PnpmStore",
+        TEMP: "D:\\Scratch\\cukii-vendor-runtime",
+        TMP: "D:\\Scratch\\cukii-vendor-runtime",
+        TMPDIR: "D:\\Scratch\\cukii-vendor-runtime",
+        npm_config_store_dir: "D:\\PnpmStore",
       },
     });
     expect(JSON.stringify(spec)).not.toMatch(/wsl|bash|cursor-agent/i);
@@ -57,6 +77,7 @@ describe("interactive bridge terminal command", () => {
       "subagent",
       "module",
       "win32",
+      windowsStorageOptions,
     );
     expect(spec.program).toBe(program);
     expect(spec.args).toEqual(args);
@@ -79,6 +100,7 @@ describe("interactive bridge terminal command", () => {
         "subagent",
         "module",
         "win32",
+        windowsStorageOptions,
       ).args,
     ).toEqual(["--model", "qwen3.8-max"]);
   });
@@ -91,6 +113,7 @@ describe("interactive bridge terminal command", () => {
       "subagent",
       "module",
       "win32",
+      windowsStorageOptions,
     );
     expect(spec.env.OPENAI_BASE_URL).toBe(
       "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
