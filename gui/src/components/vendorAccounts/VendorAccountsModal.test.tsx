@@ -538,6 +538,42 @@ describe("VendorAccountsModal", () => {
     });
   });
 
+  it("does not continue a queued refresh after the modal unmounts", async () => {
+    const pending = deferred<unknown>();
+    const ideMessenger = new MockIdeMessenger();
+    const originalRequest = ideMessenger.request.bind(ideMessenger);
+    let accountRequests = 0;
+    vi.spyOn(ideMessenger, "request").mockImplementation((async (
+      messageType: string,
+      data: unknown,
+    ) => {
+      if (messageType === "cukii/listVendorAccounts") {
+        accountRequests += 1;
+        return pending.promise;
+      }
+      return originalRequest(messageType as never, data as never);
+    }) as typeof ideMessenger.request);
+
+    const rendered = await renderWithProviders(
+      <VendorAccountsModal onClose={vi.fn()} />,
+      { mockIdeMessenger: ideMessenger },
+    );
+    await getElementByText("Checking CLIs…");
+    await rendered.user.click(
+      document.querySelector<HTMLButtonElement>(
+        '[aria-label="Refresh vendor accounts"]',
+      )!,
+    );
+
+    rendered.unmount();
+    await act(async () => {
+      pending.resolve({ status: "success", content: [] });
+      await Promise.resolve();
+    });
+
+    expect(accountRequests).toBe(1);
+  });
+
   it("does not rewrite a loaded snapshot without an explicit refresh", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {

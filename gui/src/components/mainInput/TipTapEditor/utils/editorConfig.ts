@@ -29,7 +29,11 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import { getComposerImageInsertPosition, handleImageFile } from "./imageUtils";
+import {
+  createOrderedAttachmentQueue,
+  getComposerImageInsertPosition,
+  handleImageFile,
+} from "./imageUtils";
 
 export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
 
@@ -213,6 +217,9 @@ export function createEditorConfig(options: {
           };
         },
         addProseMirrorPlugins() {
+          const insertImageInAttachmentOrder = createOrderedAttachmentQueue<
+            () => void
+          >((insert) => insert());
           const pastePlugin = new Plugin({
             props: {
               handleDOMEvents: {
@@ -242,23 +249,33 @@ export function createEditorConfig(options: {
                       continue;
                     }
                     handled = true;
-                    void handleImageFile(ideMessenger, file).then((resp) => {
-                      if (!resp) return;
-                      const [, dataUrl, originalSrc, inlineArgvSrc] = resp;
-                      const { schema } = view.state;
-                      const node = schema.nodes.image.create({
-                        alt: file.name,
-                        inlineArgvSrc: inlineArgvSrc ?? null,
-                        originalSrc,
-                        src: dataUrl,
-                        title: file.name,
-                      });
-                      const tr = view.state.tr.insert(
-                        getComposerImageInsertPosition(view.state.doc),
-                        node,
-                      );
-                      view.dispatch(tr);
-                    });
+                    const prepared = handleImageFile(ideMessenger, file).then(
+                      (response) => {
+                        if (response === undefined) return undefined;
+                        return () => {
+                          const [, dataUrl, originalSrc, inlineArgvSrc] =
+                            response;
+                          const { schema } = view.state;
+                          const node = schema.nodes.image.create({
+                            alt: file.name,
+                            inlineArgvSrc: inlineArgvSrc ?? null,
+                            originalSrc,
+                            src: dataUrl,
+                            title: file.name,
+                          });
+                          const tr = view.state.tr.insert(
+                            getComposerImageInsertPosition(view.state.doc),
+                            node,
+                          );
+                          view.dispatch(tr);
+                        };
+                      },
+                    );
+                    void insertImageInAttachmentOrder(prepared).catch(
+                      (error) => {
+                        console.error("Failed to insert composer image", error);
+                      },
+                    );
                   }
                   if (handled) {
                     event.preventDefault();

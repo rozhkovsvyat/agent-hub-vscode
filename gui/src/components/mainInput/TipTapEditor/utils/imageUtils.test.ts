@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
 
 import {
+  createOrderedAttachmentQueue,
   getComposerImageInsertPosition,
   GROK_INLINE_ARGV_IMAGE_RESOLUTION,
   getDataUrlForFile,
@@ -9,6 +10,36 @@ import {
   grokInlineArgvImageEncodePlan,
   supportsOriginalImageMimeType,
 } from "./imageUtils";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+describe("createOrderedAttachmentQueue", () => {
+  it("commits attachments in user order when the second decode finishes first", async () => {
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const consumed: string[] = [];
+    const enqueue = createOrderedAttachmentQueue<string>((value) => {
+      consumed.push(value);
+    });
+
+    const firstQueued = enqueue(first.promise);
+    const secondQueued = enqueue(second.promise);
+    second.resolve("second.png");
+    await Promise.resolve();
+    expect(consumed).toEqual([]);
+
+    first.resolve("first.png");
+    await Promise.all([firstQueued, secondQueued]);
+
+    expect(consumed).toEqual(["first.png", "second.png"]);
+  });
+});
 
 describe("getComposerImageInsertPosition", () => {
   it("appends new previews after the existing leading images", () => {

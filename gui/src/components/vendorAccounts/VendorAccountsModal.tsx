@@ -81,6 +81,8 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   const [refreshError, setRefreshError] = useState<string>();
   const [actionNotice, setActionNotice] = useState<string>();
   const refreshInFlight = useRef(false);
+  const refreshRequestGeneration = useRef(0);
+  const mounted = useRef(false);
   const authActionOpening = useRef(false);
   const pendingExplicitRefresh = useRef<
     | {
@@ -94,6 +96,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
 
   const refresh = useCallback(
     async (reason: RefreshReason, queuedGeneration?: number) => {
+      if (!mounted.current) return;
       // Native auth can change as soon as the terminal opens. No refresh is
       // allowed to paint the preceding snapshot before the action completes.
       if (authActionOpening.current) return;
@@ -121,12 +124,19 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         return;
       }
       refreshInFlight.current = true;
+      const requestGeneration = ++refreshRequestGeneration.current;
       try {
         const response = await ideMessenger.request(
           "cukii/listVendorAccounts",
           undefined,
         );
-        if (generation !== explicitRefreshGeneration.current) return;
+        if (
+          !mounted.current ||
+          requestGeneration !== refreshRequestGeneration.current ||
+          generation !== explicitRefreshGeneration.current
+        ) {
+          return;
+        }
         if (response.status === "success") {
           setAccounts(response.content);
           setRefreshError(undefined);
@@ -134,13 +144,21 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
           setRefreshError(response.error);
         }
       } finally {
+        if (requestGeneration !== refreshRequestGeneration.current) return;
         refreshInFlight.current = false;
-        if (generation === explicitRefreshGeneration.current) {
+        if (
+          mounted.current &&
+          generation === explicitRefreshGeneration.current
+        ) {
           setLoading(false);
         }
         const queuedExplicit = pendingExplicitRefresh.current;
         if (queuedExplicit) {
           pendingExplicitRefresh.current = undefined;
+          if (!mounted.current) {
+            queuedExplicit.waiters.forEach((resolve) => resolve());
+            return;
+          }
           try {
             await refresh(queuedExplicit.reason, queuedExplicit.generation);
           } finally {
@@ -153,12 +171,19 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
   );
 
   useEffect(() => {
+    mounted.current = true;
     void refresh("initial");
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      mounted.current = false;
+      refreshRequestGeneration.current += 1;
+      refreshInFlight.current = false;
+      explicitRefreshGeneration.current += 1;
+      pendingExplicitRefresh.current?.waiters.forEach((resolve) => resolve());
+      pendingExplicitRefresh.current = undefined;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose, refresh]);
@@ -181,11 +206,13 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         vendor: account.id,
         action,
       });
-      setActionNotice(
-        response.status === "success"
-          ? response.content.message
-          : response.error,
-      );
+      if (mounted.current) {
+        setActionNotice(
+          response.status === "success"
+            ? response.content.message
+            : response.error,
+        );
+      }
     } finally {
       authActionOpening.current = false;
       // Do not keep the state from before opening the native login/logout flow.
@@ -195,7 +222,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
       try {
         await refresh("action");
       } finally {
-        setBusy(undefined);
+        if (mounted.current) setBusy(undefined);
       }
     }
   };

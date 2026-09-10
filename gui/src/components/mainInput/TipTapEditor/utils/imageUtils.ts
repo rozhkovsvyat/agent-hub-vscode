@@ -22,6 +22,26 @@ const SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES = new Set([
 ]);
 
 /**
+ * Let image decoding run concurrently, but commit its results in attachment
+ * order. Browser image decoding is not FIFO: a small second screenshot can
+ * finish before a large first one and used to jump to the left of it.
+ */
+export function createOrderedAttachmentQueue<T>(
+  consume: (value: T) => void | Promise<void>,
+): (pending: Promise<T | undefined>) => Promise<void> {
+  let tail = Promise.resolve();
+  return (pending) => {
+    const queued = tail.then(async () => {
+      const value = await pending;
+      if (value !== undefined) await consume(value);
+    });
+    // A rejected decode/consumer must not strand every later attachment.
+    tail = queued.catch(() => undefined);
+    return queued;
+  };
+}
+
+/**
  * Keep composer attachments before the text while preserving the order in
  * which the user attached them. Inserting every image at document position 0
  * made the newest preview jump to the left of the first one.
@@ -150,6 +170,7 @@ export async function handleImageFile(
 
     return await new Promise((resolve) => {
       img.onload = function () {
+        _URL.revokeObjectURL(img.src);
         const dataUrl = getDataUrlForFile(file, img);
         const inlineArgvSrc = getDataUrlForFile(
           file,
@@ -176,7 +197,14 @@ export async function handleImageFile(
           image.onload = function () {
             resolve([image, dataUrl, originalSrc, inlineArgvSrc]);
           };
+          image.onerror = function () {
+            resolve(undefined);
+          };
         });
+      };
+      img.onerror = function () {
+        _URL.revokeObjectURL(img.src);
+        resolve(undefined);
       };
     });
   } else {
