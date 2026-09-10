@@ -10,6 +10,7 @@ const ncp = require("ncp").ncp;
 const { rimrafSync } = require("rimraf");
 
 const { execCmdSync } = require("../../../scripts/util");
+const { runChildOperation, sendChildResult } = require("./child-operation");
 
 async function installNodeModuleInTempDirAndCopyToCurrent(packageName, toCopy) {
   console.log(`Copying ${packageName} to ${toCopy}`);
@@ -89,17 +90,20 @@ async function installNodeModuleInTempDirAndCopyToCurrent(packageName, toCopy) {
   }
 }
 
-process.on("message", (msg) => {
-  installNodeModuleInTempDirAndCopyToCurrent(
-    msg.payload.packageName,
-    msg.payload.toCopy,
-  )
-    .then(() => process.send({ done: true }))
-    .catch((error) => {
-      console.error(error); // show the error in the parent process
-      process.send({ error: true });
-    });
-});
+if (typeof process.send === "function") {
+  process.once("message", async (msg) => {
+    try {
+      await installNodeModuleInTempDirAndCopyToCurrent(
+        msg.payload.packageName,
+        msg.payload.toCopy,
+      );
+      sendChildResult({ done: true }, 0);
+    } catch (error) {
+      console.error(error);
+      sendChildResult({ error: true, message: String(error) }, 1);
+    }
+  });
+}
 
 /**
  * invoke a child process to install a node module into temporary directory and copy it over into node modules
@@ -107,22 +111,14 @@ process.on("message", (msg) => {
  * @param {string} toCopy directory to copy into inside node modules
  */
 async function installAndCopyNodeModules(packageName, toCopy) {
-  const child = fork(__filename, { stdio: "inherit", cwd: process.cwd() });
-  child.send({
+  return runChildOperation({
+    forkChild: fork,
+    modulePath: __filename,
+    cwd: process.cwd(),
     payload: {
       packageName,
       toCopy,
     },
-  });
-
-  return new Promise((resolve, reject) => {
-    child.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      } else {
-        resolve();
-      }
-    });
   });
 }
 

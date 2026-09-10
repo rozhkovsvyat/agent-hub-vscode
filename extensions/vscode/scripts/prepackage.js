@@ -16,6 +16,10 @@ const { installAndCopyNodeModules } = require("./install-copy-nodemodule");
 const { npmInstall } = require("./npm-install");
 const { writeBuildTimestamp } = require("./utils");
 const { buildAndCopyGui } = require("./build-copy-gui");
+const {
+  assertMissingDependencyCanBeInstalled,
+  createPrepackageDependencyTasks,
+} = require("./prepackage-dependency-plan");
 
 // Clear folders that will be packaged to ensure clean slate
 rimrafSync(path.join(__dirname, "..", "bin"));
@@ -73,12 +77,19 @@ void (async () => {
   // Make sure we have an initial timestamp file
   writeBuildTimestamp();
 
-  if (!skipInstalls) {
+  {
     const installStart = Date.now();
-    console.log(`[timer] Starting npm installs at ${new Date().toISOString()}`);
-    await Promise.all([generateAndCopyConfigYamlSchema(), npmInstall()]);
     console.log(
-      `[timer] npm installs completed in ${Date.now() - installStart}ms`,
+      `[timer] Starting dependency preparation at ${new Date().toISOString()}`,
+    );
+    const dependencyTasks = createPrepackageDependencyTasks({
+      skipInstalls,
+      generateConfigYamlSchema: generateAndCopyConfigYamlSchema,
+      installDependencies: npmInstall,
+    });
+    await Promise.all(dependencyTasks.map((task) => task()));
+    console.log(
+      `[timer] Dependency preparation completed in ${Date.now() - installStart}ms`,
     );
   }
 
@@ -244,6 +255,11 @@ void (async () => {
     );
 
     if (!fs.existsSync(expectedPackagePath)) {
+      assertMissingDependencyCanBeInstalled({
+        skipInstalls,
+        dependencyName: packageToInstall,
+        expectedPath: expectedPackagePath,
+      });
       console.log(
         `[info] Installing LanceDB binary for ${target}: ${packageToInstall}`,
       );
@@ -394,6 +410,7 @@ void (async () => {
     "media/move-chat-panel-right.md",
     "continue_tutorial.py",
     "config_schema.json",
+    "config-yaml-schema.json",
 
     // Embeddings model
     "models/all-MiniLM-L6-v2/config.json",

@@ -8,16 +8,26 @@ const path = require("path");
 
 const { execCmdSync } = require("../../../scripts/util");
 
+const { runChildOperation, sendChildResult } = require("./child-operation");
 const { continueDir } = require("./utils");
 
-async function generateConfigYamlSchema() {
-  process.chdir(path.join(continueDir, "packages", "config-yaml"));
-  execCmdSync("npm install");
-  execCmdSync("npm run build");
-  execCmdSync("npm run generate-schema");
-  fs.copyFileSync(
-    path.join("schema", "config-yaml-schema.json"),
-    path.join(continueDir, "extensions", "vscode", "config-yaml-schema.json"),
+async function generateConfigYamlSchema({
+  skipInstall = false,
+  continueRoot = continueDir,
+  execCommand = execCmdSync,
+  changeDirectory = process.chdir,
+  copyFile = fs.copyFileSync,
+} = {}) {
+  const packageDir = path.join(continueRoot, "packages", "config-yaml");
+  changeDirectory(packageDir);
+  if (!skipInstall) {
+    execCommand("npm install");
+  }
+  execCommand("npm run build");
+  execCommand("npm run generate-schema");
+  copyFile(
+    path.join(packageDir, "schema", "config-yaml-schema.json"),
+    path.join(continueRoot, "extensions", "vscode", "config-yaml-schema.json"),
   );
   console.log("[info] Generated config.yaml schema");
 }
@@ -63,64 +73,44 @@ async function copyConfigSchema() {
   );
 }
 
-process.on("message", (msg) => {
-  const { operation } = msg.payload;
-  if (operation === "generate") {
-    generateConfigYamlSchema()
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-  if (operation === "copy") {
-    copyConfigSchema()
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-});
-
-async function generateAndCopyConfigYamlSchema() {
-  // Generate and copy over config-yaml-schema.json
-  const generateConfigYamlChild = fork(
-    path.join(__dirname, "generate-copy-config.js"),
-    {
-      stdio: "inherit",
-    },
-  );
-  generateConfigYamlChild.send({ payload: { operation: "generate" } });
-
-  await new Promise((resolve, reject) => {
-    generateConfigYamlChild.on("message", (msg) => {
-      if (msg.error) {
-        reject();
+if (typeof process.send === "function") {
+  process.once("message", async (msg) => {
+    const { operation, skipInstall = false } = msg.payload;
+    try {
+      if (operation === "generate") {
+        await generateConfigYamlSchema({ skipInstall });
+      } else if (operation === "copy") {
+        await copyConfigSchema();
+      } else {
+        throw new Error(`Unknown config operation: ${String(operation)}`);
       }
-      resolve();
-    });
-  });
-
-  // Copy config schemas to intellij
-  const copyConfigSchemaChild = fork(
-    path.join(__dirname, "generate-copy-config.js"),
-    {
-      stdio: "inherit",
-    },
-  );
-  copyConfigSchemaChild.send({ payload: { operation: "copy" } });
-
-  await new Promise((resolve, reject) => {
-    copyConfigSchemaChild.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      }
-      resolve();
-    });
+      sendChildResult({ done: true }, 0);
+    } catch (error) {
+      console.error(error);
+      sendChildResult({ error: true, message: String(error) }, 1);
+    }
   });
 }
 
+function runConfigOperation(operation, payload = {}, options = {}) {
+  return runChildOperation({
+    forkChild: options.forkChild ?? fork,
+    modulePath: __filename,
+    payload: { operation, ...payload },
+    timeoutMs: options.timeoutMs,
+  });
+}
+
+async function generateAndCopyConfigYamlSchema({ skipInstall = false } = {}) {
+  // Generate and copy over config-yaml-schema.json
+  await runConfigOperation("generate", { skipInstall });
+
+  // Copy config schemas to intellij
+  await runConfigOperation("copy");
+}
+
 module.exports = {
+  generateConfigYamlSchema,
   generateAndCopyConfigYamlSchema,
+  runConfigOperation,
 };
