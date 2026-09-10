@@ -12,7 +12,11 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IdeMessengerProvider } from "../../context/IdeMessenger";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
-import { ISSUE_SUBMIT_TIMEOUT_MS, ReportIssueModal } from "./ReportIssueModal";
+import {
+  ISSUE_SNAPSHOT_TIMEOUT_MS,
+  ISSUE_SUBMIT_TIMEOUT_MS,
+  ReportIssueModal,
+} from "./ReportIssueModal";
 
 const captureSnapshot = vi.hoisted(() => vi.fn());
 
@@ -236,6 +240,70 @@ describe("ReportIssueModal", () => {
       expect(submissions).toHaveLength(2);
       expect(submissions[1]).toEqual(submissions[0]);
       expect(captureSnapshot).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("unlocks snapshot reconstruction when the initial capture never resolves", async () => {
+    captureSnapshot.mockImplementationOnce(() => new Promise(() => undefined));
+    vi.useFakeTimers();
+    try {
+      renderForm();
+      expect(screen.getByText("Reconstructing…")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ISSUE_SNAPSHOT_TIMEOUT_MS);
+      });
+
+      expect(screen.getByText(/snapshot timed out/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Reconstruct chat snapshot" }),
+      ).toBeEnabled();
+      expect(screen.getByText("Unavailable")).toBeInTheDocument();
+
+      captureSnapshot.mockResolvedValueOnce(SNAPSHOT);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Reconstruct chat snapshot" }),
+      );
+      await act(async () => {
+        await vi.runAllTicks();
+      });
+      expect(
+        screen.getByAltText("Sanitized Cukii chat preview"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("unlocks report retry when the submit-time snapshot never resolves", async () => {
+    captureSnapshot.mockResolvedValueOnce(SNAPSHOT);
+    renderForm();
+    await screen.findByAltText("Sanitized Cukii chat preview");
+    fireEvent.change(
+      screen.getByPlaceholderText("A short description of the problem"),
+      { target: { value: "Snapshot refresh stopped replying" } },
+    );
+    captureSnapshot.mockImplementationOnce(() => new Promise(() => undefined));
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Report" }));
+      await act(async () => {
+        await vi.runAllTicks();
+      });
+      expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ISSUE_SNAPSHOT_TIMEOUT_MS);
+      });
+
+      expect(screen.getByText(/snapshot timed out/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Report" })).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "Reconstruct chat snapshot" }),
+      ).toBeEnabled();
     } finally {
       vi.useRealTimers();
     }

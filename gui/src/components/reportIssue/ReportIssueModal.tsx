@@ -115,6 +115,7 @@ export function ReportIssueModal({
   const reportIdRef = useRef(crypto.randomUUID());
   const submissionRef = useRef<CukiiIssueReportSubmission>();
   const submittingRef = useRef(false);
+  const snapshotGenerationRef = useRef(0);
   const attachmentsRef = useRef<CukiiIssuePickedImage[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -125,20 +126,35 @@ export function ReportIssueModal({
   attachmentsRef.current = attachments;
 
   const refreshSnapshot = useCallback(async () => {
+    const generation = ++snapshotGenerationRef.current;
     setSnapshotBusy(true);
     setSnapshotError(undefined);
     try {
-      const next = await captureCukiiChatSnapshot();
+      const next = await withIssueReportTimeout(
+        captureCukiiChatSnapshot(),
+        ISSUE_SNAPSHOT_TIMEOUT_MS,
+        "Chat snapshot timed out. The form is unlocked; try again.",
+      );
+      if (generation !== snapshotGenerationRef.current) return undefined;
       setSnapshot(next);
       return next;
     } catch (error) {
-      setSnapshot(undefined);
+      if (generation !== snapshotGenerationRef.current) return undefined;
       setSnapshotError(errorMessage(error));
       return undefined;
     } finally {
-      setSnapshotBusy(false);
+      if (generation === snapshotGenerationRef.current) {
+        setSnapshotBusy(false);
+      }
     }
   }, []);
+
+  useEffect(
+    () => () => {
+      snapshotGenerationRef.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     void refreshSnapshot();
@@ -272,11 +288,7 @@ export function ReportIssueModal({
     try {
       let submission = submissionRef.current;
       if (!submission) {
-        const currentSnapshot = await withIssueReportTimeout(
-          refreshSnapshot(),
-          ISSUE_SNAPSHOT_TIMEOUT_MS,
-          "Chat snapshot timed out. The form is unlocked; try again.",
-        );
+        const currentSnapshot = await refreshSnapshot();
         if (!currentSnapshot) {
           throw new Error(
             "Cukii could not reconstruct the sanitized chat snapshot. Try again.",
