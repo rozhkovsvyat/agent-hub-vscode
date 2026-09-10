@@ -23,7 +23,10 @@ import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
 import "./TipTapEditor.css";
 import { createEditorConfig, getPlaceholderText } from "./utils/editorConfig";
-import { handleImageFile } from "./utils/imageUtils";
+import {
+  getComposerImageInsertPosition,
+  handleImageFile,
+} from "./utils/imageUtils";
 import { useEditorEventHandlers } from "./utils/keyHandlers";
 
 export interface TipTapEditorProps {
@@ -284,7 +287,10 @@ function TipTapEditorInner(props: TipTapEditorProps) {
               src: dataUrl,
               title: file.name,
             });
-            const tr = editor.state.tr.insert(0, node);
+            const tr = editor.state.tr.insert(
+              getComposerImageInsertPosition(editor.state.doc),
+              node,
+            );
             editor.view.dispatch(tr);
           }
         });

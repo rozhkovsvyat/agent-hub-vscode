@@ -47,6 +47,14 @@ function panel() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 function register(core: { invoke: ReturnType<typeof vi.fn> }) {
   const sidebar = {
     webviewProtocol: {
@@ -270,6 +278,48 @@ describe("saved Cukii sidebar session opening", () => {
     expect(invokeCount(core)).toBe(afterFirst);
     expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(created.reveal).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces concurrent saved-session opens after the async index lookup", async () => {
+    const created = panel();
+    state.createWebviewPanel.mockReturnValue(created);
+    const metadata =
+      deferred<
+        Array<{ sessionId: string; title: string; messageCount: number }>
+      >();
+    const core = {
+      invoke: vi.fn((command: string) => {
+        if (command === "history/list") return metadata.promise;
+        return Promise.resolve(undefined);
+      }),
+    };
+    register(core);
+    const open = state.commands.get("continue.openInNewWindow")!;
+
+    const opens = Array.from({ length: 5 }, () =>
+      open({ sessionId: "saved-session" }),
+    );
+    await vi.waitFor(() => {
+      expect(
+        core.invoke.mock.calls.filter(
+          ([command]) => command === "history/list",
+        ),
+      ).toHaveLength(5);
+    });
+    metadata.resolve([
+      {
+        sessionId: "saved-session",
+        title: "Saved sidebar chat",
+        messageCount: 2,
+      },
+    ]);
+    await Promise.all(opens);
+
+    expect(state.createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(
+      core.invoke.mock.calls.filter(([command]) => command === "history/load"),
+    ).toHaveLength(1);
+    expect(created.reveal).toHaveBeenCalledTimes(4);
   });
 
   it("focuses the matching panelId without loading or creating another tab", async () => {

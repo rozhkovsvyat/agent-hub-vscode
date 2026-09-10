@@ -37,6 +37,7 @@ import {
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
   bridgeProcessExitIsFailure,
+  bridgeProcessFailureTerminalEvent,
   claudeInitialContent,
   claudeStreamingInput,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
@@ -99,31 +100,57 @@ describe("native bridge argv", () => {
       "const enqueueVisibleEvents = (events: BridgeEvent[]) => {",
     );
     const closeAt = source.indexOf('child.once("close"', enqueueAt);
-    const finalThrowAt = source.indexOf(
-      "if (error && !cancelled && !protocolTerminalReceived)",
+    const terminalFailureAt = source.indexOf(
+      "const terminalFailure = bridgeProcessFailureTerminalEvent(",
       closeAt,
     );
 
     expect(enqueueAt).toBeGreaterThan(-1);
     expect(closeAt).toBeGreaterThan(enqueueAt);
-    expect(finalThrowAt).toBeGreaterThan(closeAt);
+    expect(terminalFailureAt).toBeGreaterThan(closeAt);
     expect(source.slice(enqueueAt, closeAt)).toContain(
       'if (event.kind === "complete")',
     );
     expect(source.slice(enqueueAt, closeAt)).toContain(
       "protocolTerminalReceived = true",
     );
-    expect(source.slice(closeAt, finalThrowAt)).toContain(
+    expect(source.slice(closeAt, terminalFailureAt)).toContain(
       "bridgeProcessExitIsFailure(",
     );
-    expect(source.slice(closeAt, finalThrowAt)).toContain(
+    expect(source.slice(closeAt, terminalFailureAt)).toContain(
       'route.stdinFormat === "claude-stream-json"',
     );
     // Failed teardown still throws independently inside `finally`; only the
     // duplicate process-exit verdict is subordinated to the receipt.
-    expect(source.slice(closeAt, finalThrowAt)).toContain(
+    expect(source.slice(closeAt, terminalFailureAt)).toContain(
       "Native bridge process tree did not terminate within the safety budget",
     );
+    const terminalFailureTail = source.slice(terminalFailureAt);
+    expect(terminalFailureTail).toContain("toChatMessages(terminalFailure)");
+    expect(terminalFailureTail).not.toContain("throw error");
+    expect(source.slice(closeAt, terminalFailureAt)).toContain(
+      "local safety policy blocked a command",
+    );
+  });
+
+  it("turns a stopped native process into one visible terminal error receipt", () => {
+    const failure = new Error(
+      "GPT-5.6 Sol stopped because the local safety policy blocked a command.",
+    );
+
+    expect(bridgeProcessFailureTerminalEvent(failure, false, false)).toEqual({
+      kind: "terminalError",
+      text: failure.message,
+    });
+    expect(
+      bridgeProcessFailureTerminalEvent(failure, true, false),
+    ).toBeUndefined();
+    expect(
+      bridgeProcessFailureTerminalEvent(failure, false, true),
+    ).toBeUndefined();
+    expect(
+      bridgeProcessFailureTerminalEvent(undefined, false, false),
+    ).toBeUndefined();
   });
 
   it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {

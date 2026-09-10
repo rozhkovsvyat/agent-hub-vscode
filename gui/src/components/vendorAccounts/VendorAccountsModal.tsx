@@ -86,6 +86,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
     | {
         reason: "user" | "action";
         generation: number;
+        waiters: Array<() => void>;
       }
     | undefined
   >(undefined);
@@ -106,7 +107,16 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
       if (refreshInFlight.current) {
         if (explicit) {
           // Only user/action intent invalidates the active result.
-          pendingExplicitRefresh.current = { reason, generation };
+          await new Promise<void>((resolve) => {
+            pendingExplicitRefresh.current = {
+              reason,
+              generation,
+              waiters: [
+                ...(pendingExplicitRefresh.current?.waiters ?? []),
+                resolve,
+              ],
+            };
+          });
         }
         return;
       }
@@ -131,7 +141,11 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
         const queuedExplicit = pendingExplicitRefresh.current;
         if (queuedExplicit) {
           pendingExplicitRefresh.current = undefined;
-          void refresh(queuedExplicit.reason, queuedExplicit.generation);
+          try {
+            await refresh(queuedExplicit.reason, queuedExplicit.generation);
+          } finally {
+            queuedExplicit.waiters.forEach((resolve) => resolve());
+          }
         }
       }
     },
@@ -158,6 +172,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
     // flight. Invalidate that snapshot before the terminal opens, rather than
     // briefly painting the old login state after the user requested a change.
     explicitRefreshGeneration.current += 1;
+    pendingExplicitRefresh.current?.waiters.forEach((resolve) => resolve());
     pendingExplicitRefresh.current = undefined;
     authActionOpening.current = true;
     setBusy(key);
@@ -173,9 +188,15 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
       );
     } finally {
       authActionOpening.current = false;
-      setBusy(undefined);
       // Do not keep the state from before opening the native login/logout flow.
-      await refresh("action");
+      // The action is not visually complete until this authoritative snapshot
+      // lands: clearing `busy` first made the spinner disappear 1–2 seconds
+      // before the account row caught up.
+      try {
+        await refresh("action");
+      } finally {
+        setBusy(undefined);
+      }
     }
   };
 

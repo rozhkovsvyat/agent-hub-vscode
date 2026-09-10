@@ -2,12 +2,36 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
 
 import {
+  getComposerImageInsertPosition,
   GROK_INLINE_ARGV_IMAGE_RESOLUTION,
   getDataUrlForFile,
   getOriginalDataUrlForFile,
   grokInlineArgvImageEncodePlan,
   supportsOriginalImageMimeType,
 } from "./imageUtils";
+
+describe("getComposerImageInsertPosition", () => {
+  it("appends new previews after the existing leading images", () => {
+    const doc = {
+      forEach: (visit: (node: any, offset: number) => void) => {
+        visit({ nodeSize: 1, type: { name: "image" } }, 0);
+        visit({ nodeSize: 1, type: { name: "image" } }, 1);
+        visit({ nodeSize: 4, type: { name: "paragraph" } }, 2);
+      },
+    };
+
+    expect(getComposerImageInsertPosition(doc as any)).toBe(2);
+  });
+
+  it("keeps the first attachment before the text", () => {
+    const doc = {
+      forEach: (visit: (node: any, offset: number) => void) =>
+        visit({ nodeSize: 4, type: { name: "paragraph" } }, 0),
+    };
+
+    expect(getComposerImageInsertPosition(doc as any)).toBe(0);
+  });
+});
 
 afterEach(() => vi.restoreAllMocks());
 

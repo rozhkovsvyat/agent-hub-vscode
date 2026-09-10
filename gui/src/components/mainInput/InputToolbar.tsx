@@ -78,6 +78,7 @@ import {
 import { PermissionModeControl } from "./PermissionModeControl";
 
 const ISSUE_CAPABILITY_REFRESH_MS = 60_000;
+const ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS = [2_000, 5_000, 15_000] as const;
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -195,6 +196,7 @@ function InputToolbar(props: InputToolbarProps) {
   const [reportIssueAvailableForOpenMenu, setReportIssueAvailableForOpenMenu] =
     useState(false);
   const issueCapabilityGeneration = useRef(0);
+  const issueCapabilityRetryAttempt = useRef(0);
   const [actionQuery, setActionQuery] = useState("");
   const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
     null,
@@ -246,6 +248,25 @@ function InputToolbar(props: InputToolbarProps) {
       issueCapabilityGeneration.current += 1;
     };
   }, [refreshIssueCapability]);
+
+  useEffect(() => {
+    if (!props.isMainInput) return;
+    if (issueCapability?.reason !== "unreachable") {
+      issueCapabilityRetryAttempt.current = 0;
+      return;
+    }
+
+    const attempt = issueCapabilityRetryAttempt.current;
+    const delay =
+      ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS[
+        Math.min(attempt, ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS.length - 1)
+      ];
+    const timeout = window.setTimeout(() => {
+      issueCapabilityRetryAttempt.current = attempt + 1;
+      void refreshIssueCapability(true);
+    }, delay);
+    return () => window.clearTimeout(timeout);
+  }, [issueCapability, props.isMainInput, refreshIssueCapability]);
 
   useEffect(() => {
     let cancelled = false;

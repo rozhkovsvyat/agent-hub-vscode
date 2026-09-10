@@ -29,7 +29,7 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import { handleImageFile } from "./imageUtils";
+import { getComposerImageInsertPosition, handleImageFile } from "./imageUtils";
 
 export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
 
@@ -253,7 +253,10 @@ export function createEditorConfig(options: {
                         src: dataUrl,
                         title: file.name,
                       });
-                      const tr = view.state.tr.insert(0, node);
+                      const tr = view.state.tr.insert(
+                        getComposerImageInsertPosition(view.state.doc),
+                        node,
+                      );
                       view.dispatch(tr);
                     });
                   }

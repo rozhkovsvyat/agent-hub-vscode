@@ -45,17 +45,20 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Coming soon");
     expect(document.querySelectorAll("h3, h4")).toHaveLength(1);
     expect(getElementByText("Accounts")).toBeDefined();
-    await user.click(await getElementByText("Log out"));
+    const logout = (await getElementByText("Log out")) as HTMLButtonElement;
+    await user.click(logout);
 
     expect(requestSpy).toHaveBeenCalledWith("cukii/runVendorAuthAction", {
       vendor: "claude",
       action: "logout",
     });
-    expect(
-      requestSpy.mock.calls.filter(
-        ([messageType]) => messageType === "cukii/listVendorAccounts",
-      ),
-    ).toHaveLength(1);
+    await waitFor(() =>
+      expect(
+        requestSpy.mock.calls.filter(
+          ([messageType]) => messageType === "cukii/listVendorAccounts",
+        ),
+      ).toHaveLength(1),
+    );
     expect(
       await getElementByText(
         "Authentication flow opened in the integrated terminal.",
@@ -250,8 +253,8 @@ describe("VendorAccountsModal", () => {
       <VendorAccountsModal onClose={vi.fn()} />,
       { mockIdeMessenger: ideMessenger },
     );
-    await getElementByText("Log out");
-    await user.click(await getElementByText("Log out"));
+    const logout = (await getElementByText("Log out")) as HTMLButtonElement;
+    await user.click(logout);
 
     const refresh = document.querySelector<HTMLButtonElement>(
       '[aria-label="Refresh vendor accounts"]',
@@ -271,6 +274,8 @@ describe("VendorAccountsModal", () => {
       });
     });
     await waitFor(() => expect(accountRequests).toBe(2));
+    expect(logout).toHaveAttribute("aria-busy", "true");
+    expect(logout).toBeDisabled();
     await act(async () => {
       refreshedList.resolve({
         status: "success",
@@ -279,6 +284,10 @@ describe("VendorAccountsModal", () => {
       });
     });
     await getElementByText("fresh-after-action@example.test");
+    expect(await getElementByText("Log out")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
   });
 
   it("uses the exact sign-in and unavailable copy", async () => {

@@ -26,6 +26,7 @@ type Row = {
 export type HistoryManagerOptions = {
   beforeMutation?: () => Promise<void> | void;
   beforeMigrationCommit?: () => Promise<void> | void;
+  beforeReadCompactionCommit?: () => Promise<void> | void;
 };
 export class HistoryConflictError extends Error {
   readonly code = "HISTORY_CONFLICT";
@@ -216,22 +217,30 @@ export class HistoryManager {
   private body(s: Session, revision: number, manual: boolean) {
     return { ...s, revision, titleManuallySet: manual || undefined };
   }
-  private fromRow(row: Row): Session {
+  private decodeRow(row: Row): {
+    compactedBodyJson?: string;
+    session: Session;
+  } {
     try {
-      const body = compactSessionForPersistence(
-        JSON.parse(row.body_json) as Session,
-      );
+      const parsed = JSON.parse(row.body_json) as Session;
+      const body = compactSessionForPersistence(parsed);
       return {
-        ...body,
-        sessionId: row.id,
-        title: row.title,
-        workspaceDirectory: row.workspace,
-        titleManuallySet: row.manual_title ? true : undefined,
-        revision: row.revision,
+        compactedBodyJson: body === parsed ? undefined : JSON.stringify(body),
+        session: {
+          ...body,
+          sessionId: row.id,
+          title: row.title,
+          workspaceDirectory: row.workspace,
+          titleManuallySet: row.manual_title ? true : undefined,
+          revision: row.revision,
+        },
       };
     } catch {
       throw new HistoryIntegrityError(`Corrupt session body: ${row.id}`);
     }
+  }
+  private fromRow(row: Row): Session {
+    return this.decodeRow(row).session;
   }
   private async parallel<T, R>(
     items: T[],
@@ -603,10 +612,27 @@ export class HistoryManager {
   }
   async load(id: string) {
     this.validId(id);
-    const row = await (
-      await this.db()
-    ).get<Row>("SELECT * FROM sessions WHERE id=?", id);
-    return row ? this.fromRow(row) : this.empty(id);
+    const db = await this.db();
+    const row = await db.get<Row>("SELECT * FROM sessions WHERE id=?", id);
+    if (!row) return this.empty(id);
+    const decoded = this.decodeRow(row);
+    if (decoded.compactedBodyJson) {
+      try {
+        await this.options.beforeReadCompactionCommit?.();
+        // Representation-only migration: keep the semantic revision stable so
+        // live panels do not conflict, and never overwrite a concurrent save.
+        await db.run(
+          "UPDATE sessions SET body_json=? WHERE id=? AND revision=?",
+          decoded.compactedBodyJson,
+          row.id,
+          row.revision,
+        );
+      } catch {
+        // The compacted session is still safe to return. A busy/read-only DB
+        // can retry the physical shrink on the next load or normal save.
+      }
+    }
+    return decoded.session;
   }
   async save(incoming: Session, opts?: { authoritativeTitle?: boolean }) {
     incoming = compactSessionForPersistence(incoming);

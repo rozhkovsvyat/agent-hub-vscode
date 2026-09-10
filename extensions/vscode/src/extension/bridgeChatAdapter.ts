@@ -23,6 +23,7 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
+import { brokerFactDisciplineDirective } from "./bridgeFactDiscipline";
 import {
   bridgeInboxMessageStatus,
   markBridgeInboxMessagesRead,
@@ -477,6 +478,7 @@ function buildPrompt(
     "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
     "Answer in the user's language and keep normal chat continuity from the transcript.",
     "While working, write short status lines often — what you are doing now, not a spinner. Long silent stretches between tools read as a freeze.",
+    ...brokerFactDisciplineDirective(),
     ...(isClaudeNativeModel(brokerModel)
       ? [
           "The user may send live follow-up messages through this same native session. Treat each as current-task steering before the next model step.",
@@ -1346,6 +1348,21 @@ export function bridgeProcessExitIsFailure(
   );
 }
 
+/**
+ * A child that has actually stopped cannot continue producing a response.
+ * Surface that fact in the transcript as a terminal receipt so the GUI both
+ * explains the interruption and releases the composer. A normal protocol
+ * terminal or an explicit user cancellation remains authoritative and quiet.
+ */
+export function bridgeProcessFailureTerminalEvent(
+  error: Error | undefined,
+  cancelled: boolean,
+  protocolTerminalReceived: boolean,
+): Extract<BridgeEvent, { kind: "terminalError" }> | undefined {
+  if (!error || cancelled || protocolTerminalReceived) return undefined;
+  return { kind: "terminalError", text: error.message };
+}
+
 export type BridgeChildErrorSettlement = {
   events: BridgeEvent[];
   error: Error | undefined;
@@ -1957,10 +1974,19 @@ async function* launchBridgeChild(options: {
       // cache line that precedes it in the same stderr.
       const logSuffix = route.logFile ? ` Bridge log: ${route.logFile}` : "";
       const creditFailure = /out of credits|refill/i.test(detail);
+      const policyFailure =
+        /Rejected\(|blocked by (?:the )?(?:local )?(?:safety )?policy/i.test(
+          detail,
+        );
       const cacheField = detail.match(
         /failed to load models cache: missing field `([^`]+)`/,
       );
-      if (creditFailure) {
+      if (policyFailure) {
+        error = new Error(
+          `${route.label} stopped because the local safety policy blocked a command. The blocked command was not executed. Send the message again to continue in a fresh turn.` +
+            logSuffix,
+        );
+      } else if (creditFailure) {
         error = new Error(
           `${route.label} bridge stopped because the vendor workspace is out of credits. This is a usage limit, not a Cukii defect: ask the workspace owner to refill credits, then send the message again.` +
             logSuffix,
@@ -2066,8 +2092,15 @@ async function* launchBridgeChild(options: {
     }
   }
 
-  if (error && !cancelled && !protocolTerminalReceived) {
-    throw error;
+  const terminalFailure = bridgeProcessFailureTerminalEvent(
+    error,
+    cancelled,
+    protocolTerminalReceived,
+  );
+  if (terminalFailure) {
+    for (const message of toChatMessages(terminalFailure)) {
+      yield message;
+    }
   }
 
   return {

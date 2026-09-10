@@ -948,6 +948,18 @@ const getCommandsMap: (
         if (!known || known.messageCount === 0) {
           return;
         }
+
+        // Several navigator clicks can all pass the first synchronous lookup
+        // while the shared async index request is in flight. Re-check against
+        // the authoritative registry after that await: the first continuation
+        // creates the panel, every later continuation focuses it without
+        // starting another body load or another webview.
+        const racedExisting = fullScreenPanels.forSession(initialSessionId);
+        if (racedExisting) {
+          racedExisting.panel.panel.reveal();
+          fullScreenPanels.markActive(racedExisting.id);
+          return;
+        }
         initialTitle = known.title;
 
         // 🔴 Started here and deliberately NOT awaited. Measured like for like

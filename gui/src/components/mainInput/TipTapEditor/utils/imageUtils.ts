@@ -1,4 +1,5 @@
 import { GROK_INLINE_ARGV_IMAGE_MAX_DATA_URL_CHARS } from "core/cukiiPermissionModes";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 import { IIdeMessenger } from "../../../../context/IdeMessenger";
 
@@ -19,6 +20,25 @@ const SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES = new Set([
   "image/gif",
   "image/webp",
 ]);
+
+/**
+ * Keep composer attachments before the text while preserving the order in
+ * which the user attached them. Inserting every image at document position 0
+ * made the newest preview jump to the left of the first one.
+ */
+export function getComposerImageInsertPosition(doc: ProseMirrorNode): number {
+  let position = 0;
+  let scanningLeadingImages = true;
+  doc.forEach((node, offset) => {
+    if (!scanningLeadingImages) return;
+    if (node.type.name !== "image") {
+      scanningLeadingImages = false;
+      return;
+    }
+    position = offset + node.nodeSize;
+  });
+  return position;
+}
 
 export function supportsOriginalImageMimeType(mimeType: string): boolean {
   return SUPPORTED_ORIGINAL_IMAGE_MIME_TYPES.has(mimeType.toLowerCase());

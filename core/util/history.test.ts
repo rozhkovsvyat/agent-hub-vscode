@@ -127,6 +127,138 @@ describe("SQLite session history", () => {
     );
   });
 
+  test("first load physically shrinks a legacy duplicate without changing revision", async () => {
+    const id = `legacy-compact-${uuid()}`;
+    const body = make(id, "legacy compact", [
+      {
+        message: { id: "assistant-1", role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "call-1",
+            toolCall: {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            output: [
+              { name: "file", description: "", content: "legacy payload" },
+            ],
+          },
+        ],
+      },
+      {
+        message: {
+          id: "tool-1",
+          role: "tool",
+          content: "legacy payload",
+          toolCallId: "call-1",
+        },
+        contextItems: [],
+      },
+    ] as any);
+    const rawBody = JSON.stringify(body);
+    const db = await (history as any).db();
+    await db.run(
+      "INSERT INTO sessions (id,revision,title,workspace,created_at,created_order,updated_at,message_count,body_json,manual_title) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      [id, 7, body.title, body.workspaceDirectory, "1", 1, 1, 1, rawBody, 0],
+    );
+
+    const loaded = await history.load(id);
+    const stored = (await db.get(
+      "SELECT body_json,revision FROM sessions WHERE id=?",
+      id,
+    )) as { body_json: string; revision: number };
+
+    expect(loaded.history).toHaveLength(1);
+    expect(stored.revision).toBe(7);
+    expect(stored.body_json.length).toBeLessThan(rawBody.length);
+    expect(JSON.parse(stored.body_json).history).toHaveLength(1);
+  });
+
+  test("read compaction never overwrites a concurrent semantic save", async () => {
+    const id = `legacy-compact-race-${uuid()}`;
+    const legacy = make(id, "legacy", [
+      {
+        message: { id: "assistant-1", role: "assistant", content: "" },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "call-1",
+            toolCall: {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            output: [
+              { name: "file", description: "", content: "legacy payload" },
+            ],
+          },
+        ],
+      },
+      {
+        message: {
+          id: "tool-1",
+          role: "tool",
+          content: "legacy payload",
+          toolCallId: "call-1",
+        },
+        contextItems: [],
+      },
+    ] as any);
+    const rawBody = JSON.stringify(legacy);
+    const db = await (history as any).db();
+    await db.run(
+      "INSERT INTO sessions (id,revision,title,workspace,created_at,created_order,updated_at,message_count,body_json,manual_title) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      [
+        id,
+        7,
+        legacy.title,
+        legacy.workspaceDirectory,
+        "1",
+        1,
+        1,
+        1,
+        rawBody,
+        0,
+      ],
+    );
+
+    const concurrent = new HistoryManager();
+    const compacting = new HistoryManager({
+      beforeReadCompactionCommit: async () => {
+        await concurrent.save({
+          ...legacy,
+          revision: 7,
+          title: "concurrent save wins",
+          history: [user("new-user", "new semantic content")],
+        });
+      },
+    });
+
+    const staleSnapshot = await compacting.load(id);
+    const latest = await concurrent.load(id);
+    const stored = (await db.get(
+      "SELECT body_json,revision FROM sessions WHERE id=?",
+      id,
+    )) as { body_json: string; revision: number };
+    await compacting.close();
+    await concurrent.close();
+
+    expect(staleSnapshot.revision).toBe(7);
+    expect(latest.revision).toBe(8);
+    expect(latest.title).toBe("concurrent save wins");
+    expect(latest.history).toEqual([user("new-user", "new semantic content")]);
+    expect(stored.revision).toBe(8);
+    expect(JSON.parse(stored.body_json).history).toEqual([
+      user("new-user", "new semantic content"),
+    ]);
+  });
+
   test("exact body, model controls, unicode/null and manual title round-trip", async () => {
     const id = `round-${uuid()}`;
     const first = await history.save({

@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom";
+import { cleanup } from "@testing-library/react";
 
 // Node 22+ exposes a broken experimental global localStorage unless
 // --localstorage-file is set. Unqualified `localStorage.getItem` then throws
@@ -25,6 +26,11 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 afterEach(() => {
+  // Vitest's single-fork mode caches @testing-library/react between test
+  // files. Its import-time auto-cleanup hook is then owned by only the first
+  // file, so later files can leak rendered providers and portals into each
+  // other. Keep cleanup in the global setup where every test receives it.
+  cleanup();
   vi.clearAllMocks();
 });
 

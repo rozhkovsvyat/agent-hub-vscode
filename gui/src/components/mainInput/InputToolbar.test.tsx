@@ -644,6 +644,45 @@ describe("Cukii Claude-parity input toolbar", () => {
     },
   );
 
+  it("retries a transient unreachable issue capability without opening Accounts", async () => {
+    vi.useFakeTimers();
+    try {
+      const mockIdeMessenger = new MockIdeMessenger();
+      let capabilityRequests = 0;
+      mockIdeMessenger.responseHandlers["cukii/getIssueReportCapability"] =
+        async () => {
+          capabilityRequests += 1;
+          return capabilityRequests === 1
+            ? { available: false, reason: "unreachable" as const }
+            : { available: true, reason: "available" as const };
+        };
+
+      await renderWithProviders(<InputToolbar {...props} />, {
+        mockIdeMessenger,
+      });
+      await act(async () => undefined);
+      expect(capabilityRequests).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(capabilityRequests).toBe(2);
+
+      fireEvent.click(
+        document.querySelector<HTMLElement>(
+          '[data-testid="broker-menu-button"]',
+        )!,
+      );
+      await act(async () => undefined);
+      expect(
+        document.querySelector('[data-testid="cukii-report-issue-menu-item"]'),
+      ).not.toBeNull();
+      expect(document.body.textContent).not.toContain("Accounts");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows Report an issue last from the prefetched board capability", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     const composerClick = vi.fn();
