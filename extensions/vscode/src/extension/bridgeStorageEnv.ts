@@ -70,6 +70,30 @@ function safeExistingWindowsRoot(
   }
 }
 
+function canonicalWindowsRoot(
+  candidate: string,
+  label: string,
+  options: Required<
+    Pick<BridgeStorageOptions, "pathExists" | "pathIsDirectory" | "realPath">
+  >,
+): string | undefined {
+  let exists: boolean;
+  try {
+    exists = options.pathExists(candidate);
+  } catch (error) {
+    throw new Error(`Cannot inspect canonical ${label} root ${candidate}`, {
+      cause: error,
+    });
+  }
+  if (!exists) return undefined;
+
+  const safe = safeExistingWindowsRoot(candidate, options);
+  if (!safe) {
+    throw new Error(`Canonical ${label} root is not a safe physical directory: ${candidate}`);
+  }
+  return safe;
+}
+
 export function removeCaseInsensitiveEnvKeys(
   env: NodeJS.ProcessEnv,
   keys: string[],
@@ -100,15 +124,17 @@ export function resolveBridgeStorageLayout(
   const realPath = options.realPath ?? fs.realpathSync.native;
   const rootOptions = { pathExists, pathIsDirectory, realPath };
   const scratchRoot =
-    safeExistingWindowsRoot("D:\\Scratch", rootOptions) ??
+    canonicalWindowsRoot("D:\\Scratch", "scratch", rootOptions) ??
     safeExistingWindowsRoot(
       caseInsensitiveEnvValue(env, "CUKII_SCRATCH_DIR"),
       rootOptions,
     ) ??
-    safeExistingWindowsRoot(systemTempDir, rootOptions) ??
-    "C:\\Temp";
+    safeExistingWindowsRoot(systemTempDir, rootOptions);
+  if (!scratchRoot) {
+    throw new Error("No safe existing Windows temporary root is available");
+  }
   const pnpmStoreDir =
-    safeExistingWindowsRoot("D:\\PnpmStore", rootOptions) ??
+    canonicalWindowsRoot("D:\\PnpmStore", "pnpm store", rootOptions) ??
     safeExistingWindowsRoot(
       caseInsensitiveEnvValue(env, "npm_config_store_dir"),
       rootOptions,

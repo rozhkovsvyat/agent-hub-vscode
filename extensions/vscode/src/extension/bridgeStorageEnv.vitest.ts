@@ -70,35 +70,33 @@ describe("resolveBridgeStorageLayout", () => {
   });
 
   it("rejects forbidden stale roots even when canonical folders are missing", () => {
-    const result = resolveBridgeStorageLayout({
-      platform: "win32",
-      env: {
-        CUKII_SCRATCH_DIR: "D:\\tmp",
-        npm_config_store_dir: "D:\\Brain\\pnpm-store",
-      },
-      pathExists: () => false,
-      ...identityWindowsFs,
-      systemTempDir: "D:\\tmp",
-    });
-
-    expect(result).toEqual({
-      tempDir: "C:\\Temp\\cukii-vendor-runtime",
-    });
+    expect(() =>
+      resolveBridgeStorageLayout({
+        platform: "win32",
+        env: {
+          CUKII_SCRATCH_DIR: "D:\\tmp",
+          npm_config_store_dir: "D:\\Brain\\pnpm-store",
+        },
+        pathExists: () => false,
+        ...identityWindowsFs,
+        systemTempDir: "D:\\tmp",
+      }),
+    ).toThrow(/no safe existing windows temporary root/i);
   });
 
   it("rejects descendants of every forbidden Windows root", () => {
-    const result = resolveBridgeStorageLayout({
-      platform: "win32",
-      env: {
-        CUKII_SCRATCH_DIR: "D:\\tmp\\nested",
-        npm_config_store_dir: "D:\\Brain\\pnpm-store\\v3",
-      },
-      pathExists: () => false,
-      ...identityWindowsFs,
-      systemTempDir: "D:\\Brain\\tmp\\vendor",
-    });
-
-    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+    expect(() =>
+      resolveBridgeStorageLayout({
+        platform: "win32",
+        env: {
+          CUKII_SCRATCH_DIR: "D:\\tmp\\nested",
+          npm_config_store_dir: "D:\\Brain\\pnpm-store\\v3",
+        },
+        pathExists: () => false,
+        ...identityWindowsFs,
+        systemTempDir: "D:\\Brain\\tmp\\vendor",
+      }),
+    ).toThrow(/no safe existing windows temporary root/i);
   });
 
   it("removes inherited environment keys case-insensitively", () => {
@@ -118,7 +116,7 @@ describe("resolveBridgeStorageLayout", () => {
     const result = resolveBridgeStorageLayout({
       platform: "win32",
       env: { CUKII_SCRATCH_DIR: "relative", npm_config_store_dir: "relative" },
-      pathExists: () => false,
+      pathExists: (candidate) => candidate === "C:\\Temp",
       ...identityWindowsFs,
       systemTempDir: "C:\\Temp",
     });
@@ -166,7 +164,7 @@ describe("resolveBridgeStorageLayout", () => {
     expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
   });
 
-  it("fails closed when directory inspection or realpath fails", () => {
+  it("falls back to a verified system temp when a configured root cannot be inspected", () => {
     const common = {
       platform: "win32" as const,
       env: { CUKII_SCRATCH_DIR: "E:\\AgentScratch" },
@@ -193,6 +191,47 @@ describe("resolveBridgeStorageLayout", () => {
 
     expect(statFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
     expect(realPathFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it.each(["stat", "realpath"])(
+    "fails closed when canonical pnpm storage %s cannot be verified",
+    (failure) => {
+      expect(() =>
+        resolveBridgeStorageLayout({
+          platform: "win32",
+          env: { npm_config_store_dir: "E:\\Store" },
+          pathExists: (candidate) =>
+            candidate === "D:\\Scratch" ||
+            candidate === "D:\\PnpmStore" ||
+            candidate === "E:\\Store",
+          pathIsDirectory: (candidate) => {
+            if (failure === "stat" && candidate === "D:\\PnpmStore") {
+              throw new Error("locked");
+            }
+            return true;
+          },
+          realPath: (candidate) => {
+            if (failure === "realpath" && candidate === "D:\\PnpmStore") {
+              throw new Error("unresolved");
+            }
+            return candidate;
+          },
+          systemTempDir: "C:\\Temp",
+        }),
+      ).toThrow(/canonical pnpm store root is not a safe physical directory/i);
+    },
+  );
+
+  it("fails closed when no verified temp root exists instead of inventing C:\\Temp", () => {
+    expect(() =>
+      resolveBridgeStorageLayout({
+        platform: "win32",
+        env: {},
+        pathExists: () => false,
+        ...identityWindowsFs,
+        systemTempDir: "C:\\Temp",
+      }),
+    ).toThrow(/no safe existing windows temporary root/i);
   });
 
   it("sanitizes mixed-case terminal and process storage variables", () => {
