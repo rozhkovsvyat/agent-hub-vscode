@@ -24,6 +24,7 @@ import { useMainEditor } from "./MainEditorProvider";
 import "./TipTapEditor.css";
 import { createEditorConfig, getPlaceholderText } from "./utils/editorConfig";
 import {
+  createOrderedAttachmentQueue,
   getComposerImageInsertPosition,
   handleImageFile,
 } from "./utils/imageUtils";
@@ -69,10 +70,16 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       defaultModel?.title,
       defaultModel?.capabilities,
     );
+  const attachmentQueue =
+    useRef<(pending: Promise<(() => void) | undefined>) => Promise<void>>();
+  attachmentQueue.current ??= createOrderedAttachmentQueue<() => void>(
+    (insert) => insert(),
+  );
   const { editor, onEnter } = createEditorConfig({
     props,
     ideMessenger,
     dispatch,
+    enqueueAttachment: attachmentQueue.current,
   });
 
   // Register the main editor with the provider
@@ -269,31 +276,36 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       }}
       onDrop={(event) => {
         setShowDragOverMsg(false);
-        if (!supportsImageInput) {
+        if (!supportsImageInput || !editor) {
           return;
         }
-        let file = event.dataTransfer.files[0];
-        void handleImageFile(ideMessenger, file).then((result) => {
-          if (!editor) {
-            return;
-          }
-          if (result) {
-            const [_, dataUrl, originalSrc, inlineArgvSrc] = result;
-            const { schema } = editor.state;
-            const node = schema.nodes.image.create({
-              alt: file.name,
-              inlineArgvSrc: inlineArgvSrc ?? null,
-              originalSrc,
-              src: dataUrl,
-              title: file.name,
-            });
-            const tr = editor.state.tr.insert(
-              getComposerImageInsertPosition(editor.state.doc),
-              node,
-            );
-            editor.view.dispatch(tr);
-          }
-        });
+        for (const file of Array.from(event.dataTransfer.files)) {
+          const prepared = handleImageFile(ideMessenger, file).then(
+            (result) => {
+              if (!result) return undefined;
+              return () => {
+                if (editor.isDestroyed) return;
+                const [, dataUrl, originalSrc, inlineArgvSrc] = result;
+                const { schema } = editor.state;
+                const node = schema.nodes.image.create({
+                  alt: file.name,
+                  inlineArgvSrc: inlineArgvSrc ?? null,
+                  originalSrc,
+                  src: dataUrl,
+                  title: file.name,
+                });
+                const tr = editor.state.tr.insert(
+                  getComposerImageInsertPosition(editor.state.doc),
+                  node,
+                );
+                editor.view.dispatch(tr);
+              };
+            },
+          );
+          void attachmentQueue.current!(prepared).catch((error) => {
+            console.error("Failed to insert composer image", error);
+          });
+        }
         event.preventDefault();
       }}
     >

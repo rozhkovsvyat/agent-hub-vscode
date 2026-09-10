@@ -39,6 +39,25 @@ describe("createOrderedAttachmentQueue", () => {
 
     expect(consumed).toEqual(["first.png", "second.png"]);
   });
+
+  it("observes an early rejection immediately and still runs later work", async () => {
+    const first = deferred<string>();
+    const consumed: string[] = [];
+    const enqueue = createOrderedAttachmentQueue<string>((value) => {
+      consumed.push(value);
+    });
+
+    const firstQueued = enqueue(first.promise);
+    const rejected = enqueue(Promise.reject(new Error("decode failed")));
+    const thirdQueued = enqueue(Promise.resolve("third.png"));
+    const rejection = expect(rejected).rejects.toThrow("decode failed");
+
+    await Promise.resolve();
+    first.resolve("first.png");
+    await Promise.all([firstQueued, rejection, thirdQueued]);
+
+    expect(consumed).toEqual(["first.png", "third.png"]);
+  });
 });
 
 describe("getComposerImageInsertPosition", () => {

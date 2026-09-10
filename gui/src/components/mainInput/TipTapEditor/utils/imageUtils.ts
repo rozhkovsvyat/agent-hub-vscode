@@ -31,9 +31,17 @@ export function createOrderedAttachmentQueue<T>(
 ): (pending: Promise<T | undefined>) => Promise<void> {
   let tail = Promise.resolve();
   return (pending) => {
+    // Observe the work immediately. Waiting to attach a handler until the
+    // previous item finishes lets an early rejection become an unhandled
+    // promise even though the eventual queued result has a catch handler.
+    const observed = pending.then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (reason: unknown) => ({ status: "rejected" as const, reason }),
+    );
     const queued = tail.then(async () => {
-      const value = await pending;
-      if (value !== undefined) await consume(value);
+      const result = await observed;
+      if (result.status === "rejected") throw result.reason;
+      if (result.value !== undefined) await consume(result.value);
     });
     // A rejected decode/consumer must not strand every later attachment.
     tail = queued.catch(() => undefined);

@@ -29,11 +29,7 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import {
-  createOrderedAttachmentQueue,
-  getComposerImageInsertPosition,
-  handleImageFile,
-} from "./imageUtils";
+import { getComposerImageInsertPosition, handleImageFile } from "./imageUtils";
 
 export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
 
@@ -106,8 +102,11 @@ export function createEditorConfig(options: {
   props: TipTapEditorProps;
   ideMessenger: IIdeMessenger;
   dispatch: AppDispatch;
+  enqueueAttachment: (
+    pending: Promise<(() => void) | undefined>,
+  ) => Promise<void>;
 }) {
-  const { props, ideMessenger, dispatch } = options;
+  const { props, ideMessenger, dispatch, enqueueAttachment } = options;
 
   const { getSubmenuContextItems } = useSubmenuContextProviders();
   const defaultModel = useAppSelector(selectSelectedChatModel);
@@ -217,9 +216,6 @@ export function createEditorConfig(options: {
           };
         },
         addProseMirrorPlugins() {
-          const insertImageInAttachmentOrder = createOrderedAttachmentQueue<
-            () => void
-          >((insert) => insert());
           const pastePlugin = new Plugin({
             props: {
               handleDOMEvents: {
@@ -253,6 +249,7 @@ export function createEditorConfig(options: {
                       (response) => {
                         if (response === undefined) return undefined;
                         return () => {
+                          if (view.isDestroyed) return;
                           const [, dataUrl, originalSrc, inlineArgvSrc] =
                             response;
                           const { schema } = view.state;
@@ -271,11 +268,9 @@ export function createEditorConfig(options: {
                         };
                       },
                     );
-                    void insertImageInAttachmentOrder(prepared).catch(
-                      (error) => {
-                        console.error("Failed to insert composer image", error);
-                      },
-                    );
+                    void enqueueAttachment(prepared).catch((error) => {
+                      console.error("Failed to insert composer image", error);
+                    });
                   }
                   if (handled) {
                     event.preventDefault();
