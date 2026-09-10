@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveBridgeStorageLayout } from "./bridgeStorageEnv";
+import {
+  removeCaseInsensitiveEnvKeys,
+  resolveBridgeStorageLayout,
+} from "./bridgeStorageEnv";
 
 describe("resolveBridgeStorageLayout", () => {
   it("uses the canonical KOMPUTER scratch and pnpm roots when present", () => {
@@ -67,6 +70,33 @@ describe("resolveBridgeStorageLayout", () => {
     expect(result).toEqual({
       tempDir: "D:\\Scratch\\cukii-vendor-runtime",
     });
+  });
+
+  it("rejects descendants of every forbidden Windows root", () => {
+    const result = resolveBridgeStorageLayout({
+      platform: "win32",
+      env: {
+        CUKII_SCRATCH_DIR: "D:\\tmp\\nested",
+        npm_config_store_dir: "D:\\Brain\\pnpm-store\\v3",
+      },
+      pathExists: () => false,
+      systemTempDir: "D:\\Brain\\tmp\\vendor",
+    });
+
+    expect(result).toEqual({ tempDir: "D:\\Scratch\\cukii-vendor-runtime" });
+  });
+
+  it("removes inherited environment keys case-insensitively", () => {
+    expect(
+      removeCaseInsensitiveEnvKeys(
+        {
+          NPM_CONFIG_STORE_DIR: "D:\\Brain\\pnpm-store",
+          npm_config_store_dir: "E:\\stale",
+          Path: "C:\\Windows",
+        },
+        ["npm_config_store_dir"],
+      ),
+    ).toEqual({ Path: "C:\\Windows" });
   });
 
   it("does not invent machine-specific roots on another machine", () => {

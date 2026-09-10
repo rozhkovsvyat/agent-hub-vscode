@@ -77,7 +77,10 @@ import {
   removeBridgeScratchFile,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
-import { resolveBridgeStorageLayout } from "./bridgeStorageEnv";
+import {
+  removeCaseInsensitiveEnvKeys,
+  resolveBridgeStorageLayout,
+} from "./bridgeStorageEnv";
 import {
   RuntimeCanaryAttestation,
   runtimeCanaryExtensionBinding,
@@ -907,9 +910,15 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
   }
 
   const storage = resolveBridgeStorageLayout({ pathExists: fs.existsSync });
-  fs.mkdirSync(storage.tempDir, { recursive: true });
+  const inheritedEnv =
+    process.platform === "win32"
+      ? removeCaseInsensitiveEnvKeys(process.env, ["npm_config_store_dir"])
+      : process.env;
+  if (process.platform === "win32") {
+    fs.mkdirSync(storage.tempDir, { recursive: true });
+  }
   const env: BridgeEnv = {
-    ...process.env,
+    ...inheritedEnv,
     [pathKey]: segments.join(path.delimiter),
     ...(process.platform === "win32" ? { ComSpec: windowsCmdPath() } : {}),
     CUKII_BRIDGE_MODE: "broker",

@@ -8,13 +8,26 @@ export interface BridgeStorageLayout {
 
 function isForbiddenWindowsStoragePath(candidate: string): boolean {
   const normalized = path.win32.normalize(candidate).replace(/[\\/]+$/, "").toLowerCase();
-  return new Set([
+  const forbiddenRoots = [
     "d:\\tmp",
     "d:\\brain\\tmp",
     "d:\\brain\\worktrees",
     "d:\\brain\\pnpm-store",
     "d:\\.pnpm-store",
-  ]).has(normalized);
+  ];
+  return forbiddenRoots.some(
+    (root) => normalized === root || normalized.startsWith(`${root}\\`),
+  );
+}
+
+export function removeCaseInsensitiveEnvKeys(
+  env: NodeJS.ProcessEnv,
+  keys: string[],
+): NodeJS.ProcessEnv {
+  const blocked = new Set(keys.map((key) => key.toLowerCase()));
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !blocked.has(key.toLowerCase())),
+  );
 }
 
 export function resolveBridgeStorageLayout(options: {
