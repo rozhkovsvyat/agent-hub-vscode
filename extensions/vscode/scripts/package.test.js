@@ -8,7 +8,11 @@ const test = require("node:test");
 const { runChildOperation } = require("./child-operation");
 const { generateConfigYamlSchema } = require("./generate-copy-config");
 const { packageAll } = require("./package-all");
-const { packageExtension, parsePackageArgs } = require("./package");
+const {
+  getPackageOutputPath,
+  packageExtension,
+  parsePackageArgs,
+} = require("./package");
 const {
   assertMissingDependencyCanBeInstalled,
   createPrepackageDependencyTasks,
@@ -62,6 +66,17 @@ test("package-all prepares fresh GUI staging once before every target", () => {
     "darwin-arm64",
     "--gui-prepared",
   ]);
+});
+
+test("package output path includes the requested target", () => {
+  assert.equal(
+    getPackageOutputPath("2.0.122", "win32-x64"),
+    "extensions/vscode/build/cukii-vscode-win32-x64-2.0.122.vsix",
+  );
+  assert.equal(
+    getPackageOutputPath("2.0.122"),
+    "extensions/vscode/build/cukii-vscode-2.0.122.vsix",
+  );
 });
 
 test("prepackage always generates the config YAML schema", async () => {

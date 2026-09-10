@@ -39,6 +39,11 @@ function parsePackageArgs(args) {
   return { target, isPreRelease };
 }
 
+function getPackageOutputPath(version, target) {
+  const targetSegment = target ? `-${target}` : "";
+  return `extensions/vscode/build/cukii-vscode${targetSegment}-${version}.vsix`;
+}
+
 function packageExtension({
   args = process.argv.slice(2),
   runVsce = execFileSync,
@@ -65,13 +70,18 @@ function packageExtension({
   }
 
   runVsce(process.execPath, vsceArgs, { stdio: "inherit", shell: false });
-  console.log(
-    `vsce package completed - extension created at extensions/vscode/build/cukii-vscode-${version}.vsix`,
-  );
+  const outputPath = getPackageOutputPath(version, target);
+  console.log(`vsce package completed - extension created at ${outputPath}`);
+  return outputPath;
 }
 
 if (require.main === module) {
   packageExtension();
 }
 
-module.exports = { SUPPORTED_TARGETS, packageExtension, parsePackageArgs };
+module.exports = {
+  SUPPORTED_TARGETS,
+  getPackageOutputPath,
+  packageExtension,
+  parsePackageArgs,
+};
