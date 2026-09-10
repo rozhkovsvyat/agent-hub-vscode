@@ -344,7 +344,15 @@ export class Core {
       return session;
     });
 
-    on("history/save", async (msg) => historyManager.save(msg.data));
+    on("history/save", async (msg) => {
+      const saved = await historyManager.save(msg.data);
+      return {
+        sessionId: saved.sessionId,
+        title: saved.title,
+        revision: saved.revision,
+        titleManuallySet: saved.titleManuallySet,
+      };
+    });
     on(
       "history/rename",
       async (msg) =>

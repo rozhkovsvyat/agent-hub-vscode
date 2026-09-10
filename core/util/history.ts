@@ -6,6 +6,7 @@ import sqlite3 from "sqlite3";
 import { BaseSessionMetadata, Session } from "../index.js";
 import { ListHistoryOptions } from "../protocol/core.js";
 import { NEW_SESSION_TITLE } from "./constants.js";
+import { compactSessionForPersistence } from "./historyCompaction.js";
 import { getContinueGlobalPath, getSessionsFolderPath } from "./paths.js";
 
 const DATABASE = "history.sqlite3";
@@ -217,7 +218,9 @@ export class HistoryManager {
   }
   private fromRow(row: Row): Session {
     try {
-      const body = JSON.parse(row.body_json) as Session;
+      const body = compactSessionForPersistence(
+        JSON.parse(row.body_json) as Session,
+      );
       return {
         ...body,
         sessionId: row.id,
@@ -606,6 +609,7 @@ export class HistoryManager {
     return row ? this.fromRow(row) : this.empty(id);
   }
   async save(incoming: Session, opts?: { authoritativeTitle?: boolean }) {
+    incoming = compactSessionForPersistence(incoming);
     this.validId(incoming.sessionId);
     const db = await this.db();
     await this.options.beforeMutation?.();

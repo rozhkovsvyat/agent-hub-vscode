@@ -44,6 +44,27 @@ type IssueDraft = {
 
 type SubmitPhase = "idle" | "submitting" | "complete";
 
+export const ISSUE_SNAPSHOT_TIMEOUT_MS = 15_000;
+export const ISSUE_SUBMIT_TIMEOUT_MS = 45_000;
+
+export async function withIssueReportTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const EMPTY_DRAFT: IssueDraft = {
   title: "",
   stepsToReproduce: "",
@@ -247,25 +268,33 @@ export function ReportIssueModal({
     setPhase("submitting");
     setSubmitError(undefined);
     try {
-      const currentSnapshot = await refreshSnapshot();
+      const currentSnapshot = await withIssueReportTimeout(
+        refreshSnapshot(),
+        ISSUE_SNAPSHOT_TIMEOUT_MS,
+        "Chat snapshot timed out. The form is unlocked; try again.",
+      );
       if (!currentSnapshot) {
         throw new Error(
           "Cukii could not reconstruct the sanitized chat snapshot. Try again.",
         );
       }
-      const response = await ideMessenger.request("cukii/submitIssueReport", {
-        reportId: reportIdRef.current,
-        ...draft,
-        sessionId,
-        brokerModel,
-        attachmentIds: attachments.map(({ id }) => id),
-        snapshot: {
-          pngBase64: currentSnapshot.pngBase64,
-          width: currentSnapshot.width,
-          height: currentSnapshot.height,
-          sanitizer: "cukii-report-v1",
-        },
-      });
+      const response = await withIssueReportTimeout(
+        ideMessenger.request("cukii/submitIssueReport", {
+          reportId: reportIdRef.current,
+          ...draft,
+          sessionId,
+          brokerModel,
+          attachmentIds: attachments.map(({ id }) => id),
+          snapshot: {
+            pngBase64: currentSnapshot.pngBase64,
+            width: currentSnapshot.width,
+            height: currentSnapshot.height,
+            sanitizer: "cukii-report-v1",
+          },
+        }),
+        ISSUE_SUBMIT_TIMEOUT_MS,
+        "Report submission timed out. The form is unlocked; retrying reuses the same report ID.",
+      );
       if (response.status === "error") throw new Error(response.error);
       attachmentsRef.current = [];
       setAttachments([]);

@@ -77,6 +77,56 @@ describe("SQLite session history", () => {
     await history.clearAll();
   });
 
+  test("persists one reconstructable copy of a terminal tool result", async () => {
+    const item = make("compact-tool", "compact-tool", [
+      {
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+          ],
+        },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "call-1",
+            toolCall: {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            output: [{ name: "file", description: "", content: "payload" }],
+          },
+        ],
+      },
+      {
+        message: {
+          id: "tool-1",
+          role: "tool",
+          content: "payload",
+          toolCallId: "call-1",
+        },
+        contextItems: [],
+      },
+    ] as any);
+
+    await history.save(item);
+    const loaded = await history.load(item.sessionId);
+
+    expect(loaded.history).toHaveLength(1);
+    expect(loaded.history[0].toolCallStates?.[0].output?.[0].content).toBe(
+      "payload",
+    );
+  });
+
   test("exact body, model controls, unicode/null and manual title round-trip", async () => {
     const id = `round-${uuid()}`;
     const first = await history.save({

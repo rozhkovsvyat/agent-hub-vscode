@@ -8,6 +8,67 @@ import {
 import { saveCurrentSession } from "./session";
 
 describe("saveCurrentSession title lifecycle", () => {
+  it("does not send reconstructed terminal tool rows across the persistence bridge", async () => {
+    const state = getEmptyRootState();
+    state.session.id = "large-broker-session";
+    state.session.title = "Broker history";
+    state.session.titleManuallySet = true;
+    state.session.history = [
+      {
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+          ],
+        },
+        contextItems: [],
+        toolCallStates: [
+          {
+            toolCallId: "call-1",
+            toolCall: {
+              id: "call-1",
+              type: "function",
+              function: { name: "read_file", arguments: "{}" },
+            },
+            status: "done",
+            parsedArgs: {},
+            output: [{ name: "file", description: "", content: "payload" }],
+          },
+        ],
+      },
+      {
+        message: {
+          id: "tool-1",
+          role: "tool",
+          content: "payload",
+          toolCallId: "call-1",
+        },
+        contextItems: [],
+      },
+    ] as any;
+    const store = createMockStore(state);
+    const requestSpy = vi.spyOn(store.mockIdeMessenger, "request");
+
+    await (store.dispatch as any)(
+      saveCurrentSession({ openNewSession: false, generateTitle: false }),
+    );
+
+    const save = requestSpy.mock.calls.find(
+      ([type]) => type === "history/save",
+    );
+    expect((save?.[1] as any).history).toHaveLength(1);
+    expect(
+      (save?.[1] as any).history[0].toolCallStates[0].output[0].content,
+    ).toBe("payload");
+    expect(state.session.history).toHaveLength(2);
+  });
+
   it("turns the first persisted exchange into one semantic title, never a model name", async () => {
     const state = getEmptyRootState();
     state.session.id = "first-real-send";

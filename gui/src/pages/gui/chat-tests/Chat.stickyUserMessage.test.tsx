@@ -437,8 +437,9 @@ test("keeps attachments in one horizontally scrolling micro-preview row", () => 
     /\.cukii-user-attachment-strip\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*4px;[^}]*overflow-x:\s*auto;[^}]*padding:\s*0 0 6px;[^}]*scrollbar-width:\s*thin/s,
   );
   expect(css).toMatch(
-    /\.cukii-composer-attachment-strip\s*\{[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px;[^}]*z-index:\s*5/s,
+    /\.cukii-composer-attachment-strip\s*\{[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px;[^}]*z-index:\s*1/s,
   );
+  expect(css).toMatch(/\.cukii-input-footer\s*\{[^}]*z-index:\s*3/s);
   expect(css).toMatch(
     /\.cukii-user-attachment-card\s*\{[^}]*max-width:\s*180px;[^}]*height:\s*24px/s,
   );

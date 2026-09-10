@@ -31,6 +31,8 @@ import {
 } from "./getSuggestion";
 import { handleImageFile } from "./imageUtils";
 
+export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
+
 export function getPlaceholderText(
   placeholder: TipTapEditorProps["placeholder"],
   historyLength: number,
@@ -176,6 +178,10 @@ export function createEditorConfig(options: {
   };
 
   const editor: Editor | null = useEditor({
+    // Build the ProseMirror view after React commits the component. Creating it
+    // synchronously inside useState can race a model-switch remount and leave
+    // TipTap's EditorState without a live schema/view.
+    immediatelyRender: CUKII_EDITOR_IMMEDIATELY_RENDER,
     extensions: [
       Document,
       History,

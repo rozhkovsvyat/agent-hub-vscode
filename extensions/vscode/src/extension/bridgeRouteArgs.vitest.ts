@@ -88,6 +88,8 @@ describe("native bridge argv", () => {
     expect(bridgeProcessExitIsFailure(1, null, true)).toBe(false);
     expect(bridgeProcessExitIsFailure(null, "SIGKILL", true)).toBe(false);
     expect(bridgeProcessExitIsFailure(0, null, false)).toBe(false);
+    expect(bridgeProcessExitIsFailure(0, null, false, true)).toBe(true);
+    expect(bridgeProcessExitIsFailure(0, null, true, true)).toBe(false);
 
     const source = fs.readFileSync(
       path.join(__dirname, "bridgeChatAdapter.ts"),
@@ -112,7 +114,10 @@ describe("native bridge argv", () => {
       "protocolTerminalReceived = true",
     );
     expect(source.slice(closeAt, finalThrowAt)).toContain(
-      "bridgeProcessExitIsFailure(code, signal, protocolTerminalReceived)",
+      "bridgeProcessExitIsFailure(",
+    );
+    expect(source.slice(closeAt, finalThrowAt)).toContain(
+      'route.stdinFormat === "claude-stream-json"',
     );
     // Failed teardown still throws independently inside `finally`; only the
     // duplicate process-exit verdict is subordinated to the receipt.

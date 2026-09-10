@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,7 +12,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IdeMessengerProvider } from "../../context/IdeMessenger";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
-import { ReportIssueModal } from "./ReportIssueModal";
+import { ISSUE_SUBMIT_TIMEOUT_MS, ReportIssueModal } from "./ReportIssueModal";
 
 const captureSnapshot = vi.hoisted(() => vi.fn());
 
@@ -176,6 +177,46 @@ describe("ReportIssueModal", () => {
 
     await screen.findByText("Report queued");
     expect(screen.getByText(/stored locally/i)).toBeInTheDocument();
+  });
+
+  it("unlocks a submission that never receives an extension-host response", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/submitIssueReport"] = () =>
+      new Promise(() => undefined);
+    renderForm(messenger);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Report" })).toBeDisabled(),
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("A short description of the problem"),
+      { target: { value: "Extension host stopped replying" } },
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Report" })).toBeEnabled(),
+    );
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Report" }));
+      await act(async () => {
+        await vi.runAllTicks();
+      });
+      expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ISSUE_SUBMIT_TIMEOUT_MS);
+      });
+
+      expect(screen.getByText(/submission timed out/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Report" })).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "Close issue report" }),
+      ).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not send when the sanitized DOM snapshot cannot be reconstructed", async () => {

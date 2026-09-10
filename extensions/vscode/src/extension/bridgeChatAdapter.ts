@@ -1338,8 +1338,12 @@ export function bridgeProcessExitIsFailure(
   code: number | null,
   signal: NodeJS.Signals | null,
   protocolTerminalReceived: boolean,
+  terminalReceiptRequired = false,
 ): boolean {
-  return !protocolTerminalReceived && (code !== 0 || signal !== null);
+  return (
+    !protocolTerminalReceived &&
+    (code !== 0 || signal !== null || terminalReceiptRequired)
+  );
 }
 
 export type BridgeChildErrorSettlement = {
@@ -1937,7 +1941,13 @@ async function* launchBridgeChild(options: {
     enqueueVisibleEvents(parser.flush());
     if (
       !cancelled &&
-      bridgeProcessExitIsFailure(code, signal, protocolTerminalReceived)
+      bridgeProcessExitIsFailure(
+        code,
+        signal,
+        protocolTerminalReceived,
+        route.stdinFormat === "claude-stream-json" ||
+          route.format === "codex-thread",
+      )
     ) {
       const detail = stderr.trim() || stdoutTail.trim();
       // Name the real cause instead of dumping a raw native error that reads

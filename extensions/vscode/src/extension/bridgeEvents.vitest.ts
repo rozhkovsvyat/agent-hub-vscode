@@ -253,6 +253,17 @@ describe("BridgeEventParser", () => {
     expect(parser.sawStructuredOutput).toBe(false);
   });
 
+  it("recognizes Claude lifecycle envelopes without rendering their raw JSON", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    const lines = [
+      '{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup"}',
+      '{"type":"system","subtype":"hook_response","hook_name":"SessionStart:startup","stdout":"","exit_code":0,"outcome":"success"}',
+    ];
+
+    expect(parser.push(`${lines.join("\n")}\n`)).toEqual([]);
+    expect(parser.sawStructuredOutput).toBe(true);
+  });
+
   it("не считает обычный assistant text завершением turn", () => {
     const parser = new BridgeEventParser("anthropic-envelope");
     expect(

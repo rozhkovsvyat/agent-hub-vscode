@@ -61,6 +61,11 @@ export interface ListHistoryOptions {
   workspaceDirectory?: string;
 }
 
+export type HistorySaveReceipt = Pick<
+  Session,
+  "sessionId" | "title" | "revision" | "titleManuallySet"
+>;
+
 export type ToCoreFromIdeOrWebviewProtocol = {
   // Special
   ping: [string, string];
@@ -71,7 +76,7 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "history/list": [ListHistoryOptions, BaseSessionMetadata[]];
   "history/delete": [{ id: string }, void];
   "history/load": [{ id: string }, Session];
-  "history/save": [Session, Session];
+  "history/save": [Session, HistorySaveReceipt];
   "history/rename": [{ id: string; title: string }, Session | undefined];
   "history/share": [{ id: string; outputDir?: string }, void];
   "history/clear": [undefined, void];

@@ -261,6 +261,19 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   return out;
 }
 
+/**
+ * Claude emits lifecycle envelopes that prove stdout is valid stream-json but
+ * intentionally have no chat representation. Treating those lines as
+ * "unstructured" makes the adapter dump the complete raw JSON stream when a
+ * run stops before its result receipt.
+ */
+function isRecognizedSilentAnthropicEnvelope(event: any): boolean {
+  if (event?.type !== "system") return false;
+  return ["init", "thinking_tokens", "hook_started", "hook_response"].includes(
+    String(event.subtype ?? ""),
+  );
+}
+
 /** `codex exec --json`: события thread/turn/item. */
 function parseCodexThread(event: any): BridgeEvent[] {
   if (event.type === "turn.completed") {
@@ -489,9 +502,14 @@ export class BridgeEventParser {
           : undefined;
       return wait ? [parsedEvent, wait] : [parsedEvent];
     });
-    // An init/schema-drift JSON object is not useful structured output. Keep
-    // raw-stdout fallback alive until an event the UI can actually render.
-    if (events.length) {
+    // Known lifecycle envelopes are valid structured transport even though
+    // they deliberately render nothing. Unknown future schema still leaves the
+    // raw fallback alive so a real model answer cannot disappear silently.
+    if (
+      events.length ||
+      (this.format === "anthropic-envelope" &&
+        isRecognizedSilentAnthropicEnvelope(event))
+    ) {
       this.structured = true;
     }
     return events;

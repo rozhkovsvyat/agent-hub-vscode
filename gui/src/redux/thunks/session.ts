@@ -1,6 +1,7 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { BaseSessionMetadata, ChatMessage, Session } from "core";
 import { NEW_SESSION_TITLE } from "core/util/constants";
+import { compactSessionForPersistence } from "../../../../core/util/historyCompaction";
 import { renderChatMessage } from "core/util/messageContent";
 import { IIdeMessenger } from "../../context/IdeMessenger";
 import { selectSelectedChatModel } from "../slices/configSlice";
@@ -79,7 +80,10 @@ export const updateSession = createAsyncThunk<void, Session, ThunkApiType>(
         title: session.title,
       }),
     ); // optimistic session metadata update
-    const saved = await extra.ideMessenger.request("history/save", session);
+    const saved = await extra.ideMessenger.request(
+      "history/save",
+      compactSessionForPersistence(session),
+    );
     if (saved.status === "success") {
       dispatch(
         setSessionRevision({
@@ -131,8 +135,9 @@ export const loadSession = createAsyncThunk<
     if (session.chatModelTitle) {
       void dispatch(selectChatModelForProfile(session.chatModelTitle));
     }
-    const { continueIfTrailingSteer } =
-      await import("./continueIfTrailingSteer");
+    const { continueIfTrailingSteer } = await import(
+      "./continueIfTrailingSteer"
+    );
     void dispatch(continueIfTrailingSteer());
   },
 );
@@ -190,8 +195,9 @@ export const loadLastSession = createAsyncThunk<void, void, ThunkApiType>(
     if (session.chatModelTitle) {
       dispatch(selectChatModelForProfile(session.chatModelTitle));
     }
-    const { continueIfTrailingSteer } =
-      await import("./continueIfTrailingSteer");
+    const { continueIfTrailingSteer } = await import(
+      "./continueIfTrailingSteer"
+    );
     void dispatch(continueIfTrailingSteer());
   },
 );

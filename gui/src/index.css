@@ -2581,7 +2581,10 @@ button.cukii-submit-button--stop:active {
   width: auto;
   margin: 0;
   padding: 6px 4px 4px 8px;
-  z-index: 5;
+  /* The footer is stacking level 3 and owns every popover. Keeping the strip
+     above it made a still-attached image pill paint over the command menu even
+     though the panel itself has z-index 1000 inside that lower context. */
+  z-index: 1;
   color: var(--vscode-input-foreground, #cccccc);
 }
 

@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
 
 import {
+  CUKII_EDITOR_IMMEDIATELY_RENDER,
   clearSubmittedMainComposer,
   hasValidEditorContent,
 } from "./editorConfig";
+
+it("defers TipTap view creation until after the React commit", () => {
+  expect(CUKII_EDITOR_IMMEDIATELY_RENDER).toBe(false);
+});
 
 describe("hasValidEditorContent", () => {
   it("accepts a top-level attachment as an image-only submission", () => {
