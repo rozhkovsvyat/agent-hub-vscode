@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { CukiiImageLightbox } from "./CukiiImageLightbox";
 
 interface ComposerImage {
   displaySrc: string;
@@ -48,7 +48,6 @@ export function CukiiComposerImageStrip({ editor }: { editor: Editor | null }) {
   const [images, setImages] = useState<ComposerImage[]>([]);
   const [preview, setPreview] = useState<ComposerImage>();
   const openerRef = useRef<HTMLButtonElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!editor) {
@@ -62,23 +61,6 @@ export function CukiiComposerImageStrip({ editor }: { editor: Editor | null }) {
       editor.off("update", sync);
     };
   }, [editor]);
-
-  useEffect(() => {
-    if (!preview) return;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setPreview(undefined);
-        requestAnimationFrame(() => openerRef.current?.focus());
-      } else if (event.key === "Tab") {
-        event.preventDefault();
-        closeRef.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [preview]);
 
   if (!editor || images.length === 0) return null;
 
@@ -131,40 +113,16 @@ export function CukiiComposerImageStrip({ editor }: { editor: Editor | null }) {
           </span>
         ))}
       </div>
-      {preview &&
-        createPortal(
-          <div
-            className="cukii-image-lightbox"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) {
-                setPreview(undefined);
-                requestAnimationFrame(() => openerRef.current?.focus());
-              }
-            }}
-          >
-            <section
-              aria-label="Image preview"
-              aria-modal="true"
-              className="cukii-image-lightbox-dialog"
-              role="dialog"
-            >
-              <img alt={preview.name} src={preview.displaySrc} />
-              <button
-                aria-label="Close image preview"
-                onClick={() => {
-                  setPreview(undefined);
-                  requestAnimationFrame(() => openerRef.current?.focus());
-                }}
-                ref={closeRef}
-                title="Close preview (Esc)"
-                type="button"
-              >
-                <XMarkIcon aria-hidden="true" />
-              </button>
-            </section>
-          </div>,
-          document.body,
-        )}
+      {preview && (
+        <CukiiImageLightbox
+          name={preview.name}
+          source={preview.displaySrc}
+          onClose={() => {
+            setPreview(undefined);
+            requestAnimationFrame(() => openerRef.current?.focus());
+          }}
+        />
+      )}
     </>
   );
 }

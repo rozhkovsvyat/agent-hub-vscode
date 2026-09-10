@@ -37,6 +37,7 @@ import {
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
   bridgeProcessExitIsFailure,
+  bridgeProcessFailureMessage,
   bridgeProcessFailureTerminalEvent,
   claudeInitialContent,
   claudeStreamingInput,
@@ -129,7 +130,7 @@ describe("native bridge argv", () => {
     expect(terminalFailureTail).toContain("toChatMessages(terminalFailure)");
     expect(terminalFailureTail).not.toContain("throw error");
     expect(source.slice(closeAt, terminalFailureAt)).toContain(
-      "local safety policy blocked a command",
+      "bridgeProcessFailureMessage({",
     );
   });
 
@@ -151,6 +152,27 @@ describe("native bridge argv", () => {
     expect(
       bridgeProcessFailureTerminalEvent(undefined, false, false),
     ).toBeUndefined();
+  });
+
+  it("reduces a capacity transcript to one short actionable receipt", () => {
+    const raw = [
+      '{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"thousands of transport bytes"}}',
+      '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}',
+    ].join("\n");
+
+    const message = bridgeProcessFailureMessage({
+      label: "GPT-5.6 Sol",
+      detail: raw,
+      code: 1,
+      signal: null,
+      logFile: "D:/logs/bridge.log",
+    });
+
+    expect(message).toBe(
+      "GPT-5.6 Sol is temporarily at capacity. Choose another model or send the message again. Bridge log: D:/logs/bridge.log",
+    );
+    expect(message).not.toContain("item.completed");
+    expect(message).not.toContain("aggregated_output");
   });
 
   it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {

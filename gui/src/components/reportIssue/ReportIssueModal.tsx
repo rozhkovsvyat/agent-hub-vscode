@@ -19,6 +19,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from "react";
@@ -90,6 +91,26 @@ function readableBytes(bytes: number): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function clipboardImage(file: File) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error("The clipboard image could not be read."));
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("The clipboard image could not be read."));
+    reader.readAsDataURL(file);
+  });
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return {
+    name: file.name || `clipboard-${Date.now()}.png`,
+    mimeType: file.type as
+      "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+    base64,
+  };
 }
 
 export function ReportIssueModal({
@@ -273,6 +294,32 @@ export function ReportIssueModal({
     setAttachments((current) => [...current, ...response.content].slice(0, 3));
   };
 
+  const pasteImages = async (event: ReactClipboardEvent<HTMLDivElement>) => {
+    if (phase === "submitting" || submissionLocked) return;
+    const remaining = Math.max(0, 3 - attachmentsRef.current.length);
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+      .slice(0, remaining);
+    if (files.length === 0) return;
+    event.preventDefault();
+    setAttachmentError(undefined);
+    try {
+      const images = await Promise.all(files.map(clipboardImage));
+      const response = await ideMessenger.request(
+        "cukii/registerIssueClipboardImages",
+        { images },
+      );
+      if (response.status === "error") throw new Error(response.error);
+      setAttachments((current) =>
+        [...current, ...response.content].slice(0, 3),
+      );
+    } catch (error) {
+      setAttachmentError(errorMessage(error));
+    }
+  };
+
   const removeImage = (id: string) => {
     setAttachments((current) => current.filter((image) => image.id !== id));
     void ideMessenger.request("cukii/releaseIssueImages", {
@@ -337,6 +384,7 @@ export function ReportIssueModal({
       aria-labelledby="cukii-report-title"
       onMouseDownCapture={suppressOpeningDoubleClick}
       onMouseDown={closeFromBackdrop}
+      onPaste={(event) => void pasteImages(event)}
       onClick={(event) => {
         // ReportIssueModal is rendered inside the main InputBoxDiv. React
         // bubbles clicks through that component tree even though this is a
@@ -382,6 +430,15 @@ export function ReportIssueModal({
               {receipt.status === "sent" ? "Report sent" : "Report queued"}
             </h3>
             <p>{receipt.message}</p>
+            {receipt.taskUrl && (
+              <button
+                type="button"
+                className="cukii-report-secondary"
+                onClick={() => ideMessenger.post("openUrl", receipt.taskUrl!)}
+              >
+                Open report in YouGile
+              </button>
+            )}
             {receipt.status === "queued" && (
               <p className="cukii-report-muted">
                 The report and its files are stored locally. Cukii will retry
@@ -475,7 +532,7 @@ export function ReportIssueModal({
                 <div className="cukii-report-assets-heading">
                   <div>
                     <strong>Screenshots</strong>
-                    <span>Up to 3 images, 5 MB each</span>
+                    <span>Up to 3 images, 5 MB each · paste supported</span>
                   </div>
                   <button
                     type="button"

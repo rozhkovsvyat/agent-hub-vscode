@@ -1178,7 +1178,8 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 .cukii-report-field input:focus,
 .cukii-report-field textarea:focus,
 .cukii-report-field select:focus {
-  border-color: var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007fd4);
 }
 
 .cukii-report-field input:disabled,
@@ -2343,15 +2344,45 @@ button.cukii-submit-button--stop:active {
   margin: 0;
 }
 
-/* A long prompt keeps one footer geometry before, during and after its sticky
-   fold. Receipt remeasurement may still toggle `meta-inline`, but it must not
-   turn this footer from in-flow into absolute while the wheel is moving. */
+/* Long prompts always reserve the receipt inside the bubble instead of
+   appending a second footer row. Keeping this geometry before, during and
+   after the sticky fold makes the painted capsule lose exactly one pixel for
+   every consumed scroll pixel; changing static/absolute at the sticky edge
+   caused a one-line jump and left the fully folded capsule two rows tall. */
 .cukii-user-message-bubble[data-cukii-long-prompt="true"]
   > .cukii-user-fold-footer {
-  position: static;
-  right: auto;
-  bottom: auto;
-  margin: 2px 0 -6px auto;
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+/* The terminal sticky state is one visual row, including chevron, timestamp
+   and delivery ticks. Paragraphs remain semantic in the document but paint
+   inline inside the clipped row; the right padding keeps text out from under
+   the absolute footer. */
+.cukii-user-message-content--collapsed .ProseMirror {
+  box-sizing: border-box;
+  height: 20px;
+  overflow: hidden;
+  padding-right: calc(var(--cukii-meta-reserve, 31px) + 20px) !important;
+  white-space: nowrap;
+}
+
+.cukii-user-message-content--collapsed .ProseMirror p {
+  display: inline;
+  white-space: nowrap;
+}
+
+.cukii-user-message-content--collapsed .ProseMirror p + p::before {
+  content: " ";
+}
+
+/* A sticky capsule is always one text row at its terminal fold, even when the
+   original message carried attachments. The chevron restores the full strip;
+   ordinary in-flow and manually expanded messages remain unchanged. */
+.cukii-user-message-content--collapsed .cukii-user-attachment-strip {
+  display: none;
 }
 
 .cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
@@ -2666,10 +2697,15 @@ button.cukii-submit-button--stop:active {
   cursor: default;
 }
 
-.cukii-image-lightbox-dialog > button {
+.cukii-image-lightbox-actions {
   position: absolute;
   top: -12px;
   right: -12px;
+  display: flex;
+  gap: 6px;
+}
+
+.cukii-image-lightbox-actions > button {
   display: inline-flex;
   width: 28px;
   height: 28px;
@@ -2684,13 +2720,24 @@ button.cukii-submit-button--stop:active {
   transition: background-color 150ms ease;
 }
 
-.cukii-image-lightbox-dialog > button:hover {
+.cukii-image-lightbox-actions > button:hover {
   background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
 }
 
-.cukii-image-lightbox-dialog > button > svg {
+.cukii-image-lightbox-actions > button > svg {
   width: 18px;
   height: 18px;
+}
+
+.cukii-image-copy-status {
+  position: absolute;
+  right: 0;
+  bottom: -28px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, #cccccc);
+  background: var(--vscode-menu-background, #252526);
+  font-size: 12px;
 }
 
 .cukii-image-lightbox-dialog > img {

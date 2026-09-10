@@ -25,10 +25,12 @@ function getSuggestion(
     render: () => {
       let component: any;
       let popup: any;
+      let container: HTMLElement | null = null;
 
       const onExit = () => {
         popup?.[0]?.destroy();
         component?.destroy();
+        container?.removeAttribute("data-cukii-suggestion-open");
         onClose();
       };
 
@@ -44,18 +46,21 @@ function getSuggestion(
             return;
           }
 
-          const container = findSuggestionContainer(props.editor.view.dom);
+          const suggestionContainer = findSuggestionContainer(
+            props.editor.view.dom,
+          );
 
-          if (!container) {
+          if (!suggestionContainer) {
             console.log("no container");
             component.destroy();
             component = undefined;
             return;
           }
+          container = suggestionContainer;
 
           popup = tippy("body", {
             getReferenceClientRect: props.clientRect,
-            appendTo: () => container,
+            appendTo: () => suggestionContainer,
             content: component.element,
             showOnCreate: true,
             interactive: true,
@@ -64,6 +69,10 @@ function getSuggestion(
             maxWidth: `${window.innerWidth - 24}px`,
           });
 
+          suggestionContainer.setAttribute(
+            "data-cukii-suggestion-open",
+            "true",
+          );
           onOpen();
         },
 
@@ -85,6 +94,8 @@ function getSuggestion(
           if (props.event.key === "Escape") {
             if (!popupInstance) return false;
             popupInstance.hide();
+            container?.removeAttribute("data-cukii-suggestion-open");
+            onClose();
 
             return true;
           }

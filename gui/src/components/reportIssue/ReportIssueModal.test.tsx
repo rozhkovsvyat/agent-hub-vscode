@@ -160,6 +160,74 @@ describe("ReportIssueModal", () => {
     });
   });
 
+  it("accepts screenshots pasted from the clipboard without opening Explorer", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const register = vi.fn(async (_request: { images: unknown[] }) => [
+      {
+        id: "clipboard-1",
+        name: "clipboard-1.png",
+        size: 4,
+        mimeType: "image/png" as const,
+        previewDataUrl: "data:image/png;base64,cG5n",
+      },
+    ]);
+    (messenger.responseHandlers as Record<string, unknown>)[
+      "cukii/registerIssueClipboardImages"
+    ] = register;
+    renderForm(messenger);
+    await screen.findByAltText("Sanitized Cukii chat preview");
+
+    const file = new File(["png"], "clipboard.png", { type: "image/png" });
+    fireEvent.paste(screen.getByRole("dialog"), {
+      clipboardData: {
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => file,
+          },
+        ],
+      },
+    });
+
+    expect(await screen.findByAltText("clipboard-1.png")).toBeInTheDocument();
+    expect(register).toHaveBeenCalledOnce();
+    expect(register.mock.calls.at(0)?.[0]).toMatchObject({
+      images: [{ name: "clipboard.png", mimeType: "image/png" }],
+    });
+  });
+
+  it("offers a clickable YouGile link after a sent report", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const post = vi.spyOn(messenger, "post");
+    messenger.responses["cukii/submitIssueReport"] = {
+      reportId: "linked-report",
+      status: "sent",
+      taskId: "task-1",
+      taskUrl: "https://yougile.com/team/132d36e8a8ce/#ID-207",
+      message: "Report sent to the Cukii Bugs board.",
+    } as (typeof messenger.responses)["cukii/submitIssueReport"];
+    const { user } = renderForm(messenger);
+    await user.type(
+      screen.getByPlaceholderText("A short description of the problem"),
+      "Clickable result",
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Report" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Report" }));
+
+    await user.click(
+      await screen.findByRole("button", { name: "Open report in YouGile" }),
+    );
+    expect(post).toHaveBeenCalledWith(
+      "openUrl",
+      "https://yougile.com/team/132d36e8a8ce/#ID-207",
+    );
+  });
+
   it("shows an honest queued result when YouGile is temporarily unavailable", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     const messenger = new MockIdeMessenger();

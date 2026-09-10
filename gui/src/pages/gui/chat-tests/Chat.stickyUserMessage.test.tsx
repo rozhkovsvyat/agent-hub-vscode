@@ -151,11 +151,11 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
-      return (this as HTMLElement).classList?.contains(
-        "cukii-user-message-content",
-      )
-        ? 140
-        : 0;
+      const element = this as HTMLElement;
+      if (!element.classList?.contains("cukii-user-message-content")) return 0;
+      return element.classList.contains("cukii-user-message-content--collapsed")
+        ? 20
+        : 140;
     },
   });
 
@@ -286,6 +286,18 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
       ),
     ).not.toBeNull();
 
+    // Chromium now exposes the clipped 20px descendant as scrollHeight. A
+    // second event must not reinterpret that painted height as the prompt's
+    // natural height and bounce the capsule open again.
+    transcript.scrollTop = 221;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+    expect(
+      content.style.getPropertyValue("--cukii-sticky-visible-height"),
+    ).toBe("20px");
+
     const collapsedToggle = container.querySelector('[aria-label="Show more"]');
     const footer = bubble?.querySelector(".cukii-user-fold-footer");
     expect(footer).not.toBeNull();
@@ -371,6 +383,12 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
       /\.cukii-user-fold-footer\s*\{[^}]*margin:\s*2px 0 -6px auto/s,
     );
     expect(css).toMatch(
+      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute;[^}]*right:\s*10px;[^}]*bottom:\s*4px;[^}]*margin:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-message-content--collapsed\s+\.ProseMirror\s*\{[^}]*height:\s*20px;[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).not.toMatch(
       /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*static/s,
     );
     expect(css).toMatch(
@@ -394,7 +412,7 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
   }
 });
 
-test("never clips a visual attachment inside the text fold", () => {
+test("marks an attachment capsule as foldable while preserving it in normal flow", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
@@ -418,6 +436,9 @@ test("never clips a visual attachment inside the text fold", () => {
 
     const bubble = container.querySelector(
       '[data-testid="cukii-user-bubble-image-prompt"]',
+    );
+    await waitFor(() =>
+      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
     );
     expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
     expect(bubble?.querySelector("img")).not.toBeNull();
@@ -460,6 +481,9 @@ test("keeps attachments in one horizontally scrolling micro-preview row", () => 
   );
   expect(css).not.toContain(".cukii-code-block-node-view");
   expect(css).toContain(".cukii-image-lightbox");
+  expect(css).toMatch(
+    /\.cukii-user-message-content--collapsed\s+\.cukii-user-attachment-strip\s*\{[^}]*display:\s*none/s,
+  );
 });
 
 test("does not render fold controls for a short prompt", async () => {

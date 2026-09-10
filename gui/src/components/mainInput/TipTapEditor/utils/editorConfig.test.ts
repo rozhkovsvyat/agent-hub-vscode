@@ -7,6 +7,7 @@ import {
   CUKII_EDITOR_IMMEDIATELY_RENDER,
   clearSubmittedMainComposer,
   hasValidEditorContent,
+  shouldDeferEnterToSuggestion,
 } from "./editorConfig";
 
 it("defers TipTap view creation until after the React commit", () => {
@@ -60,5 +61,28 @@ describe("clearSubmittedMainComposer", () => {
     clearSubmittedMainComposer(editor, true, true);
 
     expect(clearContent).not.toHaveBeenCalled();
+  });
+});
+
+describe("plain Enter submission", () => {
+  it("does not let a stale closed suggestion flag turn Enter into a newline", () => {
+    const input = document.createElement("div");
+    input.className = "cukii-input-box";
+    const editorDom = document.createElement("div");
+    input.append(editorDom);
+
+    expect(shouldDeferEnterToSuggestion(true, editorDom)).toBe(false);
+    expect(shouldDeferEnterToSuggestion(false, editorDom)).toBe(false);
+  });
+
+  it("still lets the visible suggestion list own Enter", () => {
+    const input = document.createElement("div");
+    input.className = "cukii-input-box";
+    const editorDom = document.createElement("div");
+    const popup = document.createElement("div");
+    popup.setAttribute("data-cukii-suggestion-open", "true");
+    input.append(editorDom, popup);
+
+    expect(shouldDeferEnterToSuggestion(true, editorDom)).toBe(true);
   });
 });

@@ -1363,6 +1363,74 @@ export function bridgeProcessFailureTerminalEvent(
   return { kind: "terminalError", text: error.message };
 }
 
+interface BridgeProcessFailureMessageArgs {
+  label: string;
+  detail: string;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  logFile?: string;
+}
+
+/**
+ * Turn a noisy native stderr/stdout tail into one actionable terminal receipt.
+ * The transport log remains available on disk, but protocol JSON and completed
+ * tool output must never be pasted into the conversation as the error message.
+ */
+export function bridgeProcessFailureMessage({
+  label,
+  detail,
+  code,
+  signal,
+  logFile,
+}: BridgeProcessFailureMessageArgs): string {
+  const logSuffix = logFile ? ` Bridge log: ${logFile}` : "";
+  const creditFailure = /out of credits|refill/i.test(detail);
+  const policyFailure =
+    /Rejected\(|blocked by (?:the )?(?:local )?(?:safety )?policy/i.test(
+      detail,
+    );
+  const capacityFailure = detail.match(
+    /Selected model is at capacity(?:\. Please try a different model\.)?/i,
+  );
+  const cacheField = detail.match(
+    /failed to load models cache: missing field `([^`]+)`/,
+  );
+
+  if (policyFailure) {
+    return (
+      `${label} stopped because the local safety policy blocked a command. The blocked command was not executed. Send the message again to continue in a fresh turn.` +
+      logSuffix
+    );
+  }
+  if (creditFailure) {
+    return (
+      `${label} bridge stopped because the vendor workspace is out of credits. This is a usage limit, not a Cukii defect: ask the workspace owner to refill credits, then send the message again.` +
+      logSuffix
+    );
+  }
+  if (capacityFailure) {
+    return (
+      `${label} is temporarily at capacity. Choose another model or send the message again.` +
+      logSuffix
+    );
+  }
+  if (cacheField) {
+    return (
+      `${label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
+      logSuffix
+    );
+  }
+  return (
+    `${label} bridge exited ${
+      signal ? `after signal ${signal}` : `with code ${code}`
+    }.` +
+    (detail
+      ? ` ${detail}`
+      : " Native CLI stopped before returning a normal response.") +
+    logSuffix
+  );
+}
+
 export type BridgeChildErrorSettlement = {
   events: BridgeEvent[];
   error: Error | undefined;
@@ -1967,46 +2035,15 @@ async function* launchBridgeChild(options: {
       )
     ) {
       const detail = stderr.trim() || stdoutTail.trim();
-      // Name the real cause instead of dumping a raw native error that reads
-      // like noise. Order matters: the Codex models-cache warning is logged
-      // but non-fatal on current builds, while "out of credits" is the actual
-      // terminal condition — a quota failure must never be disguised by the
-      // cache line that precedes it in the same stderr.
-      const logSuffix = route.logFile ? ` Bridge log: ${route.logFile}` : "";
-      const creditFailure = /out of credits|refill/i.test(detail);
-      const policyFailure =
-        /Rejected\(|blocked by (?:the )?(?:local )?(?:safety )?policy/i.test(
+      error = new Error(
+        bridgeProcessFailureMessage({
+          label: route.label,
           detail,
-        );
-      const cacheField = detail.match(
-        /failed to load models cache: missing field `([^`]+)`/,
+          code,
+          signal,
+          logFile: route.logFile,
+        }),
       );
-      if (policyFailure) {
-        error = new Error(
-          `${route.label} stopped because the local safety policy blocked a command. The blocked command was not executed. Send the message again to continue in a fresh turn.` +
-            logSuffix,
-        );
-      } else if (creditFailure) {
-        error = new Error(
-          `${route.label} bridge stopped because the vendor workspace is out of credits. This is a usage limit, not a Cukii defect: ask the workspace owner to refill credits, then send the message again.` +
-            logSuffix,
-        );
-      } else if (cacheField) {
-        error = new Error(
-          `${route.label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
-            logSuffix,
-        );
-      } else {
-        error = new Error(
-          `${route.label} bridge exited ${
-            signal ? `after signal ${signal}` : `with code ${code}`
-          }.` +
-            (detail
-              ? ` ${detail}`
-              : " Native CLI stopped before returning a normal response.") +
-            logSuffix,
-        );
-      }
     }
     if (!cancelled) {
       canary?.record("vendor_completed", {

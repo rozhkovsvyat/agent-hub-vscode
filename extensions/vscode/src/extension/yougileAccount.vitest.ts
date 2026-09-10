@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   runYougileAuthAction,
   YOUGILE_API_BASE,
-  YOUGILE_LOGIN_URL,
   YOUGILE_PROBE_PATH,
   YOUGILE_SECRET_KEY,
   yougileAccountStatus,
@@ -44,11 +43,63 @@ const unreachable: YougileHttp = vi.fn(async () => {
   throw new Error("ENOTFOUND");
 });
 
-function authHost(key?: string) {
+function authHost(credentials?: { login: string; password: string }) {
   return {
-    openExternal: vi.fn(async () => true),
-    promptSecret: vi.fn(async () => key),
+    promptCredentials: vi.fn(async () => credentials),
   };
+}
+
+function credentialHost(credentials?: { login: string; password: string }) {
+  return {
+    promptCredentials: vi.fn(async () => credentials),
+  };
+}
+
+function loginHttp(
+  options: {
+    status?: number;
+    key?: string;
+    email?: string;
+    boardVisible?: boolean;
+  } = {},
+): YougileHttp {
+  const status = options.status ?? 200;
+  const key = options.key ?? KEY;
+  return vi.fn(async (url) => {
+    if (url.endsWith("/auth/companies")) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => [{ id: "company-cukii", name: "Cukii" }],
+      };
+    }
+    if (url.endsWith("/auth/keys/get")) {
+      return { ok: true, status: 200, json: async () => [] };
+    }
+    if (url.endsWith("/auth/keys")) {
+      return { ok: true, status: 200, json: async () => ({ key }) };
+    }
+    if (url.includes("/boards?")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content:
+            options.boardVisible === false
+              ? []
+              : [{ id: "af617b56-a4a4-49fd-8afd-b2c3db1b0787" }],
+        }),
+      };
+    }
+    if (url.endsWith("/users/me")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ email: options.email ?? OWNER }),
+      };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
 }
 
 /** No env var, no token file: discovery finds nothing. */
@@ -173,43 +224,117 @@ describe("YouGile account row", () => {
     expect(status.accountLabel).not.toBe("Not logged in");
   });
 
-  it("opens the browser and stores the key only after the API accepts it", async () => {
+  it("signs in with credentials and automatically selects the company whose key sees the Cukii board", async () => {
     const secrets = store();
-    const host = authHost(KEY);
-    const probe = http(200);
+    const host = credentialHost({ login: OWNER, password: "typed-password" });
+    const calls: Array<{ url: string; body?: string }> = [];
+    const authHttp: YougileHttp = vi.fn(async (url, init) => {
+      calls.push({ url, body: init.body });
+      if (url.endsWith("/auth/companies")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { id: "company-wrong", name: "Other" },
+            { id: "company-cukii", name: "Cukii" },
+          ],
+        };
+      }
+      if (url.endsWith("/auth/keys/get")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              key: "wrong-company-key-0123456789",
+              companyId: "company-wrong",
+              deleted: false,
+            },
+          ],
+        };
+      }
+      if (
+        url.includes("/boards?") &&
+        init.headers.Authorization?.includes("wrong")
+      ) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ content: [] }),
+        };
+      }
+      if (url.endsWith("/auth/keys")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ key: KEY }),
+        };
+      }
+      if (url.includes("/boards?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: [{ id: "af617b56-a4a4-49fd-8afd-b2c3db1b0787" }],
+          }),
+        };
+      }
+      if (url.endsWith("/users/me")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ email: OWNER }),
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
 
     const result = await runYougileAuthAction("login", {
       host,
       store: secrets,
-      http: probe,
+      http: authHttp,
+      environment: noMachineToken,
     });
 
-    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
-    expect(probe).toHaveBeenCalledWith(
-      `${YOUGILE_API_BASE}${YOUGILE_PROBE_PATH}`,
-      expect.objectContaining({
-        headers: { Authorization: `Bearer ${KEY}` },
-      }),
-    );
+    expect(host.promptCredentials).toHaveBeenCalledOnce();
     expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
       key: KEY,
       accountLabel: OWNER,
       source: "plugin",
     });
     expect(result.message).toContain(OWNER);
+    expect(calls.some(({ url }) => url.endsWith("/auth/keys"))).toBe(true);
+    expect(calls.map(({ body }) => body ?? "").join("\n")).toContain(
+      "typed-password",
+    );
+    expect([...secrets.values.values()].join("\n")).not.toContain(
+      "typed-password",
+    );
   });
 
-  it("never asks the user to type the identity", async () => {
-    // A typed address could disagree with the key, and the row would then name
-    // an account the plugin is not acting as. Vendors do not ask either.
-    const host = authHost(KEY);
+  it("never asks for an API token or opens a token-management page", async () => {
+    const host = authHost({ login: OWNER, password: "password" });
     await runYougileAuthAction("login", {
       host,
       store: store(),
-      http: http(200),
+      http: loginHttp(),
     });
-    expect(host).not.toHaveProperty("promptEmail");
-    expect(Object.keys(host)).toEqual(["openExternal", "promptSecret"]);
+    expect(Object.keys(host)).toEqual(["promptCredentials"]);
+    expect(host).not.toHaveProperty("promptSecret");
+    expect(host).not.toHaveProperty("openExternal");
+  });
+
+  it("uses the login identity while storing only the generated key", async () => {
+    // A typed address could disagree with the key, and the row would then name
+    // an account the plugin is not acting as. Vendors do not ask either.
+    const host = authHost({ login: OWNER, password: "password" });
+    await runYougileAuthAction("login", {
+      host,
+      store: store(),
+      http: loginHttp(),
+    });
+    expect(host.promptCredentials).toHaveBeenCalledOnce();
+    expect(Object.keys(host)).toEqual(["promptCredentials"]);
   });
 
   it("picks up the machine's own token and offers sign-out, never sign-in beside a live account", async () => {
@@ -278,12 +403,12 @@ describe("YouGile account row", () => {
     expect(status.actions).toEqual(["logout"]);
   });
 
-  it("saves nothing when the key is refused or the flow is cancelled", async () => {
+  it("saves nothing when credentials are refused or the flow is cancelled", async () => {
     const refused = store();
     await runYougileAuthAction("login", {
-      host: authHost(KEY),
+      host: authHost({ login: OWNER, password: "wrong" }),
       store: refused,
-      http: http(401),
+      http: loginHttp({ status: 401 }),
     });
     expect(refused.store).not.toHaveBeenCalled();
 
@@ -291,17 +416,9 @@ describe("YouGile account row", () => {
     await runYougileAuthAction("login", {
       host: authHost(undefined),
       store: cancelled,
-      http: http(200),
+      http: loginHttp(),
     });
     expect(cancelled.store).not.toHaveBeenCalled();
-
-    const junk = store();
-    await runYougileAuthAction("login", {
-      host: authHost("short"),
-      store: junk,
-      http: http(200),
-    });
-    expect(junk.store).not.toHaveBeenCalled();
   });
 
   it("forgets the key on sign-out", async () => {
@@ -363,7 +480,10 @@ describe("YouGile account row", () => {
     // would cost the owner the whole point of discovery: he would have to open
     // ~/.claude/yougile-token and paste by hand a key the machine already has.
     const secrets = store(JSON.stringify({ suppressed: true }));
-    const host = { ...authHost(KEY), confirmResume: vi.fn(async () => true) };
+    const host = {
+      ...authHost({ login: OWNER, password: "password" }),
+      confirmResume: vi.fn(async () => true),
+    };
 
     const result = await runYougileAuthAction("login", {
       host,
@@ -375,9 +495,8 @@ describe("YouGile account row", () => {
     // The offer names whose account it is — "use this key" is not a decision
     // anyone can make without knowing which account it signs them into.
     expect(host.confirmResume).toHaveBeenCalledWith(OWNER);
-    // Accepted, so no browser and no key to type.
-    expect(host.openExternal).not.toHaveBeenCalled();
-    expect(host.promptSecret).not.toHaveBeenCalled();
+    // Accepted, so no credentials need to be typed.
+    expect(host.promptCredentials).not.toHaveBeenCalled();
     expect(result.message).toContain(OWNER);
     expect(secrets.values.size).toBe(0);
 
@@ -398,45 +517,45 @@ describe("YouGile account row", () => {
     // while a valid token sat on disk. Declining must fall through to the
     // ordinary browser-and-key flow.
     const secrets = store(JSON.stringify({ suppressed: true }));
-    const other = "another-account-key-0123456789";
     const host = {
-      openExternal: vi.fn(async () => true),
-      promptSecret: vi.fn(async () => other),
+      promptCredentials: vi.fn(async () => ({
+        login: "second@company.ru",
+        password: "password",
+      })),
       confirmResume: vi.fn(async () => false),
     };
 
     await runYougileAuthAction("login", {
       host,
       store: secrets,
-      http: http(200, "second@company.ru"),
+      http: loginHttp({ email: "second@company.ru" }),
       environment: machineWithToken,
     });
 
     expect(host.confirmResume).toHaveBeenCalled();
-    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
+    expect(host.promptCredentials).toHaveBeenCalledOnce();
     expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
-      key: other,
+      key: KEY,
       accountLabel: "second@company.ru",
       source: "plugin",
     });
   });
 
-  it("a host that cannot ask never adopts the machine key by itself", async () => {
+  it("a host without resume confirmation never adopts the machine key by itself", async () => {
     // `confirmResume` is optional. Absent it, the only safe reading of "Log in"
     // is the ordinary flow — silently reusing a key nobody confirmed would be
     // the same defect through a different door.
     const secrets = store(JSON.stringify({ suppressed: true }));
-    const host = authHost(KEY);
+    const host = authHost({ login: OWNER, password: "password" });
 
     await runYougileAuthAction("login", {
       host,
       store: secrets,
-      http: http(200),
+      http: loginHttp(),
       environment: machineWithToken,
     });
 
-    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
-    expect(host.promptSecret).toHaveBeenCalled();
+    expect(host.promptCredentials).toHaveBeenCalledOnce();
   });
 
   it("NEGATIVE CONTROL: a truncated record is not sent as a credential", async () => {
@@ -462,17 +581,16 @@ describe("YouGile account row", () => {
       readFile: () => undefined,
     };
     const secrets = store(JSON.stringify({ suppressed: true }));
-    const host = authHost(KEY);
-    const rejectsStale: YougileHttp = vi.fn(
-      async (_url: string, init?: { headers?: Record<string, string> }) => {
-        const stale = init?.headers?.Authorization?.includes("stale");
-        return {
-          ok: !stale,
-          status: stale ? 401 : 200,
-          json: async () => ({ id: "u1", email: OWNER }),
-        };
-      },
-    );
+    const host = authHost({ login: OWNER, password: "password" });
+    const rejectsStale: YougileHttp = vi.fn(async (url: string, init) => {
+      const stale = init?.headers?.Authorization?.includes("stale");
+      if (!stale) return loginHttp()(url, init);
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      };
+    });
 
     await runYougileAuthAction("login", {
       host,
@@ -481,8 +599,7 @@ describe("YouGile account row", () => {
       environment: machine,
     });
 
-    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_LOGIN_URL);
-    expect(host.promptSecret).toHaveBeenCalled();
+    expect(host.promptCredentials).toHaveBeenCalledOnce();
     expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
       key: KEY,
       accountLabel: OWNER,

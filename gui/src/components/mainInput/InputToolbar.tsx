@@ -49,6 +49,7 @@ import type {
 } from "../../redux/slices/sessionSlice";
 import type {
   BrokerVendorId,
+  BrokerVendorModelCatalog,
   CukiiIssueReportCapability,
   CukiiPickedFile,
 } from "core/protocol/ideWebview";
@@ -63,6 +64,7 @@ import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
 import {
   displayModelLabel,
   EFFORT_LABELS,
+  applyRuntimeVendorCatalog,
   modelInfo,
   normalizeEffortForModel,
   supportsNativeSpeed,
@@ -79,6 +81,19 @@ import { PermissionModeControl } from "./PermissionModeControl";
 
 const ISSUE_CAPABILITY_REFRESH_MS = 60_000;
 const ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS = [2_000, 5_000, 15_000] as const;
+
+export function availableModelForBlankSession(
+  current: BrokerModel | undefined,
+  catalog: BrokerVendorModelCatalog[],
+): BrokerModel | undefined {
+  const available = catalog.flatMap((vendor) =>
+    vendor.models.filter((model) => !model.disabled),
+  );
+  if (current && available.some((model) => model.value === current)) {
+    return current;
+  }
+  return available[0]?.value;
+}
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -181,6 +196,8 @@ function InputToolbar(props: InputToolbarProps) {
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const restoredPanelDraft = useRef(false);
+  const [panelDraftResolved, setPanelDraftResolved] = useState(false);
+  const reconciledCatalogSession = useRef<string>();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const selectedVendor = brokerVendorForModel(brokerModel ?? "qwen-3-8-max");
   const [permissionCapabilities, setPermissionCapabilities] = useState<{
@@ -363,7 +380,12 @@ function InputToolbar(props: InputToolbarProps) {
   };
 
   useEffect(() => {
-    if (restoredPanelDraft.current || historyLength > 0) return;
+    if (restoredPanelDraft.current) return;
+    if (historyLength > 0) {
+      restoredPanelDraft.current = true;
+      setPanelDraftResolved(true);
+      return;
+    }
     restoredPanelDraft.current = true;
     const draft = window.cukiiVscode?.getState()?.cukiiBrokerDraft as
       | Partial<{
@@ -377,7 +399,10 @@ function InputToolbar(props: InputToolbarProps) {
           brokerPermissionMode: CukiiPermissionMode;
         }>
       | undefined;
-    if (!draft) return;
+    if (!draft) {
+      setPanelDraftResolved(true);
+      return;
+    }
     const restoredModel = draft.brokerModel ?? brokerModel ?? "opus-5";
     if (draft.brokerModel) dispatch(setBrokerModel(draft.brokerModel));
     if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
@@ -405,7 +430,48 @@ function InputToolbar(props: InputToolbarProps) {
         });
       }
     }
+    setPanelDraftResolved(true);
   }, [brokerModel, dispatch, historyLength]);
+
+  useEffect(() => {
+    if (
+      !props.isMainInput ||
+      !panelDraftResolved ||
+      historyLength > 0 ||
+      reconciledCatalogSession.current === sessionId
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void ideMessenger
+      .request("cukii/listBrokerModelCatalog", undefined)
+      .then((response) => {
+        if (cancelled || response.status !== "success") return;
+        applyRuntimeVendorCatalog(response.content);
+        const available = availableModelForBlankSession(
+          brokerModel,
+          response.content,
+        );
+        if (!available) return;
+        reconciledCatalogSession.current = sessionId;
+        if (available !== brokerModel) {
+          updateBrokerPreferences(available, "auto");
+        }
+      })
+      .catch(() => {
+        // A failed catalog probe is not evidence that another model is usable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    brokerModel,
+    historyLength,
+    ideMessenger,
+    panelDraftResolved,
+    props.isMainInput,
+    sessionId,
+  ]);
 
   const isEnterDisabled =
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));

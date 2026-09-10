@@ -1,6 +1,7 @@
 import { maskCukiiReportText } from "core/cukiiReportMasking";
 import type {
   BrokerModel,
+  CukiiIssueClipboardImage,
   CukiiIssueDiagnosticsPreview,
   CukiiIssuePickedImage,
   CukiiIssueReportCapability,
@@ -87,6 +88,7 @@ type StoredIssueReport = {
   brokerModel: BrokerModel;
   files: LocalIssueFile[];
   taskId?: string;
+  taskUrl?: string;
   chatPosted?: boolean;
   attempts: number;
   nextAttemptAt: string;
@@ -94,7 +96,7 @@ type StoredIssueReport = {
 };
 
 type PickedImage = {
-  path: string;
+  bytes: Buffer;
   name: string;
   size: number;
   mimeType: CukiiIssuePickedImage["mimeType"];
@@ -116,6 +118,31 @@ const IMAGE_MIME = new Map<string, CukiiIssuePickedImage["mimeType"]>([
   [".webp", "image/webp"],
   [".gif", "image/gif"],
 ]);
+
+function detectedImageMime(
+  bytes: Buffer,
+): CukiiIssuePickedImage["mimeType"] | undefined {
+  if (bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+  const signature = bytes.subarray(0, 6).toString("ascii");
+  if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+  if (
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return undefined;
+}
 
 const defaultHttp: YougileIssueHttp = (url, init) =>
   fetch(url, {
@@ -399,24 +426,51 @@ export class YougileIssueReporter {
       if (stat.size > CUKII_ISSUE_MAX_IMAGE_BYTES) {
         throw new Error("Each screenshot must be 5 MB or smaller.");
       }
-      const id = crypto.randomUUID();
-      const name = safeFileName(maskCukiiReportText(path.basename(file)));
-      this.pickedImages.set(id, {
-        path: file,
-        name,
-        size: stat.size,
-        mimeType,
-      });
       const bytes = await fs.promises.readFile(file);
-      result.push({
-        id,
-        name,
-        size: stat.size,
-        mimeType,
-        previewDataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
-      });
+      result.push(this.registerImage(path.basename(file), bytes, mimeType));
     }
     return result;
+  }
+
+  registerClipboardImages(
+    images: CukiiIssueClipboardImage[],
+  ): CukiiIssuePickedImage[] {
+    return images.slice(0, CUKII_ISSUE_MAX_IMAGES).map((image) => {
+      if (image.base64.length > CUKII_ISSUE_MAX_IMAGE_BYTES * 2) {
+        throw new Error("Each screenshot must be 5 MB or smaller.");
+      }
+      const bytes = Buffer.from(image.base64, "base64");
+      return this.registerImage(image.name, bytes, image.mimeType);
+    });
+  }
+
+  private registerImage(
+    rawName: string,
+    bytes: Buffer,
+    claimedMime: CukiiIssuePickedImage["mimeType"],
+  ): CukiiIssuePickedImage {
+    if (bytes.length === 0 || bytes.length > CUKII_ISSUE_MAX_IMAGE_BYTES) {
+      throw new Error("Each screenshot must be a non-empty image under 5 MB.");
+    }
+    const mimeType = detectedImageMime(bytes);
+    if (!mimeType || mimeType !== claimedMime) {
+      throw new Error("The pasted attachment is not a valid supported image.");
+    }
+    const id = crypto.randomUUID();
+    const name = safeFileName(maskCukiiReportText(rawName));
+    this.pickedImages.set(id, {
+      bytes: Buffer.from(bytes),
+      name,
+      size: bytes.length,
+      mimeType,
+    });
+    return {
+      id,
+      name,
+      size: bytes.length,
+      mimeType,
+      previewDataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
+    };
   }
 
   releasePickedImages(attachmentIds: string[]): void {
@@ -580,10 +634,7 @@ export class YougileIssueReporter {
         if (!picked)
           throw new Error("A selected screenshot expired. Choose it again.");
         const localName = `manual-${index}-${safeFileName(picked.name)}`;
-        await fs.promises.copyFile(
-          picked.path,
-          path.join(directory, localName),
-        );
+        await atomicWrite(path.join(directory, localName), picked.bytes);
         files.push({
           kind: "manual",
           name: maskCukiiReportText(picked.name),
@@ -992,10 +1043,40 @@ export class YougileIssueReporter {
       await this.writeReport(report);
     }
 
+    if (!report.taskUrl) {
+      try {
+        const [task, companies] = await Promise.all([
+          this.requestJson(
+            credential.key,
+            `/tasks/${encodeURIComponent(report.taskId)}`,
+            "GET",
+          ),
+          this.requestJson(credential.key, "/companies?limit=100", "GET"),
+        ]);
+        const commonId = (task as { idTaskCommon?: unknown }).idTaskCommon;
+        const companyId = (
+          content(companies)[0] as { id?: unknown } | undefined
+        )?.id;
+        if (
+          typeof commonId === "string" &&
+          commonId &&
+          typeof companyId === "string" &&
+          companyId.length >= 12
+        ) {
+          report.taskUrl = `https://yougile.com/team/${companyId.slice(-12)}/#${encodeURIComponent(commonId)}`;
+          await this.writeReport(report);
+        }
+      } catch {
+        // The report itself is already delivered. A temporarily unavailable
+        // convenience link must never turn that success into a queued retry.
+      }
+    }
+
     return {
       reportId: report.reportId,
       status: "sent",
       taskId: report.taskId,
+      ...(report.taskUrl ? { taskUrl: report.taskUrl } : {}),
       message: "Report sent to the Cukii Bugs board.",
     };
   }

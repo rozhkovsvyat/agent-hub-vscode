@@ -121,6 +121,14 @@ function fixture(
       taskIndex += 1;
       return response(201, { id: `task-${taskIndex}` });
     }
+    if (/\/tasks\/task-\d+$/.test(url) && init.method === "GET") {
+      return response(200, { idTaskCommon: "CUKII-207" });
+    }
+    if (url.endsWith("/companies?limit=100") && init.method === "GET") {
+      return response(200, {
+        content: [{ id: "945711d1-c885-4c95-9b88-132d36e8a8ce" }],
+      });
+    }
     if (/\/chats\/[^/]+\/messages\?/.test(url)) {
       return response(200, { content: [] });
     }
@@ -271,7 +279,11 @@ describe("YougileIssueReporter", () => {
 
     expect(fs.existsSync(pending)).toBe(false);
     const sent = await fx.reporter.submit(sensitiveSubmission);
-    expect(sent).toMatchObject({ status: "sent", taskId: "task-1" });
+    expect(sent).toMatchObject({
+      status: "sent",
+      taskId: "task-1",
+      taskUrl: "https://yougile.com/team/132d36e8a8ce/#CUKII-207",
+    });
 
     const taskCalls = fx.calls.filter(
       (call) => call.method === "POST" && call.url.endsWith("/tasks"),
@@ -319,6 +331,81 @@ describe("YougileIssueReporter", () => {
     expect(uploadedBodies).not.toContain("D:\\Brain\\clients");
     expect(uploadedBodies).not.toContain("\\\\fileserver");
     expect(uploadedBodies).not.toContain("/srv/customer");
+  });
+
+  it("accepts clipboard image bytes and owns them independently of the caller", async () => {
+    const fx = fixture({ failUploads: true });
+    const source = Buffer.from(PNG_BASE64, "base64");
+    const [picked] = fx.reporter.registerClipboardImages([
+      {
+        name: "clipboard.png",
+        mimeType: "image/png",
+        base64: source.toString("base64"),
+      },
+    ]);
+    source.fill(0);
+
+    const report = submission("report-clipboard");
+    report.attachmentIds = [picked.id];
+    await fx.reporter.submit(report);
+
+    expect(
+      fs.readFileSync(
+        path.join(
+          fx.root,
+          "pending",
+          "report-clipboard",
+          "manual-0-clipboard.png",
+        ),
+      ),
+    ).toEqual(Buffer.from(PNG_BASE64, "base64"));
+  });
+
+  it("rejects clipboard payloads with mismatched magic bytes or over 5 MB", () => {
+    const fx = fixture();
+
+    expect(() =>
+      fx.reporter.registerClipboardImages([
+        {
+          name: "not-a-png.png",
+          mimeType: "image/png",
+          base64: Buffer.from("plain text").toString("base64"),
+        },
+      ]),
+    ).toThrow("not a valid supported image");
+
+    expect(() =>
+      fx.reporter.registerClipboardImages([
+        {
+          name: "too-large.png",
+          mimeType: "image/png",
+          base64: Buffer.alloc(5 * 1024 * 1024 + 1).toString("base64"),
+        },
+      ]),
+    ).toThrow(/5 MB/);
+  });
+
+  it("persists the bytes selected from disk even if the source changes later", async () => {
+    const fx = fixture({ failUploads: true });
+    const sourcePath = path.join(fx.root, "source.png");
+    fs.writeFileSync(sourcePath, Buffer.from(PNG_BASE64, "base64"));
+    const [picked] = await fx.reporter.registerPickedImages([sourcePath]);
+    fs.writeFileSync(sourcePath, "changed after selection");
+
+    const report = submission("report-owned-file");
+    report.attachmentIds = [picked.id];
+    await fx.reporter.submit(report);
+
+    expect(
+      fs.readFileSync(
+        path.join(
+          fx.root,
+          "pending",
+          "report-owned-file",
+          "manual-0-source.png",
+        ),
+      ),
+    ).toEqual(Buffer.from(PNG_BASE64, "base64"));
   });
 
   it("schedules another bounded pass instead of stranding the third report", async () => {

@@ -14,7 +14,7 @@ import {
 import { setupStore } from "../../redux/store";
 import { renderWithProviders } from "../../util/test/render";
 import { getElementByText, getElementByTestId } from "../../util/test/utils";
-import InputToolbar from "./InputToolbar";
+import InputToolbar, { availableModelForBlankSession } from "./InputToolbar";
 
 const canonicalCss = () =>
   readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
@@ -109,6 +109,49 @@ describe("Cukii Claude-parity input toolbar", () => {
     ]);
     await user.click(attach);
     expect(await getElementByText("Add context")).toBeDefined();
+  });
+
+  it("selects the first live model for a blank session when the bootstrap default is unavailable", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responses["cukii/listBrokerModelCatalog"] = [
+      {
+        id: "claude",
+        label: "Anthropic",
+        models: [
+          { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
+        ],
+      },
+    ];
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+
+    await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    await waitFor(() => {
+      expect(store.getState().session.brokerModel).toBe("opus-5");
+    });
+  });
+
+  it("keeps an explicit model when it is live and returns no guess for an empty catalog", () => {
+    const live = [
+      {
+        id: "codex" as const,
+        label: "OpenAI",
+        models: [
+          {
+            value: "codex-5-6-sol" as const,
+            label: "GPT-5.6 Sol",
+            contextWindowLabel: "272K",
+          },
+        ],
+      },
+    ];
+    expect(availableModelForBlankSession("codex-5-6-sol", live)).toBe(
+      "codex-5-6-sol",
+    );
+    expect(availableModelForBlankSession("qwen-3-8-max", [])).toBeUndefined();
   });
 
   it("shows a Claude-style model pill beside the slash control that opens the model picker", async () => {

@@ -23,12 +23,7 @@ export type BrokerModel = string;
 export type BrokerSubagent = "auto" | BrokerModel;
 
 export type BrokerEffort =
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+  "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type BrokerSpeed = "standard" | "fast";
 
@@ -46,11 +41,7 @@ export type BrokerAutocompact = "25" | "50" | "75" | "default";
 export type BrokerModelScope = "best" | "all";
 
 export type CukiiPermissionMode =
-  | "manual"
-  | "editAutomatically"
-  | "plan"
-  | "auto"
-  | "bypass";
+  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
 
 export type BrokerVendorAuthAction = "install" | "login" | "logout";
 
@@ -169,10 +160,7 @@ export type CukiiIssueSeverity = "blocker" | "major" | "minor" | "cosmetic";
 export type CukiiIssueReportCapability = {
   available: boolean;
   reason:
-    | "available"
-    | "not_authenticated"
-    | "board_unavailable"
-    | "unreachable";
+    "available" | "not_authenticated" | "board_unavailable" | "unreachable";
   accountLabel?: string;
 };
 
@@ -183,6 +171,12 @@ export type CukiiIssuePickedImage = {
   size: number;
   mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
   previewDataUrl: string;
+};
+
+export type CukiiIssueClipboardImage = {
+  name: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  base64: string;
 };
 
 export type CukiiIssueDiagnosticsPreview = {
@@ -217,6 +211,7 @@ export type CukiiIssueReportReceipt = {
   reportId: string;
   status: "sent" | "queued";
   taskId?: string;
+  taskUrl?: string;
   message: string;
 };
 
@@ -309,6 +304,10 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     CukiiIssueDiagnosticsPreview,
   ];
   "cukii/pickIssueImages": [{ remaining: number }, CukiiIssuePickedImage[]];
+  "cukii/registerIssueClipboardImages": [
+    { images: CukiiIssueClipboardImage[] },
+    CukiiIssuePickedImage[],
+  ];
   "cukii/releaseIssueImages": [{ attachmentIds: string[] }, void];
   "cukii/submitIssueReport": [
     CukiiIssueReportSubmission,

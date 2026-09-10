@@ -90,11 +90,7 @@ export function CukiiStickyUserMessage({
     if (!content) return;
 
     const measure = () => {
-      const containsVisualAttachment = Boolean(
-        content.querySelector("img, video, audio, iframe"),
-      );
       const next =
-        !containsVisualAttachment &&
         content.scrollHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
       setIsLongPrompt(next);
       if (!next) setIsExpanded(false);
@@ -126,6 +122,12 @@ export function CukiiStickyUserMessage({
 
     let stickyStartScrollTop: number | undefined;
     let stableFlowHeight = 0;
+    // Collapsing the inner ProseMirror to one row also makes Chromium report a
+    // smaller `content.scrollHeight` on the next scroll/ResizeObserver tick.
+    // That painted measurement is not the prompt's natural height: keep the
+    // largest uncollapsed measurement for the lifetime of this message so the
+    // fold cannot immediately clear itself after reaching one row.
+    let stableNaturalContentHeight = content.scrollHeight;
 
     const clearFold = () => {
       delete content.dataset.cukiiScrollFolding;
@@ -149,7 +151,11 @@ export function CukiiStickyUserMessage({
     };
 
     const syncFoldWithScroll = () => {
-      const fullHeight = content.scrollHeight;
+      stableNaturalContentHeight = Math.max(
+        stableNaturalContentHeight,
+        content.scrollHeight,
+      );
+      const fullHeight = stableNaturalContentHeight;
       if (
         !isLongPrompt ||
         fullHeight <= CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX

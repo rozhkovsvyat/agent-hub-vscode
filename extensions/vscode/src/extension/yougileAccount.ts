@@ -13,11 +13,11 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
  * access to. It wears the same row contract as a vendor — probe, log in, log
  * out, account label — under a separate "Testing" group.
  *
- * There is deliberately no Install action. YouGile ships no CLI to install:
- * the npm registry has only the `yougile` SDK (no `bin`) and third-party MCP
- * servers. Authentication is the vendor's own documented one — a personal API
- * key against REST v2 — which is why login opens the browser and then asks for
- * the key. The machine's existing `yougile-cli.py auth-key` convention
+ * There is deliberately no Install action. YouGile ships no CLI to install.
+ * Authentication uses the official REST v2 credentials exchange: the user
+ * signs in with email/password once, while Cukii discovers the company and
+ * board and stores only the resulting API key. The machine's existing
+ * `yougile-cli.py auth-key` convention
  * (`YOUGILE_TOKEN`, then `~/.claude/yougile-token`) is honoured as-is, so an
  * already-authenticated workstation is not asked to paste a key it has.
  */
@@ -33,11 +33,13 @@ export const YOUGILE_API_BASE = "https://ru.yougile.com/api-v2";
  * would put someone else's address under the account.
  */
 export const YOUGILE_PROBE_PATH = "/users/me";
-export const YOUGILE_LOGIN_URL = "https://ru.yougile.com/";
+const CUKII_BUGS_PROJECT_ID = "945711d1-c885-4c95-9b88-73a8647d0756";
+const CUKII_BUGS_BOARD_ID = "af617b56-a4a4-49fd-8afd-b2c3db1b0787";
 
 export type YougileAuthHost = {
-  openExternal(url: string): PromiseLike<boolean>;
-  promptSecret(): PromiseLike<string | undefined>;
+  promptCredentials(): PromiseLike<
+    { login: string; password: string } | undefined
+  >;
   /**
    * After a recorded sign-out, offer to use the key this machine already holds
    * instead of typing one. 🔴 It has to be a question. Adopting that key on its
@@ -51,7 +53,12 @@ export type YougileAuthHost = {
 /** Only what this module needs from fetch, so tests never touch the network. */
 export type YougileHttp = (
   url: string,
-  init: { headers: Record<string, string>; signal?: AbortSignal },
+  init: {
+    method?: "GET" | "POST" | "DELETE";
+    headers: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  },
 ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 type StoredYougileAccount = {
@@ -100,8 +107,7 @@ export function looksLikeYougileKey(value: string): boolean {
  * using the discovered key until the next sign-in.
  */
 type StoredRecord =
-  | { kind: "account"; account: StoredYougileAccount }
-  | { kind: "suppressed" };
+  { kind: "account"; account: StoredYougileAccount } | { kind: "suppressed" };
 
 function parseStored(raw: string | undefined): StoredRecord | undefined {
   if (!raw) return undefined;
@@ -232,7 +238,188 @@ export async function probeYougileKey(
 }
 
 const defaultHttp: YougileHttp = (url, init) =>
-  fetch(url, { headers: init.headers, signal: init.signal });
+  fetch(url, {
+    method: init.method ?? "GET",
+    headers: init.headers,
+    body: init.body,
+    signal: init.signal,
+  });
+
+function responseItems(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  const items = (value as { content?: unknown } | undefined)?.content;
+  return Array.isArray(items) ? items : [];
+}
+
+type YougileCredentialExchange =
+  | { verdict: "valid"; key: string; email?: string }
+  | { verdict: "rejected" }
+  | { verdict: "unreachable" }
+  | { verdict: "board_unavailable" };
+
+async function exchangeYougileCredentials(
+  credentials: { login: string; password: string },
+  http: YougileHttp,
+): Promise<YougileCredentialExchange> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  const jsonRequest = async (
+    route: string,
+    method: "GET" | "POST" | "DELETE",
+    options: { body?: unknown; key?: string } = {},
+  ) => {
+    const response = await http(`${YOUGILE_API_BASE}${route}`, {
+      method,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.key ? { Authorization: `Bearer ${options.key}` } : {}),
+      },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+      signal: controller.signal,
+    });
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = undefined;
+    }
+    return { response, body };
+  };
+  const boardVerdict = async (
+    key: string,
+  ): Promise<"visible" | "hidden" | "rejected" | "unreachable"> => {
+    const query = new URLSearchParams({
+      projectId: CUKII_BUGS_PROJECT_ID,
+      limit: "1000",
+    });
+    try {
+      const { response, body } = await jsonRequest(
+        `/boards?${query.toString()}`,
+        "GET",
+        { key },
+      );
+      if (response.status === 401 || response.status === 403) return "rejected";
+      if (!response.ok) return "unreachable";
+      return responseItems(body).some(
+        (board) => (board as { id?: unknown }).id === CUKII_BUGS_BOARD_ID,
+      )
+        ? "visible"
+        : "hidden";
+    } catch {
+      return "unreachable";
+    }
+  };
+
+  try {
+    const authBody = {
+      login: credentials.login,
+      password: credentials.password,
+    };
+    const companiesResult = await jsonRequest("/auth/companies", "POST", {
+      body: authBody,
+    });
+    if (
+      companiesResult.response.status === 401 ||
+      companiesResult.response.status === 403
+    ) {
+      return { verdict: "rejected" };
+    }
+    if (!companiesResult.response.ok) return { verdict: "unreachable" };
+    const companies = responseItems(companiesResult.body)
+      .map((company) => ({
+        id: (company as { id?: unknown }).id,
+        name: (company as { name?: unknown }).name,
+      }))
+      .filter(
+        (company): company is { id: string; name: unknown } =>
+          typeof company.id === "string" && Boolean(company.id),
+      );
+    if (companies.length === 0) return { verdict: "board_unavailable" };
+
+    const keysResult = await jsonRequest("/auth/keys/get", "POST", {
+      body: authBody,
+    });
+    if (
+      keysResult.response.status === 401 ||
+      keysResult.response.status === 403
+    ) {
+      return { verdict: "rejected" };
+    }
+    if (!keysResult.response.ok) return { verdict: "unreachable" };
+    const existing = responseItems(keysResult.body)
+      .map((entry) => ({
+        key: (entry as { key?: unknown }).key,
+        companyId: (entry as { companyId?: unknown }).companyId,
+        deleted: (entry as { deleted?: unknown }).deleted,
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          key: string;
+          companyId: unknown;
+          deleted: unknown;
+        } =>
+          typeof entry.key === "string" &&
+          looksLikeYougileKey(entry.key) &&
+          entry.deleted !== true,
+      );
+
+    let sawUnreachable = false;
+    for (const candidate of existing) {
+      const verdict = await boardVerdict(candidate.key);
+      if (verdict === "visible") {
+        const identity = await probeYougileKey(candidate.key, { http });
+        return {
+          verdict: "valid",
+          key: candidate.key,
+          ...(identity.email ? { email: identity.email } : {}),
+        };
+      }
+      if (verdict === "unreachable") sawUnreachable = true;
+    }
+
+    const companiesWithKey = new Set(
+      existing
+        .map((entry) => entry.companyId)
+        .filter((id): id is string => typeof id === "string"),
+    );
+    for (const company of companies) {
+      if (companiesWithKey.has(company.id)) continue;
+      const created = await jsonRequest("/auth/keys", "POST", {
+        body: { ...authBody, companyId: company.id },
+      });
+      if (!created.response.ok) {
+        if (created.response.status >= 500) sawUnreachable = true;
+        continue;
+      }
+      const key = (created.body as { key?: unknown } | undefined)?.key;
+      if (typeof key !== "string" || !looksLikeYougileKey(key)) continue;
+      const verdict = await boardVerdict(key);
+      if (verdict === "visible") {
+        const identity = await probeYougileKey(key, { http });
+        return {
+          verdict: "valid",
+          key,
+          ...(identity.email ? { email: identity.email } : {}),
+        };
+      }
+      if (verdict === "unreachable") sawUnreachable = true;
+      // This key was created only for discovery and cannot file Cukii reports.
+      // Remove it best-effort; failure must not hide a later matching company.
+      await jsonRequest(`/auth/keys/${encodeURIComponent(key)}`, "DELETE", {
+        key,
+      }).catch(() => undefined);
+    }
+    return {
+      verdict: sawUnreachable ? "unreachable" : "board_unavailable",
+    };
+  } catch {
+    return { verdict: "unreachable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function yougileAccountStatus(
   options: {
@@ -355,55 +542,54 @@ export async function loginYougile(options: {
       }
     }
   }
-  await options.host.openExternal(YOUGILE_LOGIN_URL);
-  const key = (await options.host.promptSecret())?.trim();
-  if (!key) {
+  const credentials = await options.host.promptCredentials();
+  const login = credentials?.login.trim() ?? "";
+  const password = credentials?.password ?? "";
+  if (!login || !password) {
     return { opened: true, message: "YouGile sign-in cancelled." };
-  }
-  if (!looksLikeYougileKey(key)) {
-    return {
-      opened: true,
-      message: "That does not look like a YouGile API key.",
-    };
-  }
-  // 🔴 The identity is NOT asked for. `/users/me` already answers it, and a
-  // typed address could disagree with the key — the row would then name an
-  // account the plugin is not actually acting as. Vendors do not ask either.
-  const probe = await probeYougileKey(
-    key,
-    options.http ? { http: options.http } : {},
-  );
-  if (probe.verdict === "unreachable") {
-    return {
-      opened: true,
-      message: "Could not reach YouGile to check the key. Nothing was saved.",
-    };
-  }
-  if (probe.verdict === "rejected") {
-    return {
-      opened: true,
-      message: "YouGile rejected that API key. Nothing was saved.",
-    };
   }
   if (!options.store) {
     return {
       opened: true,
-      message: "No secret storage is available to save the YouGile key.",
+      message: "No secret storage is available to save the YouGile account.",
+    };
+  }
+  const exchange = await exchangeYougileCredentials(
+    { login, password },
+    options.http ?? defaultHttp,
+  );
+  if (exchange.verdict === "unreachable") {
+    return {
+      opened: true,
+      message: "Could not reach YouGile. Nothing was saved.",
+    };
+  }
+  if (exchange.verdict === "rejected") {
+    return {
+      opened: true,
+      message: "YouGile rejected that email or password. Nothing was saved.",
+    };
+  }
+  if (exchange.verdict === "board_unavailable") {
+    return {
+      opened: true,
+      message:
+        "Signed in, but none of this account's companies can see the Cukii Bugs board. Nothing was saved.",
     };
   }
   await options.store.store(
     YOUGILE_SECRET_KEY,
     JSON.stringify({
-      key,
-      ...(probe.email ? { accountLabel: probe.email } : {}),
+      key: exchange.key,
+      ...(exchange.email || login
+        ? { accountLabel: exchange.email ?? login }
+        : {}),
       source: "plugin",
     } satisfies StoredYougileAccount),
   );
   return {
     opened: true,
-    message: probe.email
-      ? `Signed in to YouGile as ${probe.email}.`
-      : "Signed in to YouGile.",
+    message: `Signed in to YouGile as ${exchange.email ?? login}.`,
   };
 }
 
@@ -462,7 +648,6 @@ export async function runYougileAuthAction(
     });
   return {
     opened: false,
-    message:
-      "YouGile has no CLI to install; sign in with a personal API key instead.",
+    message: "YouGile has no CLI to install; use the Log in action instead.",
   };
 }

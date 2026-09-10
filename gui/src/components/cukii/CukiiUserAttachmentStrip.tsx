@@ -1,19 +1,18 @@
-import { DocumentTextIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { DocumentTextIcon } from "@heroicons/react/24/outline";
 import type { ContextItemWithId } from "core";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  useEffect,
   useContext,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import FileIcon from "../FileIcon";
 import { openContextItem } from "../mainInput/belowMainInput/ContextItemsPeek";
 import { isFileAttachmentContextItem } from "./userAttachments";
+import { CukiiImageLightbox } from "./CukiiImageLightbox";
 
 interface ImageAttachment {
   kind: "image";
@@ -220,28 +219,11 @@ export function CukiiUserAttachmentStrip({
   );
   const [preview, setPreview] = useState<ImageAttachment>();
   const openerRef = useRef<HTMLButtonElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const closePreview = () => {
     setPreview(undefined);
     requestAnimationFrame(() => openerRef.current?.focus());
   };
-
-  useEffect(() => {
-    if (!preview) return;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePreview();
-      } else if (event.key === "Tab") {
-        event.preventDefault();
-        closeRef.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [preview]);
 
   if (!attachments.length) return null;
 
@@ -304,34 +286,13 @@ export function CukiiUserAttachmentStrip({
           );
         })}
       </div>
-      {preview &&
-        createPortal(
-          <div
-            className="cukii-image-lightbox"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) closePreview();
-            }}
-          >
-            <section
-              aria-label="Image preview"
-              aria-modal="true"
-              className="cukii-image-lightbox-dialog"
-              role="dialog"
-            >
-              <img alt={preview.name} src={preview.previewSrc} />
-              <button
-                aria-label="Close image preview"
-                onClick={closePreview}
-                ref={closeRef}
-                title="Close preview (Esc)"
-                type="button"
-              >
-                <XMarkIcon aria-hidden="true" />
-              </button>
-            </section>
-          </div>,
-          document.body,
-        )}
+      {preview && (
+        <CukiiImageLightbox
+          name={preview.name}
+          source={preview.previewSrc}
+          onClose={closePreview}
+        />
+      )}
     </>
   );
 }

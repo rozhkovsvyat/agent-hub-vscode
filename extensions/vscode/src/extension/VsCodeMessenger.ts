@@ -927,6 +927,9 @@ export class VsCodeMessenger {
         (picked ?? []).slice(0, remaining).map((uri) => uri.fsPath),
       );
     });
+    this.onWebview("cukii/registerIssueClipboardImages", async ({ data }) =>
+      issueReporter.registerClipboardImages(data.images),
+    );
     this.onWebview("cukii/releaseIssueImages", ({ data }) => {
       issueReporter.releasePickedImages(data.attachmentIds);
     });
@@ -969,16 +972,26 @@ export class VsCodeMessenger {
         return runYougileAuthAction(action, {
           store: this.context.secrets,
           host: {
-            openExternal: (url) =>
-              vscode.env.openExternal(vscode.Uri.parse(url)),
-            promptSecret: () =>
-              vscode.window.showInputBox({
+            promptCredentials: async () => {
+              const login = await vscode.window.showInputBox({
+                ignoreFocusOut: true,
+                title: "Sign in to YouGile",
+                prompt: "Work email",
+                placeHolder: "name@company.com",
+                validateInput: (value) =>
+                  value.trim() && value.includes("@")
+                    ? undefined
+                    : "Enter your YouGile email.",
+              });
+              if (!login) return undefined;
+              const password = await vscode.window.showInputBox({
                 password: true,
                 ignoreFocusOut: true,
-                title: "YouGile",
-                prompt:
-                  "Personal API key — YouGile → company settings → API keys",
-              }),
+                title: "Sign in to YouGile",
+                prompt: "Password",
+              });
+              return password ? { login, password } : undefined;
+            },
             // After a sign-out, the key on this machine is still there. Offer
             // it rather than making the owner paste a key he already has — and
             // offer it, so entering a different account stays possible.
@@ -990,7 +1003,7 @@ export class VsCodeMessenger {
                   : "Sign back in to YouGile with this machine's key?",
                 { modal: true },
                 use,
-                "Enter a different key",
+                "Sign in with another account",
               );
               return choice === use;
             },

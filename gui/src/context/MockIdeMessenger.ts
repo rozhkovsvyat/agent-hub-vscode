@@ -112,6 +112,17 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
   ],
   "cukii/listBrokerModelCatalog": [
     {
+      id: "qwen",
+      label: "Alibaba",
+      models: [
+        {
+          value: "qwen-3-8-max",
+          label: "Qwen 3.8 Max",
+          contextWindowLabel: "1M",
+        },
+      ],
+    },
+    {
       id: "claude",
       label: "Anthropic",
       models: [
@@ -124,6 +135,29 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
           label: "Haiku 4.5",
           contextWindowLabel: "200K",
         },
+      ],
+    },
+    {
+      id: "codex",
+      label: "OpenAI",
+      models: [
+        {
+          value: "codex-5-6-sol",
+          label: "GPT-5.6 Sol",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex-5-6-terra",
+          label: "GPT-5.6 Terra",
+          contextWindowLabel: "272K",
+        },
+      ],
+    },
+    {
+      id: "kimi",
+      label: "MoonshotAI",
+      models: [
+        { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
       ],
     },
   ],
@@ -142,6 +176,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     logLines: ["Mock sanitized diagnostic line"],
   },
   "cukii/pickIssueImages": [],
+  "cukii/registerIssueClipboardImages": [],
   "cukii/releaseIssueImages": undefined,
   "cukii/submitIssueReport": {
     reportId: "mock-report-id",

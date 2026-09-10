@@ -33,6 +33,23 @@ import { getComposerImageInsertPosition, handleImageFile } from "./imageUtils";
 
 export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
 
+/**
+ * A suggestion callback can miss its final onExit when TipTap destroys or
+ * reparents the popup. The ref is therefore only a hint: plain Enter is
+ * deferred only while this exact editor owns a visibly mounted popup.
+ */
+export function shouldDeferEnterToSuggestion(
+  dropdownHint: boolean,
+  editorDom: HTMLElement,
+): boolean {
+  if (!dropdownHint) return false;
+  return Boolean(
+    editorDom
+      .closest<HTMLElement>(".cukii-input-box")
+      ?.querySelector('[data-cukii-suggestion-open="true"]'),
+  );
+}
+
 export function getPlaceholderText(
   placeholder: TipTapEditorProps["placeholder"],
   historyLength: number,
@@ -325,9 +342,17 @@ export function createEditorConfig(options: {
         addKeyboardShortcuts() {
           return {
             Enter: () => {
-              if (inDropdownRef.current) {
+              if (
+                shouldDeferEnterToSuggestion(
+                  inDropdownRef.current,
+                  this.editor.view.dom,
+                )
+              ) {
                 return false;
               }
+              // A missing popup makes a stale lifecycle hint non-authoritative
+              // for every subsequent Enter as well.
+              inDropdownRef.current = false;
 
               onEnter({
                 useCodebase: false,
