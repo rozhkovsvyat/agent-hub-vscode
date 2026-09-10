@@ -105,6 +105,21 @@ export function CukiiStickyUserMessage({
     };
 
     measure();
+    // Markdown/editor descendants can finish their first layout after the
+    // parent layout effect. ResizeObserver is not required to emit a second
+    // record when the element is already at its final size by observation
+    // time, so an initial zero would otherwise classify every real long
+    // capsule as short forever. Re-measure once after the first paint.
+    const postPaintMeasurement = requestAnimationFrame(measure);
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? undefined
+        : new MutationObserver(measure);
+    mutationObserver?.observe(content, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? undefined
@@ -116,6 +131,8 @@ export function CukiiStickyUserMessage({
     content.addEventListener("load", measure, true);
 
     return () => {
+      cancelAnimationFrame(postPaintMeasurement);
+      mutationObserver?.disconnect();
       content.removeEventListener("load", measure, true);
       resizeObserver?.disconnect();
     };

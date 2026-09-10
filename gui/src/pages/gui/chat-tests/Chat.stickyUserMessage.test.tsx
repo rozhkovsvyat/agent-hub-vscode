@@ -422,6 +422,12 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     expect(css).toMatch(
       /\.cukii-user-bubble--meta-inline\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute/s,
     );
+    expect(css).toMatch(
+      /\.cukii-user-row--sticky[^}]*\.cukii-user-message-bubble[^}]*>\s*\.cukii-user-metadata\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*4px/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-row--sticky[^}]*\.cukii-user-content-shell[^}]*\.ProseMirror[^}]*p:last-child::after\s*\{[^}]*width:\s*calc\(var\(--cukii-meta-reserve\) \+ 4px\)/s,
+    );
   } finally {
     globalThis.ResizeObserver = originalResizeObserver;
     if (scrollHeightDescriptor) {
@@ -468,6 +474,106 @@ test("marks an attachment capsule as foldable while preserving it in normal flow
     expect(bubble?.querySelector("img")).not.toBeNull();
     expect(bubble?.querySelector(".cukii-user-metadata")?.textContent).toBe(
       "01:15",
+    );
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+  }
+});
+
+test("re-measures a long capsule after the first browser paint", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  let contentReads = 0;
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      if (!this.classList?.contains("cukii-user-message-content")) return 0;
+      contentReads += 1;
+      return contentReads === 1 ? 0 : 140;
+    },
+  });
+
+  try {
+    const { container } = render(
+      <CukiiStickyUserMessage
+        bubbleClassName="cukii-user-message-bubble"
+        messageId="post-paint-prompt"
+        metadata={<span className="cukii-user-metadata">01:16</span>}
+      >
+        <p>{"Long after layout ".repeat(12)}</p>
+      </CukiiStickyUserMessage>,
+    );
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-post-paint-prompt"]',
+    );
+
+    await waitFor(() =>
+      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
+    );
+    expect(contentReads).toBeGreaterThanOrEqual(2);
+    expect(bubble?.querySelector(".cukii-user-fold-footer")).not.toBeNull();
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+  }
+});
+
+test("re-measures delayed Markdown content after its DOM mutation", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  let markdownReady = false;
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      if (!this.classList?.contains("cukii-user-message-content")) return 0;
+      return markdownReady ? 140 : 0;
+    },
+  });
+
+  try {
+    const { container } = render(
+      <CukiiStickyUserMessage
+        bubbleClassName="cukii-user-message-bubble"
+        messageId="delayed-markdown-prompt"
+        metadata={<span className="cukii-user-metadata">01:17</span>}
+      >
+        <div />
+      </CukiiStickyUserMessage>,
+    );
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-delayed-markdown-prompt"]',
+    );
+    const content = bubble?.querySelector<HTMLElement>(
+      ".cukii-user-message-content",
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+
+    markdownReady = true;
+    act(() => content?.appendChild(document.createTextNode("rendered")));
+    await waitFor(() =>
+      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
     );
   } finally {
     if (scrollHeightDescriptor) {

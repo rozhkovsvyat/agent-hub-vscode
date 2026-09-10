@@ -2467,6 +2467,30 @@ button.cukii-submit-button--stop:active {
   margin: 0;
 }
 
+/* Every sticky capsule has exactly one receipt row. The generic MAX fit
+   observer may run before delayed Markdown exists and deliberately keeps a
+   separate footer when it cannot prove fit; a sticky header cannot afford
+   that second line. Reserve the measured receipt width in the final paragraph
+   and pin the receipt in the same visual row. Non-sticky transcript bubbles
+   keep the ordinary measured MAX fallback. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble
+  > .cukii-user-content-shell
+  .ProseMirror
+  p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: calc(var(--cukii-meta-reserve) + 4px);
+  height: 14px;
+}
+
+.cukii-user-row--sticky .cukii-user-message-bubble > .cukii-user-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
 /* Dark ink on the orange capsule: time and checks inherit the brand text
    token instead of the muted description gray. */
 .cukii-user-message-bubble .cukii-user-metadata {
