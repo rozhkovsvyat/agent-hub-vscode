@@ -438,7 +438,7 @@ export function Chat() {
         void dispatch(streamResponseThunk({ editorState, modifiers, index }));
 
         if (editorToClearOnSend) {
-          editorToClearOnSend.commands.clearContent();
+          editorToClearOnSend.commands.clearContent(true);
         }
       }
     },

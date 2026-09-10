@@ -86,7 +86,10 @@ export function clearSubmittedMainComposer(
   isInEdit: boolean,
 ): void {
   if (isMainInput && !isInEdit) {
-    editor.commands.clearContent();
+    // `CukiiComposerImageStrip` mirrors image nodes through TipTap's `update`
+    // event. The default clear does not emit that event, leaving stale pills
+    // visible until the user's next keystroke.
+    editor.commands.clearContent(true);
   }
 }
 
@@ -493,7 +496,7 @@ export function createEditorConfig(options: {
           modifiers,
         }),
       );
-      editor.commands.clearContent();
+      editor.commands.clearContent(true);
       return;
     }
 

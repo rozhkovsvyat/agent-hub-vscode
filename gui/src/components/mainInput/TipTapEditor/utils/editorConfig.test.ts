@@ -43,7 +43,8 @@ describe("clearSubmittedMainComposer", () => {
 
     clearSubmittedMainComposer(editor, true, false);
 
-    expect(clearContent).toHaveBeenCalledTimes(1);
+    expect(clearContent).toHaveBeenCalledOnce();
+    expect(clearContent).toHaveBeenCalledWith(true);
   });
 
   it("preserves historical and edit-mode editor state", () => {
