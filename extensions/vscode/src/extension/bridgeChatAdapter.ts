@@ -77,6 +77,7 @@ import {
   removeBridgeScratchFile,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
+import { resolveBridgeStorageLayout } from "./bridgeStorageEnv";
 import {
   RuntimeCanaryAttestation,
   runtimeCanaryExtensionBinding,
@@ -905,6 +906,8 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     appendPathSegment(segments, path.join(home, ".local", "bin"));
   }
 
+  const storage = resolveBridgeStorageLayout({ pathExists: fs.existsSync });
+  fs.mkdirSync(storage.tempDir, { recursive: true });
   const env: BridgeEnv = {
     ...process.env,
     [pathKey]: segments.join(path.delimiter),
@@ -912,6 +915,16 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     CUKII_BRIDGE_MODE: "broker",
     CUKII_BROKER_MODEL: model,
     CUKII_SUBAGENT_MODEL: subagent,
+    ...(process.platform === "win32"
+      ? {
+          TEMP: storage.tempDir,
+          TMP: storage.tempDir,
+          TMPDIR: storage.tempDir,
+          ...(storage.pnpmStoreDir
+            ? { npm_config_store_dir: storage.pnpmStoreDir }
+            : {}),
+        }
+      : {}),
   };
 
   // Kimi аутентифицируется собственным device-токеном (`kimi login`), а не через
