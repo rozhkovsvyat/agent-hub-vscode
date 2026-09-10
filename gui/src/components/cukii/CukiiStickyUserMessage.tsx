@@ -83,6 +83,7 @@ export function CukiiStickyUserMessage({
   const [isExpanded, setIsExpanded] = useState(false);
   const isExpandedRef = useRef(isExpanded);
   const naturalContentHeightRef = useRef(0);
+  const stickyStartScrollTopRef = useRef<number | undefined>();
   const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
   isExpandedRef.current = isExpanded;
 
@@ -145,7 +146,6 @@ export function CukiiStickyUserMessage({
     const bubble = content?.closest<HTMLElement>(".cukii-user-message-bubble");
     if (!content || !row || !transcript || !bubble) return;
 
-    let stickyStartScrollTop: number | undefined;
     let stableFlowHeight = 0;
     // Collapsing the inner ProseMirror to one row also makes Chromium report a
     // smaller `content.scrollHeight` on the next scroll/ResizeObserver tick.
@@ -183,6 +183,24 @@ export function CukiiStickyUserMessage({
         naturalContentHeightRef.current,
         content.scrollHeight,
       );
+      const transcriptRect = transcript.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTopFromScrollport = rowRect.top - transcriptRect.top;
+
+      // Capture the row's document-flow origin even while Markdown is still
+      // reporting zero/one-line height. In a real streamed turn, parent
+      // auto-scroll can pin the row before the delayed content measurement
+      // flips `isLongPrompt`; Blink then exposes a painted sticky offset equal
+      // to the current scrollTop. Adopting that late value leaves no remaining
+      // scroll distance and progress stays at 0 forever.
+      if (rowTopFromScrollport > 1) {
+        stickyStartScrollTopRef.current =
+          transcript.scrollTop + rowTopFromScrollport;
+      } else if (stickyStartScrollTopRef.current === undefined) {
+        stickyStartScrollTopRef.current =
+          offsetTopInside(row, transcript) ?? transcript.scrollTop;
+      }
+
       const fullHeight = naturalContentHeightRef.current;
       if (
         !isLongPrompt ||
@@ -192,27 +210,13 @@ export function CukiiStickyUserMessage({
         return;
       }
 
-      const transcriptRect = transcript.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const rowTopFromScrollport = rowRect.top - transcriptRect.top;
       const isAtStickyEdge =
         transcript.scrollTop > 0 && Math.abs(rowTopFromScrollport) <= 1;
-
-      // Chromium reports a sticky element's *painted* offsetTop after it pins,
-      // so recomputing the threshold at every scroll frame chases scrollTop
-      // forever. Refresh it only while the row is still in normal flow, then
-      // hold that value for the whole forward/reverse sticky cycle.
-      if (rowTopFromScrollport > 1) {
-        stickyStartScrollTop = transcript.scrollTop + rowTopFromScrollport;
-      } else if (stickyStartScrollTop === undefined) {
-        stickyStartScrollTop =
-          offsetTopInside(row, transcript) ?? transcript.scrollTop;
-      }
       const geometry = resolveStickyCollapseGeometry({
         fullHeight,
         isAtStickyEdge,
         scrollTop: transcript.scrollTop,
-        stickyStartScrollTop,
+        stickyStartScrollTop: stickyStartScrollTopRef.current,
       });
       const visibleHeight =
         isExpandedRef.current || geometry.phase === "flow"

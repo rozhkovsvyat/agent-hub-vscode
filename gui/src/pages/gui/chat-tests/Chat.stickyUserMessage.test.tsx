@@ -143,6 +143,156 @@ test("maps scroll distance to a reversible pixel-by-pixel sticky fold", () => {
   ).toEqual({ phase: "flow", progress: 0, visibleHeight: 140 });
 });
 
+test("keeps the pre-paint flow origin when streamed markdown becomes long after the row sticks", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollTop",
+  );
+  const originalGetBoundingClientRect =
+    HTMLElement.prototype.getBoundingClientRect;
+  const originalMutationObserver = globalThis.MutationObserver;
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const mutationCallbacks: Array<() => void> = [];
+  let contentHeight = 0;
+  let transcriptScrollTop = 60;
+  let rowTop = 40;
+
+  class TestMutationObserver {
+    constructor(callback: MutationCallback) {
+      mutationCallbacks.push(() =>
+        callback([], this as unknown as MutationObserver),
+      );
+    }
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  class TestResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains(
+        "cukii-user-message-content",
+      )
+        ? contentHeight
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains("cukii-transcript")
+        ? transcriptScrollTop
+        : 0;
+    },
+    set(value: number) {
+      if ((this as HTMLElement).classList?.contains("cukii-transcript")) {
+        transcriptScrollTop = value;
+      }
+    },
+  });
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains("cukii-transcript")) {
+      return { top: 0, height: 500 } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-row--sticky")) {
+      return { top: rowTop, height: contentHeight + 46 } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-message-content")) {
+      return { top: rowTop + 14, height: contentHeight } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-message-bubble")) {
+      return { top: rowTop + 14, height: contentHeight + 20 } as DOMRect;
+    }
+    return originalGetBoundingClientRect.call(this);
+  };
+  globalThis.MutationObserver =
+    TestMutationObserver as unknown as typeof MutationObserver;
+  globalThis.ResizeObserver =
+    TestResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => undefined;
+
+  try {
+    const { container } = render(
+      <div className="cukii-transcript">
+        <div className="cukii-user-row--sticky">
+          <CukiiStickyUserMessage
+            bubbleClassName="cukii-user-message-bubble"
+            messageId="late-markdown"
+          >
+            Streamed prompt
+          </CukiiStickyUserMessage>
+        </div>
+      </div>,
+    );
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-late-markdown"]',
+    );
+
+    // The first layout pass sees no Markdown height yet, while the row is in
+    // normal flow at scrollTop 60 + top 40 = document offset 100.
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+
+    // Streaming finishes after auto-scroll has already pinned the row. Blink's
+    // sticky offset now equals the current scrollTop, so adopting it here would
+    // make progress permanently zero at the bottom of the transcript.
+    contentHeight = 140;
+    transcriptScrollTop = 220;
+    rowTop = 0;
+    act(() => mutationCallbacks.forEach((callback) => callback()));
+
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+    expect(
+      bubble
+        ?.closest(".cukii-user-row--sticky")
+        ?.getAttribute("data-cukii-collapse-progress"),
+    ).toBe("1.0000");
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .scrollHeight;
+    }
+    if (scrollTopDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollTop",
+        scrollTopDescriptor,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .scrollTop;
+    }
+    HTMLElement.prototype.getBoundingClientRect =
+      originalGetBoundingClientRect;
+    globalThis.MutationObserver = originalMutationObserver;
+    globalThis.ResizeObserver = originalResizeObserver;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  }
+});
+
 test("folds a long prompt only after it actually sticks to the transcript top", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
