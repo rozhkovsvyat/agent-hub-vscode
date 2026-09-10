@@ -10,8 +10,8 @@ import { IIdeMessenger } from "../../../../context/IdeMessenger";
 import { AppDispatch } from "../../../../redux/store";
 import AtMentionDropdown from "../../AtMentionDropdown";
 import { ComboBoxItem, ComboBoxItemType, ComboBoxSubAction } from "../../types";
-import { TIPPY_DIV_ID } from "../TipTapEditor";
 import { SlashCommand } from "../extensions";
+import { findSuggestionContainer } from "./suggestionContainer";
 
 function getSuggestion(
   items: (props: { query: string }) => Promise<ComboBoxItem[]>,
@@ -44,7 +44,7 @@ function getSuggestion(
             return;
           }
 
-          const container = document.getElementById(TIPPY_DIV_ID);
+          const container = findSuggestionContainer(props.editor.view.dom);
 
           if (!container) {
             console.log("no container");

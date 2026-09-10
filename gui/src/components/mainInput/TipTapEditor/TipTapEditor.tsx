@@ -46,8 +46,6 @@ export interface TipTapEditorProps {
   inputId: string;
 }
 
-export const TIPPY_DIV_ID = "tippy-js-div";
-
 function TipTapEditorInner(props: TipTapEditorProps) {
   const dispatch = useAppDispatch();
   const mainEditorContext = useMainEditor();
@@ -351,7 +349,7 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       {showDragOverMsg && supportsImageInput && (
         <DragOverlay show={showDragOverMsg} setShow={setShowDragOverMsg} />
       )}
-      <div id={TIPPY_DIV_ID} className="fixed z-50" />
+      <div className="fixed z-50" data-cukii-tippy-container />
     </InputBoxDiv>
   );
 }
