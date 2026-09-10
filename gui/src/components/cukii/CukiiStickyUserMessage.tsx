@@ -60,6 +60,20 @@ function offsetTopInside(element: HTMLElement, ancestor: HTMLElement) {
   return node === ancestor ? offset : undefined;
 }
 
+function stickyFlowOriginInside(row: HTMLElement, transcript: HTMLElement) {
+  // Once CSS `position: sticky` pins the row, Chromium changes the row's
+  // offsetTop to its painted position. The containing turn remains in normal
+  // document flow, and the sticky user row is its first layout child, so the
+  // turn is the stable origin even when a restored session mounts at the
+  // bottom with the row already pinned.
+  const turn = row.closest<HTMLElement>(".cukii-turn");
+  if (turn && turn !== row && transcript.contains(turn)) {
+    const turnOffset = offsetTopInside(turn, transcript);
+    if (turnOffset !== undefined) return turnOffset;
+  }
+  return offsetTopInside(row, transcript);
+}
+
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
   children: ReactNode;
@@ -92,6 +106,7 @@ export function CukiiStickyUserMessage({
     if (!content) return;
 
     naturalContentHeightRef.current = 0;
+    stickyStartScrollTopRef.current = undefined;
 
     const measure = () => {
       naturalContentHeightRef.current = Math.max(
@@ -198,7 +213,7 @@ export function CukiiStickyUserMessage({
           transcript.scrollTop + rowTopFromScrollport;
       } else if (stickyStartScrollTopRef.current === undefined) {
         stickyStartScrollTopRef.current =
-          offsetTopInside(row, transcript) ?? transcript.scrollTop;
+          stickyFlowOriginInside(row, transcript) ?? transcript.scrollTop;
       }
 
       const fullHeight = naturalContentHeightRef.current;

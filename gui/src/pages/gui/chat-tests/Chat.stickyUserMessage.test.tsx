@@ -284,8 +284,189 @@ test("keeps the pre-paint flow origin when streamed markdown becomes long after 
       delete (HTMLElement.prototype as unknown as Record<string, unknown>)
         .scrollTop;
     }
-    HTMLElement.prototype.getBoundingClientRect =
-      originalGetBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    globalThis.MutationObserver = originalMutationObserver;
+    globalThis.ResizeObserver = originalResizeObserver;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  }
+});
+
+test("uses the turn flow origin when a restored session mounts with the row already sticky", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollTop",
+  );
+  const offsetTopDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetTop",
+  );
+  const offsetParentDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetParent",
+  );
+  const originalGetBoundingClientRect =
+    HTMLElement.prototype.getBoundingClientRect;
+  const originalMutationObserver = globalThis.MutationObserver;
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const mutationCallbacks: Array<() => void> = [];
+  let contentHeight = 0;
+
+  class TestMutationObserver {
+    constructor(callback: MutationCallback) {
+      mutationCallbacks.push(() =>
+        callback([], this as unknown as MutationObserver),
+      );
+    }
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  class TestResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains(
+        "cukii-user-message-content",
+      )
+        ? contentHeight
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains("cukii-transcript")
+        ? 220
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+    configurable: true,
+    get() {
+      const element = this as HTMLElement;
+      if (element.classList?.contains("cukii-turn")) return 100;
+      if (element.classList?.contains("cukii-user-row--sticky")) return 220;
+      return 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+    configurable: true,
+    get() {
+      const element = this as HTMLElement;
+      if (element.classList?.contains("cukii-turn")) {
+        return element.parentElement;
+      }
+      if (element.classList?.contains("cukii-user-row--sticky")) {
+        return element.parentElement;
+      }
+      return null;
+    },
+  });
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains("cukii-transcript")) {
+      return { top: 0, height: 500 } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-row--sticky")) {
+      return { top: 0, height: contentHeight + 46 } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-message-content")) {
+      return { top: 14, height: contentHeight } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-message-bubble")) {
+      return { top: 14, height: contentHeight + 20 } as DOMRect;
+    }
+    return originalGetBoundingClientRect.call(this);
+  };
+  globalThis.MutationObserver =
+    TestMutationObserver as unknown as typeof MutationObserver;
+  globalThis.ResizeObserver =
+    TestResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => undefined;
+
+  try {
+    const { container } = render(
+      <div className="cukii-transcript">
+        <div className="cukii-turn">
+          <div className="cukii-user-row--sticky">
+            <CukiiStickyUserMessage
+              bubbleClassName="cukii-user-message-bubble"
+              messageId="restored-at-bottom"
+            >
+              Restored prompt
+            </CukiiStickyUserMessage>
+          </div>
+        </div>
+      </div>,
+    );
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-restored-at-bottom"]',
+    );
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+
+    contentHeight = 140;
+    act(() => mutationCallbacks.forEach((callback) => callback()));
+
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+    expect(
+      bubble
+        ?.closest(".cukii-user-row--sticky")
+        ?.getAttribute("data-cukii-collapse-progress"),
+    ).toBe("1.0000");
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+    if (scrollTopDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollTop",
+        scrollTopDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+    }
+    if (offsetTopDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "offsetTop",
+        offsetTopDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetTop");
+    }
+    if (offsetParentDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "offsetParent",
+        offsetParentDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetParent");
+    }
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     globalThis.MutationObserver = originalMutationObserver;
     globalThis.ResizeObserver = originalResizeObserver;
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
