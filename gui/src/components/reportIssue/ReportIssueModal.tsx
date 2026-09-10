@@ -108,7 +108,10 @@ async function clipboardImage(file: File) {
   return {
     name: file.name || `clipboard-${Date.now()}.png`,
     mimeType: file.type as
-      "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+      | "image/png"
+      | "image/jpeg"
+      | "image/webp"
+      | "image/gif",
     base64,
   };
 }
@@ -138,6 +141,8 @@ export function ReportIssueModal({
   const submittingRef = useRef(false);
   const snapshotGenerationRef = useRef(0);
   const attachmentsRef = useRef<CukiiIssuePickedImage[]>([]);
+  const mountedRef = useRef(true);
+  const pasteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const resultCloseRef = useRef<HTMLButtonElement>(null);
@@ -239,7 +244,9 @@ export function ReportIssueModal({
 
   useEffect(
     () => () => {
+      mountedRef.current = false;
       const attachmentIds = attachmentsRef.current.map(({ id }) => id);
+      attachmentsRef.current = [];
       if (attachmentIds.length > 0) {
         void ideMessenger.request("cukii/releaseIssueImages", {
           attachmentIds,
@@ -291,37 +298,64 @@ export function ReportIssueModal({
       setAttachmentError(response.error);
       return;
     }
-    setAttachments((current) => [...current, ...response.content].slice(0, 3));
+    acceptRegisteredImages(response.content);
   };
 
-  const pasteImages = async (event: ReactClipboardEvent<HTMLDivElement>) => {
-    if (phase === "submitting" || submissionLocked) return;
+  const releaseImages = (images: CukiiIssuePickedImage[]) => {
+    if (images.length === 0) return;
+    void ideMessenger.request("cukii/releaseIssueImages", {
+      attachmentIds: images.map(({ id }) => id),
+    });
+  };
+
+  const acceptRegisteredImages = (images: CukiiIssuePickedImage[]) => {
+    if (!mountedRef.current) {
+      releaseImages(images);
+      return;
+    }
     const remaining = Math.max(0, 3 - attachmentsRef.current.length);
+    const accepted = images.slice(0, remaining);
+    const overflow = images.slice(remaining);
+    const next = [...attachmentsRef.current, ...accepted];
+    attachmentsRef.current = next;
+    setAttachments(next);
+    releaseImages(overflow);
+  };
+
+  const pasteImages = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    if (phase === "submitting" || submissionLocked) return;
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file))
-      .slice(0, remaining);
+      .slice(0, 3);
     if (files.length === 0) return;
     event.preventDefault();
     setAttachmentError(undefined);
-    try {
-      const images = await Promise.all(files.map(clipboardImage));
-      const response = await ideMessenger.request(
-        "cukii/registerIssueClipboardImages",
-        { images },
-      );
-      if (response.status === "error") throw new Error(response.error);
-      setAttachments((current) =>
-        [...current, ...response.content].slice(0, 3),
-      );
-    } catch (error) {
-      setAttachmentError(errorMessage(error));
-    }
+    const run = async () => {
+      const remaining = Math.max(0, 3 - attachmentsRef.current.length);
+      if (remaining === 0 || !mountedRef.current) return;
+      try {
+        const images = await Promise.all(
+          files.slice(0, remaining).map(clipboardImage),
+        );
+        const response = await ideMessenger.request(
+          "cukii/registerIssueClipboardImages",
+          { images },
+        );
+        if (response.status === "error") throw new Error(response.error);
+        acceptRegisteredImages(response.content);
+      } catch (error) {
+        if (mountedRef.current) setAttachmentError(errorMessage(error));
+      }
+    };
+    pasteQueueRef.current = pasteQueueRef.current.then(run, run);
   };
 
   const removeImage = (id: string) => {
-    setAttachments((current) => current.filter((image) => image.id !== id));
+    const next = attachmentsRef.current.filter((image) => image.id !== id);
+    attachmentsRef.current = next;
+    setAttachments(next);
     void ideMessenger.request("cukii/releaseIssueImages", {
       attachmentIds: [id],
     });

@@ -76,17 +76,10 @@ import {
 import { BridgeSteeringController } from "./bridgeSteer";
 import { BridgeRunCancellation } from "./bridgeRunCancellation";
 import {
-  isBridgePidAlive,
+  isBridgeProcessTreeAlive,
   manualTreeKillCommand,
   retryBridgeTreeKill,
 } from "./bridgeChildLifecycle";
-import {
-  BRIDGE_CANCEL_COMPLETION_MS,
-  BRIDGE_CANCEL_RECEIPT_MS,
-  cancelDecision,
-  settledWithin,
-  TIMED_OUT,
-} from "./bridgeCancelBudget";
 import { retryBridgeTeardownOnDispose } from "./bridgeDisposeTeardown";
 import {
   BridgeRunCoordinator,
@@ -124,11 +117,17 @@ function sourceProtocol(
 }
 
 type ActiveBridgeRun = BridgeRunIdentity & {
+  streamMessageId: string;
   controller: AbortController;
   done: Promise<CukiiBridgeRunCompletion>;
   steering: BridgeSteeringController;
   cancellation: BridgeRunCancellation;
   imageScope: BridgeImageScope;
+};
+
+type OwnedPermissionBroker = {
+  runId: string;
+  broker: ClaudePermissionBroker;
 };
 
 /**
@@ -139,13 +138,19 @@ export class VsCodeMessenger {
   /** Brokers are scoped to the exact webview protocol that created the run. */
   private readonly claudePermissionBrokers = new Map<
     VsCodeWebviewProtocol,
-    Set<ClaudePermissionBroker>
+    Set<OwnedPermissionBroker>
+  >();
+  /** Includes candidates waiting behind process-tree teardown. Stop/Escape is
+   * bound to the exact run even before that candidate becomes active. */
+  private readonly bridgeRunCandidates = new Map<
+    VsCodeWebviewProtocol,
+    Map<string, ActiveBridgeRun>
   >();
   private readonly panelSessionIds = new Map<VsCodeWebviewProtocol, string>();
   private readonly bridgeRuns = new BridgeRunCoordinator<
     VsCodeWebviewProtocol,
     ActiveBridgeRun
-  >(12_000, { isPidAlive: (pid) => isBridgePidAlive(pid) });
+  >(22_000, { isPidAlive: (pid) => isBridgeProcessTreeAlive(pid) });
   private nextBridgeRunId = 0;
   /** Preserve click order when two panels rename the same session together. */
   private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
@@ -169,62 +174,39 @@ export class VsCodeMessenger {
     run: ActiveBridgeRun,
     requestId: string,
   ): Promise<CukiiCancelReceipt> {
-    const { alreadyCancelled, receipt } = run.cancellation.cancel();
-    // 🔴 Both of these used to be awaited without a bound, and that was the
-    // eternal loader. `receipt` resolves off `run.done`, and `run.done` is
-    // resolved in the stream generator's `finally` — which never runs while
-    // nobody is pulling the generator. So a run that stalled mid-stream made
-    // Stop hang forever, and every later submit found the slot still occupied:
-    // neither stopping nor restarting the session could recover it.
-    //
-    // Timing out here does not mean the vendor is alive. It means we stopped
-    // waiting for a promise that may never settle, and must now decide the
-    // question the hard way — by probing the pid.
-    const result = await settledWithin(receipt, BRIDGE_CANCEL_RECEIPT_MS);
-    const completion =
-      result === TIMED_OUT
-        ? TIMED_OUT
-        : await settledWithin(run.done, BRIDGE_CANCEL_COMPLETION_MS);
-    const {
-      interrupted,
-      terminationVerified,
-      probePid: childPid,
-    } = cancelDecision({
-      receipt: result,
-      completion,
-      runChildPid: run.childPid,
-    });
-    if (!terminationVerified) {
-      // The teardown budget expired without a confirmed death, but the tree may
-      // have died right after it. Re-probe liveness before declaring the slot
-      // unrecoverable: a verified-dead occupant must free the slot instead of
-      // blocking every later submit until the panel is closed.
-      //
-      // A run that never reached spawn owns no process, so there is nothing to
-      // outlive it and nothing to justify holding the slot.
-      if (childPid !== undefined && (await isBridgePidAlive(childPid))) {
-        // Last resort before refusing: one forced tree kill, then verify.
-        // Without it a wedged tree kept the panel unusable until it was closed.
-        const reaped = await retryBridgeTreeKill(childPid);
-        if (!reaped) {
-          throw new Error(
-            `Native bridge run ${run.runId} did not terminate; replacement is blocked. ` +
-              `Reap it with: ${manualTreeKillCommand(childPid)}`,
-          );
-        }
+    const { alreadyCancelled, interrupted } = run.cancellation.cancel();
+    // Abort starts an idempotent tree teardown inside bridgeChatAdapter. Do not
+    // wait for the stream generator's `finally`: its consumer may already have
+    // disappeared. Verify the owned tree directly and free the slot as soon as
+    // it is dead so Stop -> next prompt is a fast, deterministic transition.
+    if (run.childPid !== undefined) {
+      const reaped = await retryBridgeTreeKill(run.childPid, {
+        budgetMs: 7_000,
+      });
+      if (!reaped) {
+        throw new Error(
+          `Native bridge run ${run.runId} did not terminate; replacement is blocked. ` +
+            `Reap it with: ${manualTreeKillCommand(run.childPid)}`,
+        );
       }
       this.bridgeRuns.release(protocol, run);
       return {
         requestId,
         sessionId: run.sessionId,
+        runId: run.runId,
         status: alreadyCancelled ? "already-cancelled" : "cancelled",
         interrupted,
         postMortem: true,
       };
     }
+    // The run was cancelled before it reached spawn. launchBridgeChild checks
+    // the same signal immediately before spawn, so no process can appear after
+    // this slot is released.
+    this.bridgeRuns.release(protocol, run);
     return {
       requestId,
       sessionId: run.sessionId,
+      runId: run.runId,
       status: alreadyCancelled ? "already-cancelled" : "cancelled",
       interrupted,
     };
@@ -274,10 +256,11 @@ export class VsCodeMessenger {
 
   private addPermissionBroker(
     protocol: VsCodeWebviewProtocol,
+    runId: string,
     broker: ClaudePermissionBroker,
   ): void {
     const brokers = this.claudePermissionBrokers.get(protocol) ?? new Set();
-    brokers.add(broker);
+    brokers.add({ runId, broker });
     this.claudePermissionBrokers.set(protocol, brokers);
   }
 
@@ -287,8 +270,44 @@ export class VsCodeMessenger {
   ): void {
     const brokers = this.claudePermissionBrokers.get(protocol);
     if (!brokers) return;
-    brokers.delete(broker);
+    for (const owned of brokers) {
+      if (owned.broker === broker) brokers.delete(owned);
+    }
     if (brokers.size === 0) this.claudePermissionBrokers.delete(protocol);
+  }
+
+  private registerBridgeCandidate(
+    protocol: VsCodeWebviewProtocol,
+    run: ActiveBridgeRun,
+  ): void {
+    const candidates = this.bridgeRunCandidates.get(protocol) ?? new Map();
+    candidates.set(run.runId, run);
+    this.bridgeRunCandidates.set(protocol, candidates);
+  }
+
+  private removeBridgeCandidate(
+    protocol: VsCodeWebviewProtocol,
+    run: ActiveBridgeRun,
+  ): void {
+    const candidates = this.bridgeRunCandidates.get(protocol);
+    if (!candidates || candidates.get(run.runId) !== run) return;
+    candidates.delete(run.runId);
+    if (candidates.size === 0) this.bridgeRunCandidates.delete(protocol);
+  }
+
+  private bridgeCandidateFor(
+    protocol: VsCodeWebviewProtocol,
+    identity: { runId?: string; streamMessageId?: string },
+  ): ActiveBridgeRun | undefined {
+    const candidates = this.bridgeRunCandidates.get(protocol);
+    if (!candidates) return undefined;
+    if (identity.runId) return candidates.get(identity.runId);
+    if (identity.streamMessageId) {
+      return [...candidates.values()].find(
+        (run) => run.streamMessageId === identity.streamMessageId,
+      );
+    }
+    return this.bridgeRuns.activeFor(protocol);
   }
 
   private async runAuthTerminalFlow(
@@ -442,10 +461,11 @@ export class VsCodeMessenger {
         void this.teardownBridgeRunOnDispose(protocol, run);
       }
       const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
-      for (const broker of brokers) broker.denyAll();
-      void Promise.all(brokers.map((broker) => broker.dispose())).finally(
+      for (const { broker } of brokers) broker.denyAll();
+      void Promise.all(brokers.map(({ broker }) => broker.dispose())).finally(
         () => {
           this.claudePermissionBrokers.delete(protocol);
+          this.bridgeRunCandidates.delete(protocol);
           this.panelSessionIds.delete(protocol);
         },
       );
@@ -1074,25 +1094,40 @@ export class VsCodeMessenger {
       const protocol = sourceProtocol(msg, this.webviewProtocol);
       const accepted = [
         ...(this.claudePermissionBrokers.get(protocol) ?? []),
-      ].some((broker) => broker.respond(msg.data));
+      ].some(({ broker }) => broker.respond(msg.data));
       // A forged or stale response must be silent and fail closed. In
       // particular, never relay it to a different panel's pending request.
       if (!accepted) return;
     });
     const disposePermissionBrokersFor = async (
       protocol: VsCodeWebviewProtocol,
+      expectedStreamMessageId?: string,
     ) => {
-      const run = this.bridgeRuns.activeFor(protocol);
+      const runs = expectedStreamMessageId
+        ? [
+            this.bridgeCandidateFor(protocol, {
+              streamMessageId: expectedStreamMessageId,
+            }),
+          ].filter((run): run is ActiveBridgeRun => Boolean(run))
+        : [...(this.bridgeRunCandidates.get(protocol)?.values() ?? [])];
+      if (expectedStreamMessageId && runs.length === 0) return;
+      // Snapshot the brokers owned by the matched run before cancellation can
+      // release the slot. A replacement Claude run may create a new broker
+      // while the process tree is being reaped; the old abort must not dispose
+      // that replacement's permission channel.
+      const runIds = new Set(runs.map((run) => run.runId));
+      const brokers = [
+        ...(this.claudePermissionBrokers.get(protocol) ?? []),
+      ].filter((owned) => !expectedStreamMessageId || runIds.has(owned.runId));
       let cancellationError: unknown;
-      if (run) {
+      for (const run of runs) {
         try {
           await this.cancelBridgeRun(protocol, run, `abort:${run.sessionId}`);
         } catch (error) {
-          cancellationError = error;
+          cancellationError ??= error;
         }
       }
-      const brokers = [...(this.claudePermissionBrokers.get(protocol) ?? [])];
-      for (const broker of brokers) {
+      for (const { broker } of brokers) {
         // Stop/session replacement is an authority boundary: do not leave an
         // MCP worker waiting behind a closed chat or retain its private config.
         await broker.dispose();
@@ -1103,6 +1138,7 @@ export class VsCodeMessenger {
     this.onWebview("abort", async (msg) => {
       await disposePermissionBrokersFor(
         sourceProtocol(msg, this.webviewProtocol),
+        msg.messageId,
       );
     });
     this.onWebview("cukii/panelSessionChanged", async (msg) => {
@@ -1156,7 +1192,8 @@ export class VsCodeMessenger {
         done.then(() => undefined),
       );
       const run: ActiveBridgeRun = {
-        runId: `${Date.now()}-${++this.nextBridgeRunId}`,
+        runId: msg.data.runId ?? `${Date.now()}-${++this.nextBridgeRunId}`,
+        streamMessageId: msg.messageId,
         controller,
         done,
         sessionId: msg.data.sessionId,
@@ -1173,7 +1210,8 @@ export class VsCodeMessenger {
         },
         onPendingChanged: (requestIds) =>
           cukiiSessionAttention.promptsChanged(msg.data.sessionId, requestIds),
-        onBrokerCreated: (broker) => this.addPermissionBroker(protocol, broker),
+        onBrokerCreated: (broker) =>
+          this.addPermissionBroker(protocol, run.runId, broker),
         onBrokerDisposed: (broker) =>
           this.removePermissionBroker(protocol, broker),
         steering,
@@ -1211,62 +1249,76 @@ export class VsCodeMessenger {
         imageScope,
         abortSignal: controller.signal,
       };
+      this.registerBridgeCandidate(protocol, run);
       const stream = streamBridgeChat(msg.data, permissionTransport);
       const messenger = this;
       const wrapped = (async function* () {
-        const acquisition = await messenger.bridgeRuns.acquire(
-          protocol,
-          run,
-          async (previous) => {
-            try {
-              await messenger.cancelBridgeRun(
-                protocol,
-                previous,
-                `replace:${previous.sessionId}:${run.runId}`,
-              );
-              return true;
-            } catch {
-              return false;
-            }
-          },
-        );
-        if (acquisition !== "acquired") {
-          resolveDone({ terminationVerified: true, childPid });
-          return {
-            cukiiBridgeDisposition: acquisition,
-            sessionId: run.sessionId,
-            runId: run.runId,
-          };
-        }
-        // From here the session is visibly working in the sidebar drawer. The
-        // marker is dropped in `finally`, so an abort or a thrown stream frees
-        // it just as a clean end does.
-        cukiiSessionAttention.runStarted(run.sessionId, run.runId);
-        recordCukiiDiagnostic("bridge.run.started", {
-          sessionId: run.sessionId,
-          model: run.brokerModel,
-          runId: run.runId,
-        });
         try {
-          return yield* stream;
-        } catch (error) {
-          recordCukiiDiagnostic("bridge.run.failed", {
-            sessionId: run.sessionId,
-            model: run.brokerModel,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          throw error;
-        } finally {
-          cukiiSessionAttention.runEnded(run.sessionId, run.runId);
-          recordCukiiDiagnostic("bridge.run.finished", {
-            sessionId: run.sessionId,
-            model: run.brokerModel,
-            terminationVerified,
-          });
-          resolveDone({ terminationVerified, childPid });
-          if (terminationVerified) {
-            messenger.bridgeRuns.release(protocol, run);
+          const acquisition = await messenger.bridgeRuns.acquire(
+            protocol,
+            run,
+            async (previous) => {
+              try {
+                await messenger.cancelBridgeRun(
+                  protocol,
+                  previous,
+                  `replace:${previous.sessionId}:${run.runId}`,
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          );
+          if (acquisition !== "acquired") {
+            resolveDone({ terminationVerified: true, childPid });
+            return {
+              cukiiBridgeDisposition: acquisition,
+              sessionId: run.sessionId,
+              runId: run.runId,
+            };
           }
+          if (controller.signal.aborted) {
+            messenger.bridgeRuns.release(protocol, run);
+            resolveDone({ terminationVerified: true, childPid });
+            return {
+              cukiiBridgeDisposition: "superseded" as const,
+              sessionId: run.sessionId,
+              runId: run.runId,
+            };
+          }
+          // From here the session is visibly working in the sidebar drawer. The
+          // marker is dropped in `finally`, so an abort or a thrown stream frees
+          // it just as a clean end does.
+          cukiiSessionAttention.runStarted(run.sessionId, run.runId);
+          recordCukiiDiagnostic("bridge.run.started", {
+            sessionId: run.sessionId,
+            model: run.brokerModel,
+            runId: run.runId,
+          });
+          try {
+            return yield* stream;
+          } catch (error) {
+            recordCukiiDiagnostic("bridge.run.failed", {
+              sessionId: run.sessionId,
+              model: run.brokerModel,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          } finally {
+            cukiiSessionAttention.runEnded(run.sessionId, run.runId);
+            recordCukiiDiagnostic("bridge.run.finished", {
+              sessionId: run.sessionId,
+              model: run.brokerModel,
+              terminationVerified,
+            });
+            resolveDone({ terminationVerified, childPid });
+            if (terminationVerified) {
+              messenger.bridgeRuns.release(protocol, run);
+            }
+          }
+        } finally {
+          messenger.removeBridgeCandidate(protocol, run);
         }
       })();
       void done.finally(() => {
@@ -1324,21 +1376,23 @@ export class VsCodeMessenger {
       "cukii/cancelBridgeRun",
       async (msg): Promise<CukiiCancelReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
-        const run = this.bridgeRuns.activeFor(protocol);
-        const purge = purgeUnreadBridgeInboxMessages(msg.data.sessionId);
-        if (!run || run.sessionId !== msg.data.sessionId) {
-          if (!(await purge)) {
-            throw new Error(
-              "Cukii could not retire unread inbox messages for the cancelled run",
-            );
-          }
+        const run = this.bridgeCandidateFor(protocol, {
+          runId: msg.data.runId,
+        });
+        if (
+          !run ||
+          run.sessionId !== msg.data.sessionId ||
+          (msg.data.runId !== undefined && run.runId !== msg.data.runId)
+        ) {
           return {
             requestId: msg.data.requestId,
             sessionId: msg.data.sessionId,
+            runId: msg.data.runId,
             status: "already-cancelled",
             interrupted: "turn",
           };
         }
+        const purge = purgeUnreadBridgeInboxMessages(msg.data.sessionId);
         // Explicit Stop cancels the queued bubbles on the GUI side; unread
         // inbox entries must die with them or the next run would resurrect
         // stale instructions the user already withdrew.

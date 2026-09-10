@@ -124,9 +124,9 @@ function fixture(
     if (/\/tasks\/task-\d+$/.test(url) && init.method === "GET") {
       return response(200, { idTaskCommon: "CUKII-207" });
     }
-    if (url.endsWith("/companies?limit=100") && init.method === "GET") {
+    if (url.endsWith("/companies") && init.method === "GET") {
       return response(200, {
-        content: [{ id: "945711d1-c885-4c95-9b88-132d36e8a8ce" }],
+        id: "945711d1-c885-4c95-9b88-132d36e8a8ce",
       });
     }
     if (/\/chats\/[^/]+\/messages\?/.test(url)) {
@@ -383,6 +383,25 @@ describe("YougileIssueReporter", () => {
         },
       ]),
     ).toThrow(/5 MB/);
+  });
+
+  it("registers a clipboard batch atomically when a later image is invalid", () => {
+    const fx = fixture();
+    expect(() =>
+      fx.reporter.registerClipboardImages([
+        {
+          name: "valid.png",
+          mimeType: "image/png",
+          base64: PNG_BASE64,
+        },
+        {
+          name: "invalid.png",
+          mimeType: "image/png",
+          base64: Buffer.from("not an image").toString("base64"),
+        },
+      ]),
+    ).toThrow(/valid supported image/i);
+    expect((fx.reporter as any).pickedImages.size).toBe(0);
   });
 
   it("persists the bytes selected from disk even if the source changes later", async () => {

@@ -1,6 +1,7 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
 import type { CukiiBridgeStreamDisposition } from "core/protocol/ideWebview";
+import { v4 as uuidv4 } from "uuid";
 import {
   hasImageAttachments,
   renderChatMessage,
@@ -9,7 +10,7 @@ import {
 import {
   acceptToolCall,
   addPromptCompletionPair,
-  abortStream,
+  claimBridgeRun,
   clearSteerInterrupt,
   errorToolCall,
   markSteerRead,
@@ -20,6 +21,7 @@ import {
   setInactive,
   setInlineErrorMessage,
   setIsPruned,
+  settleBridgeRun,
   setSteerStatus,
   setToolCallCalling,
   streamUpdate,
@@ -117,21 +119,27 @@ function raceNextOrCancellation<T>(
   nextPromise: Promise<
     IteratorResult<T, PromptLog | CukiiBridgeStreamDisposition | undefined>
   >,
-  getState: () => RootState,
+  signal: AbortSignal,
 ): Promise<RaceResult<T>> {
-  return Promise.race([
-    nextPromise.then((value) => ({ kind: "value" as const, value })),
-    new Promise<RaceResult<T>>((resolve) => {
-      const check = () => {
-        if (!getState().session.isStreaming) {
-          resolve({ kind: "cancelled" as const });
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      check();
-    }),
-  ]);
+  if (signal.aborted) return Promise.resolve({ kind: "cancelled" });
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      resolve({ kind: "cancelled" });
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void nextPromise.then(
+      (value) => {
+        cleanup();
+        resolve({ kind: "value", value });
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -195,6 +203,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
   async (options, { dispatch, extra, getState }) => {
     const state = getState();
     const sessionId = state.session.id;
+    const runId = uuidv4();
     const explicitlyQueuedFollowUpMessageIds = Array.from(
       new Set(
         (
@@ -235,11 +244,12 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     const brokerAutocompact = state.session.brokerAutocompact;
     const thinkingEnabled = state.session.hasReasoningEnabled;
     const streamAborter = state.session.streamAborter;
-    const initialUserReceiptId = explicitlyQueuedFollowUpMessageIds.length > 0
-      ? undefined
-      : state.session.history.findLast(
-          (item) => item.message.role === "user" && !item.isSteer,
-        )?.message.id;
+    const initialUserReceiptId =
+      explicitlyQueuedFollowUpMessageIds.length > 0
+        ? undefined
+        : state.session.history.findLast(
+            (item) => item.message.role === "user" && !item.isSteer,
+          )?.message.id;
 
     const queuedFollowUps = queuedFollowUpMessageIds.map((messageId) =>
       state.session.history.find(
@@ -312,15 +322,28 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     let superseded = false;
 
     const settleTerminal = () => {
-      if (!terminalSettled && getState().session.id === sessionId) {
+      if (
+        !terminalSettled &&
+        getState().session.id === sessionId &&
+        getState().session.activeBridgeRunId === runId
+      ) {
         terminalSettled = true;
-        dispatch(setInactive());
+        dispatch(settleBridgeRun({ runId }));
       }
+    };
+
+    const ownsBridgeRun = () => {
+      const current = getState().session;
+      return (
+        current.id === sessionId &&
+        current.activeBridgeRunId === runId &&
+        current.streamAborter === streamAborter
+      );
     };
 
     const markAcceptedAndPersist = async (messageIds: string[]) => {
       const current = getState().session;
-      if (current.id !== sessionId) return;
+      if (!ownsBridgeRun()) return;
       let changed = false;
       for (const messageId of messageIds) {
         const item = current.history.find(
@@ -338,6 +361,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       }
       if (!changed) return;
       const { saveCurrentSession } = await import("./session");
+      if (!ownsBridgeRun()) return;
       unwrapResult(
         await dispatch(
           saveCurrentSession({
@@ -363,7 +387,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       return appearedThisRun;
     };
 
-    dispatch(setActive());
+    dispatch(claimBridgeRun({ runId }));
     dispatch(markLatestUserReceiptDelivered());
     dispatch(setInlineErrorMessage(undefined));
     dispatch(setIsPruned(false));
@@ -375,6 +399,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         "cukii/streamBridgeChat",
         {
           sessionId: state.session.id,
+          runId,
           messages,
           brokerModel,
           brokerSubagent,
@@ -392,14 +417,20 @@ export const streamBrokerBridgeInput = createAsyncThunk<
 
       let completed = false;
       try {
-        while (true) {
-          const result = await raceNextOrCancellation(gen.next(), getState);
+        streamLoop: while (true) {
+          const result = await raceNextOrCancellation(
+            gen.next(),
+            streamAborter.signal,
+          );
           if (result.kind === "cancelled") {
-            dispatch(abortStream());
             await gen.return(undefined);
             break;
           }
           if (result.value.done) {
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break;
+            }
             completed = true;
             const finalValue = result.value.value;
             if (finalValue && isBridgeStreamDisposition(finalValue)) {
@@ -419,12 +450,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             }
             break;
           }
-          if (getState().session.id !== sessionId) {
-            await gen.return(undefined);
-            break;
-          }
-          if (!getState().session.isStreaming) {
-            dispatch(abortStream());
+          if (!ownsBridgeRun()) {
             await gen.return(undefined);
             break;
           }
@@ -440,8 +466,16 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           );
           if (batchReceiptIds.length > 0) {
             await markAcceptedAndPersist(batchReceiptIds);
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break;
+            }
           }
           for (const message of bridgeMessages) {
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break streamLoop;
+            }
             if (isBridgeTerminalMessage(message)) {
               hasTerminalReceipt = true;
               break;
@@ -465,6 +499,10 @@ export const streamBrokerBridgeInput = createAsyncThunk<
             if (message.cukiiVendorActivity) {
               if (queuedFollowUpMessageIds.length > 0) {
                 await markAcceptedAndPersist(queuedFollowUpMessageIds);
+                if (!ownsBridgeRun()) {
+                  await gen.return(undefined);
+                  break streamLoop;
+                }
               }
               if (initialUserReceiptId) {
                 dispatch(markSteerRead({ messageId: initialUserReceiptId }));

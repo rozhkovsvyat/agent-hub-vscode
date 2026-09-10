@@ -5,6 +5,7 @@ import {
   cancelQueuedSteers,
   clearDanglingMessages,
   setCancelling,
+  setCancellingSource,
   setInactive,
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
@@ -22,8 +23,29 @@ export const cancelStream = createAsyncThunk<
   ThunkApiType
 >("chat/cancelStream", async (args, { dispatch, extra, getState }) => {
   const session = getState().session;
+  const runId = session.activeBridgeRunId;
+  const submissionEpoch = session.submissionEpoch;
   const userInitiated = !args?.source || args.source === "user";
-  if (session.isCancelling) return;
+  if (session.isCancelling) {
+    if (userInitiated && session.cancellingSource !== "user") {
+      const latestAssistant = [...session.history]
+        .reverse()
+        .find((item) => item.message.role === "assistant");
+      const interrupted = latestAssistant?.toolCallStates?.some((tool) =>
+        ["generated", "generating", "calling"].includes(tool.status),
+      )
+        ? "tool"
+        : "turn";
+      // A native cancellation is already in flight, but a later explicit
+      // Stop is a new terminal boundary. Rotate the controller and cancel the
+      // durable outbox without issuing a duplicate native request.
+      dispatch(setInactive());
+      dispatch(abortStream());
+      dispatch(clearDanglingMessages(interrupted));
+      dispatch(cancelQueuedSteers());
+    }
+    return;
+  }
   if (!session.isStreaming) {
     dispatch(setInactive());
     dispatch(abortStream());
@@ -57,29 +79,43 @@ export const cancelStream = createAsyncThunk<
   // cancellation receipt arrives, even though the visible turn is already
   // settled optimistically.
   dispatch(setCancelling(true));
+  dispatch(setCancellingSource(userInitiated ? "user" : "internal"));
 
   const requestId = uuidv4();
   try {
     const response = await extra.ideMessenger.request("cukii/cancelBridgeRun", {
       requestId,
       sessionId: session.id,
+      runId,
     });
+    const current = getState().session;
     if (
       userInitiated &&
       response.status === "success" &&
-      getState().session.id === session.id
+      current.id === session.id &&
+      current.submissionEpoch === submissionEpoch &&
+      !current.isStreaming &&
+      current.activeBridgeRunId === undefined &&
+      (!runId || !response.content.runId || response.content.runId === runId)
     ) {
       dispatch(clearDanglingMessages(response.content.interrupted));
     }
   } finally {
-    if (getState().session.id === session.id) {
+    const current = getState().session;
+    if (
+      current.id === session.id &&
+      current.submissionEpoch === submissionEpoch &&
+      (current.activeBridgeRunId === undefined ||
+        current.activeBridgeRunId === runId)
+    ) {
       dispatch(setCancelling(false));
       // Only provider/lifecycle cancellations may drain the durable outbox.
       // After an explicit user Stop the queued follow-ups are already
       // cancelled and the broker must stay stopped.
       if (!userInitiated) {
-        const { continueIfTrailingSteer } =
-          await import("./continueIfTrailingSteer");
+        const { continueIfTrailingSteer } = await import(
+          "./continueIfTrailingSteer"
+        );
         void dispatch(continueIfTrailingSteer());
       }
     }

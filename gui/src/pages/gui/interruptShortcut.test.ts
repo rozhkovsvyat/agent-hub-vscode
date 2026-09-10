@@ -28,11 +28,19 @@ describe("shouldInterruptFromEscape", () => {
     expect(shouldInterruptFromEscape(escape(), active)).toBe(true);
   });
 
+  it("stops the whole run even while a Claude permission is pending", () => {
+    expect(
+      shouldInterruptFromEscape(escape(), {
+        ...active,
+        hasPendingPermission: true,
+      }),
+    ).toBe(true);
+  });
+
   it.each([
     ["idle", { ...active, isStreaming: false }, escape()],
     ["repeat", active, escape({ repeat: true })],
     ["IME", active, escape({ isComposing: true })],
-    ["permission", { ...active, hasPendingPermission: true }, escape()],
     ["already cancelling", { ...active, isCancelling: true }, escape()],
   ])("guards %s", (_name, state, event) => {
     expect(shouldInterruptFromEscape(event, state)).toBe(false);

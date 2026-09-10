@@ -910,10 +910,12 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
   }
 
   const storage = resolveBridgeStorageLayout({ pathExists: fs.existsSync });
-  const inheritedEnv = bridgeStorageProcessEnv();
   if (process.platform === "win32") {
     fs.mkdirSync(storage.tempDir, { recursive: true });
   }
+  // Re-resolve after creation: an existing/replaced leaf may itself be a
+  // junction and must not escape the verified scratch root.
+  const inheritedEnv = bridgeStorageProcessEnv();
   const env: BridgeEnv = {
     ...inheritedEnv,
     [pathKey]: segments.join(path.delimiter),
@@ -1432,12 +1434,15 @@ export function bridgeProcessFailureMessage({
   return (
     `${label} bridge exited ${
       signal ? `after signal ${signal}` : `with code ${code}`
-    }.` +
-    (detail
-      ? ` ${detail}`
-      : " Native CLI stopped before returning a normal response.") +
-    logSuffix
+    }. Native CLI stopped before returning a normal response.` + logSuffix
   );
+}
+
+export function bridgeFailureDetail(
+  stdoutTail: string,
+  stderr: string,
+): string {
+  return [stdoutTail.trim(), stderr.trim()].filter(Boolean).join("\n");
 }
 
 export type BridgeChildErrorSettlement = {
@@ -1647,126 +1652,136 @@ async function* streamBridgeChatWithSteer(
     controls,
     args.brokerPermissionMode,
   );
-  // The harness canary is deliberately limited to Kimi.  It carries a nonce
-  // from the exact submitted user turn and emits no record for normal chats.
-  const canaryTurn = runtimeCanaryTurn(args.messages);
-  const activeExtension = vscode.extensions.getExtension("cukii.cukii-vscode");
-  const extensionBinding = activeExtension
-    ? runtimeCanaryExtensionBinding(
-        activeExtension.extensionPath,
-        activeExtension.packageJSON.version,
-      )
-    : undefined;
-  const canary =
-    canaryTurn && args.brokerModel.startsWith("kimi") && extensionBinding
-      ? new RuntimeCanaryAttestation(
-          canaryTurn,
-          args.brokerModel,
-          extensionBinding,
-          permissionTransport?.onRuntimeCanaryEvent,
-        )
-      : undefined;
   let permissionBroker: ClaudePermissionBroker | undefined;
-  if (
-    ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(
-      args.brokerModel,
-    ) &&
-    args.brokerPermissionMode !== "bypass"
-  ) {
-    if (!permissionTransport) {
-      throw new Error(
-        "Claude permission transport is unavailable for this Cukii panel.",
-      );
-    }
-    permissionBroker = new ClaudePermissionBroker({
-      panelId: permissionTransport.panelId,
-      sessionId: args.sessionId || permissionTransport.sessionId,
-      mode: args.brokerPermissionMode,
-      onRequest: permissionTransport.onRequest,
-      onPendingChanged: permissionTransport.onPendingChanged,
-    });
-    await permissionBroker.start();
-    attachClaudePermissionTransport(route, permissionBroker);
-    permissionTransport.onBrokerCreated?.(permissionBroker);
-  }
-  permissionTransport?.abortSignal?.throwIfAborted();
-  const subagentLabel =
-    args.brokerSubagent === "auto"
-      ? "Auto"
-      : displayBridgeModel(args.brokerSubagent);
-  yield {
-    role: "thinking",
-    content:
-      `Starting ${route.label} broker bridge.\n` +
-      `${bridgeControlSummary(controls)}\n` +
-      `Subagent route: ${subagentLabel}.\n` +
-      (args.brokerSubagent === "auto"
-        ? "Auto routing may choose the strongest available native worker.\n"
-        : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),
-  };
-  let command: ResolvedCommand;
-  try {
-    command = ensureProgramAvailable(route);
-    if (brokerVendorForModel(args.brokerModel) === "grok") {
-      // `resolveCommand` can replace the short `grok` token with an absolute
-      // native path (or a cmd shim plus prefix args). The last pre-spawn check
-      // must therefore measure that fully resolved Windows command line.
-      assertGrokWindowsCommandLine(command.program, command.args);
-    }
-  } catch (err) {
+  let resourcesReleased = false;
+  const releasePreparedResources = async () => {
+    if (resourcesReleased) return;
+    resourcesReleased = true;
     if (route.promptFile) removeBridgeScratchFile(route.promptFile);
     if (permissionBroker) {
       await permissionBroker.dispose();
       permissionTransport?.onBrokerDisposed?.(permissionBroker);
     }
-    throw err;
-  }
-  yield {
-    role: "thinking",
-    content: `Launching native command: ${describeBridgeLaunch(command.program, command.args)}\n`,
   };
-
-  // A codex startup crash caused by its models cache is repaired and the
-  // launch retried exactly once; every other failure surfaces untouched.
-  const launchOptions = {
-    command,
-    route,
-    cwd,
-    prompt,
-    messages: transportMessages,
-    sessionId: args.sessionId,
-    brokerModel: args.brokerModel,
-    brokerSubagent: args.brokerSubagent,
-    queuedFollowUpMessageId: args.queuedFollowUpMessageId,
-    queuedFollowUpMessageIds: args.queuedFollowUpMessageIds,
-    permissionTransport,
-    canary,
-    permissionBroker,
-  };
-  let codexCacheRetried = false;
-  for (;;) {
-    try {
-      return yield* launchBridgeChild(launchOptions);
-    } catch (err) {
-      const failureMessage = err instanceof Error ? err.message : String(err);
-      if (
-        route.program !== "codex" ||
-        !isCodexModelsCacheFailure(failureMessage)
-      ) {
-        throw err;
-      }
-      if (codexCacheRetried) {
+  try {
+    // The harness canary is deliberately limited to Kimi.  It carries a nonce
+    // from the exact submitted user turn and emits no record for normal chats.
+    const canaryTurn = runtimeCanaryTurn(args.messages);
+    const activeExtension =
+      vscode.extensions.getExtension("cukii.cukii-vscode");
+    const extensionBinding = activeExtension
+      ? runtimeCanaryExtensionBinding(
+          activeExtension.extensionPath,
+          activeExtension.packageJSON.version,
+        )
+      : undefined;
+    const canary =
+      canaryTurn && args.brokerModel.startsWith("kimi") && extensionBinding
+        ? new RuntimeCanaryAttestation(
+            canaryTurn,
+            args.brokerModel,
+            extensionBinding,
+            permissionTransport?.onRuntimeCanaryEvent,
+          )
+        : undefined;
+    if (
+      ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(
+        args.brokerModel,
+      ) &&
+      args.brokerPermissionMode !== "bypass"
+    ) {
+      if (!permissionTransport) {
         throw new Error(
-          `${route.label} bridge still cannot start after a cache repair: the Codex CLI keeps rejecting ${path.join(resolveCodexHome(), "models_cache.json")}. Another installed Codex/ChatGPT extension shares that file and rewrites it without \`supports_parallel_tool_calls\`. Update that extension or delete the cache file, then retry. (${failureMessage})`,
+          "Claude permission transport is unavailable for this Cukii panel.",
         );
       }
-      codexCacheRetried = true;
-      yield {
-        role: "thinking",
-        content:
-          "Codex rejected its models cache at launch; Cukii healed the file and retries the bridge once.\n",
-      };
+      permissionBroker = new ClaudePermissionBroker({
+        panelId: permissionTransport.panelId,
+        sessionId: args.sessionId || permissionTransport.sessionId,
+        mode: args.brokerPermissionMode,
+        onRequest: permissionTransport.onRequest,
+        onPendingChanged: permissionTransport.onPendingChanged,
+      });
+      await permissionBroker.start();
+      attachClaudePermissionTransport(route, permissionBroker);
+      permissionTransport.onBrokerCreated?.(permissionBroker);
     }
+    permissionTransport?.abortSignal?.throwIfAborted();
+    const subagentLabel =
+      args.brokerSubagent === "auto"
+        ? "Auto"
+        : displayBridgeModel(args.brokerSubagent);
+    yield {
+      role: "thinking",
+      content:
+        `Starting ${route.label} broker bridge.\n` +
+        `${bridgeControlSummary(controls)}\n` +
+        `Subagent route: ${subagentLabel}.\n` +
+        (args.brokerSubagent === "auto"
+          ? "Auto routing may choose the strongest available native worker.\n"
+          : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),
+    };
+    let command: ResolvedCommand;
+    try {
+      command = ensureProgramAvailable(route);
+      if (brokerVendorForModel(args.brokerModel) === "grok") {
+        // `resolveCommand` can replace the short `grok` token with an absolute
+        // native path (or a cmd shim plus prefix args). The last pre-spawn check
+        // must therefore measure that fully resolved Windows command line.
+        assertGrokWindowsCommandLine(command.program, command.args);
+      }
+    } catch (err) {
+      throw err;
+    }
+    yield {
+      role: "thinking",
+      content: `Launching native command: ${describeBridgeLaunch(command.program, command.args)}\n`,
+    };
+
+    // A codex startup crash caused by its models cache is repaired and the
+    // launch retried exactly once; every other failure surfaces untouched.
+    const launchOptions = {
+      command,
+      route,
+      cwd,
+      prompt,
+      messages: transportMessages,
+      sessionId: args.sessionId,
+      brokerModel: args.brokerModel,
+      brokerSubagent: args.brokerSubagent,
+      queuedFollowUpMessageId: args.queuedFollowUpMessageId,
+      queuedFollowUpMessageIds: args.queuedFollowUpMessageIds,
+      permissionTransport,
+      canary,
+      permissionBroker,
+    };
+    let codexCacheRetried = false;
+    for (;;) {
+      try {
+        return yield* launchBridgeChild(launchOptions);
+      } catch (err) {
+        const failureMessage = err instanceof Error ? err.message : String(err);
+        if (
+          route.program !== "codex" ||
+          !isCodexModelsCacheFailure(failureMessage)
+        ) {
+          throw err;
+        }
+        if (codexCacheRetried) {
+          throw new Error(
+            `${route.label} bridge still cannot start after a cache repair: the Codex CLI keeps rejecting ${path.join(resolveCodexHome(), "models_cache.json")}. Another installed Codex/ChatGPT extension shares that file and rewrites it without \`supports_parallel_tool_calls\`. Update that extension or delete the cache file, then retry. (${failureMessage})`,
+          );
+        }
+        codexCacheRetried = true;
+        yield {
+          role: "thinking",
+          content:
+            "Codex rejected its models cache at launch; Cukii healed the file and retries the bridge once.\n",
+        };
+      }
+    }
+  } finally {
+    await releasePreparedResources();
   }
 }
 
@@ -1821,16 +1836,31 @@ async function* launchBridgeChild(options: {
   // about to spawn (MCP registration + strict delivery gate). Failures only
   // degrade to the turn-end drain fallback.
   ensureBrokerVendorIntegration(brokerModel);
+  const vendorEnv = await alibabaSpawnEnv(brokerModel);
+  // Environment discovery may read SecretStorage. Stop is allowed to arrive
+  // during that await, so the authoritative guard belongs immediately before
+  // spawn, with no further asynchronous boundary after it.
+  if (permissionTransport?.abortSignal?.aborted) {
+    return {
+      modelTitle: route.label,
+      modelProvider: "cukii-bridge",
+      prompt,
+      completion: "",
+    };
+  }
   const child = childProcess.spawn(command.program, command.args, {
     cwd,
     env: {
       ...bridgeEnv(brokerModel, brokerSubagent),
-      ...(await alibabaSpawnEnv(brokerModel)),
+      ...vendorEnv,
       // Kept for vendors that preserve inherited env. The authoritative MCP
       // binding is the pid + process-start-token record registered below.
       ...(sessionId ? { CUKII_SESSION_ID: sessionId } : {}),
     },
     shell: false,
+    // POSIX Stop targets the whole process group (CLI + shells/tools/MCP
+    // workers). Windows uses taskkill /T against the live launcher instead.
+    detached: process.platform !== "win32",
     windowsHide: true,
   });
   if (child.pid && sessionId) {
@@ -1849,6 +1879,11 @@ async function* launchBridgeChild(options: {
   let protocolTerminalReceived = false;
   const queue: BridgeEvent[] = [];
   let canaryResponse = "";
+  let terminationPromise: Promise<boolean> | undefined;
+  const terminateOnce = () => {
+    terminationPromise ??= terminateBridgeChild(child).catch(() => false);
+    return terminationPromise;
+  };
   const queuedFollowUpRead = new Set<string>();
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
@@ -1901,6 +1936,10 @@ async function* launchBridgeChild(options: {
     queue.length = 0;
     done = true;
     permissionBroker?.denyAll();
+    // Start physical teardown from the AbortSignal itself. The async generator
+    // may have a pending `next()` which nobody will ever pull again; its
+    // `finally` is only the idempotent join, not the trigger.
+    void terminateOnce();
   };
   permissionTransport?.abortSignal?.addEventListener("abort", abortChild, {
     once: true,
@@ -2043,7 +2082,7 @@ async function* launchBridgeChild(options: {
           route.format === "codex-thread",
       )
     ) {
-      const detail = stderr.trim() || stdoutTail.trim();
+      const detail = bridgeFailureDetail(stdoutTail, stderr);
       error = new Error(
         bridgeProcessFailureMessage({
           label: route.label,
@@ -2121,16 +2160,11 @@ async function* launchBridgeChild(options: {
     child.stdin.end();
     let terminated = false;
     try {
-      terminated = await terminateBridgeChild(child);
+      terminated = await terminateOnce();
     } catch {
       terminated = false;
     }
     permissionTransport?.onTerminationResult?.(terminated);
-    if (route.promptFile) removeBridgeScratchFile(route.promptFile);
-    if (permissionBroker) {
-      await permissionBroker.dispose();
-      permissionTransport?.onBrokerDisposed?.(permissionBroker);
-    }
     if (!terminated) {
       throw new Error(
         "Native bridge process tree did not terminate within the safety budget",

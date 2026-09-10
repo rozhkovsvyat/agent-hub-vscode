@@ -2,15 +2,18 @@ const ESCAPE_OWNING_OVERLAY_SELECTOR =
   '[role="menu"], [role="dialog"], [role="listbox"], .tippy-box';
 
 export function hasVisibleEscapeOwningOverlay(doc: Document = document) {
-  return [...doc.querySelectorAll<HTMLElement>(ESCAPE_OWNING_OVERLAY_SELECTOR)].some(
-    (element) => {
-      if (element.hidden || element.getAttribute("aria-hidden") === "true") {
-        return false;
-      }
-      const style = doc.defaultView?.getComputedStyle(element);
-      return style?.display !== "none" && style?.visibility !== "hidden";
-    },
-  );
+  return [
+    ...doc.querySelectorAll<HTMLElement>(ESCAPE_OWNING_OVERLAY_SELECTOR),
+  ].some((element) => {
+    // Escape on the native permission prompt is a whole-run Stop. Treating
+    // it as a generic dialog left Claude alive after denying only one tool.
+    if (element.classList.contains("cukii-permission-request")) return false;
+    if (element.hidden || element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    const style = doc.defaultView?.getComputedStyle(element);
+    return style?.display !== "none" && style?.visibility !== "hidden";
+  });
 }
 
 export function dispatchResponseEscape(
@@ -34,6 +37,7 @@ export function dispatchResponseEscape(
     return false;
   }
   event.preventDefault();
+  event.stopImmediatePropagation();
   dispatchCancelStream();
   return true;
 }

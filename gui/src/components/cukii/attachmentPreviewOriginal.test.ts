@@ -46,7 +46,7 @@ describe("просмотр показывает оригинал, а не тра
 
   it("и плашка, и лайтбокс берут previewSrc", () => {
     expect(strip).toContain("src={attachment.previewSrc}");
-    expect(strip).toContain("src={preview.previewSrc}");
+    expect(strip).toContain("source={preview.previewSrc}");
     expect(strip).not.toContain("src={attachment.src}");
     expect(strip).not.toContain("src={preview.src}");
   });

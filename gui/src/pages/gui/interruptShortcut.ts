@@ -12,7 +12,6 @@ export function shouldInterruptFromEscape(
     event.key === "Escape" &&
     state.isStreaming &&
     !state.isCancelling &&
-    !state.hasPendingPermission &&
     !event.repeat &&
     !event.isComposing &&
     event.keyCode !== 229 &&

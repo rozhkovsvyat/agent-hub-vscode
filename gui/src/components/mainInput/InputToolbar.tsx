@@ -207,6 +207,7 @@ function InputToolbar(props: InputToolbarProps) {
     generation?: number;
   } | null>(null);
   const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
+  const [catalogRefreshGeneration, setCatalogRefreshGeneration] = useState(0);
   const [reportIssueOpen, setReportIssueOpen] = useState(false);
   const [issueCapability, setIssueCapability] =
     useState<CukiiIssueReportCapability>();
@@ -466,6 +467,7 @@ function InputToolbar(props: InputToolbarProps) {
     };
   }, [
     brokerModel,
+    catalogRefreshGeneration,
     historyLength,
     ideMessenger,
     panelDraftResolved,
@@ -1004,6 +1006,8 @@ function InputToolbar(props: InputToolbarProps) {
         <VendorAccountsModal
           onClose={() => {
             setVendorAccountsOpen(false);
+            reconciledCatalogSession.current = undefined;
+            setCatalogRefreshGeneration((generation) => generation + 1);
             void refreshIssueCapability(true);
           }}
         />

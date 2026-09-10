@@ -26,12 +26,19 @@ function getSuggestion(
       let component: any;
       let popup: any;
       let container: HTMLElement | null = null;
+      let suggestionOpen = false;
+
+      const markClosed = () => {
+        container?.removeAttribute("data-cukii-suggestion-open");
+        if (!suggestionOpen) return;
+        suggestionOpen = false;
+        onClose();
+      };
 
       const onExit = () => {
         popup?.[0]?.destroy();
         component?.destroy();
-        container?.removeAttribute("data-cukii-suggestion-open");
-        onClose();
+        markClosed();
       };
 
       return {
@@ -67,12 +74,14 @@ function getSuggestion(
             trigger: "manual",
             placement: "bottom-start",
             maxWidth: `${window.innerWidth - 24}px`,
+            onHide: markClosed,
           });
 
           suggestionContainer.setAttribute(
             "data-cukii-suggestion-open",
             "true",
           );
+          suggestionOpen = true;
           onOpen();
         },
 
@@ -94,8 +103,7 @@ function getSuggestion(
           if (props.event.key === "Escape") {
             if (!popupInstance) return false;
             popupInstance.hide();
-            container?.removeAttribute("data-cukii-suggestion-open");
-            onClose();
+            markClosed();
 
             return true;
           }

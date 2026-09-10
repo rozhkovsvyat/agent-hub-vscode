@@ -170,6 +170,70 @@ describe("BridgeRunCoordinator", () => {
     ).resolves.toBe("blocked");
     expect(coordinator.activeFor("panel")).toBe(active);
   });
+
+  it("treats an unavailable liveness probe as unknown, never as death", async () => {
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000, {
+      isPidAlive: () => undefined,
+    });
+    const active: Run = { ...run("active"), childPid: 4242 };
+    await coordinator.acquire("panel", active, async () => true);
+
+    await expect(
+      coordinator.acquire("panel", run("candidate"), async () => false),
+    ).resolves.toBe("blocked");
+    expect(coordinator.activeFor("panel")).toBe(active);
+  });
+
+  it("never acquires through a slot released while liveness is pending", async () => {
+    let finishProbe!: (alive: boolean) => void;
+    const probe = new Promise<boolean>((resolve) => {
+      finishProbe = resolve;
+    });
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000, {
+      isPidAlive: () => probe,
+    });
+    const active: Run = { ...run("active"), childPid: 4242 };
+    await coordinator.acquire("panel", active, async () => true);
+
+    const staleReplacement = coordinator.acquire(
+      "panel",
+      run("stale-replacement"),
+      async () => true,
+    );
+    coordinator.release("panel", active);
+    const current = run("current");
+    await expect(
+      coordinator.acquire("panel", current, async () => true),
+    ).resolves.toBe("acquired");
+
+    finishProbe(false);
+    await expect(staleReplacement).resolves.toBe("superseded");
+    expect(coordinator.activeFor("panel")).toBe(current);
+  });
+
+  it("keeps the sole replacement tracked when Stop releases the old run", async () => {
+    let finishProbe!: (alive: boolean) => void;
+    const probe = new Promise<boolean>((resolve) => {
+      finishProbe = resolve;
+    });
+    const coordinator = new BridgeRunCoordinator<string, Run>(1_000, {
+      isPidAlive: () => probe,
+    });
+    const active: Run = { ...run("active"), childPid: 4242 };
+    await coordinator.acquire("panel", active, async () => true);
+    const replacement = run("replacement");
+    const acquiring = coordinator.acquire(
+      "panel",
+      replacement,
+      async () => true,
+    );
+
+    coordinator.release("panel", active);
+    finishProbe(true);
+
+    await expect(acquiring).resolves.toBe("acquired");
+    expect(coordinator.activeFor("panel")).toBe(replacement);
+  });
 });
 
 describe("bridgeRunAcceptsSteer", () => {

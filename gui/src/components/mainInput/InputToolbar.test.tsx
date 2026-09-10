@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { MockIdeMessenger } from "../../context/MockIdeMessenger";
@@ -152,6 +158,48 @@ describe("Cukii Claude-parity input toolbar", () => {
       "codex-5-6-sol",
     );
     expect(availableModelForBlankSession("qwen-3-8-max", [])).toBeUndefined();
+  });
+
+  it("reconciles the bootstrap model after the first account login closes", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    let catalogRequests = 0;
+    mockIdeMessenger.responseHandlers["cukii/listBrokerModelCatalog"] =
+      async () => {
+        catalogRequests += 1;
+        return catalogRequests === 1
+          ? []
+          : [
+              {
+                id: "codex" as const,
+                label: "OpenAI",
+                models: [
+                  {
+                    value: "codex-5-6-sol" as const,
+                    label: "GPT-5.6 Sol",
+                    contextWindowLabel: "272K",
+                  },
+                ],
+              },
+            ];
+      };
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+    await waitFor(() => expect(catalogRequests).toBe(1));
+    expect(store.getState().session.brokerModel).toBe("qwen-3-8-max");
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    await user.click(await getElementByText("Manage accounts…"));
+    await user.click(
+      await screen.findByRole("button", { name: "Close vendor accounts" }),
+    );
+
+    await waitFor(() => expect(catalogRequests).toBe(2));
+    await waitFor(() =>
+      expect(store.getState().session.brokerModel).toBe("codex-5-6-sol"),
+    );
   });
 
   it("shows a Claude-style model pill beside the slash control that opens the model picker", async () => {

@@ -6,6 +6,9 @@ import {
   type ChatHistoryItemWithMessageId,
   newSession,
   setActive,
+  setInactive,
+  streamUpdate,
+  submitEditorAndInitAtIndex,
 } from "../slices/sessionSlice";
 import { cancelStream } from "./cancelStream";
 
@@ -16,6 +19,33 @@ function deferred<T>() {
 }
 
 describe("cancelStream", () => {
+  it("records a terminal user Stop while an internal cancel receipt is pending", async () => {
+    const state = getEmptyRootState();
+    state.session.isStreaming = false;
+    state.session.isCancelling = true;
+    state.session.history = [
+      {
+        message: { id: "u1", role: "user", content: "queued follow-up" },
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "queued",
+        messageReceipt: { sentAt: 1, status: "queued" },
+      },
+    ];
+    const originalAborter = state.session.streamAborter;
+    const messenger = new MockIdeMessenger();
+    const request = vi.spyOn(messenger, "request");
+    const store: any = createMockStore(state, messenger);
+
+    await store.dispatch(cancelStream() as any);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(originalAborter.signal.aborted).toBe(true);
+    expect(store.getState().session.streamAborter).not.toBe(originalAborter);
+    expect(store.getState().session.history[0].steerStatus).toBe("cancelled");
+    expect(store.getState().session.isStreaming).toBe(false);
+  });
+
   it("paints Interrupted immediately while native cancellation finishes", async () => {
     const state = getEmptyRootState();
     state.session.history = [
@@ -146,6 +176,64 @@ describe("cancelStream", () => {
     ).toHaveLength(0);
   });
 
+  it("does not let a late Stop receipt mutate a new run in the same session", async () => {
+    const state = getEmptyRootState();
+    state.session.history = [
+      {
+        message: { id: "u1", role: "user", content: "first" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a1", role: "assistant", content: "old output" },
+        contextItems: [],
+      },
+    ];
+    const messenger = new MockIdeMessenger();
+    const receipt = deferred<any>();
+    messenger.responseHandlers["cukii/cancelBridgeRun"] = vi.fn(
+      async () => receipt.promise,
+    );
+    const store: any = createMockStore(state, messenger);
+    store.dispatch(setActive());
+
+    const cancellation = store.dispatch(cancelStream() as any);
+    await vi.waitFor(() =>
+      expect(store.getState().session.isCancelling).toBe(true),
+    );
+    store.dispatch(
+      newSession({
+        sessionId: state.session.id,
+        title: "same session, new run",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: { role: "user", content: "continue" },
+            contextItems: [],
+          },
+          {
+            message: { role: "assistant", content: "new output" },
+            contextItems: [],
+          },
+        ],
+      }),
+    );
+    store.dispatch(setActive());
+
+    receipt.resolve({
+      requestId: "late-stop",
+      sessionId: state.session.id,
+      status: "cancelled",
+      interrupted: "turn",
+    });
+    await cancellation;
+
+    expect(store.getState().session.isStreaming).toBe(true);
+    expect(store.getState().session.history.at(-1)?.interrupted).not.toBe(true);
+    expect(store.getState().session.history.at(-1)?.message.content).toBe(
+      "new output",
+    );
+  });
+
   it("uses a tool receipt without also painting a general interruption", async () => {
     const state = getEmptyRootState();
     state.session.history = [
@@ -184,6 +272,55 @@ describe("cancelStream", () => {
     expect(store.getState().session.history[1].toolCallStates?.[0].status).toBe(
       "canceled",
     );
+  });
+
+  it("does not let a late Stop receipt mark a newer completed turn interrupted", async () => {
+    const state = getEmptyRootState();
+    state.session.history = [
+      {
+        message: { id: "old-user", role: "user", content: "old" },
+        contextItems: [],
+      },
+      {
+        message: { id: "old-assistant", role: "assistant", content: "working" },
+        contextItems: [],
+      },
+    ];
+    const messenger = new MockIdeMessenger();
+    const receipt = deferred<any>();
+    messenger.responseHandlers["cukii/cancelBridgeRun"] = vi.fn(
+      async () => receipt.promise,
+    );
+    const store: any = createMockStore(state, messenger);
+    store.dispatch(setActive());
+    const oldCancellation = store.dispatch(cancelStream() as any);
+    await vi.waitFor(() =>
+      expect(store.getState().session.isCancelling).toBe(true),
+    );
+
+    store.dispatch(
+      submitEditorAndInitAtIndex({
+        index: store.getState().session.history.length,
+        editorState: { type: "doc" },
+      }),
+    );
+    store.dispatch(
+      streamUpdate([{ role: "assistant", content: "new completed output" }]),
+    );
+    store.dispatch(setInactive());
+
+    receipt.resolve({
+      requestId: "late-old-stop",
+      sessionId: state.session.id,
+      status: "cancelled",
+      interrupted: "turn",
+    });
+    await oldCancellation;
+
+    expect(store.getState().session.history.at(-1)?.message.content).toBe(
+      "new completed output",
+    );
+    expect(store.getState().session.history.at(-1)?.interrupted).not.toBe(true);
   });
 
   it("an explicit user Stop cancels the durable outbox and never drains it", async () => {

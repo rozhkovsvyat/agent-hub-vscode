@@ -66,7 +66,7 @@ function loginHttp(
   const status = options.status ?? 200;
   const key = options.key ?? KEY;
   return vi.fn(async (url) => {
-    if (url.endsWith("/auth/companies")) {
+    if (url.includes("/auth/companies?")) {
       return {
         ok: status >= 200 && status < 300,
         status,
@@ -230,7 +230,7 @@ describe("YouGile account row", () => {
     const calls: Array<{ url: string; body?: string }> = [];
     const authHttp: YougileHttp = vi.fn(async (url, init) => {
       calls.push({ url, body: init.body });
-      if (url.endsWith("/auth/companies")) {
+      if (url.includes("/auth/companies?")) {
         return {
           ok: true,
           status: 200,
@@ -310,6 +310,130 @@ describe("YouGile account row", () => {
     expect([...secrets.values.values()].join("\n")).not.toContain(
       "typed-password",
     );
+  });
+
+  it("replaces a rejected old key for the same company during automatic sign-in", async () => {
+    const calls: string[] = [];
+    const rejectedKey = "rejected-company-key-0123456789";
+    const authHttp: YougileHttp = vi.fn(async (url, init) => {
+      calls.push(url);
+      if (url.includes("/auth/companies?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{ id: "company-cukii", name: "Cukii" }],
+        };
+      }
+      if (url.endsWith("/auth/keys/get")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { key: rejectedKey, companyId: "company-cukii", deleted: false },
+          ],
+        };
+      }
+      if (
+        url.includes("/boards?") &&
+        init.headers.Authorization?.includes(rejectedKey)
+      ) {
+        return { ok: false, status: 401, json: async () => ({}) };
+      }
+      if (url.endsWith("/auth/keys")) {
+        return { ok: true, status: 200, json: async () => ({ key: KEY }) };
+      }
+      if (url.includes("/boards?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: [{ id: "af617b56-a4a4-49fd-8afd-b2c3db1b0787" }],
+          }),
+        };
+      }
+      if (url.endsWith("/users/me")) {
+        return { ok: true, status: 200, json: async () => ({ email: OWNER }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await runYougileAuthAction("login", {
+      host: authHost({ login: OWNER, password: "password" }),
+      store: store(),
+      http: authHttp,
+      environment: noMachineToken,
+    });
+
+    expect(result.message).toContain(OWNER);
+    expect(calls.filter((url) => url.endsWith("/auth/keys"))).toHaveLength(1);
+  });
+
+  it("finds the Cukii company after paginating the official companies response", async () => {
+    const companyCalls: string[] = [];
+    let createdKeys = 0;
+    const authHttp: YougileHttp = vi.fn(async (url) => {
+      if (url.includes("/auth/companies?")) {
+        companyCalls.push(url);
+        const secondPage = url.includes("offset=1");
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: [
+              secondPage
+                ? { id: "company-cukii", name: "Cukii" }
+                : { id: "company-other", name: "Other" },
+            ],
+            paging: { next: !secondPage },
+          }),
+        };
+      }
+      if (url.endsWith("/auth/keys/get")) {
+        return { ok: true, status: 200, json: async () => [] };
+      }
+      if (url.endsWith("/auth/keys")) {
+        createdKeys += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            key: createdKeys === 1 ? "other-company-key-0123456789" : KEY,
+          }),
+        };
+      }
+      if (url.includes("/boards?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content:
+              createdKeys === 2
+                ? [{ id: "af617b56-a4a4-49fd-8afd-b2c3db1b0787" }]
+                : [],
+          }),
+        };
+      }
+      if (url.endsWith("/users/me")) {
+        return { ok: true, status: 200, json: async () => ({ email: OWNER }) };
+      }
+      if (url.includes("/auth/keys/")) {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await runYougileAuthAction("login", {
+      host: authHost({ login: OWNER, password: "password" }),
+      store: store(),
+      http: authHttp,
+      environment: noMachineToken,
+    });
+
+    expect(result.message).toContain(OWNER);
+    expect(companyCalls).toEqual([
+      expect.stringContaining("offset=0"),
+      expect.stringContaining("offset=1"),
+    ]);
   });
 
   it("never asks for an API token or opens a token-management page", async () => {

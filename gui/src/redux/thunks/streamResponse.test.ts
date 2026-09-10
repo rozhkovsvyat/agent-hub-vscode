@@ -687,6 +687,9 @@ describe("streamResponseThunk", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         streamAborter: expect.any(AbortController),
         title: "Session summary",
         isPruned: false,
@@ -1079,6 +1082,9 @@ describe("streamResponseThunk", () => {
       ...stateWithToolSettings,
       session: {
         ...stateWithToolSettings.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         history: [
           {
             contextItems: [],
@@ -1141,6 +1147,7 @@ describe("streamResponseThunk", () => {
                 },
                 parsedArgs: { query: "test function" },
                 status: "done",
+                mcpUiState: undefined,
                 output: [
                   {
                     name: "Search Results",
@@ -1289,7 +1296,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/pending",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "pending",
         },
@@ -1686,7 +1698,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -1788,6 +1805,9 @@ describe("streamResponseThunk", () => {
       ...abortState,
       session: {
         ...abortState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         history: [
           {
             contextItems: [],

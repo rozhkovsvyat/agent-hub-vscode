@@ -414,7 +414,8 @@ export class YougileIssueReporter {
   async registerPickedImages(
     files: string[],
   ): Promise<CukiiIssuePickedImage[]> {
-    const result: CukiiIssuePickedImage[] = [];
+    const prepared: Array<ReturnType<YougileIssueReporter["prepareImage"]>> =
+      [];
     for (const file of files.slice(0, CUKII_ISSUE_MAX_IMAGES)) {
       const extension = path.extname(file).toLowerCase();
       const mimeType = IMAGE_MIME.get(extension);
@@ -427,28 +428,29 @@ export class YougileIssueReporter {
         throw new Error("Each screenshot must be 5 MB or smaller.");
       }
       const bytes = await fs.promises.readFile(file);
-      result.push(this.registerImage(path.basename(file), bytes, mimeType));
+      prepared.push(this.prepareImage(path.basename(file), bytes, mimeType));
     }
-    return result;
+    return prepared.map((image) => this.commitImage(image));
   }
 
   registerClipboardImages(
     images: CukiiIssueClipboardImage[],
   ): CukiiIssuePickedImage[] {
-    return images.slice(0, CUKII_ISSUE_MAX_IMAGES).map((image) => {
+    const prepared = images.slice(0, CUKII_ISSUE_MAX_IMAGES).map((image) => {
       if (image.base64.length > CUKII_ISSUE_MAX_IMAGE_BYTES * 2) {
         throw new Error("Each screenshot must be 5 MB or smaller.");
       }
       const bytes = Buffer.from(image.base64, "base64");
-      return this.registerImage(image.name, bytes, image.mimeType);
+      return this.prepareImage(image.name, bytes, image.mimeType);
     });
+    return prepared.map((image) => this.commitImage(image));
   }
 
-  private registerImage(
+  private prepareImage(
     rawName: string,
     bytes: Buffer,
     claimedMime: CukiiIssuePickedImage["mimeType"],
-  ): CukiiIssuePickedImage {
+  ) {
     if (bytes.length === 0 || bytes.length > CUKII_ISSUE_MAX_IMAGE_BYTES) {
       throw new Error("Each screenshot must be a non-empty image under 5 MB.");
     }
@@ -456,10 +458,17 @@ export class YougileIssueReporter {
     if (!mimeType || mimeType !== claimedMime) {
       throw new Error("The pasted attachment is not a valid supported image.");
     }
-    const id = crypto.randomUUID();
     const name = safeFileName(maskCukiiReportText(rawName));
+    return { bytes: Buffer.from(bytes), name, mimeType };
+  }
+
+  private commitImage(
+    image: ReturnType<YougileIssueReporter["prepareImage"]>,
+  ): CukiiIssuePickedImage {
+    const id = crypto.randomUUID();
+    const { bytes, name, mimeType } = image;
     this.pickedImages.set(id, {
-      bytes: Buffer.from(bytes),
+      bytes,
       name,
       size: bytes.length,
       mimeType,
@@ -471,6 +480,14 @@ export class YougileIssueReporter {
       mimeType,
       previewDataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`,
     };
+  }
+
+  private registerImage(
+    rawName: string,
+    bytes: Buffer,
+    claimedMime: CukiiIssuePickedImage["mimeType"],
+  ): CukiiIssuePickedImage {
+    return this.commitImage(this.prepareImage(rawName, bytes, claimedMime));
   }
 
   releasePickedImages(attachmentIds: string[]): void {
@@ -1051,12 +1068,10 @@ export class YougileIssueReporter {
             `/tasks/${encodeURIComponent(report.taskId)}`,
             "GET",
           ),
-          this.requestJson(credential.key, "/companies?limit=100", "GET"),
+          this.requestJson(credential.key, "/companies", "GET"),
         ]);
         const commonId = (task as { idTaskCommon?: unknown }).idTaskCommon;
-        const companyId = (
-          content(companies)[0] as { id?: unknown } | undefined
-        )?.id;
+        const companyId = (companies as { id?: unknown }).id;
         if (
           typeof commonId === "string" &&
           commonId &&

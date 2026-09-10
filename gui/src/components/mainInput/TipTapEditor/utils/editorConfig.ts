@@ -130,9 +130,6 @@ export function createEditorConfig(options: {
   const sessionMode = useAppSelector((state) => state.session.mode);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const isCancelling = useAppSelector((state) => state.session.isCancelling);
-  const hasPendingPermission = useAppSelector(
-    (state) => Object.keys(state.session.pendingClaudePermissions).length > 0,
-  );
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const historyLength = useAppSelector((store) => store.session.history.length);
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
@@ -145,7 +142,6 @@ export function createEditorConfig(options: {
   const sessionModeRef = useUpdatingRef(sessionMode);
   const isStreamingRef = useUpdatingRef(isStreaming);
   const isCancellingRef = useUpdatingRef(isCancelling);
-  const hasPendingPermissionRef = useUpdatingRef(hasPendingPermission);
   const getSubmenuContextItemsRef = useUpdatingRef(getSubmenuContextItems);
   const availableContextProvidersRef = useUpdatingRef(
     props.availableContextProviders,
@@ -428,10 +424,7 @@ export function createEditorConfig(options: {
               // Esc stops the turn (Claude parity). Consume it so we don't
               // also blur to the editor or close the JetBrains sidebar.
               if (isStreamingRef.current) {
-                if (
-                  isCancellingRef.current ||
-                  hasPendingPermissionRef.current
-                ) {
+                if (isCancellingRef.current) {
                   return false;
                 }
                 void dispatch(cancelStream());

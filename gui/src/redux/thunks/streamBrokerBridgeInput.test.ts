@@ -160,6 +160,90 @@ describe("streamBrokerBridgeInput controls", () => {
     ).toBe(true);
   });
 
+  it("drops the rest of an old batch when receipt persistence overlaps a replacement run", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    let saveStarted!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      saveStarted = resolve;
+    });
+    ideMessenger.responseHandlers["history/save"] = vi.fn(
+      async (session: any) => {
+        saveStarted();
+        await saveGate;
+        return session;
+      },
+    );
+    let releaseReplacement!: () => void;
+    const replacementGate = new Promise<void>((resolve) => {
+      releaseReplacement = resolve;
+    });
+    let call = 0;
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      call += 1;
+      if (call === 1) {
+        yield [
+          {
+            role: "thinking",
+            content: "accepted",
+            cukiiSteerReadMessageId: "old-follow-up",
+          },
+          { role: "assistant", content: "stale output after save" },
+        ];
+        return;
+      }
+      await replacementGate;
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "receipt-save-race",
+        title: "Receipt save race",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: messageWithId(
+              { role: "user", content: "old follow-up" },
+              "old-follow-up",
+            ),
+            contextItems: [],
+            isSteer: true,
+            steerStatus: "deferred",
+          } as ChatHistoryItemWithMessageId,
+        ],
+        mode: "broker",
+      }),
+    );
+
+    const oldRun = store.dispatch(
+      streamBrokerBridgeInput({ queuedFollowUpMessageId: "old-follow-up" }),
+    );
+    await saving;
+    const replacement = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(ideMessenger.streamRequest).toHaveBeenCalledTimes(2),
+    );
+
+    releaseSave();
+    await oldRun;
+    expect(
+      store
+        .getState()
+        .session.history.some(
+          (item) => item.message.content === "stale output after save",
+        ),
+    ).toBe(false);
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    releaseReplacement();
+    await replacement;
+    expect(store.getState().session.isStreaming).toBe(false);
+  });
+
   it("passes steerInterrupt and consumes the pending flag on a redelivered follow-up", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: any[] = [];
@@ -1056,11 +1140,15 @@ describe("streamBrokerBridgeInput controls", () => {
     const ideMessenger = new MockIdeMessenger();
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
+    let releaseThird!: () => void;
     const firstBlocked = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
     const secondBlocked = new Promise<void>((resolve) => {
       releaseSecond = resolve;
+    });
+    const thirdBlocked = new Promise<void>((resolve) => {
+      releaseThird = resolve;
     });
     let call = 0;
     ideMessenger.streamRequest = vi.fn(async function* () {
@@ -1081,6 +1169,7 @@ describe("streamBrokerBridgeInput controls", () => {
           runId: "run-2",
         };
       }
+      await thirdBlocked;
       yield [{ role: "assistant", content: "final", cukiiTerminal: true }];
     }) as typeof ideMessenger.streamRequest;
     const store = setupStore({ ideMessenger });
@@ -1118,7 +1207,82 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.isStreaming).toBe(true);
 
     // Only the final owner may settle the shared activity indicator.
+    releaseThird();
     await third;
+    expect(store.getState().session.isStreaming).toBe(false);
+  });
+
+  it("keeps a new prompt active when the stopped run finishes late", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    let releaseStoppedReturn!: () => void;
+    let finishReplacement!: (value: IteratorResult<any[], undefined>) => void;
+    const stoppedReturn = new Promise<IteratorResult<any[], undefined>>(
+      (resolve) => {
+        releaseStoppedReturn = () => resolve({ done: true, value: undefined });
+      },
+    );
+    const replacementNext = new Promise<IteratorResult<any[], undefined>>(
+      (resolve) => {
+        finishReplacement = resolve;
+      },
+    );
+    const stoppedReturnSpy = vi.fn(() => stoppedReturn);
+    let call = 0;
+    ideMessenger.streamRequest = vi.fn(() => {
+      call += 1;
+      if (call === 1) {
+        return {
+          next: vi.fn(() => new Promise(() => undefined)),
+          return: stoppedReturnSpy,
+          throw: vi.fn(),
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+        };
+      }
+      return {
+        next: vi.fn(() => replacementNext),
+        return: vi.fn(async () => ({ done: true, value: undefined })),
+        throw: vi.fn(),
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      };
+    }) as unknown as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "stop-then-prompt",
+        title: "Stop then prompt",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [
+          {
+            message: { role: "user", content: "first run" },
+            contextItems: [],
+          },
+        ],
+        mode: "broker",
+      }),
+    );
+
+    const stopped = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() =>
+      expect(store.getState().session.isStreaming).toBe(true),
+    );
+    store.dispatch(abortStream());
+    await vi.waitFor(() => expect(stoppedReturnSpy).toHaveBeenCalledTimes(1));
+
+    store.dispatch(streamUpdate([{ role: "user", content: "second run" }]));
+    const replacement = store.dispatch(streamBrokerBridgeInput());
+    await vi.waitFor(() => expect(call).toBe(2));
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    releaseStoppedReturn();
+    await stopped;
+    expect(store.getState().session.isStreaming).toBe(true);
+
+    finishReplacement({ done: true, value: undefined });
+    await replacement;
     expect(store.getState().session.isStreaming).toBe(false);
   });
 });

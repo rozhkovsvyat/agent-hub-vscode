@@ -152,7 +152,8 @@ describe("resolveBridgeStorageLayout", () => {
         CUKII_SCRATCH_DIR: "E:\\AgentScratch",
         npm_config_store_dir: "E:\\PnpmStore",
       },
-      pathExists: (candidate) => candidate !== "D:\\Scratch" && candidate !== "D:\\PnpmStore",
+      pathExists: (candidate) =>
+        candidate !== "D:\\Scratch" && candidate !== "D:\\PnpmStore",
       pathIsDirectory: () => true,
       realPath: (candidate) =>
         candidate === "E:\\AgentScratch" || candidate === "E:\\PnpmStore"
@@ -162,6 +163,24 @@ describe("resolveBridgeStorageLayout", () => {
     });
 
     expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  it("rejects a vendor-runtime leaf junction that escapes the verified root", () => {
+    expect(() =>
+      resolveBridgeStorageLayout({
+        platform: "win32",
+        env: {},
+        pathExists: (candidate) =>
+          candidate === "D:\\Scratch" ||
+          candidate === "D:\\Scratch\\cukii-vendor-runtime",
+        pathIsDirectory: () => true,
+        realPath: (candidate) =>
+          candidate === "D:\\Scratch\\cukii-vendor-runtime"
+            ? "D:\\Brain\\tmp"
+            : candidate,
+        systemTempDir: "C:\\Temp",
+      }),
+    ).toThrow(/temporary directory escapes/i);
   });
 
   it("falls back to a verified system temp when a configured root cannot be inspected", () => {
@@ -190,7 +209,9 @@ describe("resolveBridgeStorageLayout", () => {
     });
 
     expect(statFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
-    expect(realPathFailure).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+    expect(realPathFailure).toEqual({
+      tempDir: "C:\\Temp\\cukii-vendor-runtime",
+    });
   });
 
   it.each(["stat", "realpath"])(
@@ -266,7 +287,9 @@ describe("resolveBridgeStorageLayout", () => {
       npm_config_store_dir: "D:\\PnpmStore",
     });
     expect(Object.keys(bridgeStorageProcessEnv(options))).not.toContain("TeMp");
-    expect(Object.keys(bridgeStorageProcessEnv(options))).not.toContain("NPM_CONFIG_STORE_DIR");
+    expect(Object.keys(bridgeStorageProcessEnv(options))).not.toContain(
+      "NPM_CONFIG_STORE_DIR",
+    );
   });
 
   it("keeps non-Windows vendors under their normal temporary root", () => {

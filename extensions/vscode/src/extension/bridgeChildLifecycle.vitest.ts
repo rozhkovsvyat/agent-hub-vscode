@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   isBridgePidAlive,
   retryBridgeTreeKill,
+  tasklistProbeIndicatesAlive,
   terminateBridgeChild,
 } from "./bridgeChildLifecycle";
 
@@ -80,15 +81,11 @@ async function readTreePids(child: ChildProcess): Promise<TreePids> {
 /** cmd.exe → node parent → node grandchild (matches Windows bridge shape). */
 function spawnWindowsMultilevelTree(): ChildProcess {
   const launcherPath = path.join(__dirname, "bridgeChildTreeFixture.cmd");
-  return spawn(
-    process.env.ComSpec ?? "cmd.exe",
-    ["/d", "/c", launcherPath],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      env: { ...process.env, CUKII_TEST_NODE_PATH: process.execPath },
-    },
-  );
+  return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/c", launcherPath], {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    env: { ...process.env, CUKII_TEST_NODE_PATH: process.execPath },
+  });
 }
 
 async function waitForRootExit(child: ChildProcess): Promise<void> {
@@ -309,7 +306,9 @@ describe("terminateBridgeChild", () => {
 
         const taskkillReceipt = await taskkillTree(rootPid!);
         // Old ordering: root is already dead, so /T cannot walk the tree.
-        expect(taskkillReceipt.code, JSON.stringify(taskkillReceipt)).not.toBe(0);
+        expect(taskkillReceipt.code, JSON.stringify(taskkillReceipt)).not.toBe(
+          0,
+        );
         expect(isPidAlive(pids.parentPid)).toBe(true);
         expect(isPidAlive(pids.grandchildPid)).toBe(true);
       } finally {
@@ -344,6 +343,31 @@ describe("terminateBridgeChild", () => {
     },
     30_000,
   );
+
+  it.runIf(process.platform === "win32")(
+    "kills descendants even when the Windows launcher exited before teardown",
+    async () => {
+      const root = spawnWindowsMultilevelTree();
+      let pids: TreePids | undefined;
+      try {
+        await waitForSpawn(root);
+        pids = await readTreePids(root);
+        root.kill();
+        await waitForRootExit(root);
+        expect(isPidAlive(pids.parentPid)).toBe(true);
+        expect(isPidAlive(pids.grandchildPid)).toBe(true);
+
+        await expect(
+          terminateBridgeChild(root, { graceMs: 50, forceMs: 10_000 }),
+        ).resolves.toBe(true);
+        expect(await waitForPidExit(pids.parentPid)).toBe(true);
+        expect(await waitForPidExit(pids.grandchildPid)).toBe(true);
+      } finally {
+        await cleanupTree(root.pid, pids);
+      }
+    },
+    30_000,
+  );
 });
 
 function spawnSleeperChild(): ChildProcess {
@@ -354,6 +378,15 @@ function spawnSleeperChild(): ChildProcess {
 }
 
 describe("isBridgePidAlive", () => {
+  it("treats a nonzero tasklist exit as unknown/alive, never verified death", () => {
+    expect(tasklistProbeIndicatesAlive(1, "", 4242)).toBe(true);
+    expect(tasklistProbeIndicatesAlive(null, "", 4242)).toBe(true);
+    expect(tasklistProbeIndicatesAlive(0, "", 4242)).toBe(false);
+    expect(tasklistProbeIndicatesAlive(0, "node.exe 4242 Console", 4242)).toBe(
+      true,
+    );
+  });
+
   it("reports a live child as alive and a killed child as dead", async () => {
     const child = spawnSleeperChild();
     await waitForSpawn(child);

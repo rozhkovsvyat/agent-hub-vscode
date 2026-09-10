@@ -342,6 +342,16 @@ type SessionState = {
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
   isCancelling?: boolean;
+  /** Distinguishes a duplicate user Stop from a user Stop that must overtake
+   * an internal provider/recovery cancellation already waiting on native. */
+  cancellingSource?: "user" | "internal";
+  /** Ephemeral owner of broker streaming state. Late frames/finalizers from a
+   * stopped run may not mutate a replacement run in the same session. */
+  activeBridgeRunId?: string;
+  /** Monotonic owner of a submitted turn. It remains after completion so a
+   * late cancellation receipt from an older turn cannot mutate a newer turn
+   * that has already finished. */
+  submissionEpoch?: number;
   /** Ephemeral per-tab state; deliberately excluded from persisted Session. */
   bridgeWait?: CukiiBridgeWait;
   /** A live steer could not be injected, so the current turn was interrupted
@@ -404,6 +414,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   history: [],
   isStreaming: false,
   isCancelling: false,
+  activeBridgeRunId: undefined,
+  submissionEpoch: 0,
   bridgeWait: undefined,
   title: NEW_SESSION_TITLE,
   titleManuallySet: false,
@@ -457,6 +469,13 @@ export const sessionSlice = createSlice({
     },
     setActive: (state) => {
       state.isStreaming = true;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    claimBridgeRun: (state, action: PayloadAction<{ runId: string }>) => {
+      state.activeBridgeRunId = action.payload.runId;
+      state.isStreaming = true;
+      state.isCancelling = false;
       state.bridgeWait = undefined;
     },
     setIsGatheringContext: (state, { payload }: PayloadAction<boolean>) => {
@@ -596,6 +615,7 @@ export const sessionSlice = createSlice({
       }>,
     ) => {
       const { index, editorState } = payload;
+      state.submissionEpoch = (state.submissionEpoch ?? 0) + 1;
 
       if (state.history.length && index < state.history.length) {
         // Resubmission - update input message, truncate history after resubmit with new empty response message
@@ -754,10 +774,28 @@ export const sessionSlice = createSlice({
       finishActiveThinking(state.history);
       state.isStreaming = false;
       state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    settleBridgeRun: (state, action: PayloadAction<{ runId: string }>) => {
+      if (state.activeBridgeRunId !== action.payload.runId) return;
+      const curMessage = state.history.at(-1);
+      if (curMessage) curMessage.isGatheringContext = false;
+      finishActiveThinking(state.history);
+      state.isStreaming = false;
+      state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
       state.bridgeWait = undefined;
     },
     setCancelling: (state, action: PayloadAction<boolean>) => {
       state.isCancelling = action.payload;
+      if (!action.payload) state.cancellingSource = undefined;
+    },
+    setCancellingSource: (
+      state,
+      action: PayloadAction<"user" | "internal" | undefined>,
+    ) => {
+      state.cancellingSource = action.payload;
     },
     appendUserSteerMessage: (
       state,
@@ -856,6 +894,7 @@ export const sessionSlice = createSlice({
       finishActiveThinking(state.history);
       state.isStreaming = false;
       state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
       state.bridgeWait = undefined;
     },
     setBridgeWait: (
@@ -1048,12 +1087,14 @@ export const sessionSlice = createSlice({
     },
     newSession: (state, { payload }: PayloadAction<Session | undefined>) => {
       state.lastSessionId = state.id;
+      state.submissionEpoch = (state.submissionEpoch ?? 0) + 1;
 
       state.streamAborter.abort();
       state.streamAborter = new AbortController();
 
       state.isStreaming = false;
       state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
       state.bridgeWait = undefined;
       state.steerInterruptPending = false;
       state.isSessionLoading = false;
@@ -1547,7 +1588,10 @@ export const {
   addContextItemsAtIndex,
   setAppliedRulesAtIndex,
   setInactive,
+  claimBridgeRun,
+  settleBridgeRun,
   setCancelling,
+  setCancellingSource,
   appendUserSteerMessage,
   markSteerRead,
   markLatestUserReceiptDelivered,

@@ -512,7 +512,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/pending",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "pending",
         },
@@ -895,7 +900,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -975,6 +985,9 @@ describe("streamResponseThunk", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         title: "Hello",
         history: [
           {
@@ -1098,7 +1111,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/pending",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "pending",
         },
@@ -1506,6 +1524,10 @@ describe("streamResponseThunk", () => {
         payload: true,
       },
       {
+        type: "session/setCancellingSource",
+        payload: "internal",
+      },
+      {
         type: "session/setCancelling",
         payload: false,
       },
@@ -1555,7 +1577,12 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -1635,6 +1662,11 @@ describe("streamResponseThunk", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        cancellingSource: undefined,
+        inlineErrorMessage: undefined,
+        submissionEpoch: 1,
         title: "Hello", // The rescue save's fallback title reaches the header
         streamAborter: expect.any(AbortController),
         mainEditorContentTrigger: mockEditorState, // Editor content that triggered the request

@@ -82,6 +82,7 @@ export function CukiiStickyUserMessage({
   const [isLongPrompt, setIsLongPrompt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const isExpandedRef = useRef(isExpanded);
+  const naturalContentHeightRef = useRef(0);
   const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
   isExpandedRef.current = isExpanded;
 
@@ -89,9 +90,16 @@ export function CukiiStickyUserMessage({
     const content = contentRef.current;
     if (!content) return;
 
+    naturalContentHeightRef.current = 0;
+
     const measure = () => {
+      naturalContentHeightRef.current = Math.max(
+        naturalContentHeightRef.current,
+        content.scrollHeight,
+      );
       const next =
-        content.scrollHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
+        naturalContentHeightRef.current >
+        CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
       setIsLongPrompt(next);
       if (!next) setIsExpanded(false);
     };
@@ -127,7 +135,10 @@ export function CukiiStickyUserMessage({
     // That painted measurement is not the prompt's natural height: keep the
     // largest uncollapsed measurement for the lifetime of this message so the
     // fold cannot immediately clear itself after reaching one row.
-    let stableNaturalContentHeight = content.scrollHeight;
+    naturalContentHeightRef.current = Math.max(
+      naturalContentHeightRef.current,
+      content.scrollHeight,
+    );
 
     const clearFold = () => {
       delete content.dataset.cukiiScrollFolding;
@@ -151,11 +162,11 @@ export function CukiiStickyUserMessage({
     };
 
     const syncFoldWithScroll = () => {
-      stableNaturalContentHeight = Math.max(
-        stableNaturalContentHeight,
+      naturalContentHeightRef.current = Math.max(
+        naturalContentHeightRef.current,
         content.scrollHeight,
       );
-      const fullHeight = stableNaturalContentHeight;
+      const fullHeight = naturalContentHeightRef.current;
       if (
         !isLongPrompt ||
         fullHeight <= CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX

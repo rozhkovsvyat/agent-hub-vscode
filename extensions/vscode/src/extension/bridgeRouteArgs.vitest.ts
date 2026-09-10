@@ -36,6 +36,7 @@ vi.mock("./permissionCapabilities", () => ({
 import {
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
+  bridgeFailureDetail,
   bridgeProcessExitIsFailure,
   bridgeProcessFailureMessage,
   bridgeProcessFailureTerminalEvent,
@@ -173,6 +174,38 @@ describe("native bridge argv", () => {
     );
     expect(message).not.toContain("item.completed");
     expect(message).not.toContain("aggregated_output");
+  });
+
+  it("finds capacity in stdout even when stderr contains an unrelated warning", () => {
+    const detail = bridgeFailureDetail(
+      '{"error":"Selected model is at capacity. Please try a different model."}',
+      "Warning: optional transport cache unavailable",
+    );
+    const message = bridgeProcessFailureMessage({
+      label: "GPT-5.6 Sol",
+      detail,
+      code: 1,
+      signal: null,
+    });
+
+    expect(message).toContain("temporarily at capacity");
+    expect(message).not.toContain("optional transport cache");
+  });
+
+  it("never pastes an unknown native transcript into the generic fallback", () => {
+    const message = bridgeProcessFailureMessage({
+      label: "Codex",
+      detail:
+        '{"type":"item.completed","aggregated_output":"private raw output"}',
+      code: 1,
+      signal: null,
+      logFile: "D:/logs/bridge.log",
+    });
+
+    expect(message).toContain("Native CLI stopped before returning");
+    expect(message).toContain("D:/logs/bridge.log");
+    expect(message).not.toContain("aggregated_output");
+    expect(message).not.toContain("private raw output");
   });
 
   it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {

@@ -8,12 +8,12 @@ type BridgeChild = {
   kill(signal?: NodeJS.Signals | number): boolean;
 };
 
+type WindowsProcessRow = { pid: number; parentPid: number };
+
 export type TerminationOptions = {
   graceMs?: number;
   forceMs?: number;
-  forceKill?: (
-    child: BridgeChild,
-  ) => boolean | void | Promise<boolean | void>;
+  forceKill?: (child: BridgeChild) => boolean | void | Promise<boolean | void>;
   /** Test-only platform override so Windows ordering can be asserted on any host. */
   platform?: NodeJS.Platform;
 };
@@ -28,6 +28,162 @@ function remainingBudget(deadline: number): number {
 
 function hasExited(child: BridgeChild): boolean {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+function windowsProcessRows(
+  budgetMs: number,
+): Promise<WindowsProcessRow[] | undefined> {
+  return new Promise((resolve) => {
+    const script =
+      "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | ForEach-Object { '{0},{1}' -f $_.ProcessId,$_.ParentProcessId }";
+    const probe = spawn(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let stdout = "";
+    let settled = false;
+    const finish = (rows: WindowsProcessRow[] | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(rows);
+    };
+    const timer = setTimeout(
+      () => {
+        probe.kill();
+        finish(undefined);
+      },
+      Math.max(1, budgetMs),
+    );
+    probe.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    probe.once("error", () => finish(undefined));
+    probe.once("close", (code) => {
+      if (code !== 0) return finish(undefined);
+      const rows = stdout
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [pid, parentPid] = line.split(",").map(Number);
+          return { pid, parentPid };
+        })
+        .filter(
+          (row) =>
+            Number.isSafeInteger(row.pid) &&
+            row.pid > 0 &&
+            Number.isSafeInteger(row.parentPid) &&
+            row.parentPid >= 0,
+        );
+      finish(rows);
+    });
+  });
+}
+
+function descendantsOf(
+  rootPid: number,
+  rows: WindowsProcessRow[],
+): WindowsProcessRow[] {
+  const descendants: WindowsProcessRow[] = [];
+  const parents = [rootPid];
+  const seen = new Set<number>(parents);
+  while (parents.length > 0) {
+    const parent = parents.shift()!;
+    for (const row of rows) {
+      if (row.parentPid !== parent || seen.has(row.pid)) continue;
+      seen.add(row.pid);
+      descendants.push(row);
+      parents.push(row.pid);
+    }
+  }
+  return descendants;
+}
+
+async function windowsTreeIsAlive(
+  rootPid: number,
+  budgetMs = 2_000,
+): Promise<boolean> {
+  if (await windowsTasklistHasPid(rootPid)) return true;
+  const rows = await windowsProcessRows(budgetMs);
+  // An unavailable process table is unknown, not proof of death.
+  return rows === undefined || descendantsOf(rootPid, rows).length > 0;
+}
+
+function posixGroupIsAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitForTreeExit(
+  pid: number,
+  platform: NodeJS.Platform,
+  budgetMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (true) {
+    const alive =
+      platform === "win32"
+        ? await windowsTreeIsAlive(
+            pid,
+            Math.min(2_000, remainingBudget(deadline)),
+          )
+        : posixGroupIsAlive(pid);
+    if (!alive) return true;
+    if (Date.now() >= deadline) return false;
+    await wait(Math.min(50, remainingBudget(deadline)));
+  }
+}
+
+async function waitForWindowsPidsExit(
+  pids: number[],
+  budgetMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (true) {
+    let anyAlive = false;
+    for (const pid of pids) {
+      if (await windowsTasklistHasPid(pid)) {
+        anyAlive = true;
+        break;
+      }
+    }
+    if (!anyAlive) return true;
+    if (Date.now() >= deadline) return false;
+    await wait(Math.min(50, remainingBudget(deadline)));
+  }
+}
+
+async function windowsKillDescendantsAfterRootExit(
+  rootPid: number,
+  budgetMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  const rows = await windowsProcessRows(
+    Math.min(2_000, remainingBudget(deadline)),
+  );
+  if (rows === undefined) return false;
+  const descendants = descendantsOf(rootPid, rows);
+  if (descendants.length === 0) return true;
+  const descendantIds = new Set(descendants.map((row) => row.pid));
+  const topLevel = descendants.filter(
+    (row) => !descendantIds.has(row.parentPid),
+  );
+  for (const row of topLevel) {
+    if (remainingBudget(deadline) <= 0) return false;
+    await windowsTaskKillTree(row.pid, remainingBudget(deadline));
+  }
+  // Verify the exact snapshot. Once an intermediate parent disappears, a
+  // fresh parent-chain walk can no longer reach a surviving grandchild.
+  return waitForWindowsPidsExit(
+    descendants.map((row) => row.pid),
+    remainingBudget(deadline),
+  );
 }
 
 async function waitForClose(
@@ -84,15 +240,38 @@ export async function terminateBridgeChild(
   child: BridgeChild,
   options: TerminationOptions = {},
 ): Promise<boolean> {
-  if (hasExited(child)) return true;
-
   const platform = options.platform ?? process.platform;
   const graceMs = options.graceMs ?? 750;
-  const forceMs =
-    options.forceMs ?? (platform === "win32" ? 10_000 : 1_250);
+  const forceMs = options.forceMs ?? (platform === "win32" ? 10_000 : 1_250);
   const forceKill =
     options.forceKill ??
     ((candidate: BridgeChild) => defaultForceKill(candidate, forceMs));
+
+  if (hasExited(child)) {
+    if (
+      platform === "win32" &&
+      process.platform === "win32" &&
+      child.pid &&
+      !options.forceKill
+    ) {
+      return windowsKillDescendantsAfterRootExit(child.pid, forceMs);
+    }
+    if (
+      platform !== "win32" &&
+      process.platform === platform &&
+      child.pid &&
+      !options.forceKill
+    ) {
+      if (!posixGroupIsAlive(child.pid)) return true;
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // Verification below is authoritative.
+      }
+      return waitForTreeExit(child.pid, platform, forceMs);
+    }
+    return true;
+  }
 
   const closed = new Promise<void>((resolve) =>
     child.once("close", () => resolve()),
@@ -104,8 +283,43 @@ export async function terminateBridgeChild(
   if (platform === "win32") {
     if (hasExited(child)) return true;
     const deadline = Date.now() + forceMs;
+    const rows =
+      !options.forceKill && child.pid && process.platform === "win32"
+        ? await windowsProcessRows(Math.min(2_000, remainingBudget(deadline)))
+        : undefined;
+    const knownPids =
+      rows && child.pid
+        ? [child.pid, ...descendantsOf(child.pid, rows).map((row) => row.pid)]
+        : child.pid
+          ? [child.pid]
+          : [];
     await forceKill(child);
-    return waitForClose(closed, child, remainingBudget(deadline));
+    const rootClosed = await waitForClose(
+      closed,
+      child,
+      remainingBudget(deadline),
+    );
+    if (!rootClosed) return false;
+    if (options.forceKill || !child.pid || process.platform !== "win32") {
+      return true;
+    }
+    return waitForWindowsPidsExit(knownPids, remainingBudget(deadline));
+  }
+
+  if (child.pid && process.platform === platform && !options.forceKill) {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      // The group may already be gone; the liveness check decides.
+    }
+    if (await waitForTreeExit(child.pid, platform, graceMs)) return true;
+    const deadline = Date.now() + forceMs;
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // The group may have exited between probe and signal.
+    }
+    return waitForTreeExit(child.pid, platform, remainingBudget(deadline));
   }
 
   child.kill();
@@ -120,6 +334,14 @@ export async function terminateBridgeChild(
   return waitForClose(closed, child, remainingBudget(deadline));
 }
 
+export function tasklistProbeIndicatesAlive(
+  code: number | null,
+  stdout: string,
+  pid: number,
+): boolean {
+  return code !== 0 || stdout.includes(String(pid));
+}
+
 function windowsTasklistHasPid(pid: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = spawn(
@@ -130,26 +352,30 @@ function windowsTasklistHasPid(pid: number): Promise<boolean> {
     let stdout = "";
     const timer = setTimeout(() => {
       probe.kill();
-      resolve(false);
+      // Unknown is fail-closed: callers may not free a run slot merely because
+      // the OS probe timed out under load.
+      resolve(true);
     }, 2_000);
     probe.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
     probe.once("error", () => {
       clearTimeout(timer);
-      resolve(false);
+      resolve(true);
     });
     probe.once("close", (code) => {
       clearTimeout(timer);
-      resolve(code === 0 && stdout.includes(String(pid)));
+      // A failed tasklist invocation is unknown, never proof that a process
+      // died. Callers use true as the fail-closed "possibly alive" result.
+      resolve(tasklistProbeIndicatesAlive(code, stdout, pid));
     });
   });
 }
 
 /**
  * Liveness probe for a bridge pid. Windows asks tasklist; POSIX uses
- * signal 0. A probe failure is reported as "dead" so callers never block
- * recovery on a probe that cannot answer.
+ * signal 0. A probe failure is treated as unknown/alive so callers never issue
+ * a successful termination receipt without proof of death.
  */
 export async function isBridgePidAlive(pid: number): Promise<boolean> {
   if (process.platform === "win32") {
@@ -162,6 +388,13 @@ export async function isBridgePidAlive(pid: number): Promise<boolean> {
     // EPERM means a live process we are not allowed to signal.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+/** Liveness of the owned native process tree, not merely its launcher PID. */
+export async function isBridgeProcessTreeAlive(pid: number): Promise<boolean> {
+  return process.platform === "win32"
+    ? windowsTreeIsAlive(pid)
+    : posixGroupIsAlive(pid);
 }
 
 /** The exact command an operator can run to reap an orphaned bridge tree. */
@@ -233,7 +466,7 @@ export async function retryBridgeTreeKill(
 ): Promise<boolean> {
   const platform = options.platform ?? process.platform;
   const budgetMs = options.budgetMs ?? 5_000;
-  const pidAlive = options.pidAlive ?? (() => isBridgePidAlive(pid));
+  const pidAlive = options.pidAlive ?? (() => isBridgeProcessTreeAlive(pid));
   if (!(await pidAlive(pid))) return true;
 
   const deadline = Date.now() + budgetMs;
@@ -243,6 +476,14 @@ export async function retryBridgeTreeKill(
       platform === "win32"
         ? windowsTaskKillTree(forcePid, forceBudgetMs)
         : posixForceTreeKill(forcePid));
+  if (
+    platform === "win32" &&
+    process.platform === "win32" &&
+    !(await isBridgePidAlive(pid)) &&
+    !options.forceTreeKill
+  ) {
+    return windowsKillDescendantsAfterRootExit(pid, remainingBudget(deadline));
+  }
   await force(pid, remainingBudget(deadline));
 
   // A just-killed pid may take a moment to disappear from the OS tables.

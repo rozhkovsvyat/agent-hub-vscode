@@ -198,6 +198,57 @@ describe("ReportIssueModal", () => {
     });
   });
 
+  it("releases clipboard images that arrive after the form was closed", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    let resolveRegister: ((images: any[]) => void) | undefined;
+    const register = vi.fn(
+      () =>
+        new Promise<any[]>((resolve) => {
+          resolveRegister = resolve;
+        }),
+    );
+    const release = vi.fn();
+    (messenger.responseHandlers as Record<string, unknown>)[
+      "cukii/registerIssueClipboardImages"
+    ] = register;
+    (messenger.responseHandlers as Record<string, unknown>)[
+      "cukii/releaseIssueImages"
+    ] = release;
+    const rendered = renderForm(messenger);
+    await screen.findByAltText("Sanitized Cukii chat preview");
+
+    const file = new File(["png"], "late.png", { type: "image/png" });
+    fireEvent.paste(screen.getByRole("dialog"), {
+      clipboardData: {
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => file,
+          },
+        ],
+      },
+    });
+    await waitFor(() => expect(register).toHaveBeenCalledOnce());
+    cleanup();
+    await act(async () => {
+      resolveRegister?.([
+        {
+          id: "late-1",
+          name: "late.png",
+          size: 4,
+          mimeType: "image/png",
+          previewDataUrl: "data:image/png;base64,cG5n",
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    expect(release).toHaveBeenCalledWith({ attachmentIds: ["late-1"] });
+    expect(rendered.onClose).not.toHaveBeenCalled();
+  });
+
   it("offers a clickable YouGile link after a sent report", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     const messenger = new MockIdeMessenger();

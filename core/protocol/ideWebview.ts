@@ -23,7 +23,12 @@ export type BrokerModel = string;
 export type BrokerSubagent = "auto" | BrokerModel;
 
 export type BrokerEffort =
-  "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra";
 
 export type BrokerSpeed = "standard" | "fast";
 
@@ -41,7 +46,11 @@ export type BrokerAutocompact = "25" | "50" | "75" | "default";
 export type BrokerModelScope = "best" | "all";
 
 export type CukiiPermissionMode =
-  "manual" | "editAutomatically" | "plan" | "auto" | "bypass";
+  | "manual"
+  | "editAutomatically"
+  | "plan"
+  | "auto"
+  | "bypass";
 
 export type BrokerVendorAuthAction = "install" | "login" | "logout";
 
@@ -119,6 +128,9 @@ export type CukiiInboxReceipt = {
 export type CukiiCancelReceipt = {
   requestId: string;
   sessionId: string;
+  /** Exact native run affected by this receipt. Undefined only for a legacy
+   * client which cancelled before run identities were carried end to end. */
+  runId?: string;
   status: "cancelled" | "already-cancelled";
   interrupted: "turn" | "tool";
   /** Teardown itself could not confirm death; a post-mortem pid liveness
@@ -160,7 +172,10 @@ export type CukiiIssueSeverity = "blocker" | "major" | "minor" | "cosmetic";
 export type CukiiIssueReportCapability = {
   available: boolean;
   reason:
-    "available" | "not_authenticated" | "board_unavailable" | "unreachable";
+    | "available"
+    | "not_authenticated"
+    | "board_unavailable"
+    | "unreachable";
   accountLabel?: string;
 };
 
@@ -336,6 +351,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/streamBridgeChat": [
     {
       sessionId: string;
+      /** Client-owned run identity. It prevents a delayed Stop/finalizer from
+       * mutating a replacement turn in the same session. */
+      runId?: string;
       messages: ChatMessage[];
       brokerModel: BrokerModel;
       brokerSubagent: BrokerSubagent;
@@ -373,7 +391,7 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     CukiiInboxReceipt,
   ];
   "cukii/cancelBridgeRun": [
-    { requestId: string; sessionId: string },
+    { requestId: string; sessionId: string; runId?: string },
     CukiiCancelReceipt,
   ];
   "cukii/openChatPanel": [

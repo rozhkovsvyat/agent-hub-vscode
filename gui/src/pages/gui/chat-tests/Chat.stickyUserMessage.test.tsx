@@ -148,6 +148,20 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     HTMLElement.prototype,
     "scrollHeight",
   );
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const resizeCallbacks: Array<() => void> = [];
+  class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resizeCallbacks.push(() =>
+        callback([], this as unknown as ResizeObserver),
+      );
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver =
+    TestResizeObserver as unknown as typeof ResizeObserver;
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
@@ -275,6 +289,15 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     expect(
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
+
+    // A real browser emits ResizeObserver after the collapsed CSS changes
+    // scrollHeight to 20. That painted height must not reclassify the immutable
+    // long prompt as short and clear the fold.
+    act(() => resizeCallbacks.forEach((callback) => callback()));
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+    expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
     expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
       stableFlowHeight,
     );
@@ -400,6 +423,7 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
       /\.cukii-user-bubble--meta-inline\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute/s,
     );
   } finally {
+    globalThis.ResizeObserver = originalResizeObserver;
     if (scrollHeightDescriptor) {
       Object.defineProperty(
         HTMLElement.prototype,

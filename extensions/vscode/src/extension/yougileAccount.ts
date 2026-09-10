@@ -107,7 +107,8 @@ export function looksLikeYougileKey(value: string): boolean {
  * using the discovered key until the next sign-in.
  */
 type StoredRecord =
-  { kind: "account"; account: StoredYougileAccount } | { kind: "suppressed" };
+  | { kind: "account"; account: StoredYougileAccount }
+  | { kind: "suppressed" };
 
 function parseStored(raw: string | undefined): StoredRecord | undefined {
   if (!raw) return undefined;
@@ -315,17 +316,33 @@ async function exchangeYougileCredentials(
       login: credentials.login,
       password: credentials.password,
     };
-    const companiesResult = await jsonRequest("/auth/companies", "POST", {
-      body: authBody,
-    });
-    if (
-      companiesResult.response.status === 401 ||
-      companiesResult.response.status === 403
-    ) {
-      return { verdict: "rejected" };
+    const companyItems: unknown[] = [];
+    const companyPageLimit = 1_000;
+    let companyOffset = 0;
+    for (let page = 0; page < 100; page += 1) {
+      const companiesResult = await jsonRequest(
+        `/auth/companies?limit=${companyPageLimit}&offset=${companyOffset}`,
+        "POST",
+        { body: authBody },
+      );
+      if (
+        companiesResult.response.status === 401 ||
+        companiesResult.response.status === 403
+      ) {
+        return { verdict: "rejected" };
+      }
+      if (!companiesResult.response.ok) return { verdict: "unreachable" };
+      const pageItems = responseItems(companiesResult.body);
+      companyItems.push(...pageItems);
+      const hasNext =
+        (companiesResult.body as { paging?: { next?: unknown } } | undefined)
+          ?.paging?.next === true;
+      if (!hasNext) break;
+      if (pageItems.length === 0) return { verdict: "unreachable" };
+      companyOffset += pageItems.length;
+      if (page === 99) return { verdict: "unreachable" };
     }
-    if (!companiesResult.response.ok) return { verdict: "unreachable" };
-    const companies = responseItems(companiesResult.body)
+    const companies = companyItems
       .map((company) => ({
         id: (company as { id?: unknown }).id,
         name: (company as { name?: unknown }).name,
@@ -366,6 +383,7 @@ async function exchangeYougileCredentials(
       );
 
     let sawUnreachable = false;
+    const companiesWithUsableKey = new Set<string>();
     for (const candidate of existing) {
       const verdict = await boardVerdict(candidate.key);
       if (verdict === "visible") {
@@ -377,15 +395,13 @@ async function exchangeYougileCredentials(
         };
       }
       if (verdict === "unreachable") sawUnreachable = true;
+      if (verdict !== "rejected" && typeof candidate.companyId === "string") {
+        companiesWithUsableKey.add(candidate.companyId);
+      }
     }
 
-    const companiesWithKey = new Set(
-      existing
-        .map((entry) => entry.companyId)
-        .filter((id): id is string => typeof id === "string"),
-    );
     for (const company of companies) {
-      if (companiesWithKey.has(company.id)) continue;
+      if (companiesWithUsableKey.has(company.id)) continue;
       const created = await jsonRequest("/auth/keys", "POST", {
         body: { ...authBody, companyId: company.id },
       });

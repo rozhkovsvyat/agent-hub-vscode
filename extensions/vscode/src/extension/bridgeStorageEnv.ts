@@ -17,7 +17,10 @@ export interface BridgeStorageOptions {
 }
 
 function isForbiddenWindowsStoragePath(candidate: string): boolean {
-  const normalized = path.win32.normalize(candidate).replace(/[\\/]+$/, "").toLowerCase();
+  const normalized = path.win32
+    .normalize(candidate)
+    .replace(/[\\/]+$/, "")
+    .toLowerCase();
   const forbiddenRoots = [
     "d:\\tmp",
     "d:\\brain\\tmp",
@@ -89,7 +92,9 @@ function canonicalWindowsRoot(
 
   const safe = safeExistingWindowsRoot(candidate, options);
   if (!safe) {
-    throw new Error(`Canonical ${label} root is not a safe physical directory: ${candidate}`);
+    throw new Error(
+      `Canonical ${label} root is not a safe physical directory: ${candidate}`,
+    );
   }
   return safe;
 }
@@ -120,7 +125,8 @@ export function resolveBridgeStorageLayout(
 
   const pathExists = options.pathExists ?? fs.existsSync;
   const pathIsDirectory =
-    options.pathIsDirectory ?? ((candidate) => fs.statSync(candidate).isDirectory());
+    options.pathIsDirectory ??
+    ((candidate) => fs.statSync(candidate).isDirectory());
   const realPath = options.realPath ?? fs.realpathSync.native;
   const rootOptions = { pathExists, pathIsDirectory, realPath };
   const scratchRoot =
@@ -133,6 +139,22 @@ export function resolveBridgeStorageLayout(
   if (!scratchRoot) {
     throw new Error("No safe existing Windows temporary root is available");
   }
+  const tempDir = targetPath.join(scratchRoot, "cukii-vendor-runtime");
+  if (pathExists(tempDir)) {
+    const physicalTempDir = safeExistingWindowsRoot(tempDir, rootOptions);
+    const expectedPhysicalTempDir = path.win32
+      .normalize(tempDir)
+      .replace(/[\\/]+$/, "")
+      .toLowerCase();
+    if (
+      !physicalTempDir ||
+      physicalTempDir.toLowerCase() !== expectedPhysicalTempDir
+    ) {
+      throw new Error(
+        `Canonical vendor temporary directory escapes its verified root: ${tempDir}`,
+      );
+    }
+  }
   const pnpmStoreDir =
     canonicalWindowsRoot("D:\\PnpmStore", "pnpm store", rootOptions) ??
     safeExistingWindowsRoot(
@@ -141,7 +163,7 @@ export function resolveBridgeStorageLayout(
     );
 
   return {
-    tempDir: targetPath.join(scratchRoot, "cukii-vendor-runtime"),
+    tempDir,
     ...(pnpmStoreDir ? { pnpmStoreDir } : {}),
   };
 }
@@ -153,11 +175,19 @@ export function bridgeStorageEnvOverrides(
   if (platform !== "win32") return {};
 
   const inherited = options.env ?? process.env;
-  const storage = resolveBridgeStorageLayout({ ...options, platform, env: inherited });
+  const storage = resolveBridgeStorageLayout({
+    ...options,
+    platform,
+    env: inherited,
+  });
   const overrides: Record<string, string | null> = {};
   for (const key of Object.keys(inherited)) {
     const normalized = key.toLowerCase();
-    if (normalized === "temp" || normalized === "tmp" || normalized === "tmpdir") {
+    if (
+      normalized === "temp" ||
+      normalized === "tmp" ||
+      normalized === "tmpdir"
+    ) {
       overrides[key] = storage.tempDir;
     } else if (normalized === "npm_config_store_dir") {
       overrides[key] = storage.pnpmStoreDir ?? null;
@@ -185,7 +215,11 @@ export function bridgeStorageProcessEnv(
     "TMPDIR",
     "npm_config_store_dir",
   ]);
-  const storage = resolveBridgeStorageLayout({ ...options, platform, env: inherited });
+  const storage = resolveBridgeStorageLayout({
+    ...options,
+    platform,
+    env: inherited,
+  });
   return {
     ...cleaned,
     TEMP: storage.tempDir,

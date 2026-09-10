@@ -4,6 +4,7 @@ export type InterruptKind = "turn" | "tool";
 export class BridgeRunCancellation {
   private readonly activeToolIds = new Set<string>();
   private cancellation: Promise<{ interrupted: InterruptKind }> | undefined;
+  private interrupted: InterruptKind | undefined;
 
   constructor(
     private readonly abort: () => void,
@@ -20,15 +21,17 @@ export class BridgeRunCancellation {
 
   cancel(): {
     alreadyCancelled: boolean;
+    interrupted: InterruptKind;
     receipt: Promise<{ interrupted: InterruptKind }>;
   } {
     const alreadyCancelled = Boolean(this.cancellation);
+    this.interrupted ??= this.activeToolIds.size ? "tool" : "turn";
+    const interrupted = this.interrupted;
     this.cancellation ??= (async () => {
-      const interrupted = this.activeToolIds.size ? "tool" : "turn";
       this.abort();
       await this.done;
       return { interrupted };
     })();
-    return { alreadyCancelled, receipt: this.cancellation };
+    return { alreadyCancelled, interrupted, receipt: this.cancellation };
   }
 }

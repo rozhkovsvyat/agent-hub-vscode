@@ -95,6 +95,21 @@ export const streamResponseThunk = createAsyncThunk<
       // prevents rapid Enter presses from starting parallel normal turns while
       // the durable pre-save is blocked.
       dispatch(submitEditorAndInitAtIndex({ index: inputIndex, editorState }));
+      const submittedSessionId = getState().session.id;
+      const submissionEpoch = getState().session.submissionEpoch;
+      let submissionAborter = getState().session.streamAborter;
+      const isCurrentSubmission = () => {
+        const session = getState().session;
+        return (
+          session.id === submittedSessionId &&
+          session.submissionEpoch === submissionEpoch
+        );
+      };
+      const isSubmissionCancelled = () =>
+        getState().session.streamAborter !== submissionAborter ||
+        submissionAborter.signal.aborted;
+      const mayContinueSubmission = () =>
+        isCurrentSubmission() && !isSubmissionCancelled();
       const messageId = getState().session.history[inputIndex]?.message.id;
       if (!messageId) {
         throw new Error("Failed to initialize the user turn");
@@ -102,82 +117,94 @@ export const streamResponseThunk = createAsyncThunk<
       dispatch(resetNextCodeBlockToApplyIndex());
 
       await dispatch(
-        streamThunkWrapper(async () => {
-          const state = getState();
+        streamThunkWrapper({
+          isCurrent: isCurrentSubmission,
+          isCancelled: isSubmissionCancelled,
+          adoptCancellationBoundary: () => {
+            if (isCurrentSubmission()) {
+              submissionAborter = getState().session.streamAborter;
+            }
+          },
+          runStream: async () => {
+            const state = getState();
 
-          const defaultContextProviders =
-            state.config.config.experimental?.defaultContext ?? [];
+            const defaultContextProviders =
+              state.config.config.experimental?.defaultContext ?? [];
 
-          // Resolve context providers and construct new history
-          const {
-            selectedContextItems,
-            selectedCode,
-            content,
-            legacyCommandWithInput,
-          } = await resolveEditorContent({
-            editorState,
-            modifiers,
-            ideMessenger: extra.ideMessenger,
-            defaultContextProviders,
-            availableSlashCommands: state.config.config.slashCommands,
-            dispatch,
-            getState,
-          });
+            // Resolve context providers and construct new history
+            const {
+              selectedContextItems,
+              selectedCode,
+              content,
+              legacyCommandWithInput,
+            } = await resolveEditorContent({
+              editorState,
+              modifiers,
+              ideMessenger: extra.ideMessenger,
+              defaultContextProviders,
+              availableSlashCommands: state.config.config.slashCommands,
+              dispatch,
+              getState,
+            });
+            if (!mayContinueSubmission()) return;
 
-          // symbols for both context items AND selected codeblocks
-          const filesForSymbols = [
-            ...selectedContextItems
-              .filter((item) => item.uri?.type === "file" && item?.uri?.value)
-              .map((item) => item.uri!.value),
-            ...selectedCode.map((rif) => rif.filepath),
-          ];
-          void dispatch(updateFileSymbolsFromFiles(filesForSymbols));
+            // symbols for both context items AND selected codeblocks
+            const filesForSymbols = [
+              ...selectedContextItems
+                .filter((item) => item.uri?.type === "file" && item?.uri?.value)
+                .map((item) => item.uri!.value),
+              ...selectedCode.map((rif) => rif.filepath),
+            ];
+            void dispatch(updateFileSymbolsFromFiles(filesForSymbols));
 
-          dispatch(
-            updateHistoryItemAtIndex({
-              index: inputIndex,
-              updates: {
-                message: {
-                  role: "user",
-                  content,
-                  id: messageId,
+            dispatch(
+              updateHistoryItemAtIndex({
+                index: inputIndex,
+                updates: {
+                  message: {
+                    role: "user",
+                    content,
+                    id: messageId,
+                  },
+                  contextItems: selectedContextItems,
                 },
-                contextItems: selectedContextItems,
-              },
-            }),
-          );
-
-          // Persist the resolved payload before vendor dispatch. The wrapper's
-          // pre-save already made the optimistic bubble durable; this second
-          // save upgrades it with resolved context/content while preserving its
-          // identity.
-          if (!getState().session.isInEdit) {
-            const earlySave = dispatch(
-              saveCurrentSession({
-                openNewSession: false,
-                generateTitle: false,
-                provisionalTitle: true,
               }),
             );
-            void earlySave.catch(() => undefined);
-            await earlySave.catch(() => undefined);
-          }
 
-          unwrapResult(
-            await dispatch(
-              streamNormalInput({
-                legacySlashCommandData: legacyCommandWithInput
-                  ? {
-                      command: legacyCommandWithInput.command,
-                      contextItems: selectedContextItems,
-                      historyIndex: inputIndex,
-                      input: legacyCommandWithInput.input,
-                      selectedCode,
-                    }
-                  : undefined,
-              }),
-            ),
-          );
+            // Persist the resolved payload before vendor dispatch. The wrapper's
+            // pre-save already made the optimistic bubble durable; this second
+            // save upgrades it with resolved context/content while preserving its
+            // identity.
+            if (!getState().session.isInEdit) {
+              const earlySave = dispatch(
+                saveCurrentSession({
+                  openNewSession: false,
+                  generateTitle: false,
+                  provisionalTitle: true,
+                }),
+              );
+              void earlySave.catch(() => undefined);
+              await earlySave.catch(() => undefined);
+              if (!mayContinueSubmission()) return;
+            }
+
+            if (!mayContinueSubmission()) return;
+            unwrapResult(
+              await dispatch(
+                streamNormalInput({
+                  legacySlashCommandData: legacyCommandWithInput
+                    ? {
+                        command: legacyCommandWithInput.command,
+                        contextItems: selectedContextItems,
+                        historyIndex: inputIndex,
+                        input: legacyCommandWithInput.input,
+                        selectedCode,
+                      }
+                    : undefined,
+                }),
+              ),
+            );
+          },
         }),
       );
       const { continueIfTrailingSteer } = await import(
