@@ -53,7 +53,7 @@ const ErrorPage: React.FC = () => {
         ) : (
           <ArrowPathIcon className="h-5 w-5" />
         )}
-        Continue
+        Cukii
       </Button>
     </div>
   );

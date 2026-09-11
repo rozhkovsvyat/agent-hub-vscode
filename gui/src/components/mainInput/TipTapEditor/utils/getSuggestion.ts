@@ -193,7 +193,7 @@ export function getContextProviderDropdownOptions(
         action: () => {
           ideMessenger.post(
             "openUrl",
-            "https://docs.continue.dev/customization/context-providers#built-in-context-providers",
+            "https://github.com/rozhkovsvyat/agent-hub-vscode",
           );
         },
         description: "",

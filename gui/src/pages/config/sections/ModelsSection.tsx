@@ -16,17 +16,16 @@ import { ModelRoleRow } from "../components/ModelRoleRow";
 
 const MODEL_DOCS_URLS = {
   chat: {
-    learnMore: "https://docs.continue.dev/ide-extensions/chat/quick-start",
-    setup: "https://docs.continue.dev/ide-extensions/chat/model-setup",
+    learnMore: "https://github.com/rozhkovsvyat/agent-hub-vscode",
+    setup: "https://github.com/rozhkovsvyat/agent-hub-vscode",
   },
   autocomplete: {
-    learnMore:
-      "https://docs.continue.dev/ide-extensions/autocomplete/quick-start",
-    setup: "https://docs.continue.dev/ide-extensions/autocomplete/model-setup",
+    learnMore: "https://github.com/rozhkovsvyat/agent-hub-vscode",
+    setup: "https://github.com/rozhkovsvyat/agent-hub-vscode",
   },
   edit: {
-    learnMore: "https://docs.continue.dev/ide-extensions/edit/quick-start",
-    setup: "https://docs.continue.dev/ide-extensions/edit/model-setup",
+    learnMore: "https://github.com/rozhkovsvyat/agent-hub-vscode",
+    setup: "https://github.com/rozhkovsvyat/agent-hub-vscode",
   },
 } as const;
 
@@ -185,7 +184,7 @@ export function ModelsSection() {
               selectedModel={config.selectedModelByRole.apply ?? undefined}
               onSelect={(model) => handleRoleUpdate("apply", model)}
               onConfigure={handleConfigureModel}
-              setupURL="https://docs.continue.dev/customize/model-roles/apply"
+              setupURL="https://github.com/rozhkovsvyat/agent-hub-vscode"
             />
 
             <Divider />
@@ -198,7 +197,7 @@ export function ModelsSection() {
               selectedModel={config.selectedModelByRole.embed ?? undefined}
               onSelect={(model) => handleRoleUpdate("embed", model)}
               onConfigure={handleConfigureModel}
-              setupURL="https://docs.continue.dev/customize/model-roles/embeddings"
+              setupURL="https://github.com/rozhkovsvyat/agent-hub-vscode"
             />
 
             <Divider />
@@ -211,7 +210,7 @@ export function ModelsSection() {
               selectedModel={config.selectedModelByRole.rerank ?? undefined}
               onSelect={(model) => handleRoleUpdate("rerank", model)}
               onConfigure={handleConfigureModel}
-              setupURL="https://docs.continue.dev/customize/model-roles/reranking"
+              setupURL="https://github.com/rozhkovsvyat/agent-hub-vscode"
             />
           </div>
         </Toggle>
