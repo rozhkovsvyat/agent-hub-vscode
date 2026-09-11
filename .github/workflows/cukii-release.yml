@@ -1,0 +1,106 @@
+name: cukii-release
+
+# Tag-driven promotion, mirroring the portal pipeline:
+#   rc-X.Y.Z  -> pre-release VSIX, GitHub pre-release, Marketplace preview channel
+#   vX.Y.Z    -> stable VSIX, GitHub release, Marketplace stable (manual gate)
+on:
+  push:
+    tags:
+      - "rc-*"
+      - "v*"
+
+jobs:
+  checks:
+    uses: ./.github/workflows/cukii-ci.yml
+
+  build:
+    needs: checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must match manifest version
+        shell: bash
+        working-directory: extensions/vscode
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER=$(node -p "require('./package.json').version")
+          case "$TAG" in
+            rc-*) EXPECT="rc-${VER}" ;;
+            v*)   EXPECT="v${VER}" ;;
+            *)    echo "unsupported tag: $TAG"; exit 1 ;;
+          esac
+          if [ "$TAG" != "$EXPECT" ]; then
+            echo "tag $TAG does not match manifest version $EXPECT"; exit 1
+          fi
+          echo "tag $TAG matches manifest $VER"
+
+      - uses: ./.github/actions/build-vscode-extension
+        with:
+          platform: win32
+          arch: x64
+          npm_config_arch: x64
+          pre-release: ${{ startsWith(github.ref_name, 'rc-') }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: win32-x64-vsix
+          path: extensions/vscode/*.vsix
+          if-no-files-found: error
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: win32-x64-vsix
+          path: vsix
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          prerelease: ${{ startsWith(github.ref_name, 'rc-') }}
+          files: vsix/*.vsix
+
+  publish-marketplace:
+    needs: build
+    runs-on: ubuntu-latest
+    # `marketplace` is an environment with required reviewers: a stable tag
+    # waits for a human approval, exactly like the portal's prod gate.
+    environment: ${{ startsWith(github.ref_name, 'rc-') && 'marketplace-preview' || 'marketplace' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: win32-x64-vsix
+          path: vsix
+
+      - name: Publish to VS Code Marketplace
+        working-directory: extensions/vscode
+        shell: bash
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT secret is not set; skipping publish (artifact is on the GitHub release)."
+            exit 0
+          fi
+          VSIX=$(ls ../../vsix/*.vsix | head -n 1)
+          echo "publishing $VSIX as pre-release=$PRE"
+          if [ "$PRE" = "true" ]; then
+            npx --yes @vscode/vsce publish --pre-release --no-dependencies --packagePath "$VSIX"
+          else
+            npx --yes @vscode/vsce publish --no-dependencies --packagePath "$VSIX"
+          fi
+        env:
+          PRE: ${{ startsWith(github.ref_name, 'rc-') }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

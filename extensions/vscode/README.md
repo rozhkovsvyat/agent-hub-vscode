@@ -1,54 +1,40 @@
 <div align="center">
 
-![Continue logo](media/readme.png)
+![Cukii](media/icon.png)
 
-<div align="center">
+<h1 align="center">Cukii</h1>
 
-<a target="_blank" href="https://opensource.org/licenses/Apache-2.0" style="background:none">
-    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" style="height: 22px;" />
-</a>
-<a target="_blank" href="https://docs.continue.dev" style="background:none">
-    <img src="https://img.shields.io/badge/Continue-docs-%23BE1B55.svg?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNiAyNCIgZmlsbD0id2hpdGUiPgogIDxwYXRoIGQ9Ik0yMC41Mjg2IDMuMjY4MTFMMTkuMTUxMiA1LjY1Njk0TDIyLjYzMjggMTEuNjg0OUMyMi42NTgyIDExLjczMDYgMjIuNjczNSAxMS43ODY2IDIyLjY3MzUgMTEuODM3NEMyMi42NzM1IDExLjg4ODIgMjIuNjU4MiAxMS45NDQxIDIyLjYzMjggMTEuOTg5OUwxOS4xNTEyIDE4LjAyMjlMMjAuNTI4NiAyMC40MTE3TDI1LjQ3OTEgMTEuODM3NEwyMC41Mjg2IDMuMjYzMDNWMy4yNjgxMVpNMTguNjE3NiA1LjM0NjlMMTkuOTk1IDIuOTU4MDdIMTcuMjQwMkwxNS44NjI4IDUuMzQ2OUgxOC42MjI3SDE4LjYxNzZaTTE1Ljg1NzcgNS45NjY5N0wxOS4wNzUgMTEuNTMyNEgyMS44Mjk4TDE4LjYxNzYgNS45NjY5N0gxNS44NTc3Wk0xOC42MTc2IDE3LjcxNzlMMjEuODI5OCAxMi4xNDc0SDE5LjA3NUwxNS44NTc3IDE3LjcxNzlIMTguNjE3NlpNMTUuODU3NyAxOC4zMzhMMTcuMjM1MSAyMC43MTY3SDE5Ljk4OTlMMTguNjEyNSAxOC4zMzhIMTUuODUyNkgxNS44NTc3Wk02LjUyMDk4IDIxLjMwNjNDNi40NjUwNyAyMS4zMDYzIDYuNDE0MjQgMjEuMjkxIDYuMzY4NSAyMS4yNjU2QzYuMzIyNzYgMjEuMjQwMiA2LjI4MjA5IDIxLjE5OTUgNi4yNTY2OCAyMS4xNTM4TDIuNzcwMDIgMTUuMTIwN0gwLjAxNTI0ODJMNC45NjU3IDIzLjY5SDE0Ljg2MTVMMTMuNDg0MSAyMS4zMDYzSDYuNTI2MDZINi41MjA5OFpNMTQuMDE3OCAyMC45OTYyTDE1LjM5NTIgMjMuMzhMMTYuNzcyNiAyMC45OTExTDE1LjM5NTIgMTguNjAyM0wxNC4wMTc4IDIwLjk5MTFWMjAuOTk2MlpNMTQuODYxNSAxOC4yOTc0SDguNDM3MTJMNy4wNTk3MyAyMC42ODYySDEzLjQ4NDFMMTQuODYxNSAxOC4yOTc0Wk03Ljg5ODM2IDE3Ljk5MjRMNC42ODEwOCAxMi40MjE5TDMuMzAzNjkgMTQuODEwN0w2LjUyMDk4IDIwLjM4MTJMNy44OTgzNiAxNy45OTI0Wk0wLjAxMDE2NTQgMTQuNTAwN0gyLjc2NDk0TDQuMTQyMzIgMTIuMTExOEgxLjM5MjYzTDAuMDEwMTY1NCAxNC41MDA3Wk02LjI0MTQzIDIuNTQxM0M2LjI2Njg1IDIuNDk1NTYgNi4zMDc1MSAyLjQ1NDkgNi4zNTMyNSAyLjQyOTQ4QzYuMzk5IDIuNDA0MDcgNi40NTQ5IDIuMzg4ODIgNi41MDU3MyAyLjM4ODgySDEzLjQ3NEwxNC44NTE0IDBINC45NTA0NUwwIDguNTc0MzVIMi43NTQ3N0w2LjIzMTI3IDIuNTQ2MzhMNi4yNDE0MyAyLjU0MTNaTTQuMTQyMzIgMTEuNTc4MkwyLjc2NDk0IDkuMTg5MzRIMC4wMTAxNjU0TDEuMzg3NTUgMTEuNTc4Mkg0LjE0MjMyWk02LjUxMDgxIDMuMzEzODZMMy4yOTg2MSA4Ljg3OTNMNC42NzU5OSAxMS4yNjgxTDcuODg4MiA1LjcwMjY4TDYuNTEwODEgMy4zMTM4NlpNMTMuNDc5MSAzLjAwMzgySDcuMDQ0NDhMOC40MjE4NyA1LjM5MjY0SDE0Ljg1NjRMMTMuNDc5MSAzLjAwMzgyWk0xNS4zOTUyIDUuMDgyNkwxNi43Njc1IDIuNjk4ODZMMTUuMzk1MiAwLjMxMDAzOEwxNC4wMTc4IDIuNjkzNzhMMTUuMzk1MiA1LjA4MjZaIi8+Cjwvc3ZnPg==" style="height: 22px;" />
-</a>
-
-<p></p>
+**One workspace for every AI vendor you already pay for**
 
 </div>
 
-<h1 align="center">Continue</h1>
+Cukii puts the command-line agents you use — Claude Code, Codex, Qwen, Grok, Cursor, Kimi — behind a single chat panel inside VS Code. No per-vendor terminal juggling, no copied API keys, no second UI to learn: open the panel, pick a model, talk to it.
 
-<div align="center">
+## What you get
 
-**[Source-controlled AI checks, enforceable in CI](https://docs.continue.dev)**
+- **One composer, many vendors.** Switch between Claude, OpenAI Codex, Alibaba Qwen, xAI Grok, Cursor and Moonshot Kimi from the model picker, with a `Best / All` toggle and a per-session effort control.
+- **Accounts that log themselves in.** _Manage accounts_ installs each vendor CLI and opens its sign-in page in your browser; Cukii picks the session up on its own and shows a single connected / not-connected dot per vendor.
+- **Sessions that survive.** Interrupted runs, remote SSH windows and restored history come back where you left them.
+- **Long answers stay readable.** Sticky user messages fold to a single line while you scroll, and unfold on demand.
+- **Bug reports in one click.** Send a sanitised report about a stuck or wrong session straight to the team's board, with screenshots and diagnostics attached.
+- **Remote-SSH ready.** The extension runs on the remote host, so your agents work against the machine that has your code.
 
-</div>
+## Getting started
 
-## VS Code Agent
+1. Install the extension and open **Cukii** from the activity bar (or run _Cukii: Open in New Window_).
+2. Open **Manage accounts…** from the composer menu and press **Install** for the vendor you own, then **Log in** — the browser opens, you sign in, the row turns connected.
+3. Pick a model in the composer and send your first message with `Enter`.
 
-[Agent](https://docs.continue.dev/ide-extensions/agent/quick-start) to work on development tasks together with AI
+## Requirements
 
-![agent](docs/images/agent.gif)
+- VS Code 1.70 or newer
+- Node.js 20 or newer on the machine that runs the agents
+- At least one vendor CLI (Cukii can install it for you from _Manage accounts_)
 
-## VS Code Chat
+## Feedback
 
-[Chat](https://docs.continue.dev/ide-extensions/chat/quick-start) to ask general questions and clarify code sections
-
-![chat](docs/images/chat.gif)
-
-## VS Code Edit
-
-[Edit](https://docs.continue.dev/ide-extensions/edit/quick-start) to modify a code section without leaving your current file
-
-![edit](docs/images/edit.gif)
-
-## VS Code Autocomplete
-
-[Autocomplete](https://docs.continue.dev/ide-extensions/autocomplete/quick-start) to receive inline code suggestions as you type
-
-![autocomplete](docs/images/autocomplete.gif)
-
-</div>
+Something stuck or answered wrongly? Use **Report a bug** in the session — it reaches the team with everything needed to reproduce. Issues and source live in the [repository](https://github.com/rozhkovsvyat/agent-hub-vscode).
 
 ## License
 
-[Apache 2.0 © 2023-2025 Continue Dev, Inc.](./LICENSE)
+Apache-2.0 — see [LICENSE](./LICENSE).

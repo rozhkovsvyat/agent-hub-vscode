@@ -1,0 +1,65 @@
+name: cukii-ci
+
+on:
+  push:
+    branches:
+      - cukii/trunk
+      - "cukii/**"
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Build shared packages
+        run: node ./scripts/build-packages.js
+
+      - name: Install core
+        working-directory: core
+        run: npm ci
+
+      - name: Install gui
+        working-directory: gui
+        run: npm ci
+
+      - name: Install extension
+        working-directory: extensions/vscode
+        run: npm ci
+        env:
+          # vscode-ripgrep downloads a binary from GitHub releases
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Typecheck core
+        working-directory: core
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Typecheck gui
+        working-directory: gui
+        run: npm run tsc:check
+
+      - name: Typecheck extension
+        working-directory: extensions/vscode
+        run: npm run tsc:check
+
+      - name: Extension tests
+        working-directory: extensions/vscode
+        run: npm test
+
+      - name: GUI tests
+        working-directory: gui
+        run: npm test
+
+      - name: Packaging build graph
+        working-directory: extensions/vscode
+        run: npm run test:build-graph

@@ -5,17 +5,15 @@
   "version": "2.0.109",
   "repository": {
     "type": "git",
-    "url": "https://github.com/continuedev/continue"
+    "url": "https://github.com/rozhkovsvyat/agent-hub-vscode"
   },
   "extensionKind": [
     "workspace"
   ],
   "bugs": {
-    "url": "https://github.com/continuedev/continue/issues",
-    "email": "nate@continue.dev"
+    "url": "https://github.com/rozhkovsvyat/agent-hub-vscode/issues"
   },
-  "homepage": "https://continue.dev",
-  "qna": "https://github.com/continuedev/continue/issues/new/choose",
+  "homepage": "https://github.com/rozhkovsvyat/agent-hub-vscode",
   "license": "Apache-2.0",
   "displayName": "Cukii",
   "pricing": "Free",
@@ -88,7 +86,7 @@
         "continue.telemetryEnabled": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Cukii collects anonymous usage data, cleaned of PII, to help us improve the product for our users. Read more  at [continue.dev › Telemetry](https://docs.continue.dev/telemetry).",
+          "markdownDescription": "Cukii collects anonymous usage data, cleaned of PII, to help us improve the product for our users.",
           "markdownDeprecationMessage": "This setting is deprecated and will be removed in a later version. Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page.",
           "deprecationMessage": "Please use the _Telemetry > Allow Anonymous Telemetry_ setting in the extension's User Settings page."
         },
@@ -105,17 +103,17 @@
         "continue.enableQuickActions": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Enable the experimental Quick Actions feature. Read our walkthrough to learn about configuration and how to share feedback: [continue.dev › Walkthrough: Quick Actions (experimental)](https://docs.continue.dev/customize/deep-dives/vscode-actions#quick-actions)"
+          "markdownDescription": "Enable the experimental Quick Actions feature."
         },
         "continue.enableTabAutocomplete": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Enable Cukii's tab autocomplete feature. Read our walkthrough to learn about configuration and how to share feedback: [continue.dev › Walkthrough: Tab Autocomplete (beta)](https://docs.continue.dev/features/tab-autocomplete)"
+          "markdownDescription": "Enable Cukii's tab autocomplete feature."
         },
         "continue.enableNextEdit": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Enable Cukii's next edit feature. Read our docs to learn about configuration and how to share feedback: [continue.dev › Features › Autocomplete › Next Edit (experimental)](https://docs.continue.dev/features/autocomplete/next-edit)"
+          "markdownDescription": "Enable Cukii's next edit feature."
         },
         "continue.pauseTabAutocompleteOnBattery": {
           "type": "boolean",
