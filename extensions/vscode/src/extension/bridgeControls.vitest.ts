@@ -167,7 +167,7 @@ describe("Cukii bridge controls", () => {
     ["editAutomatically", "auto-edit"],
     ["plan", "plan"],
     ["auto", "auto"],
-    ["bypass", "yolo"],
+    ["bypass", "default"],
   ] as const)(
     "routes Qwen %s through native approval mode %s",
     (mode, native) => {
