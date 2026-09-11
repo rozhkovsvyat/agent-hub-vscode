@@ -21,6 +21,13 @@ esbuild.js
 importMetaUrl.js
 scripts
 media/readme.png
+media/sidebar-icon.png
+media/move-to-right-sidebar.gif
+media/move-chat-panel-right.md
+media/README-activity-icon.md
+media/*.py
+gui/jetbrains_index.html
+gui/jetbrains_editorInset_index.html
 models/whisper-base/**
 e2e
 
