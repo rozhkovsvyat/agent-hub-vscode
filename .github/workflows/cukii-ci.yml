@@ -40,6 +40,10 @@ jobs:
           # vscode-ripgrep downloads a binary from GitHub releases
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Write build timestamp
+        working-directory: extensions/vscode
+        run: npm run write-build-timestamp
+
       - name: Typecheck core
         working-directory: core
         run: npx tsc -p tsconfig.json --noEmit
