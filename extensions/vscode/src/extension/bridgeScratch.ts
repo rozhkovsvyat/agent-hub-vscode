@@ -1,14 +1,25 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
  * Cukii bridge IPC/transcripts/logs are machine-local scratch artefacts.
  * They must never land in a vault, the repository, or the shared OS temp
  * directory where they become visible as unrelated timeline receipts.
+ * Windows keeps the owner's rotation-managed D: volume; every other platform
+ * gets a private directory under the user home, created 0700, because a
+ * literal Windows volume on POSIX resolves relative to the working directory
+ * and would litter the checkout with `D:` folders before failing.
  */
-export const CUKII_BRIDGE_SCRATCH_ROOT = "D:\\Scratch\\cukii-bridge";
-export const CUKII_PERMISSION_SCRATCH_ROOT = "D:\\Scratch\\cukii-permission";
-export const CUKII_VOICE_SCRATCH_ROOT = "D:\\Scratch\\cukii-voice";
+function scratchRootFor(name: string): string {
+  return process.platform === "win32"
+    ? `D:\\Scratch\\cukii-${name}`
+    : path.join(os.homedir(), ".cukii", "scratch", name);
+}
+
+export const CUKII_BRIDGE_SCRATCH_ROOT = scratchRootFor("bridge");
+export const CUKII_PERMISSION_SCRATCH_ROOT = scratchRootFor("permission");
+export const CUKII_VOICE_SCRATCH_ROOT = scratchRootFor("voice");
 
 /**
  * Make a fixed Scratch directory one component at a time. Every existing
@@ -29,7 +40,10 @@ export function createDirectoryWithoutReparse(root: string): string {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      fs.mkdirSync(current);
+      // Scratch holds prompts and permission payloads; on POSIX the mode must
+      // not depend on the ambient umask. Windows ignores the mode argument.
+      fs.mkdirSync(current, { mode: 0o700 });
+      fs.chmodSync(current, 0o700);
       const created = fs.lstatSync(current);
       if (created.isSymbolicLink() || !created.isDirectory()) {
         throw new Error(`Unsafe bridge Scratch path component: ${current}`);
