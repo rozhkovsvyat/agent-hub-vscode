@@ -1,6 +1,6 @@
 name: cukii-release
 
-# Tag-driven promotion, mirroring the portal pipeline:
+# Tag-driven promotion, mirroring the vacation repo pipeline:
 #   rc-X.Y.Z  -> pre-release VSIX, GitHub pre-release, Marketplace preview channel
 #   vX.Y.Z    -> stable VSIX, GitHub release, Marketplace stable (manual gate)
 on:

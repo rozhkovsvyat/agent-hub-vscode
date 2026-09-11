@@ -22,6 +22,15 @@ jobs:
         with:
           node-version-file: ".nvmrc"
 
+      # Fail-fast guard from the vacation repo pipeline: an unfinished merge
+      # must not reach build/test; fail before any install work happens.
+      - name: Conflict marker guard
+        run: |
+          if grep -rInE '^(<<<<<<<|>>>>>>>)' --exclude-dir=.git --exclude-dir=node_modules .; then
+            echo "git conflict markers found; resolve the merge before pushing"
+            exit 1
+          fi
+
       - name: Build shared packages
         run: node ./scripts/build-packages.js
 
