@@ -12,7 +12,11 @@ import {
   writeBridgeScratchFile,
 } from "./bridgeScratch";
 
-describe("Cukii Scratch roots", () => {
+// The Scratch roots are fixed Windows volumes (`D:\Scratch\cukii-*`) and the
+// hardening here is about Windows junction/reparse points, so none of this
+// exists on another platform: `path.resolve("D:\\Scratch\\…")` is a relative
+// POSIX path and `realpathSync.native` can only fail on it.
+describe.runIf(process.platform === "win32")("Cukii Scratch roots", () => {
   it("creates exclusive bridge prompts and removes only owned direct children", () => {
     const prompt = writeBridgeScratchFile("hardening", "secret prompt");
     try {

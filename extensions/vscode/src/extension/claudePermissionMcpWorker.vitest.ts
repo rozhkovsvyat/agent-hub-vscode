@@ -71,43 +71,50 @@ describe("standalone Claude permission MCP worker", () => {
     ]);
   });
 
-  it("returns exactly one text block with the broker's original input", async () => {
-    let request: any;
-    const broker = new ClaudePermissionBroker({
-      panelId: "panel-a",
-      sessionId: "session-a",
-      mode: "manual",
-      onRequest: (next) => {
-        request = next;
-      },
-    });
-    brokers.push(broker);
-    await broker.start();
-    process.env.CUKII_PERMISSION_PIPE = broker.pipeName;
-    process.env.CUKII_PERMISSION_TOKEN = broker.token;
-    process.env.CUKII_PERMISSION_SESSION = "session-a";
-    const response = mcpResponseForMessage({
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tools/call",
-      params: {
-        name: "request",
-        arguments: { tool_name: "Bash", input: { command: "git status" } },
-      },
-    });
-    await vi.waitFor(() => expect(request).toBeDefined());
-    broker.respond({ ...request, decision: "allow" });
-    const result = await response;
-    const content = (
-      result?.result as { content: { type: string; text: string }[] }
-    ).content;
-    expect(content).toHaveLength(1);
-    expect(content[0].type).toBe("text");
-    expect(JSON.parse(content[0].text)).toEqual({
-      behavior: "allow",
-      updatedInput: { command: "git status" },
-    });
-  });
+  // win32 only: this is the one case that constructs a real
+  // `ClaudePermissionBroker`, which needs a Windows named pipe plus a private
+  // config directory under the fixed `D:\Scratch\cukii-permission` root. The
+  // frame/JSON-RPC contracts around it are platform-neutral and stay live.
+  it.runIf(process.platform === "win32")(
+    "returns exactly one text block with the broker's original input",
+    async () => {
+      let request: any;
+      const broker = new ClaudePermissionBroker({
+        panelId: "panel-a",
+        sessionId: "session-a",
+        mode: "manual",
+        onRequest: (next) => {
+          request = next;
+        },
+      });
+      brokers.push(broker);
+      await broker.start();
+      process.env.CUKII_PERMISSION_PIPE = broker.pipeName;
+      process.env.CUKII_PERMISSION_TOKEN = broker.token;
+      process.env.CUKII_PERMISSION_SESSION = "session-a";
+      const response = mcpResponseForMessage({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "request",
+          arguments: { tool_name: "Bash", input: { command: "git status" } },
+        },
+      });
+      await vi.waitFor(() => expect(request).toBeDefined());
+      broker.respond({ ...request, decision: "allow" });
+      const result = await response;
+      const content = (
+        result?.result as { content: { type: string; text: string }[] }
+      ).content;
+      expect(content).toHaveLength(1);
+      expect(content[0].type).toBe("text");
+      expect(JSON.parse(content[0].text)).toEqual({
+        behavior: "allow",
+        updatedInput: { command: "git status" },
+      });
+    },
+  );
 
   it("denies a worker with invalid auth instead of auto-approving", async () => {
     process.env.CUKII_PERMISSION_PIPE = "\\\\.\\pipe\\missing-cukii-permission";

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 import {
   runYougileAuthAction,
@@ -102,21 +104,34 @@ function loginHttp(
   });
 }
 
+/**
+ * `readMachineToken` builds the token path with `path.join(homedir(), ".claude",
+ * "yougile-token")`, i.e. with THIS platform's separator. A fake home spelled
+ * `C:\Users\owner` therefore only ever produces the literal the mocked
+ * `readFile` compares against on Windows — anywhere else the mock is handed
+ * `/home/owner/.claude/…` vs `C:\Users\owner/.claude/…` and reports "no token",
+ * which silently turns every discovery test into the logged-out case. Deriving
+ * both sides from one constant keeps the isolation real on every platform.
+ */
+const OWNER_HOME =
+  process.platform === "win32" ? "C:\\Users\\owner" : "/home/owner";
+const NOBODY_HOME =
+  process.platform === "win32" ? "C:\\nobody" : "/nonexistent-home";
+const ownerTokenFile = path.join(OWNER_HOME, ".claude", "yougile-token");
+
 /** No env var, no token file: discovery finds nothing. */
 const noMachineToken = {
   env: {},
-  homedir: () => "C:\\nobody",
+  homedir: () => NOBODY_HOME,
   readFile: () => undefined,
 };
 
 /** The vault tooling has written its key where discovery looks for it. */
 const machineWithToken = {
   env: {},
-  homedir: () => "C:\\Users\\owner",
+  homedir: () => OWNER_HOME,
   readFile: (file: string) =>
-    file === "C:\\Users\\owner\\.claude\\yougile-token"
-      ? `${KEY}\n`
-      : undefined,
+    file === ownerTokenFile ? `${KEY}\n` : undefined,
 };
 
 describe("YouGile account row", () => {
@@ -469,14 +484,7 @@ describe("YouGile account row", () => {
     const fromFile = await yougileAccountStatus({
       store: store(),
       http: http(200),
-      environment: {
-        env: {},
-        homedir: () => "C:\\Users\\owner",
-        readFile: (file) =>
-          file === "C:\\Users\\owner\\.claude\\yougile-token"
-            ? `${KEY}\n`
-            : undefined,
-      },
+      environment: machineWithToken,
     });
     expect(fromFile.state).toBe("connected");
     // 🔴 The owner's report: the row showed a green dot and his e-mail next to
@@ -494,7 +502,7 @@ describe("YouGile account row", () => {
       http: http(200),
       environment: {
         env: { YOUGILE_TOKEN: KEY },
-        homedir: () => "C:\\nobody",
+        homedir: () => NOBODY_HOME,
         readFile: () => undefined,
       },
     });
@@ -514,7 +522,7 @@ describe("YouGile account row", () => {
       http: probe,
       environment: {
         env: { YOUGILE_TOKEN: KEY },
-        homedir: () => "C:\\nobody",
+        homedir: () => NOBODY_HOME,
         readFile: () => undefined,
       },
     });
@@ -583,11 +591,9 @@ describe("YouGile account row", () => {
 
     const tokenAppearsLater = {
       env: {},
-      homedir: () => "C:\\Users\\owner",
+      homedir: () => OWNER_HOME,
       readFile: (file: string) =>
-        file === "C:\\Users\\owner\\.claude\\yougile-token"
-          ? `${KEY}\n`
-          : undefined,
+        file === ownerTokenFile ? `${KEY}\n` : undefined,
     };
     const after = await yougileAccountStatus({
       store: secrets,
@@ -701,7 +707,7 @@ describe("YouGile account row", () => {
     // the normal browser flow has to take over.
     const machine = {
       env: { YOUGILE_TOKEN: "stale-key-0123456789abcdef" },
-      homedir: () => "C:\\nobody",
+      homedir: () => NOBODY_HOME,
       readFile: () => undefined,
     };
     const secrets = store(JSON.stringify({ suppressed: true }));
@@ -751,11 +757,9 @@ describe("YouGile account row", () => {
     // broken. So the sign-out is recorded and discovery is suppressed.
     const machine = {
       env: {},
-      homedir: () => "C:\\Users\\owner",
+      homedir: () => OWNER_HOME,
       readFile: (file: string) =>
-        file === "C:\\Users\\owner\\.claude\\yougile-token"
-          ? `${KEY}\n`
-          : undefined,
+        file === ownerTokenFile ? `${KEY}\n` : undefined,
     };
     const secrets = store();
     const result = await runYougileAuthAction("logout", {

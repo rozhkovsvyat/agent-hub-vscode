@@ -299,22 +299,28 @@ describe("native bridge argv", () => {
     ).toEqual([{ role: "thinking", content: "Launching native command" }]);
   });
 
-  it("uses the ordinary native Kimi component chain, without lstat on homedir", () => {
-    const paths = nativeKimiPaths();
-    const lstatSync = vi.spyOn(fs, "lstatSync");
-    const route = routeForModel(
-      "kimi-k3",
-      "D:/Brain/vault",
-      "prompt",
-      [],
-      resolveBridgeControls("kimi-k3", "high", "standard"),
-    );
-    expect(route.program).toBe(paths.executable);
-    expect(lstatSync).toHaveBeenCalledWith(paths.root);
-    expect(lstatSync).toHaveBeenCalledWith(paths.bin);
-    expect(lstatSync).toHaveBeenCalledWith(paths.executable);
-    expect(lstatSync).not.toHaveBeenCalledWith(os.homedir());
-  });
+  // win32 only: `kimiWindowsNativeProgram()` (the `.kimi-code\bin\kimi.exe`
+  // component chain) is reached only when `process.platform === "win32"`;
+  // elsewhere the route falls back to a bare `kimi` on PATH.
+  it.runIf(process.platform === "win32")(
+    "uses the ordinary native Kimi component chain, without lstat on homedir",
+    () => {
+      const paths = nativeKimiPaths();
+      const lstatSync = vi.spyOn(fs, "lstatSync");
+      const route = routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
+      );
+      expect(route.program).toBe(paths.executable);
+      expect(lstatSync).toHaveBeenCalledWith(paths.root);
+      expect(lstatSync).toHaveBeenCalledWith(paths.bin);
+      expect(lstatSync).toHaveBeenCalledWith(paths.executable);
+      expect(lstatSync).not.toHaveBeenCalledWith(os.homedir());
+    },
+  );
 
   it("routes selected K3 with the exact verified prompt-mode argv", () => {
     const route = routeForModel(
@@ -357,167 +363,194 @@ describe("native bridge argv", () => {
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 
-  it("spills a quote-storm prompt beyond the CreateProcess limit into an exclusive Scratch file", () => {
-    const oversized = '\\"'.repeat(12_000);
-    const route = routeForModel(
-      "kimi-k3",
-      "D:/Brain/vault",
-      oversized,
-      [],
-      resolveBridgeControls("kimi-k3", "high", "standard"),
-    );
-    expect(route.promptFile).toBeDefined();
-    if (route.promptFile) promptFiles.push(route.promptFile);
-    expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(oversized);
-    const loader = route.args[route.args.indexOf("-p") + 1];
-    expect(loader).toContain(route.promptFile!);
-    expect(loader).not.toBe(oversized);
-    expect(
-      windowsCommandLineUtf16Length(route.program, route.args),
-    ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
-    expect(spawn).not.toHaveBeenCalled();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
-
-  it("keeps a 100k-unit live transcript launchable through the Kimi spill file", () => {
-    const transcript =
-      "Cukii broker transcript line with session context.\n".repeat(2_500);
-    expect(transcript.length).toBeGreaterThan(
-      KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
-    );
-    const route = routeForModel(
-      "kimi-k3",
-      "D:/Brain/vault",
-      transcript,
-      [],
-      resolveBridgeControls("kimi-k3", "high", "standard"),
-    );
-    expect(route.promptFile).toBeDefined();
-    if (route.promptFile) promptFiles.push(route.promptFile);
-    expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(transcript);
-    const loader = route.args[route.args.indexOf("-p") + 1];
-    expect(loader).toContain(route.promptFile!);
-    const modelIndex = route.args.indexOf("-m");
-    expect(route.args[modelIndex + 1]).toBe("kimi-code/k3");
-    expect(
-      windowsCommandLineUtf16Length(route.program, route.args),
-    ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
-  });
-
-  it("fails closed when only a Kimi cmd shim is present", () => {
-    const { executable: nativeProgram } = nativeKimiPaths();
-    const shim = path.join(
-      os.homedir(),
-      "AppData",
-      "Roaming",
-      "npm",
-      "kimi.cmd",
-    );
-    const originalLstat = fs.lstatSync;
-    const lstatSync = vi
-      .spyOn(fs, "lstatSync")
-      .mockImplementation((candidate) => {
-        if (String(candidate).toLowerCase() === nativeProgram.toLowerCase()) {
-          const error = new Error("ENOENT") as NodeJS.ErrnoException;
-          error.code = "ENOENT";
-          throw error;
-        }
-        return originalLstat(candidate);
-      });
-    const existsSync = vi
-      .spyOn(fs, "existsSync")
-      .mockImplementation((candidate) =>
-        String(candidate).toLowerCase() === shim.toLowerCase() ? true : false,
+  // win32 only: the spill exists because CreateProcess has a 32767-character
+  // UTF-16 command-line budget, and the spill file itself lives under the
+  // fixed Windows root `D:\Scratch\cukii-bridge`. Neither the limit nor that
+  // root exists on another platform, so `route.promptFile` stays undefined.
+  it.runIf(process.platform === "win32")(
+    "spills a quote-storm prompt beyond the CreateProcess limit into an exclusive Scratch file",
+    () => {
+      const oversized = '\\"'.repeat(12_000);
+      const route = routeForModel(
+        "kimi-k3",
+        "D:/Brain/vault",
+        oversized,
+        [],
+        resolveBridgeControls("kimi-k3", "high", "standard"),
       );
-    const writeFileSync = vi.spyOn(fs, "writeFileSync");
-    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+      expect(route.promptFile).toBeDefined();
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(oversized);
+      const loader = route.args[route.args.indexOf("-p") + 1];
+      expect(loader).toContain(route.promptFile!);
+      expect(loader).not.toBe(oversized);
+      expect(
+        windowsCommandLineUtf16Length(route.program, route.args),
+      ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    },
+  );
 
-    expect(() =>
-      routeForModel(
+  // win32 only: same CreateProcess budget and the same `D:\Scratch` spill root.
+  it.runIf(process.platform === "win32")(
+    "keeps a 100k-unit live transcript launchable through the Kimi spill file",
+    () => {
+      const transcript =
+        "Cukii broker transcript line with session context.\n".repeat(2_500);
+      expect(transcript.length).toBeGreaterThan(
+        KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
+      );
+      const route = routeForModel(
         "kimi-k3",
         "D:/Brain/vault",
-        "&|<>^%!",
+        transcript,
         [],
         resolveBridgeControls("kimi-k3", "high", "standard"),
-      ),
-    ).toThrow(/native executable is required/);
-    expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
-    expect(existsSync).not.toHaveBeenCalledWith(shim);
-    expect(writeFileSync).not.toHaveBeenCalled();
-    expect(mkdirSync).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
+      );
+      expect(route.promptFile).toBeDefined();
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(fs.readFileSync(route.promptFile!, "utf8")).toBe(transcript);
+      const loader = route.args[route.args.indexOf("-p") + 1];
+      expect(loader).toContain(route.promptFile!);
+      const modelIndex = route.args.indexOf("-m");
+      expect(route.args[modelIndex + 1]).toBe("kimi-code/k3");
+      expect(
+        windowsCommandLineUtf16Length(route.program, route.args),
+      ).toBeLessThanOrEqual(KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16);
+    },
+  );
 
-  it("rejects a reparse/junction Kimi parent before any side effect", () => {
-    const paths = nativeKimiPaths();
-    const originalLstat = fs.lstatSync;
-    const lstatSync = vi
-      .spyOn(fs, "lstatSync")
-      .mockImplementation((candidate) => {
-        if (String(candidate).toLowerCase() === paths.root.toLowerCase()) {
-          // On Windows Node presents a junction/reparse point as lstat
-          // symbolic-link metadata; the component must not be traversed.
-          return fakeStats("directory", true);
-        }
-        return originalLstat(candidate);
-      });
-    const writeFileSync = vi.spyOn(fs, "writeFileSync");
-    const mkdirSync = vi.spyOn(fs, "mkdirSync");
-    expect(() =>
-      routeForModel(
-        "kimi-k3",
-        "D:/Brain/vault",
-        "&|<>^%!",
-        [],
-        resolveBridgeControls("kimi-k3", "high", "standard"),
-      ),
-    ).toThrow(/native executable is required/);
-    expect(lstatSync).toHaveBeenCalledWith(paths.root);
-    expect(lstatSync).not.toHaveBeenCalledWith(paths.bin);
-    expect(writeFileSync).not.toHaveBeenCalled();
-    expect(mkdirSync).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
+  // win32 only: an npm `.cmd` shim under %APPDATA%\npm and the rule that the
+  // native `kimi.exe` must exist are Windows-only. Off Windows the route
+  // resolves a bare `kimi` from PATH and never reaches this check.
+  it.runIf(process.platform === "win32")(
+    "fails closed when only a Kimi cmd shim is present",
+    () => {
+      const { executable: nativeProgram } = nativeKimiPaths();
+      const shim = path.join(
+        os.homedir(),
+        "AppData",
+        "Roaming",
+        "npm",
+        "kimi.cmd",
+      );
+      const originalLstat = fs.lstatSync;
+      const lstatSync = vi
+        .spyOn(fs, "lstatSync")
+        .mockImplementation((candidate) => {
+          if (String(candidate).toLowerCase() === nativeProgram.toLowerCase()) {
+            const error = new Error("ENOENT") as NodeJS.ErrnoException;
+            error.code = "ENOENT";
+            throw error;
+          }
+          return originalLstat(candidate);
+        });
+      const existsSync = vi
+        .spyOn(fs, "existsSync")
+        .mockImplementation((candidate) =>
+          String(candidate).toLowerCase() === shim.toLowerCase() ? true : false,
+        );
+      const writeFileSync = vi.spyOn(fs, "writeFileSync");
+      const mkdirSync = vi.spyOn(fs, "mkdirSync");
 
-  it("rejects a final Kimi executable symlink before any side effect", () => {
-    const paths = nativeKimiPaths();
-    const originalLstat = fs.lstatSync;
-    const lstatSync = vi
-      .spyOn(fs, "lstatSync")
-      .mockImplementation((candidate) => {
-        const pathKey = String(candidate).toLowerCase();
-        if (pathKey === paths.root.toLowerCase()) {
-          return fakeStats("directory");
-        }
-        if (pathKey === paths.bin.toLowerCase()) {
-          return fakeStats("directory");
-        }
-        if (pathKey === paths.executable.toLowerCase()) {
-          return fakeStats("file", true);
-        }
-        return originalLstat(candidate);
-      });
-    const writeFileSync = vi.spyOn(fs, "writeFileSync");
-    const mkdirSync = vi.spyOn(fs, "mkdirSync");
-    expect(() =>
-      routeForModel(
-        "kimi-k3",
-        "D:/Brain/vault",
-        "&|<>^%!",
-        [],
-        resolveBridgeControls("kimi-k3", "high", "standard"),
-      ),
-    ).toThrow(/native executable is required/);
-    expect(lstatSync).toHaveBeenCalledWith(paths.root);
-    expect(lstatSync).toHaveBeenCalledWith(paths.bin);
-    expect(lstatSync).toHaveBeenCalledWith(paths.executable);
-    expect(writeFileSync).not.toHaveBeenCalled();
-    expect(mkdirSync).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
+      expect(() =>
+        routeForModel(
+          "kimi-k3",
+          "D:/Brain/vault",
+          "&|<>^%!",
+          [],
+          resolveBridgeControls("kimi-k3", "high", "standard"),
+        ),
+      ).toThrow(/native executable is required/);
+      expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
+      expect(existsSync).not.toHaveBeenCalledWith(shim);
+      expect(writeFileSync).not.toHaveBeenCalled();
+      expect(mkdirSync).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    },
+  );
+
+  // win32 only: a junction/reparse point is how Node reports this on Windows,
+  // and the component chain it guards is only walked there.
+  it.runIf(process.platform === "win32")(
+    "rejects a reparse/junction Kimi parent before any side effect",
+    () => {
+      const paths = nativeKimiPaths();
+      const originalLstat = fs.lstatSync;
+      const lstatSync = vi
+        .spyOn(fs, "lstatSync")
+        .mockImplementation((candidate) => {
+          if (String(candidate).toLowerCase() === paths.root.toLowerCase()) {
+            // On Windows Node presents a junction/reparse point as lstat
+            // symbolic-link metadata; the component must not be traversed.
+            return fakeStats("directory", true);
+          }
+          return originalLstat(candidate);
+        });
+      const writeFileSync = vi.spyOn(fs, "writeFileSync");
+      const mkdirSync = vi.spyOn(fs, "mkdirSync");
+      expect(() =>
+        routeForModel(
+          "kimi-k3",
+          "D:/Brain/vault",
+          "&|<>^%!",
+          [],
+          resolveBridgeControls("kimi-k3", "high", "standard"),
+        ),
+      ).toThrow(/native executable is required/);
+      expect(lstatSync).toHaveBeenCalledWith(paths.root);
+      expect(lstatSync).not.toHaveBeenCalledWith(paths.bin);
+      expect(writeFileSync).not.toHaveBeenCalled();
+      expect(mkdirSync).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    },
+  );
+
+  // win32 only: the symlink check belongs to the same Windows-only
+  // `.kimi-code\bin\kimi.exe` component chain.
+  it.runIf(process.platform === "win32")(
+    "rejects a final Kimi executable symlink before any side effect",
+    () => {
+      const paths = nativeKimiPaths();
+      const originalLstat = fs.lstatSync;
+      const lstatSync = vi
+        .spyOn(fs, "lstatSync")
+        .mockImplementation((candidate) => {
+          const pathKey = String(candidate).toLowerCase();
+          if (pathKey === paths.root.toLowerCase()) {
+            return fakeStats("directory");
+          }
+          if (pathKey === paths.bin.toLowerCase()) {
+            return fakeStats("directory");
+          }
+          if (pathKey === paths.executable.toLowerCase()) {
+            return fakeStats("file", true);
+          }
+          return originalLstat(candidate);
+        });
+      const writeFileSync = vi.spyOn(fs, "writeFileSync");
+      const mkdirSync = vi.spyOn(fs, "mkdirSync");
+      expect(() =>
+        routeForModel(
+          "kimi-k3",
+          "D:/Brain/vault",
+          "&|<>^%!",
+          [],
+          resolveBridgeControls("kimi-k3", "high", "standard"),
+        ),
+      ).toThrow(/native executable is required/);
+      expect(lstatSync).toHaveBeenCalledWith(paths.root);
+      expect(lstatSync).toHaveBeenCalledWith(paths.bin);
+      expect(lstatSync).toHaveBeenCalledWith(paths.executable);
+      expect(writeFileSync).not.toHaveBeenCalled();
+      expect(mkdirSync).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    },
+  );
 
   it("accepts the exact full CreateProcess command-line boundary", () => {
     const emptyRoute = routeForModel(
@@ -684,38 +717,45 @@ describe("native bridge argv", () => {
     ).toThrow(/JPEG, PNG, GIF, or WebP.*did not drop/i);
   });
 
-  it("adds the real Claude MCP permission transport without leaking its token", async () => {
-    const route = routeForModel(
-      "opus-5",
-      "D:/Brain/vault",
-      "prompt",
-      [],
-      resolveBridgeControls("opus-5", "high", "standard"),
-      "manual",
-    );
-    const broker = new ClaudePermissionBroker({
-      panelId: "panel-a",
-      sessionId: "session-a",
-      mode: "manual",
-      onRequest: () => {},
-    });
-    await broker.start();
-    try {
-      attachClaudePermissionTransport(route, broker);
-      expect(route.args.slice(-7)).toEqual([
-        "--mcp-config",
-        broker.configPath,
-        "--strict-mcp-config",
-        "--allowed-tools",
-        "mcp__cukii_permission__request",
-        "--permission-prompt-tool",
-        "mcp__cukii_permission__request",
-      ]);
-      expect(route.args.join(" ")).not.toContain(broker.token);
-    } finally {
-      await broker.dispose();
-    }
-  });
+  // win32 only: `ClaudePermissionBroker` allocates a Windows named pipe
+  // (`\\.\pipe\…`) and its config directory under the fixed Windows root
+  // `D:\Scratch\cukii-permission`; constructing it anywhere else throws ENOENT
+  // before this transport contract can be observed.
+  it.runIf(process.platform === "win32")(
+    "adds the real Claude MCP permission transport without leaking its token",
+    async () => {
+      const route = routeForModel(
+        "opus-5",
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("opus-5", "high", "standard"),
+        "manual",
+      );
+      const broker = new ClaudePermissionBroker({
+        panelId: "panel-a",
+        sessionId: "session-a",
+        mode: "manual",
+        onRequest: () => {},
+      });
+      await broker.start();
+      try {
+        attachClaudePermissionTransport(route, broker);
+        expect(route.args.slice(-7)).toEqual([
+          "--mcp-config",
+          broker.configPath,
+          "--strict-mcp-config",
+          "--allowed-tools",
+          "mcp__cukii_permission__request",
+          "--permission-prompt-tool",
+          "mcp__cukii_permission__request",
+        ]);
+        expect(route.args.join(" ")).not.toContain(broker.token);
+      } finally {
+        await broker.dispose();
+      }
+    },
+  );
 
   it("wires independent Claude effort and speed into the native CLI", () => {
     const controls = resolveBridgeControls("opus-5", "xhigh", "fast");
@@ -891,7 +931,6 @@ describe("native bridge argv", () => {
         "--dangerously-bypass-approvals-and-sandbox",
         "--approve-for-me",
       ],
-      ["grok-4-6", "plan", "--permission-mode plan", "--always-approve"],
       ["composer-2-5", "plan", "--plan", "--trust"],
       [
         "qwen-3-8-max",
@@ -915,6 +954,26 @@ describe("native bridge argv", () => {
       expect(route.args.join(" ")).not.toContain(forbidden);
     }
   });
+
+  // win32 only: `grokRoute` always spills its transcript into the fixed
+  // Windows root `D:\Scratch\cukii-bridge` before it produces any argv, so the
+  // Grok case of the table above cannot be routed where that root is absent.
+  it.runIf(process.platform === "win32")(
+    "routes only the verified Grok noninteractive mode to a non-conflicting flag set",
+    () => {
+      const route = routeForModel(
+        "grok-4-6",
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("grok-4-6", "high", "standard"),
+        "plan",
+      );
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(route.args.join(" ")).toContain("--permission-mode plan");
+      expect(route.args.join(" ")).not.toContain("--always-approve");
+    },
+  );
 
   it.each([
     ["manual", "default"],
@@ -978,69 +1037,85 @@ describe("native bridge argv", () => {
     ).toThrow("no verified permission mode");
   });
 
-  it("wires Grok reasoning effort and reports no fake fast tier", () => {
-    const controls = resolveBridgeControls("grok-4-6", "max", "fast");
-    const route = routeForModel(
-      "grok-4-6",
-      "D:/Brain/vault",
-      "prompt",
-      [],
-      controls,
-    );
-    if (route.promptFile) promptFiles.push(route.promptFile);
-    expect(route.args).toContain("--reasoning-effort");
-    expect(route.args[route.args.indexOf("--reasoning-effort") + 1]).toBe(
-      "xhigh",
-    );
-    expect(controls.effectiveSpeed).toBe("standard");
-  });
-
-  it("rejects a Grok route above the fully quoted Windows argv limit", () => {
-    const messages: ChatMessage[] = [
-      {
-        role: "user",
-        content: Array.from({ length: 515 }, () => ({
-          type: "imageUrl" as const,
-          imageUrl: { url: "data:image/png;base64,AA==" },
-        })),
-      },
-    ];
-    let returnedPromptFile: string | undefined;
-    let thrown: unknown;
-    try {
+  // win32 only: every Grok route first spills its transcript into the fixed
+  // Windows root `D:\Scratch\cukii-bridge`, which cannot be created elsewhere.
+  it.runIf(process.platform === "win32")(
+    "wires Grok reasoning effort and reports no fake fast tier",
+    () => {
+      const controls = resolveBridgeControls("grok-4-6", "max", "fast");
       const route = routeForModel(
         "grok-4-6",
         "D:/Brain/vault",
         "prompt",
-        messages,
-        resolveBridgeControls("grok-4-6", "max", "standard"),
+        [],
+        controls,
       );
-      returnedPromptFile = route.promptFile;
-    } catch (error) {
-      thrown = error;
-    } finally {
-      if (returnedPromptFile) promptFiles.push(returnedPromptFile);
-    }
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(route.args).toContain("--reasoning-effort");
+      expect(route.args[route.args.indexOf("--reasoning-effort") + 1]).toBe(
+        "xhigh",
+      );
+      expect(controls.effectiveSpeed).toBe("standard");
+    },
+  );
 
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toMatch(
-      /Grok command line.*UTF-16.*did not start/i,
-    );
-  });
+  // win32 only: the limit under test is CreateProcess's fully quoted UTF-16
+  // command-line budget, and reaching it requires the Windows spill file.
+  it.runIf(process.platform === "win32")(
+    "rejects a Grok route above the fully quoted Windows argv limit",
+    () => {
+      const messages: ChatMessage[] = [
+        {
+          role: "user",
+          content: Array.from({ length: 515 }, () => ({
+            type: "imageUrl" as const,
+            imageUrl: { url: "data:image/png;base64,AA==" },
+          })),
+        },
+      ];
+      let returnedPromptFile: string | undefined;
+      let thrown: unknown;
+      try {
+        const route = routeForModel(
+          "grok-4-6",
+          "D:/Brain/vault",
+          "prompt",
+          messages,
+          resolveBridgeControls("grok-4-6", "max", "standard"),
+        );
+        returnedPromptFile = route.promptFile;
+      } catch (error) {
+        thrown = error;
+      } finally {
+        if (returnedPromptFile) promptFiles.push(returnedPromptFile);
+      }
 
-  it("routes a newly discovered xAI model with its exact native id", () => {
-    const [catalogModel] = grokCatalogFromOutput("  - grok-4.7\n");
-    expect(catalogModel.value).toBe("grok:grok-4.7");
-    const route = routeForModel(
-      catalogModel.value,
-      "D:/Brain/vault",
-      "prompt",
-      [],
-      resolveBridgeControls(catalogModel.value, "high", "standard"),
-    );
-    if (route.promptFile) promptFiles.push(route.promptFile);
-    expect(route.args[route.args.indexOf("--model") + 1]).toBe("grok-4.7");
-  });
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toMatch(
+        /Grok command line.*UTF-16.*did not start/i,
+      );
+    },
+  );
+
+  // win32 only: the catalog parse is cross-platform (and covered by
+  // bridgeModelCatalog.vitest.ts), but asserting the routed `--model` needs the
+  // Grok spill file under `D:\Scratch\cukii-bridge`.
+  it.runIf(process.platform === "win32")(
+    "routes a newly discovered xAI model with its exact native id",
+    () => {
+      const [catalogModel] = grokCatalogFromOutput("  - grok-4.7\n");
+      expect(catalogModel.value).toBe("grok:grok-4.7");
+      const route = routeForModel(
+        catalogModel.value,
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls(catalogModel.value, "high", "standard"),
+      );
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(route.args[route.args.indexOf("--model") + 1]).toBe("grok-4.7");
+    },
+  );
 
   it("switches Cursor to its real Fast model id", () => {
     const route = routeForModel(

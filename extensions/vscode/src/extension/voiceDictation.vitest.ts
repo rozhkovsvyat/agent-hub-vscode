@@ -151,7 +151,13 @@ describe("voice dictation runtime", () => {
   });
 
   it("uses Cukii's packaged/development recorder rather than system PATH", () => {
-    expect(voiceFfmpegExecutable()).toMatch(/ffmpeg\.exe$/i);
+    // The bundled recorder is `ffmpeg.exe` on Windows and `ffmpeg` elsewhere;
+    // either way it has to be an owned absolute path, never a bare PATH name.
+    const executable = voiceFfmpegExecutable();
+    expect(executable).toMatch(
+      process.platform === "win32" ? /ffmpeg\.exe$/i : /ffmpeg$/i,
+    );
+    expect(path.isAbsolute(executable)).toBe(true);
   });
 
   it("detects an incomplete packaged model and pins a finite recording cap", () => {

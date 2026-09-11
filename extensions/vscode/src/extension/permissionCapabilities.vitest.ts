@@ -7,27 +7,39 @@ import { parseVendorPermissionCapabilities } from "core/cukiiPermissionModes";
 import { probeCliRoute, probeCommandForRoute } from "./permissionCapabilities";
 
 describe("native permission capability probing", () => {
-  it("runs a Windows .cmd probe through ComSpec without shell mode", () => {
-    const probe = probeCommandForRoute(
-      "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\claude.cmd",
-    );
-    expect(probe.program.toLowerCase()).toContain("cmd.exe");
-    expect(probe.argsPrefix).toEqual([
-      "/d",
-      "/v:off",
-      "/s",
-      "/c",
-      'call "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\claude.cmd"',
-    ]);
-  });
+  // win32 only: `probeCommandForRoute` short-circuits to the bare route unless
+  // `process.platform === "win32"`, so the ComSpec/`.cmd` wrapping it exists to
+  // verify (Windows cannot CreateProcess a .cmd directly) is unreachable here.
+  it.runIf(process.platform === "win32")(
+    "runs a Windows .cmd probe through ComSpec without shell mode",
+    () => {
+      const probe = probeCommandForRoute(
+        "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\claude.cmd",
+      );
+      expect(probe.program.toLowerCase()).toContain("cmd.exe");
+      expect(probe.argsPrefix).toEqual([
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        'call "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\claude.cmd"',
+      ]);
+    },
+  );
 
-  it("does not route the native Cursor probe through WSL", () => {
-    const probe = probeCommandForRoute(
-      "C:\\Users\\owner\\.cursor\\bin\\agent.exe",
-    );
-    expect(probe.program).toContain("agent.exe");
-    expect(probe.argsPrefix).toEqual([]);
-  });
+  // win32 only: "not through WSL" is a Windows routing decision. Off Windows
+  // `probeCommandForRoute` returns the route untouched, so both assertions
+  // would pass without exercising the behaviour they describe.
+  it.runIf(process.platform === "win32")(
+    "does not route the native Cursor probe through WSL",
+    () => {
+      const probe = probeCommandForRoute(
+        "C:\\Users\\owner\\.cursor\\bin\\agent.exe",
+      );
+      expect(probe.program).toContain("agent.exe");
+      expect(probe.argsPrefix).toEqual([]);
+    },
+  );
 
   it.skipIf(process.platform !== "win32")(
     "executes a Codex .cmd route with spaces, Unicode, and metacharacters",

@@ -65,7 +65,14 @@ async function brokerFor(
   };
 }
 
-describe("Claude MCP permission broker", () => {
+// win32 only: the broker's transport is a Windows named pipe
+// (`\\.\pipe\cukii-permission-…`) and every instance allocates its private
+// config directory under the fixed Windows root `D:\Scratch\cukii-permission`
+// (see `bridgeScratch.ts`). Constructing a broker anywhere else throws ENOENT
+// before any of these contracts can be observed.
+const describeWin32 = describe.runIf(process.platform === "win32");
+
+describeWin32("Claude MCP permission broker", () => {
   it("denies only an oversized frame and continues with auth and permission in the same chunk", async () => {
     const fixture = await brokerFor();
     const client = await rawBrokerClient(fixture.broker.pipeName);

@@ -1506,42 +1506,49 @@ describe("Cukii vendor CLI accounts", () => {
     ).toBe(kimiUnavailable);
   });
 
-  it("discovers Cursor from native Windows product locations before PATH", () => {
-    const candidates = nativeCliCandidates(
-      "cursor",
-      "C:\\Users\\owner",
-      "win32",
-      { LOCALAPPDATA: "C:\\Users\\owner\\AppData\\Local" },
-    );
-    expect(candidates.slice(0, 2)).toEqual([
-      "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.cmd",
-      "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
-    ]);
-    expect(
-      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
-    ).toContain(
-      "C:\\Users\\owner\\AppData\\Local\\Programs\\Cursor\\resources\\app\\bin\\agent.exe",
-    );
-    expect(
-      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
-    ).toContain("C:\\Program Files\\Cursor\\resources\\app\\bin\\agent.exe");
-    expect(
-      nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
-    ).not.toContain("agent");
-    expect(
-      probeSpec(
+  // win32 only: these are Windows product locations (%LOCALAPPDATA%, Program
+  // Files) and `probeSpec` wraps a `.ps1` in `%SystemRoot%\...\powershell.exe`
+  // only when `process.platform === "win32"`; elsewhere it returns the script
+  // path unchanged.
+  it.runIf(process.platform === "win32")(
+    "discovers Cursor from native Windows product locations before PATH",
+    () => {
+      const candidates = nativeCliCandidates(
         "cursor",
+        "C:\\Users\\owner",
+        "win32",
+        { LOCALAPPDATA: "C:\\Users\\owner\\AppData\\Local" },
+      );
+      expect(candidates.slice(0, 2)).toEqual([
+        "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.cmd",
         "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
-      ),
-    ).toMatchObject({
-      program: expect.stringMatching(/powershell\.exe$/i),
-      args: expect.arrayContaining([
-        "-File",
-        "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
-        "status",
-      ]),
-    });
-  });
+      ]);
+      expect(
+        nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+      ).toContain(
+        "C:\\Users\\owner\\AppData\\Local\\Programs\\Cursor\\resources\\app\\bin\\agent.exe",
+      );
+      expect(
+        nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+      ).toContain("C:\\Program Files\\Cursor\\resources\\app\\bin\\agent.exe");
+      expect(
+        nativeCliCandidates("cursor", "C:\\Users\\owner", "win32", {}),
+      ).not.toContain("agent");
+      expect(
+        probeSpec(
+          "cursor",
+          "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
+        ),
+      ).toMatchObject({
+        program: expect.stringMatching(/powershell\.exe$/i),
+        args: expect.arrayContaining([
+          "-File",
+          "C:\\Users\\owner\\AppData\\Local\\cursor-agent\\agent.ps1",
+          "status",
+        ]),
+      });
+    },
+  );
 
   it("uses the required disconnected, unavailable, and connected fallback copy", () => {
     expect(notInstalledVendorStatus("cursor")).toMatchObject({
@@ -1654,152 +1661,167 @@ describe("Cukii vendor CLI accounts", () => {
     expect(isMissingCliError(new Error("authentication expired"))).toBe(false);
   });
 
-  it("runs each native Windows .cmd account probe without shell quoting loss", async () => {
-    if (process.platform !== "win32") return;
-    const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-auth-stubs-");
-    const fixture = (name: string, body: string) => {
-      const file = path.join(directory, `${name}.cmd`);
-      fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
-      return file;
-    };
+  // win32 only: these fixtures are real `.cmd` scripts executed through
+  // ComSpec, so the behaviour exists only on Windows. Guarding at the `it`
+  // level reports the case as skipped elsewhere; the previous in-body early
+  // return reported it as passed without asserting anything.
+  it.runIf(process.platform === "win32")(
+    "runs each native Windows .cmd account probe without shell quoting loss",
+    async () => {
+      const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-auth-stubs-");
+      const fixture = (name: string, body: string) => {
+        const file = path.join(directory, `${name}.cmd`);
+        fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
+        return file;
+      };
 
-    try {
-      const statuses = await Promise.all([
-        probeVendorExecutable(
-          "claude",
-          fixture(
+      try {
+        const statuses = await Promise.all([
+          probeVendorExecutable(
             "claude",
-            'echo {"loggedIn":true,"email":"claude@example.test"}',
+            fixture(
+              "claude",
+              'echo {"loggedIn":true,"email":"claude@example.test"}',
+            ),
           ),
-        ),
-        probeVendorExecutable(
-          "codex",
-          fixture("codex", "echo Logged in using ChatGPT"),
-          { metadata: undefined },
-        ),
-        probeVendorExecutable(
-          "grok",
-          fixture(
+          probeVendorExecutable(
+            "codex",
+            fixture("codex", "echo Logged in using ChatGPT"),
+            { metadata: undefined },
+          ),
+          probeVendorExecutable(
             "grok",
-            "echo You are logged in with grok.com as xai@example.test",
+            fixture(
+              "grok",
+              "echo You are logged in with grok.com as xai@example.test",
+            ),
+            { metadata: undefined },
           ),
-          { metadata: undefined },
-        ),
-        probeVendorExecutable(
-          "cursor",
-          fixture(
+          probeVendorExecutable(
             "cursor",
-            'echo {"isAuthenticated":true,"userInfo":{"email":"cursor@example.test"}}',
+            fixture(
+              "cursor",
+              'echo {"isAuthenticated":true,"userInfo":{"email":"cursor@example.test"}}',
+            ),
           ),
-        ),
-        probeVendorExecutable(
-          "kimi",
-          fixture(
+          probeVendorExecutable(
             "kimi",
-            "echo managed:kimi-code source=oauth account=kimi@example.test",
+            fixture(
+              "kimi",
+              "echo managed:kimi-code source=oauth account=kimi@example.test",
+            ),
+            { metadata: undefined },
           ),
-          { metadata: undefined },
-        ),
-        probeVendorExecutable("qwen", fixture("qwen", "echo 0.22.2"), {
-          metadata: {
-            credentialPresent: true,
-            email: "alibaba@example.test",
-          },
-        }),
-      ]);
+          probeVendorExecutable("qwen", fixture("qwen", "echo 0.22.2"), {
+            metadata: {
+              credentialPresent: true,
+              email: "alibaba@example.test",
+            },
+          }),
+        ]);
 
-      expect(statuses.map((status) => status.state)).toEqual([
-        "connected",
-        "connected",
-        "connected",
-        "connected",
-        "connected",
-        "connected",
-      ]);
-      expect(statuses[2].accountLabel).toBe("xai@example.test");
-      expect(statuses[4].accountLabel).toBe("kimi@example.test");
-      expect(statuses[5]).toMatchObject({
-        id: "qwen",
-        label: "Alibaba",
-        accountLabel: "alibaba@example.test",
-        actions: ["logout"],
-      });
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        expect(statuses.map((status) => status.state)).toEqual([
+          "connected",
+          "connected",
+          "connected",
+          "connected",
+          "connected",
+          "connected",
+        ]);
+        expect(statuses[2].accountLabel).toBe("xai@example.test");
+        expect(statuses[4].accountLabel).toBe("kimi@example.test");
+        expect(statuses[5]).toMatchObject({
+          id: "qwen",
+          label: "Alibaba",
+          accountLabel: "alibaba@example.test",
+          actions: ["logout"],
+        });
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("isolates native rejection and timeout to their own vendor", async () => {
-    if (process.platform !== "win32") return;
-    const directory = fs.mkdtempSync(
-      "D:\\Scratch\\cukii-vendor-auth-failures-",
-    );
-    const fixture = (name: string, body: string) => {
-      const file = path.join(directory, `${name}.cmd`);
-      fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
-      return file;
-    };
+  // win32 only: the same real `.cmd`/ComSpec fixtures as the case above.
+  it.runIf(process.platform === "win32")(
+    "isolates native rejection and timeout to their own vendor",
+    async () => {
+      const directory = fs.mkdtempSync(
+        "D:\\Scratch\\cukii-vendor-auth-failures-",
+      );
+      const fixture = (name: string, body: string) => {
+        const file = path.join(directory, `${name}.cmd`);
+        fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
+        return file;
+      };
 
-    try {
-      const [connected, rejected, timedOut] = await Promise.all([
-        probeVendorExecutable(
-          "codex",
-          fixture("codex", "echo Logged in using ChatGPT"),
-          { metadata: undefined },
-        ),
-        probeVendorExecutable(
-          "claude",
-          fixture("claude", "echo Not signed in\r\nexit /b 1"),
-        ),
-        probeVendorExecutable(
-          "grok",
-          fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
-          { timeoutMs: 50 },
-        ),
-      ]);
+      try {
+        const [connected, rejected, timedOut] = await Promise.all([
+          probeVendorExecutable(
+            "codex",
+            fixture("codex", "echo Logged in using ChatGPT"),
+            { metadata: undefined },
+          ),
+          probeVendorExecutable(
+            "claude",
+            fixture("claude", "echo Not signed in\r\nexit /b 1"),
+          ),
+          probeVendorExecutable(
+            "grok",
+            fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
+            { timeoutMs: 50 },
+          ),
+        ]);
 
-      expect(connected).toMatchObject({
-        state: "connected",
-        authenticated: true,
-        accountLabel: "Connected",
-      });
-      expect(rejected).toMatchObject({
-        state: "disconnected",
-        accountLabel: "Not logged in",
-      });
-      expect(timedOut).toMatchObject({
-        state: "unknown",
-        accountLabel: "Account status unavailable",
-      });
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        expect(connected).toMatchObject({
+          state: "connected",
+          authenticated: true,
+          accountLabel: "Connected",
+        });
+        expect(rejected).toMatchObject({
+          state: "disconnected",
+          accountLabel: "Not logged in",
+        });
+        expect(timedOut).toMatchObject({
+          state: "unknown",
+          accountLabel: "Account status unavailable",
+        });
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("never passes a hostile .cmd route to ComSpec", async () => {
-    if (process.platform !== "win32") return;
-    const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-auth-hostile-");
-    const marker = path.join(directory, "executed.txt");
-    const route = path.join(directory, "grok%CUKII_UNSAFE_ROUTE%.cmd");
-    fs.writeFileSync(
-      route,
-      `@echo off\r\necho executed>"${marker}"\r\n`,
-      "utf8",
-    );
+  // win32 only: the `%VAR%` expansion inside a quoted `call` token is cmd.exe
+  // grammar; there is no ComSpec to refuse the route on another platform.
+  it.runIf(process.platform === "win32")(
+    "never passes a hostile .cmd route to ComSpec",
+    async () => {
+      const directory = fs.mkdtempSync(
+        "D:\\Scratch\\cukii-vendor-auth-hostile-",
+      );
+      const marker = path.join(directory, "executed.txt");
+      const route = path.join(directory, "grok%CUKII_UNSAFE_ROUTE%.cmd");
+      fs.writeFileSync(
+        route,
+        `@echo off\r\necho executed>"${marker}"\r\n`,
+        "utf8",
+      );
 
-    try {
-      await expect(probeVendorExecutable("grok", route)).resolves.toMatchObject(
-        {
+      try {
+        await expect(
+          probeVendorExecutable("grok", route),
+        ).resolves.toMatchObject({
           installed: true,
           state: "unknown",
           accountLabel: "Account status unavailable",
-        },
-      );
-      expect(fs.existsSync(marker)).toBe(false);
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        });
+        expect(fs.existsSync(marker)).toBe(false);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("vendor account ordering", () => {

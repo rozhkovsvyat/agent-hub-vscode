@@ -374,6 +374,12 @@ function spawnSleeperChild(): ChildProcess {
   return spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
     stdio: "ignore",
     windowsHide: true,
+    // Production launches a bridge detached off Windows so the pid owns a
+    // process group, which is what the POSIX tree probes signal (`-pid`).
+    // Spawned attached, `posixGroupIsAlive` finds no such group and reads the
+    // tree as already dead, so `retryBridgeTreeKill` reports success without
+    // ever sending a signal and the child is still running.
+    detached: process.platform !== "win32",
   });
 }
 

@@ -95,7 +95,10 @@ describe("bridgeVendorMcp", () => {
       expect(result).toBe(true);
       expect(spawn).toHaveBeenCalledTimes(1);
       const [program, args, spawnOptions] = spawn.mock.calls[0];
-      expect(program).toBe("python");
+      // `brokerPythonCommand` launches `python` on Windows (the py launcher
+      // name) and `python3` everywhere else; the rest of the contract — helper
+      // path, flags, and env passthrough — is identical on both.
+      expect(program).toBe(process.platform === "win32" ? "python" : "python3");
       expect(args).toEqual([
         path.join(brokerDir, "session_identity.py"),
         "--register",

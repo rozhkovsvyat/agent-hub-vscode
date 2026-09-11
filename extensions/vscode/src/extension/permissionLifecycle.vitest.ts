@@ -18,14 +18,31 @@ describe("Claude permission lifecycle", () => {
       {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
+        // Mirror how production launches a bridge (`bridgeChatAdapter.ts`):
+        // POSIX teardown signals the whole process group via
+        // `process.kill(-pid, …)`, which only reaches anything when the child
+        // owns a group. Spawned attached, the group kill raises ESRCH,
+        // `posixGroupIsAlive` then reads the missing group as "dead", and the
+        // child is reported terminated while it is still running.
+        detached: process.platform !== "win32",
       },
     );
     await new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
+    // `exitCode`/`signalCode` are only populated once Node has reaped the
+    // child, which is not the same instant the OS-level liveness probe inside
+    // `terminateBridgeChild` sees the group disappear.
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve());
+    });
     try {
       await expect(terminateBridgeChild(child)).resolves.toBe(true);
+      await Promise.race([
+        exited,
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
