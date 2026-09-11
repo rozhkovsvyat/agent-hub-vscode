@@ -388,7 +388,7 @@ export class VsCodeMessenger {
     try {
       return {
         outcome:
-          vendor !== "deepseek" && (action === "login" || action === "logout")
+          vendor !== "deepseek"
             ? await Promise.race([
                 closed,
                 cap,

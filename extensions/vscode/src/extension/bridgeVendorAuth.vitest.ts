@@ -1839,10 +1839,28 @@ describe("vendor account ordering", () => {
 
 describe("vendor auth flow assist", () => {
   it("detects the transition expected by each action", () => {
-    expect(vendorAuthTransitionReached("login", true)).toBe(true);
-    expect(vendorAuthTransitionReached("login", false)).toBe(false);
-    expect(vendorAuthTransitionReached("logout", false)).toBe(true);
-    expect(vendorAuthTransitionReached("logout", true)).toBe(false);
+    const status = (installed: boolean, authenticated: boolean) => ({
+      installed,
+      authenticated,
+    });
+    expect(vendorAuthTransitionReached("login", status(false, true))).toBe(
+      true,
+    );
+    expect(vendorAuthTransitionReached("login", status(true, false))).toBe(
+      false,
+    );
+    expect(vendorAuthTransitionReached("logout", status(true, false))).toBe(
+      true,
+    );
+    expect(vendorAuthTransitionReached("logout", status(true, true))).toBe(
+      false,
+    );
+    expect(vendorAuthTransitionReached("install", status(true, false))).toBe(
+      true,
+    );
+    expect(vendorAuthTransitionReached("install", status(false, true))).toBe(
+      false,
+    );
   });
 
   it("extracts the first https URL from device-auth output", () => {

@@ -1699,7 +1699,7 @@ export async function probeBrokerVendorAccount(
  */
 export async function watchVendorAuthTransition(
   vendor: VendorWithCli,
-  action: "login" | "logout",
+  action: BrokerVendorAuthAction,
   options: {
     intervalMs?: number;
     timeoutMs?: number;
@@ -1720,17 +1720,27 @@ export async function watchVendorAuthTransition(
     } catch {
       continue;
     }
-    if (vendorAuthTransitionReached(action, status.authenticated === true)) {
+    if (vendorAuthTransitionReached(action, status)) {
       return "transition";
     }
   }
 }
 
 export function vendorAuthTransitionReached(
-  action: "login" | "logout",
-  authenticated: boolean,
+  action: BrokerVendorAuthAction,
+  status: Pick<BrokerVendorAuthStatus, "installed" | "authenticated">,
 ): boolean {
-  return action === "login" ? authenticated : !authenticated;
+  switch (action) {
+    case "install":
+      // A finished `npm install -g` only becomes visible once the probe can
+      // resolve the new executable; waiting for the terminal to close left
+      // the accounts row stale for minutes (owner report 2026-09-11).
+      return status.installed === true;
+    case "login":
+      return status.authenticated === true;
+    case "logout":
+      return status.authenticated === false;
+  }
 }
 
 const AUTH_FLOW_URL_PATTERN = /https:\/\/[^\s"'<>()\]]+/i;
