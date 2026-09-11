@@ -429,12 +429,16 @@ function kimiPermissionArgv(_mode: CukiiPermissionMode): PermissionArgvSpec {
 }
 
 function qwenPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {
+  // Qwen bridge runs never get `yolo`: with --safe-mode gone the discipline
+  // layer (hooks, MCP, skills) is live again, so the host-owned broker and
+  // Qwen's own deny > ask > allow policy are the guard rails. Bypass therefore
+  // degrades to the verified interactive-equivalent `default` mode.
   const nativeMode: Record<CukiiPermissionMode, string> = {
     manual: "default",
     editAutomatically: "auto-edit",
     plan: "plan",
     auto: "auto",
-    bypass: "yolo",
+    bypass: "default",
   };
   return {
     args: ["--approval-mode", nativeMode[mode]],

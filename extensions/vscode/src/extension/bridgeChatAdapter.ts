@@ -1238,7 +1238,6 @@ export function routeForModel(
           program: "qwen",
           args: [
             ...alibabaQwenArgv(model),
-            "--safe-mode",
             "--prompt",
             "Follow the Cukii broker instructions supplied on stdin.",
             "--output-format",

@@ -196,6 +196,16 @@ export function ensureQwenBrokerRegistration(
     settings.mcpServers = mcpServers;
     mcpAdded = true;
   }
+  // Older builds left `trust: true` on this entry, letting the broker MCP run
+  // without Qwen's confirmation prompt. The broker is host-owned but not
+  // vendor-trusted, so every registration normalizes it and Qwen's own
+  // deny > ask > allow policy stays in force for bridge runs.
+  const brokerEntry = mcpServers[BROKER_MCP_NAME] as Record<string, unknown>;
+  let trustNormalized = false;
+  if (brokerEntry.trust !== false) {
+    brokerEntry.trust = false;
+    trustNormalized = true;
+  }
   if (!serialized.includes(GATE_MARKER)) {
     const hooks =
       typeof settings.hooks === "object" && settings.hooks !== null
@@ -217,7 +227,7 @@ export function ensureQwenBrokerRegistration(
     settings.hooks = hooks;
     hookAdded = true;
   }
-  if (mcpAdded || hookAdded)
+  if (mcpAdded || hookAdded || trustNormalized)
     writeAtomic(settingsPath, JSON.stringify(settings, null, 2));
   return { mcpAdded, hookAdded };
 }

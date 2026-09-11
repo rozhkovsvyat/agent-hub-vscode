@@ -150,6 +150,7 @@ describe("bridgeVendorMcp", () => {
       const entry = settings.mcpServers[BROKER_MCP_NAME];
       expect(entry.command).toBe(brokerPythonCommand(options()));
       expect(entry.args[0]).toBe(path.join(brokerDir, "mcp_server.py"));
+      expect(entry.trust).toBe(false);
       const preToolUse = settings.hooks.PreToolUse;
       expect(preToolUse).toHaveLength(1);
       expect(preToolUse[0].hooks[0].command).toContain("inbox_gate.py");
@@ -177,6 +178,24 @@ describe("bridgeVendorMcp", () => {
       const settings = readSettings();
       expect(settings.hooks.PreToolUse).toHaveLength(2);
       expect(settings.hooks.PreToolUse[0].matcher).toBe("write_file");
+    });
+
+    it("normalizes a legacy trust:true entry even when nothing else changes", () => {
+      writeSettings({ mcpServers: { other: { command: "x" } }, hooks: {} });
+      ensureQwenBrokerRegistration(brokerDir, options());
+      writeSettings({
+        ...readSettings(),
+        mcpServers: {
+          ...readSettings().mcpServers,
+          [BROKER_MCP_NAME]: {
+            ...readSettings().mcpServers[BROKER_MCP_NAME],
+            trust: true,
+          },
+        },
+      });
+      const result = ensureQwenBrokerRegistration(brokerDir, options());
+      expect(result).toMatchObject({ mcpAdded: false, hookAdded: false });
+      expect(readSettings().mcpServers[BROKER_MCP_NAME].trust).toBe(false);
     });
 
     it("skips silently when the settings file is torn", () => {

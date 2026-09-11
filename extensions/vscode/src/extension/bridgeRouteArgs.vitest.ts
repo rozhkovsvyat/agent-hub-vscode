@@ -935,8 +935,8 @@ describe("native bridge argv", () => {
       [
         "qwen-3-8-max",
         "bypass",
+        "--approval-mode default",
         "--approval-mode yolo",
-        "--approval-mode plan",
       ],
     ] as const;
 
@@ -980,7 +980,7 @@ describe("native bridge argv", () => {
     ["editAutomatically", "auto-edit"],
     ["plan", "plan"],
     ["auto", "auto"],
-    ["bypass", "yolo"],
+    ["bypass", "default"],
   ] as const)(
     "carries Qwen %s through the production route as --approval-mode %s",
     (mode, nativeMode) => {
@@ -1168,7 +1168,7 @@ describe("native bridge argv", () => {
     );
     if (route.promptFile) promptFiles.push(route.promptFile);
     expect(route.args[route.args.indexOf("--model") + 1]).toBe("qwen3.8-max");
-    expect(route.args).toContain("--safe-mode");
+    expect(route.args).not.toContain("--safe-mode");
     expect(route.args.join(" ")).not.toContain("qwen3.8-max-preview");
     expect(route.args.join(" ")).not.toMatch(/preview/i);
   });
@@ -1229,13 +1229,13 @@ describe("native bridge argv", () => {
       "bypass",
     );
     expect(route.program).toBe("qwen");
-    expect(route.args.slice(0, 5)).toEqual([
+    expect(route.args.slice(0, 4)).toEqual([
       "--model",
       "qwen3.8-max",
-      "--safe-mode",
       "--prompt",
       "Follow the Cukii broker instructions supplied on stdin.",
     ]);
+    expect(route.args).not.toContain("--safe-mode");
     expect(route.args).toContain("stream-json");
     expect(route.args.join(" ")).not.toContain("qwen3.8-max-preview");
     expect(route.args.join(" ")).not.toContain("anthropic");
