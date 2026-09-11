@@ -1,6 +1,6 @@
 <div align="center">
 
-![Cukii](media/icon.png)
+![Cukii](https://raw.githubusercontent.com/rozhkovsvyat/agent-hub-vscode/cukii/trunk/extensions/vscode/media/icon.png)
 
 <h1 align="center">Cukii</h1>
 
