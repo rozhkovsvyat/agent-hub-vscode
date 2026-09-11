@@ -405,7 +405,8 @@ export async function loginAlibabaTokenPlan(options: {
   if (!credential) {
     return {
       opened: true,
-      message: "Authentication flow opened in the integrated terminal.",
+      message:
+        "The Alibaba console opened in your browser. No key was entered, so nothing was saved.",
     };
   }
   const fileSystem = options.fileSystem ?? fs;
@@ -419,7 +420,8 @@ export async function loginAlibabaTokenPlan(options: {
   );
   return {
     opened: true,
-    message: "Authentication flow opened in the integrated terminal.",
+    message:
+      "Alibaba Token Plan key saved on this machine. The console stays open in your browser.",
   };
 }
 
@@ -443,7 +445,7 @@ export async function logoutAlibabaTokenPlan(
   }
   return {
     opened: true,
-    message: "Authentication flow opened in the integrated terminal.",
+    message: "Alibaba Token Plan key removed from this machine.",
   };
 }
 
