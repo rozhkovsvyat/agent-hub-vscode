@@ -22,9 +22,11 @@ export class DownloadYamlExtensionCodeLensProvider
     const docCodeLens: vscode.CodeLens = {
       range: new vscode.Range(0, 0, 0, 0),
       command: {
-        title: "📖 View Continue Reference",
+        title: "📖 View Cukii Reference",
         command: "vscode.open",
-        arguments: [vscode.Uri.parse("https://docs.continue.dev/reference")],
+        arguments: [
+          vscode.Uri.parse("https://github.com/rozhkovsvyat/agent-hub-vscode"),
+        ],
       },
       isResolved: true,
     };

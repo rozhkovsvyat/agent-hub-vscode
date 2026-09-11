@@ -57,7 +57,11 @@ export class ConfigYamlDocumentLinkProvider
           const resolvedPath = path.resolve(parentPath, slug);
           linkUri = vscode.Uri.file(resolvedPath);
         } else {
-          linkUri = vscode.Uri.parse(`https://continue.dev/${slug}`);
+          // Cukii does not host a public block registry, so `uses:` slugs that
+          // are not local paths link to the repository instead.
+          linkUri = vscode.Uri.parse(
+            "https://github.com/rozhkovsvyat/agent-hub-vscode",
+          );
         }
 
         const link = new vscode.DocumentLink(range, linkUri);

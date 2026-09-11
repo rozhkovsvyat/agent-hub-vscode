@@ -3,7 +3,7 @@ import { GlobalContext } from "../util/GlobalContext";
 import { joinPathsToUri } from "../util/uri";
 
 const FIRST_TIME_DEFAULT_PROMPT_FILE = `# This is an example ".prompt" file
-# It is used to define and reuse prompts within Continue
+# It is used to define and reuse prompts within Cukii
 # Each .prompt file can be accessed by typing "@prompts" in the Chat input
 
 # A prompt file consists of two parts:
@@ -24,7 +24,7 @@ const FIRST_TIME_DEFAULT_PROMPT_FILE = `# This is an example ".prompt" file
   # @os
   # @repo-map
 
-# To learn more, see the full .prompt file reference: https://docs.continue.dev/features/prompt-files
+# To learn more, see the project repository: https://github.com/rozhkovsvyat/agent-hub-vscode
 name: Example
 description: Example prompt file
 ---
