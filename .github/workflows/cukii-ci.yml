@@ -63,6 +63,10 @@ jobs:
       - name: GUI tests
         working-directory: gui
         run: npm test
+        env:
+          # Several chat tests assert clock strings rendered in the developer
+          # timezone; pin TZ so CI (UTC) matches local runs (UTC+3).
+          TZ: Europe/Moscow
 
       - name: Packaging build graph
         working-directory: extensions/vscode
