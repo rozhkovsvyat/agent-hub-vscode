@@ -31,21 +31,18 @@
   "categories": [
     "AI",
     "Chat",
-    "Programming Languages",
-    "Education",
-    "Machine Learning",
-    "Snippets"
+    "Programming Languages"
   ],
   "keywords": [
-    "chatgpt",
-    "cline",
-    "roo",
-    "github",
-    "copilot",
+    "ai",
+    "agent",
+    "chat",
     "claude",
-    "mistral",
-    "codestral",
-    "ai"
+    "codex",
+    "qwen",
+    "grok",
+    "cursor",
+    "kimi"
   ],
   "activationEvents": [
     "onUri",
