@@ -138,6 +138,13 @@ export function createEditorConfig(options: {
 
   const inSubmenuRef = useRef<string | undefined>(undefined);
   const inDropdownRef = useRef(false);
+  // The extension list is frozen on the render that builds the view, and with
+  // `immediatelyRender: false` that render is the one where `useEditor` still
+  // returns `null`. A shortcut that closes over `onEnter` directly would keep
+  // calling the version whose `editor` is forever `null`, so Enter would be
+  // swallowed without ever submitting. Every submit goes through this ref.
+  const onEnterRef = useRef<(modifiers: InputModifiers) => void>(() => {});
+  const useActiveFileRef = useUpdatingRef(useActiveFile);
   const defaultModelRef = useUpdatingRef(defaultModel);
   const sessionModeRef = useUpdatingRef(sessionMode);
   const isStreamingRef = useUpdatingRef(isStreaming);
@@ -350,25 +357,25 @@ export function createEditorConfig(options: {
               // for every subsequent Enter as well.
               inDropdownRef.current = false;
 
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !useActiveFile,
+                noContext: !useActiveFileRef.current,
               });
               return true;
             },
 
             "Mod-Enter": () => {
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !!useActiveFile,
+                noContext: !!useActiveFileRef.current,
               });
 
               return true;
             },
             "Alt-Enter": () => {
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !!useActiveFile,
+                noContext: !!useActiveFileRef.current,
               });
 
               return true;
@@ -546,6 +553,10 @@ export function createEditorConfig(options: {
     props.onEnter(json, modifiers, editor);
     clearSubmittedMainComposer(editor, props.isMainInput, isInEdit);
   };
+
+  // Keep the frozen keyboard shortcuts pointed at this render's closure, which
+  // is the only one that can see the live editor and the current session state.
+  onEnterRef.current = onEnter;
 
   return { editor, onEnter };
 }
