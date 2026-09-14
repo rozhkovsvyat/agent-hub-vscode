@@ -57,6 +57,45 @@ describe("cukii brand icons", () => {
     expect(activitySvg).toContain('mask="url(#cutout-mask)"');
   });
 
+  it("cuts the Marketplace tile from the activity cookie, not the older mark", () => {
+    // 2.0.126 shipped a store tile rendered from media/cukii-mark.svg — the
+    // older, heavily outlined cookie — so the listing and the sidebar showed
+    // two different biscuits. The tile must reuse the activity geometry.
+    const activitySvg = readMediaIcon("media/cukii-activity.svg");
+    const storeSvg = readMediaIcon("media/cukii-store.svg");
+
+    const silhouette = (svg: string) => /\sd="(M56\.3[^"]+)"/.exec(svg)?.[1];
+    expect(silhouette(storeSvg)).toBeDefined();
+    expect(silhouette(storeSvg)).toBe(silhouette(activitySvg));
+
+    for (const bite of [
+      'cx="49.5" cy="14" r="10"',
+      'cx="38.5" cy="8.5" r="6"',
+    ]) {
+      expect(storeSvg).toContain(bite);
+      expect(activitySvg).toContain(bite);
+    }
+    for (const chip of [
+      'cx="26.6" cy="28.8" r="3.75"',
+      'cx="39.9" cy="35" r="5.25"',
+      'cx="28.2" cy="40.6" r="4.1"',
+    ]) {
+      expect(storeSvg).toContain(chip);
+    }
+
+    // The tile is the only place the palette lives; the activity icon stays
+    // monochrome because VS Code paints it through a CSS mask.
+    expect(storeSvg).toContain('fill="#E3A867"');
+    expect(activitySvg).toContain('fill="currentColor"');
+
+    const generator = readFileSync(
+      join(__dirname, "..", "scripts", "build-marketplace-icon.js"),
+      "utf8",
+    );
+    expect(generator).toContain('"cukii-store.svg"');
+    expect(generator).not.toContain('"cukii-mark.svg"');
+  });
+
   it("moves the color-mark chips by the same offset without changing their radii", () => {
     const markSvg = readMediaIcon("media/cukii-mark.svg");
 

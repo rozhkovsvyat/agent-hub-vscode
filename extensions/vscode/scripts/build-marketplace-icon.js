@@ -1,24 +1,26 @@
 // Renders media/icon.png (the Marketplace tile) from the current brand mark.
-// The store icon used to be a stale Continue-era bitmap; regenerating it from
-// media/cukii-mark.svg keeps the listing and the activity bar on one source.
+// The store icon used to be a stale Continue-era bitmap. It was then rebuilt
+// from media/cukii-mark.svg, which is the OLDER outlined cookie — the store
+// tile disagreed with the sidebar. media/cukii-store.svg carries the same
+// geometry the activity bar paints, so listing and sidebar stay one source.
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
 
 const SIZE = Number(process.argv[2] || 512);
 const mediaDir = path.join(__dirname, "..", "media");
-const source = path.join(mediaDir, "cukii-mark.svg");
+const source = path.join(mediaDir, "cukii-store.svg");
 const target = path.join(mediaDir, "icon.png");
 
 async function main() {
   const svg = fs.readFileSync(source);
   const viewBox = /viewBox="0 0 (\d+) (\d+)"/.exec(svg.toString("utf8"));
   if (!viewBox) {
-    throw new Error("cukii-mark.svg must declare a 0 0 N N viewBox");
+    throw new Error("cukii-store.svg must declare a 0 0 N N viewBox");
   }
   const units = Number(viewBox[1]);
   if (units !== Number(viewBox[2])) {
-    throw new Error("cukii-mark.svg viewBox must be square");
+    throw new Error("cukii-store.svg viewBox must be square");
   }
   // librsvg rasterises at 72dpi unless told otherwise; density scales the
   // user units so the output lands on SIZE pixels without a resample blur.
