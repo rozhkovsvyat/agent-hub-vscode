@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  lineageHasValidStartOrder,
   readRunBindingForPid,
   registerRunBinding,
   resolveAncestorRunBinding,
@@ -61,4 +62,25 @@ describe("bridgeRunBinding", () => {
     expect(readRunBindingForPid(process.pid, now)).toBeUndefined();
     expect(registerRunBinding(process.pid, "../escape", "run-a", now)).toBeUndefined();
   }, 20_000);
+
+  it("rejects a reused numeric parent that started after its child", () => {
+    expect(
+      lineageHasValidStartOrder([
+        { pid: 30, parentPid: 20, startToken: "300" },
+        { pid: 20, parentPid: 10, startToken: "200" },
+      ]),
+    ).toBe(true);
+    expect(
+      lineageHasValidStartOrder([
+        { pid: 30, parentPid: 20, startToken: "300" },
+        { pid: 20, parentPid: 10, startToken: "400" },
+      ]),
+    ).toBe(false);
+    expect(
+      lineageHasValidStartOrder([
+        { pid: 30, parentPid: 20, startToken: "unknown" },
+        { pid: 20, parentPid: 10, startToken: "200" },
+      ]),
+    ).toBe(false);
+  });
 });

@@ -19,7 +19,7 @@ export type CukiiRunBinding = {
   expiresMs: number;
 };
 
-type ProcessSnapshot = {
+export type ProcessSnapshot = {
   pid: number;
   parentPid: number;
   startToken: string;
@@ -51,7 +51,11 @@ function portableSnapshot(pid: number): ProcessSnapshot | undefined {
   const result = spawnSync(
     "ps",
     ["-o", "ppid=", "-o", "lstart=", "-p", String(pid)],
-    { encoding: "utf8", timeout: 2_000 },
+    {
+      encoding: "utf8",
+      timeout: 2_000,
+      env: { ...process.env, LC_ALL: "C", LANG: "C" },
+    },
   );
   if (result.status !== 0) return undefined;
   const match = String(result.stdout || "")
@@ -63,6 +67,30 @@ function portableSnapshot(pid: number): ProcessSnapshot | undefined {
     parentPid: Number(match[1]),
     startToken: match[2].trim().replace(/\s+/g, " "),
   };
+}
+
+function startOrder(token: string): bigint | undefined {
+  if (/^\d+$/.test(token)) {
+    try {
+      return BigInt(token);
+    } catch {
+      return undefined;
+    }
+  }
+  const parsed = Date.parse(token);
+  return Number.isFinite(parsed) ? BigInt(parsed) : undefined;
+}
+
+/** Every OS parent must have started no later than its observed child. */
+export function lineageHasValidStartOrder(lineage: ProcessSnapshot[]): boolean {
+  for (let index = 1; index < lineage.length; index += 1) {
+    const descendant = startOrder(lineage[index - 1].startToken);
+    const ancestor = startOrder(lineage[index].startToken);
+    if (descendant === undefined || ancestor === undefined || ancestor > descendant) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function windowsLineage(startPid: number): ProcessSnapshot[] {
@@ -206,7 +234,10 @@ export function resolveAncestorRunBinding(
   parentPid = process.ppid,
   nowMs = Date.now(),
 ): CukiiRunBinding | undefined {
-  for (const process of processLineage(parentPid)) {
+  const lineage = processLineage(parentPid);
+  for (let index = 0; index < lineage.length; index += 1) {
+    if (!lineageHasValidStartOrder(lineage.slice(0, index + 1))) return undefined;
+    const process = lineage[index];
     try {
       const item = JSON.parse(fs.readFileSync(bindingPath(process.pid), "utf8"));
       if (

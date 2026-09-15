@@ -5,6 +5,11 @@ import path from "node:path";
 
 import type { BrokerVendorId } from "core/protocol/ideWebview";
 
+import {
+  withOwnerFileLock,
+  writeOwnerFileAtomic,
+} from "./ownerFileTransaction";
+
 export const CUKII_MEMORY_MCP_NAME = "cukii-memory";
 
 export type CukiiMemoryRelayDescriptor = {
@@ -21,18 +26,6 @@ type MemoryMcpOptions = {
 
 function home(options?: MemoryMcpOptions): string {
   return options?.userHome ?? os.homedir();
-}
-
-function writeAtomic(target: string, body: string): void {
-  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const tmp = `${target}.cukii-memory.tmp`;
-  fs.writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600 });
-  try {
-    fs.chmodSync(tmp, 0o600);
-  } catch {
-    // Windows ACLs are authoritative; POSIX configs are forced owner-only.
-  }
-  fs.renameSync(tmp, target);
 }
 
 function relayEnvironment(descriptor: CukiiMemoryRelayDescriptor) {
@@ -83,37 +76,41 @@ function setJsonMemoryServer(
   descriptor: CukiiMemoryRelayDescriptor,
   options: { trust?: boolean } = {},
 ): void {
-  const config = readJsonOwnerConfig(configPath);
-  if (
-    config.mcpServers !== undefined &&
-    (typeof config.mcpServers !== "object" ||
-      config.mcpServers === null ||
-      Array.isArray(config.mcpServers))
-  ) {
-    throw new Error("owner MCP servers config is not an object");
-  }
-  const existing = config.mcpServers?.[CUKII_MEMORY_MCP_NAME];
-  if (existing && !isManagedJsonEntry(existing)) {
-    throw new Error("owner already defines cukii-memory");
-  }
-  config.mcpServers = {
-    ...(config.mcpServers ?? {}),
-    [CUKII_MEMORY_MCP_NAME]: {
-      ...memoryMcpEntry(descriptor),
-      ...(options.trust === undefined ? {} : { trust: options.trust }),
-    },
-  };
-  writeAtomic(configPath, JSON.stringify(config, null, 2));
+  withOwnerFileLock(configPath, () => {
+    const config = readJsonOwnerConfig(configPath);
+    if (
+      config.mcpServers !== undefined &&
+      (typeof config.mcpServers !== "object" ||
+        config.mcpServers === null ||
+        Array.isArray(config.mcpServers))
+    ) {
+      throw new Error("owner MCP servers config is not an object");
+    }
+    const existing = config.mcpServers?.[CUKII_MEMORY_MCP_NAME];
+    if (existing && !isManagedJsonEntry(existing)) {
+      throw new Error("owner already defines cukii-memory");
+    }
+    config.mcpServers = {
+      ...(config.mcpServers ?? {}),
+      [CUKII_MEMORY_MCP_NAME]: {
+        ...memoryMcpEntry(descriptor),
+        ...(options.trust === undefined ? {} : { trust: options.trust }),
+      },
+    };
+    writeOwnerFileAtomic(configPath, JSON.stringify(config, null, 2));
+  });
 }
 
 function removeJsonMemoryServer(configPath: string): void {
   try {
-    const config = readJsonOwnerConfig(configPath);
-    const servers = config.mcpServers;
-    const existing = servers?.[CUKII_MEMORY_MCP_NAME];
-    if (!existing || !isManagedJsonEntry(existing)) return;
-    delete servers[CUKII_MEMORY_MCP_NAME];
-    writeAtomic(configPath, JSON.stringify(config, null, 2));
+    withOwnerFileLock(configPath, () => {
+      const config = readJsonOwnerConfig(configPath);
+      const servers = config.mcpServers;
+      const existing = servers?.[CUKII_MEMORY_MCP_NAME];
+      if (!existing || !isManagedJsonEntry(existing)) return;
+      delete servers[CUKII_MEMORY_MCP_NAME];
+      writeOwnerFileAtomic(configPath, JSON.stringify(config, null, 2));
+    });
   } catch {
     // A missing or owner-managed unreadable config is left untouched.
   }
@@ -145,44 +142,46 @@ function configureCliVendor(
   addArgs: string[],
   options?: MemoryMcpOptions,
 ): boolean {
-  const run = options?.spawn ?? spawnSync;
   const configPath = path.join(home(options), `.${vendor}`, "config.toml");
-  const before = fs.existsSync(configPath)
-    ? fs.readFileSync(configPath, "utf8")
-    : undefined;
-  const existing = before === undefined ? undefined : tomlMemoryBlock(before);
-  if (existing && !isManagedTomlConfig(before!)) return false;
-  const removeArgs =
-    vendor === "codex"
-      ? ["mcp", "remove", CUKII_MEMORY_MCP_NAME]
-      : ["mcp", "remove", "-s", "user", CUKII_MEMORY_MCP_NAME];
-  if (existing) {
-    const removed = run(vendor, removeArgs, {
-      timeout: 10_000,
-      encoding: "utf8",
-    });
-    if (removed.status !== 0) return false;
-  }
-  const added = run(vendor, addArgs, { timeout: 15_000, encoding: "utf8" });
-  if (added.status !== 0) {
-    if (before !== undefined) {
-      writeAtomic(configPath, before);
-    } else {
-      try {
-        const created = fs.readFileSync(configPath, "utf8");
-        if (isManagedTomlConfig(created)) fs.unlinkSync(configPath);
-      } catch {
-        // No prior owner file existed; leave only unknown, non-managed data.
-      }
+  return withOwnerFileLock(configPath, () => {
+    const run = options?.spawn ?? spawnSync;
+    const before = fs.existsSync(configPath)
+      ? fs.readFileSync(configPath, "utf8")
+      : undefined;
+    const existing = before === undefined ? undefined : tomlMemoryBlock(before);
+    if (existing && !isManagedTomlConfig(before!)) return false;
+    const removeArgs =
+      vendor === "codex"
+        ? ["mcp", "remove", CUKII_MEMORY_MCP_NAME]
+        : ["mcp", "remove", "-s", "user", CUKII_MEMORY_MCP_NAME];
+    if (existing) {
+      const removed = run(vendor, removeArgs, {
+        timeout: 10_000,
+        encoding: "utf8",
+      });
+      if (removed.status !== 0) return false;
     }
-    return false;
-  }
-  try {
-    fs.chmodSync(configPath, 0o600);
-  } catch {
-    // Windows ACLs are authoritative.
-  }
-  return true;
+    const added = run(vendor, addArgs, { timeout: 15_000, encoding: "utf8" });
+    if (added.status !== 0) {
+      if (before !== undefined) {
+        writeOwnerFileAtomic(configPath, before);
+      } else {
+        try {
+          const created = fs.readFileSync(configPath, "utf8");
+          if (isManagedTomlConfig(created)) fs.unlinkSync(configPath);
+        } catch {
+          // No prior owner file existed; leave only unknown, non-managed data.
+        }
+      }
+      return false;
+    }
+    try {
+      fs.chmodSync(configPath, 0o600);
+    } catch {
+      // Windows ACLs are authoritative.
+    }
+    return true;
+  });
 }
 
 function commandEnvironmentArgs(

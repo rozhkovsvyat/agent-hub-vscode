@@ -5,6 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { resolveAncestorRunBinding } from "./bridgeRunBinding";
+import { resolveWithBoundedRetry } from "./bindingRetry";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 const WAIT_TIMEOUT_MS = 30 * 60_000;
@@ -108,7 +109,10 @@ async function waitForAnswer(file: string): Promise<Record<string, unknown>> {
 }
 
 async function requestUserInput(argumentsValue: unknown) {
-  const binding = resolveAncestorRunBinding();
+  // The vendor can launch its MCP child a few milliseconds before the host's
+  // post-spawn CIM/proc lookup publishes the run binding. Treat that as a
+  // bounded startup race, not a terminal user-question failure.
+  const binding = await resolveWithBoundedRetry(resolveAncestorRunBinding);
   if (!binding) return { cancelled: true, reason: "Cukii run binding unavailable" };
   const questions = normalizeQuestions(
     (argumentsValue as { questions?: unknown } | undefined)?.questions,

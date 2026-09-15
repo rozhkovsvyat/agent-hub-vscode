@@ -3,6 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+  withOwnerFileLock,
+  writeOwnerFileAtomic,
+} from "./ownerFileTransaction";
+
 import type { BrokerModel } from "core/protocol/ideWebview";
 import { brokerVendorForModel } from "core/cukiiPermissionModes";
 import {
@@ -152,18 +157,6 @@ export function registerBrokerSessionBinding(
   }
 }
 
-function writeAtomic(target: string, body: string): void {
-  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const tmp = `${target}.tmp`;
-  fs.writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600 });
-  try {
-    fs.chmodSync(tmp, 0o600);
-  } catch {
-    // Windows ACLs are authoritative.
-  }
-  fs.renameSync(tmp, target);
-}
-
 function questionMcpEntry() {
   return {
     command: process.execPath,
@@ -190,66 +183,70 @@ function managedQuestionEntry(value: unknown): boolean {
 }
 
 function ensureJsonQuestionServer(configPath: string): boolean {
-  let config: { mcpServers?: Record<string, unknown> } = {};
-  if (fs.existsSync(configPath)) {
-    try {
-      config = JSON.parse(fs.readFileSync(configPath, "utf8")) as typeof config;
-    } catch {
+  return withOwnerFileLock(configPath, () => {
+    let config: { mcpServers?: Record<string, unknown> } = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, "utf8")) as typeof config;
+      } catch {
+        return false;
+      }
+    }
+    if (
+      config.mcpServers !== undefined &&
+      (typeof config.mcpServers !== "object" ||
+        config.mcpServers === null ||
+        Array.isArray(config.mcpServers))
+    ) {
       return false;
     }
-  }
-  if (
-    config.mcpServers !== undefined &&
-    (typeof config.mcpServers !== "object" ||
-      config.mcpServers === null ||
-      Array.isArray(config.mcpServers))
-  ) {
-    return false;
-  }
-  const servers = config.mcpServers ?? {};
-  const existing = servers[QUESTION_MCP_NAME];
-  if (existing && !managedQuestionEntry(existing)) return false;
-  const wanted = questionMcpEntry();
-  if (JSON.stringify(existing) === JSON.stringify(wanted)) return false;
-  config.mcpServers = { ...servers, [QUESTION_MCP_NAME]: wanted };
-  writeAtomic(configPath, JSON.stringify(config, null, 2));
-  return true;
+    const servers = config.mcpServers ?? {};
+    const existing = servers[QUESTION_MCP_NAME];
+    if (existing && !managedQuestionEntry(existing)) return false;
+    const wanted = questionMcpEntry();
+    if (JSON.stringify(existing) === JSON.stringify(wanted)) return false;
+    config.mcpServers = { ...servers, [QUESTION_MCP_NAME]: wanted };
+    writeOwnerFileAtomic(configPath, JSON.stringify(config, null, 2));
+    return true;
+  });
 }
 
 const QUESTION_TOML_BEGIN = "# cukii-question managed begin";
 const QUESTION_TOML_END = "# cukii-question managed end";
 
 function ensureTomlQuestionServer(configPath: string): boolean {
-  let body = "";
-  try {
-    body = fs.readFileSync(configPath, "utf8");
-  } catch {
-    // A missing config is created; an existing unreadable one fails below.
-    if (fs.existsSync(configPath)) return false;
-  }
-  const hasOwnerSection = /^\s*\[mcp_servers\.cukii-question\]\s*$/m.test(body);
-  const start = body.indexOf(QUESTION_TOML_BEGIN);
-  const end = body.indexOf(QUESTION_TOML_END);
-  if ((start >= 0) !== (end >= 0) || (start >= 0 && end < start)) return false;
-  if (hasOwnerSection && (start < 0 || end < start)) return false;
-  const entry = questionMcpEntry();
-  const block = [
-    QUESTION_TOML_BEGIN,
-    "[mcp_servers.cukii-question]",
-    `command = ${tomlLiteral(entry.command)}`,
-    `args = [${tomlLiteral(entry.args[0])}]`,
-    "[mcp_servers.cukii-question.env]",
-    'ELECTRON_RUN_AS_NODE = "1"',
-    'CUKII_QUESTION_MANAGED = "1"',
-    QUESTION_TOML_END,
-  ].join("\n");
-  const next =
-    start >= 0 && end >= start
-      ? `${body.slice(0, start)}${block}${body.slice(end + QUESTION_TOML_END.length)}`
-      : `${body.trimEnd()}\n\n${block}\n`;
-  if (next === body) return false;
-  writeAtomic(configPath, next);
-  return true;
+  return withOwnerFileLock(configPath, () => {
+    let body = "";
+    try {
+      body = fs.readFileSync(configPath, "utf8");
+    } catch {
+      // A missing config is created; an existing unreadable one fails below.
+      if (fs.existsSync(configPath)) return false;
+    }
+    const hasOwnerSection = /^\s*\[mcp_servers\.cukii-question\]\s*$/m.test(body);
+    const start = body.indexOf(QUESTION_TOML_BEGIN);
+    const end = body.indexOf(QUESTION_TOML_END);
+    if ((start >= 0) !== (end >= 0) || (start >= 0 && end < start)) return false;
+    if (hasOwnerSection && (start < 0 || end < start)) return false;
+    const entry = questionMcpEntry();
+    const block = [
+      QUESTION_TOML_BEGIN,
+      "[mcp_servers.cukii-question]",
+      `command = ${tomlLiteral(entry.command)}`,
+      `args = [${tomlLiteral(entry.args[0])}]`,
+      "[mcp_servers.cukii-question.env]",
+      'ELECTRON_RUN_AS_NODE = "1"',
+      'CUKII_QUESTION_MANAGED = "1"',
+      QUESTION_TOML_END,
+    ].join("\n");
+    const next =
+      start >= 0 && end >= start
+        ? `${body.slice(0, start)}${block}${body.slice(end + QUESTION_TOML_END.length)}`
+        : `${body.trimEnd()}\n\n${block}\n`;
+    if (next === body) return false;
+    writeOwnerFileAtomic(configPath, next);
+    return true;
+  });
 }
 
 function ensureQuestionVendorRegistration(
@@ -355,7 +352,7 @@ export function ensureQwenBrokerRegistration(
     hookAdded = true;
   }
   if (mcpAdded || hookAdded || trustNormalized)
-    writeAtomic(settingsPath, JSON.stringify(settings, null, 2));
+    writeOwnerFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
   return { mcpAdded, hookAdded };
 }
 
@@ -379,7 +376,7 @@ export function ensureCursorBrokerRegistration(
     [BROKER_MCP_NAME]: mcpEntry(brokerDir, options),
   };
   fs.mkdirSync(cursorDir, { recursive: true });
-  writeAtomic(configPath, JSON.stringify(config, null, 2));
+  writeOwnerFileAtomic(configPath, JSON.stringify(config, null, 2));
   return { mcpAdded: true, hookAdded: false };
 }
 
@@ -480,7 +477,7 @@ export function ensureCodexBrokerRegistration(
       "timeout = 15",
     );
   }
-  writeAtomic(configPath, body + block.join("\n") + "\n");
+  writeOwnerFileAtomic(configPath, body + block.join("\n") + "\n");
   return { mcpAdded: !hasMcp, hookAdded: !hasGate };
 }
 
@@ -543,7 +540,7 @@ export function ensureGrokBrokerRegistration(
       2,
     );
     if (current.trim() !== wanted.trim()) {
-      writeAtomic(hookPath, wanted);
+      writeOwnerFileAtomic(hookPath, wanted);
       hookAdded = true;
     }
   } catch {
@@ -579,7 +576,7 @@ export function ensureKimiBrokerRegistration(
         [BROKER_MCP_NAME]: mcpEntry(brokerDir, options),
       };
       fs.mkdirSync(kimiDir, { recursive: true });
-      writeAtomic(configPath, JSON.stringify(config, null, 2));
+      writeOwnerFileAtomic(configPath, JSON.stringify(config, null, 2));
       mcpAdded = true;
     }
   } catch {
@@ -600,7 +597,7 @@ export function ensureKimiBrokerRegistration(
         `command = ${tomlLiteral(gateCommand(brokerDir, "kimi", options))}`,
         "timeout = 15",
       ];
-      writeAtomic(configPath, body + block.join("\n") + "\n");
+      writeOwnerFileAtomic(configPath, body + block.join("\n") + "\n");
       hookAdded = true;
     }
   } catch {
