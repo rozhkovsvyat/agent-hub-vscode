@@ -4,7 +4,10 @@ name: cukii-release
 #   rc-X.Y.Z  -> pre-release VSIX, GitHub pre-release, Marketplace preview channel
 #   vX.Y.Z    -> stable VSIX, GitHub release, Marketplace stable (manual gate)
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - "cukii/release-smoke/**"
     tags:
       - "rc-*"
       - "v*"
@@ -22,6 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Tag must match manifest version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         working-directory: extensions/vscode
         run: |
@@ -77,6 +81,58 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Install pinned VS Code for activation smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.129.1'
+          $archive = Join-Path $env:RUNNER_TEMP "vscode-$version.zip"
+          $root = Join-Path $env:RUNNER_TEMP "vscode-$version"
+          Invoke-WebRequest `
+            -Uri "https://update.code.visualstudio.com/$version/win32-x64-archive/stable" `
+            -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $codeExe = Join-Path $root 'Code.exe'
+          $codeBin = Join-Path $root 'bin'
+          $codeCli = Join-Path $codeBin 'code.cmd'
+          if (-not (Test-Path -LiteralPath $codeCli -PathType Leaf)) {
+            throw "pinned VS Code CLI is absent: $codeCli"
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $codeExe
+          if ($signature.Status -ne 'Valid' -or
+              [string]$signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+            throw "pinned VS Code Authenticode verification failed: status=$($signature.Status) signer=$($signature.SignerCertificate.Subject)"
+          }
+          $observed = @(& $codeCli --version)[0]
+          if ($observed -cne $version) {
+            throw "pinned VS Code version mismatch: expected=$version observed=$observed"
+          }
+          $codeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Activation capacity preflight
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'D:\Scratch' | Out-Null
+          pwsh -NoProfile -File scripts/cukii-release/assert-cukii-release-capacity.ps1
+
+      - name: Activate packaged Windows carrier
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          pwsh -NoProfile -File scripts/cukii-release/test-cukii-vsix-activation.ps1 `
+            -VsixPath "extensions/vscode/build/cukii-vscode-win32-x64-$version.vsix" `
+            -SourceManifestPath extensions/vscode/package.json `
+            -CodeCli "$env:RUNNER_TEMP/vscode-1.129.1/bin/code.cmd" `
+            -ScratchParent 'D:\Scratch'
+
+      - name: Reject invalid release candidates
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          pwsh -NoProfile -File scripts/cukii-release/test-cukii-release-gate.ps1 `
+            -VsixPath "extensions/vscode/build/cukii-vscode-win32-x64-$version.vsix" `
+            -SourceManifestPath extensions/vscode/package.json
+
       - name: Upload VSIX
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -85,6 +141,7 @@ jobs:
           if-no-files-found: error
 
   github-release:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -104,6 +161,7 @@ jobs:
           files: vsix/*.vsix
 
   publish-marketplace:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     permissions:

@@ -148,6 +148,24 @@ test("tag release packages, verifies, and publishes every supported target", () 
     /path: extensions\/vscode\/cukii-vscode-\*-\*\.vsix/,
   );
   assert.match(workflow, /scripts\/publish-marketplace\.js/);
+  assert.match(workflow, /Install pinned VS Code for activation smoke/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /cukii\/release-smoke\/\*\*/);
+  assert.match(workflow, /if: startsWith\(github\.ref, 'refs\/tags\/'\)/);
+  assert.match(workflow, /Get-AuthenticodeSignature/);
+  assert.match(workflow, /test-cukii-vsix-activation\.ps1/);
+  assert.match(workflow, /test-cukii-release-gate\.ps1/);
+  assert.match(workflow, /ACTIVATION-SMOKE-PASS|Activate packaged Windows carrier/);
+  assert.ok(
+    workflow.indexOf("Activate packaged Windows carrier") <
+      workflow.indexOf("Upload VSIX"),
+    "activation smoke must gate artifact upload",
+  );
+  assert.ok(
+    workflow.indexOf("Reject invalid release candidates") <
+      workflow.indexOf("Upload VSIX"),
+    "negative release matrix must gate artifact upload",
+  );
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: read/);
   assert.doesNotMatch(workflow, /VSCE_PAT/);
