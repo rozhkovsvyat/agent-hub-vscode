@@ -630,6 +630,98 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   font-size: 13px !important;
 }
 
+.cukii-user-question {
+  box-sizing: border-box;
+  max-height: calc(100vh - 2.5rem);
+  overflow: auto;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 10px;
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #cccccc);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+  padding: 14px;
+}
+
+.cukii-user-question-title {
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.cukii-user-question-list {
+  display: grid;
+  gap: 14px;
+}
+
+.cukii-user-question fieldset {
+  display: grid;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.cukii-user-question legend span,
+.cukii-user-question legend strong,
+.cukii-user-question-option span,
+.cukii-user-question-option small {
+  display: block;
+}
+
+.cukii-user-question legend span,
+.cukii-user-question-option small {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+}
+
+.cukii-user-question legend strong {
+  margin: 2px 0 6px;
+  font-size: 13px;
+}
+
+.cukii-user-question-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.cukii-user-question-option:has(input:checked) {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+}
+
+.cukii-user-question-other {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--vscode-input-border, #454545);
+  border-radius: 4px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  padding: 6px 8px;
+}
+
+.cukii-user-question-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.cukii-user-question-actions button {
+  min-width: 78px;
+  border-radius: 4px;
+  padding: 5px 12px;
+}
+
+.cukii-user-question-actions button[type="submit"] {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
 .cukii-footer-icon {
   display: block;
   width: 26px;

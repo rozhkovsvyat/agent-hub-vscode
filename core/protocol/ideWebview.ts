@@ -162,6 +162,36 @@ export type CukiiClaudePermissionRequest = {
   toolUseId?: string;
 };
 
+export type CukiiUserQuestionOption = {
+  label: string;
+  description: string;
+};
+
+export type CukiiUserQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  options: CukiiUserQuestionOption[];
+};
+
+/** One MCP request bound to the exact native run and chat session. */
+export type CukiiUserQuestionRequest = {
+  runId: string;
+  requestId: string;
+  sessionId: string;
+  requestFingerprint: string;
+  questions: CukiiUserQuestion[];
+};
+
+export type CukiiUserQuestionResponse = {
+  runId: string;
+  requestId: string;
+  sessionId: string;
+  requestFingerprint: string;
+  answers?: Record<string, string>;
+  cancelled?: boolean;
+};
+
 export type CukiiPickedFile = {
   path: string;
   name: string;
@@ -307,6 +337,8 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     },
     void,
   ];
+  /** Reply to a run-bound request_user_input MCP call. */
+  "cukii/respondUserQuestion": [CukiiUserQuestionResponse, void];
   "cukii/listVendorAccounts": [undefined, BrokerVendorAuthStatus[]];
   "cukii/listBrokerModelCatalog": [undefined, BrokerVendorModelCatalog[]];
   "cukii/pickAttachmentFiles": [undefined, CukiiPickedFile[]];
@@ -463,6 +495,11 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   /** A real Claude `--permission-prompt-tool` request, scoped to this panel. */
   "cukii/claudePermissionRequested": [
     CukiiClaudePermissionRequest,
+    { accepted: boolean },
+  ];
+  /** Vendor-agnostic question requested through the managed broker MCP. */
+  "cukii/userQuestionRequested": [
+    CukiiUserQuestionRequest,
     { accepted: boolean },
   ];
   "cukii/sessionTitleChanged": [

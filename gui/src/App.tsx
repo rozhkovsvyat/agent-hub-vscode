@@ -5,6 +5,7 @@ import { SubmenuContextProvidersProvider } from "./context/SubmenuContextProvide
 import { VscThemeProvider } from "./context/VscTheme";
 import ParallelListeners from "./hooks/ParallelListeners";
 import { ClaudePermissionPrompt } from "./components/mainInput/ClaudePermissionPrompt";
+import { CukiiUserQuestionPrompt } from "./components/mainInput/CukiiUserQuestionPrompt";
 import ConfigPage from "./pages/config";
 import ErrorPage from "./pages/error";
 import Chat from "./pages/gui";
@@ -79,6 +80,7 @@ function App() {
       </MainEditorProvider>
       <ParallelListeners />
       <ClaudePermissionPrompt />
+      <CukiiUserQuestionPrompt />
     </VscThemeProvider>
   );
 }

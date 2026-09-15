@@ -489,6 +489,7 @@ function buildPrompt(
         ]
       : []),
     ...brokerInboxDirective(brokerModel),
+    ...brokerUserQuestionDirective(brokerModel),
     ...(steerInterrupt
       ? [
           "The latest user message was injected while you were mid-task; the previous turn was interrupted so you would see it promptly. Address this newest message first, then resume the task you were working on, taking it into account. Do not discard your prior work unless the new message changes the task.",
@@ -541,6 +542,14 @@ export function brokerInboxDirective(model: BrokerModel): string[] {
       " A message left unread too long is force-delivered: your next tool call is paused and its text arrives in the denial reason. Process that displayed batch once and call broker_inbox_ack directly with the displayed IDs; do not call broker_inbox to reread it. Then continue unless that message explicitly told you to stop.",
     "To coordinate with parallel sessions, the same channel is bidirectional: the available broker_sessions tool lists live sessions and broker_send writes one of them a message" +
       " (status or fact requests, handoff notes). Sending new work to a worker is still broker_delegate, never broker_send.",
+  ];
+}
+
+/** A single question contract shared by every connected vendor MCP. */
+export function brokerUserQuestionDirective(model: BrokerModel): string[] {
+  if (brokerVendorForModel(model) === "deepseek") return [];
+  return [
+    "When a missing user choice genuinely blocks safe progress, call the available MCP tool whose base name is request_user_input. It opens Cukii's shared question UI and returns the correlated answers. Ask 1–3 short questions with 2–3 mutually exclusive options each; Cukii adds a free-form Other option. Do not emulate the dialog with ordinary final text when this tool is available.",
   ];
 }
 

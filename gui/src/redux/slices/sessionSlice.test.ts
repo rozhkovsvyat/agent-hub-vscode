@@ -105,6 +105,7 @@ describe("sessionSlice streamUpdate", () => {
     isSessionMetadataLoading: false,
     compactionLoading: {},
     pendingClaudePermissions: {},
+    pendingUserQuestions: {},
   });
 
   it("restores controls per session and resets new tabs to defaults", () => {

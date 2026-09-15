@@ -43,6 +43,7 @@ import type {
   BrokerSubagent,
   CukiiPermissionMode,
   CukiiClaudePermissionRequest,
+  CukiiUserQuestionRequest,
 } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
@@ -381,6 +382,8 @@ type SessionState = {
   brokerPermissionMode: CukiiPermissionMode;
   /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */
   pendingClaudePermissions: Record<string, CukiiClaudePermissionRequest>;
+  /** Keyed by run/request so a delayed question cannot replace another run's UI. */
+  pendingUserQuestions: Record<string, CukiiUserQuestionRequest>;
   isInEdit: boolean;
   codeBlockApplyStates: {
     states: ApplyState[];
@@ -432,6 +435,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   brokerModelScope: "best",
   brokerPermissionMode: "bypass",
   pendingClaudePermissions: {},
+  pendingUserQuestions: {},
   hasReasoningEnabled: true,
   isInEdit: false,
   codeBlockApplyStates: {
@@ -1501,6 +1505,25 @@ export const sessionSlice = createSlice({
     clearClaudePermissions: (state) => {
       state.pendingClaudePermissions = {};
     },
+    enqueueUserQuestion: (
+      state,
+      action: PayloadAction<CukiiUserQuestionRequest>,
+    ) => {
+      const request = action.payload;
+      state.pendingUserQuestions[`${request.runId}:${request.requestId}`] =
+        request;
+    },
+    removeUserQuestion: (
+      state,
+      action: PayloadAction<{ runId: string; requestId: string }>,
+    ) => {
+      delete state.pendingUserQuestions[
+        `${action.payload.runId}:${action.payload.requestId}`
+      ];
+    },
+    clearUserQuestions: (state) => {
+      state.pendingUserQuestions = {};
+    },
     setNewestToolbarPreviewForInput: (
       state,
       {
@@ -1647,6 +1670,9 @@ export const {
   enqueueClaudePermission,
   removeClaudePermission,
   clearClaudePermissions,
+  enqueueUserQuestion,
+  removeUserQuestion,
+  clearUserQuestions,
   setInlineErrorMessage,
   setIsPruned,
   setContextPercentage,

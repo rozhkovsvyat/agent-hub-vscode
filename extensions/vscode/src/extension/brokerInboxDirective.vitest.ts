@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
 
-import { brokerInboxDirective, supportsBrokerInbox } from "./bridgeChatAdapter";
+import {
+  brokerInboxDirective,
+  brokerUserQuestionDirective,
+  supportsBrokerInbox,
+} from "./bridgeChatAdapter";
 
 describe("broker inbox steering gate", () => {
   it("covers every MCP-capable vendor; claude stays out", () => {
@@ -50,5 +54,22 @@ describe("broker inbox steering gate", () => {
 
   it("stays silent for claude", () => {
     expect(brokerInboxDirective("fable-5")).toEqual([]);
+  });
+
+  it("offers the same request_user_input contract to every connected vendor", () => {
+    for (const model of [
+      "fable-5",
+      "qwen-3-8-max",
+      "codex-5-6-terra",
+      "grok-4-6",
+      "composer-2-5",
+      "kimi-k2",
+    ]) {
+      const lines = brokerUserQuestionDirective(model);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("base name is request_user_input");
+      expect(lines[0]).toContain("1–3 short questions");
+    }
+    expect(brokerUserQuestionDirective("deepseek-v4-pro")).toEqual([]);
   });
 });

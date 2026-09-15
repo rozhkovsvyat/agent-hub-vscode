@@ -15,8 +15,8 @@ import { brokerVendorForModel } from "core/cukiiPermissionModes";
  * Every function is fail-open: a registration problem must never block the
  * run — the turn-end drain fallback still delivers queued messages.
  *
- * Claude is deliberately not wired: its stdin channel interrupts the turn
- * live, which is a stronger guarantee than the gate.
+ * Claude needs no inbox gate because stdin interrupts live, but it does need
+ * the managed MCP server for Cukii's vendor-agnostic request_user_input UI.
  */
 
 export const BROKER_MCP_NAME = "cukii-broker";
@@ -256,6 +256,50 @@ export function ensureCursorBrokerRegistration(
   return { mcpAdded: true, hookAdded: false };
 }
 
+/** claude: use the official CLI so its large user config is never rewritten. */
+export function ensureClaudeBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const spawnFn = options?.spawn ?? spawnSync;
+  const env = envOf(options);
+  try {
+    const existing = spawnFn("claude", ["mcp", "get", BROKER_MCP_NAME], {
+      timeout: 5000,
+      encoding: "utf8",
+      env,
+    });
+    if (existing.status === 0) return { mcpAdded: false, hookAdded: false };
+    const added = spawnFn(
+      "claude",
+      [
+        "mcp",
+        "add",
+        "--transport",
+        "stdio",
+        "--scope",
+        "user",
+        "--env",
+        "PYTHONIOENCODING=utf-8",
+        "--env",
+        "PYTHONUTF8=1",
+        BROKER_MCP_NAME,
+        "--",
+        brokerPythonCommand(options),
+        path.join(brokerDir, "mcp_server.py"),
+      ],
+      { timeout: 15_000, encoding: "utf8", env },
+    );
+    return {
+      mcpAdded: added.status === 0,
+      hookAdded: false,
+      ...(added.status === 0 ? {} : { skipped: "claude mcp add failed" }),
+    };
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "claude unavailable" };
+  }
+}
+
 function tomlLiteral(value: string): string {
   // TOML literal strings pass Windows backslashes through untouched; only a
   // quote inside the path forces the basic-string escape route.
@@ -459,6 +503,9 @@ export function ensureBrokerVendorIntegration(
       };
     let result: VendorRegistration | undefined;
     switch (vendor) {
+      case "claude":
+        result = ensureClaudeBrokerRegistration(brokerDir, options);
+        break;
       case "qwen":
         result = ensureQwenBrokerRegistration(brokerDir, options);
         break;
@@ -475,7 +522,7 @@ export function ensureBrokerVendorIntegration(
         result = ensureKimiBrokerRegistration(brokerDir, options);
         break;
       default:
-        result = undefined; // claude (native stdin), deepseek (not connected)
+        result = undefined; // deepseek (not connected)
     }
     completed.add(key);
     return result;

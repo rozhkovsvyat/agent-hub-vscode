@@ -103,6 +103,7 @@ import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
 import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
 import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
+import { BridgeQuestionBroker } from "./bridgeQuestions";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -124,6 +125,7 @@ type ActiveBridgeRun = BridgeRunIdentity & {
   steering: BridgeSteeringController;
   cancellation: BridgeRunCancellation;
   imageScope: BridgeImageScope;
+  questionBroker: BridgeQuestionBroker;
 };
 
 type OwnedPermissionBroker = {
@@ -1088,9 +1090,10 @@ export class VsCodeMessenger {
         action === "install"
           ? flow.outcome === "command-failed"
             ? "CLI installation failed. Fix the error shown in the terminal, then select Install again."
-            : flow.outcome === "terminal-closed" || flow.outcome === "transition"
-            ? "CLI installation finished in the integrated terminal."
-            : "Latest CLI installation is running in the integrated terminal."
+            : flow.outcome === "terminal-closed" ||
+                flow.outcome === "transition"
+              ? "CLI installation finished in the integrated terminal."
+              : "Latest CLI installation is running in the integrated terminal."
           : flow.outcome === "transition"
             ? action === "login"
               ? "Signed in; the account status was refreshed."
@@ -1110,6 +1113,14 @@ export class VsCodeMessenger {
       ].some(({ broker }) => broker.respond(msg.data));
       // A forged or stale response must be silent and fail closed. In
       // particular, never relay it to a different panel's pending request.
+      if (!accepted) return;
+    });
+    this.onWebview("cukii/respondUserQuestion", (msg) => {
+      const protocol = sourceProtocol(msg, this.webviewProtocol);
+      const accepted = [
+        ...(this.bridgeRunCandidates.get(protocol)?.values() ?? []),
+      ].some((run) => run.questionBroker.respond(msg.data));
+      // Stale, forged and cross-panel answers fail closed.
       if (!accepted) return;
     });
     const disposePermissionBrokersFor = async (
@@ -1134,6 +1145,7 @@ export class VsCodeMessenger {
       ].filter((owned) => !expectedStreamMessageId || runIds.has(owned.runId));
       let cancellationError: unknown;
       for (const run of runs) {
+        run.questionBroker.dispose("run stopped");
         try {
           await this.cancelBridgeRun(protocol, run, `abort:${run.sessionId}`);
         } catch (error) {
@@ -1175,6 +1187,7 @@ export class VsCodeMessenger {
         this.publishAutocompact(msg.data.brokerAutocompact);
       }
       const controller = new AbortController();
+      const runId = msg.data.runId ?? `${Date.now()}-${++this.nextBridgeRunId}`;
       let resolveDone!: (result: CukiiBridgeRunCompletion) => void;
       const done = new Promise<CukiiBridgeRunCompletion>((resolve) => {
         resolveDone = resolve;
@@ -1205,7 +1218,7 @@ export class VsCodeMessenger {
         done.then(() => undefined),
       );
       const run: ActiveBridgeRun = {
-        runId: msg.data.runId ?? `${Date.now()}-${++this.nextBridgeRunId}`,
+        runId,
         streamMessageId: msg.messageId,
         controller,
         done,
@@ -1214,6 +1227,11 @@ export class VsCodeMessenger {
         steering,
         cancellation,
         imageScope,
+        questionBroker: new BridgeQuestionBroker(
+          msg.data.sessionId,
+          runId,
+          (request) => protocol.send("cukii/userQuestionRequested", request),
+        ),
       };
       const permissionTransport: ClaudePermissionTransport = {
         panelId: this.panelIdForProtocol(protocol),
@@ -1263,6 +1281,7 @@ export class VsCodeMessenger {
         abortSignal: controller.signal,
       };
       this.registerBridgeCandidate(protocol, run);
+      run.questionBroker.start();
       const stream = streamBridgeChat(msg.data, permissionTransport);
       const messenger = this;
       const wrapped = (async function* () {
@@ -1337,6 +1356,7 @@ export class VsCodeMessenger {
       void done.finally(() => {
         steering.close();
         inboxWatch?.close();
+        run.questionBroker.dispose("run finished");
         imageScope.dispose();
       });
       return wrapped;

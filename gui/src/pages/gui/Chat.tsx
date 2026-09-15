@@ -151,7 +151,9 @@ export function Chat() {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const isCancelling = useAppSelector((state) => state.session.isCancelling);
   const hasPendingPermission = useAppSelector(
-    (state) => Object.keys(state.session.pendingClaudePermissions).length > 0,
+    (state) =>
+      Object.keys(state.session.pendingClaudePermissions).length > 0 ||
+      Object.keys(state.session.pendingUserQuestions).length > 0,
   );
   const bridgeWait = useAppSelector((state) => state.session.bridgeWait);
   const mainTextInputRef = useRef<HTMLInputElement>(null);

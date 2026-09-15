@@ -9,6 +9,7 @@ import {
   brokerPythonCommand,
   ensureBrokerVendorIntegration,
   ensureCodexBrokerRegistration,
+  ensureClaudeBrokerRegistration,
   ensureCursorBrokerRegistration,
   ensureGrokBrokerRegistration,
   ensureKimiBrokerRegistration,
@@ -213,6 +214,49 @@ describe("bridgeVendorMcp", () => {
     });
   });
 
+  describe("claude registration", () => {
+    it("uses the official user-scoped CLI without rewriting .claude.json", () => {
+      const spawn = vi
+        .fn()
+        .mockReturnValueOnce({ status: 1 })
+        .mockReturnValueOnce({ status: 0 });
+      const result = ensureClaudeBrokerRegistration(brokerDir, {
+        ...options(),
+        spawn: spawn as never,
+      });
+      expect(result).toEqual({ mcpAdded: true, hookAdded: false });
+      expect(spawn.mock.calls[0][1]).toEqual(["mcp", "get", BROKER_MCP_NAME]);
+      expect(spawn.mock.calls[1][1]).toEqual([
+        "mcp",
+        "add",
+        "--transport",
+        "stdio",
+        "--scope",
+        "user",
+        "--env",
+        "PYTHONIOENCODING=utf-8",
+        "--env",
+        "PYTHONUTF8=1",
+        BROKER_MCP_NAME,
+        "--",
+        brokerPythonCommand(options()),
+        path.join(brokerDir, "mcp_server.py"),
+      ]);
+      expect(fs.existsSync(path.join(home, ".claude.json"))).toBe(false);
+    });
+
+    it("does not add a duplicate when Claude already knows the server", () => {
+      const spawn = vi.fn().mockReturnValue({ status: 0 });
+      expect(
+        ensureClaudeBrokerRegistration(brokerDir, {
+          ...options(),
+          spawn: spawn as never,
+        }),
+      ).toEqual({ mcpAdded: false, hookAdded: false });
+      expect(spawn).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("cursor registration", () => {
     it("creates ~/.cursor/mcp.json with the entry when absent", () => {
       const result = ensureCursorBrokerRegistration(brokerDir, options());
@@ -403,11 +447,19 @@ describe("bridgeVendorMcp", () => {
       );
     });
 
-    it("skips claude models entirely", () => {
+    it("wires Claude to the same MCP question surface without an inbox hook", () => {
       seedQwenSettings();
+      const spawn = vi
+        .fn()
+        .mockReturnValueOnce({ status: 1 })
+        .mockReturnValueOnce({ status: 0 });
       expect(
-        ensureBrokerVendorIntegration("opus-5", options()),
-      ).toBeUndefined();
+        ensureBrokerVendorIntegration("opus-5", {
+          ...options(),
+          spawn: spawn as never,
+        }),
+      ).toEqual({ mcpAdded: true, hookAdded: false });
+      expect(spawn.mock.calls[1][1]).toContain("user");
       expect(fs.readdirSync(home)).toEqual([".qwen"]);
     });
 
