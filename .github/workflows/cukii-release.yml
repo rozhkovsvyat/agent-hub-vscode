@@ -37,19 +37,51 @@ jobs:
           fi
           echo "tag $TAG matches manifest $VER"
 
-      - uses: ./.github/actions/build-vscode-extension
+      - uses: actions/setup-node@v4
         with:
-          platform: win32
-          arch: x64
-          npm_config_arch: x64
-          pre-release: ${{ startsWith(github.ref_name, 'rc-') }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          node-version-file: ".nvmrc"
+
+      - name: Build packages
+        shell: bash
+        run: node ./scripts/build-packages.js
+
+      - name: Install build dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: |
+          npm --prefix extensions/vscode ci
+          npm --prefix gui ci
+          npm --prefix core ci
+
+      - name: Build all target carriers
+        shell: bash
+        working-directory: extensions/vscode
+        run: |
+          if [ "${{ startsWith(github.ref_name, 'rc-') }}" = "true" ]; then
+            npm run package-all -- --pre-release
+          else
+            npm run package-all
+          fi
+
+      - name: Verify every target carrier
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          $targets = @('win32-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64')
+          foreach ($target in $targets) {
+            $vsix = "extensions/vscode/cukii-vscode-$target-$version.vsix"
+            pwsh -NoProfile -File scripts/assert-cukii-cross-target-vsix.ps1 `
+              -VsixPath $vsix -ExpectedTarget $target -ExpectedVersion $version
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v4
         with:
-          name: win32-x64-vsix
-          path: extensions/vscode/*.vsix
+          name: all-targets-vsix
+          path: extensions/vscode/cukii-vscode-*-*.vsix
           if-no-files-found: error
 
   github-release:
@@ -61,7 +93,7 @@ jobs:
       - name: Download VSIX
         uses: actions/download-artifact@v4
         with:
-          name: win32-x64-vsix
+          name: all-targets-vsix
           path: vsix
 
       - name: Publish GitHub release
@@ -83,7 +115,7 @@ jobs:
       - name: Download VSIX
         uses: actions/download-artifact@v4
         with:
-          name: win32-x64-vsix
+          name: all-targets-vsix
           path: vsix
 
       - name: Publish to VS Code Marketplace
@@ -94,13 +126,18 @@ jobs:
             echo "VSCE_PAT secret is not set; skipping publish (artifact is on the GitHub release)."
             exit 0
           fi
-          VSIX=$(ls ../../vsix/*.vsix | head -n 1)
-          echo "publishing $VSIX as pre-release=$PRE"
-          if [ "$PRE" = "true" ]; then
-            npx --yes @vscode/vsce publish --pre-release --no-dependencies --packagePath "$VSIX"
-          else
-            npx --yes @vscode/vsce publish --no-dependencies --packagePath "$VSIX"
+          mapfile -t VSIXES < <(find ../../vsix -maxdepth 1 -type f -name '*.vsix' | sort)
+          if [ "${#VSIXES[@]}" -ne 5 ]; then
+            echo "expected 5 target VSIX files, found ${#VSIXES[@]}"; exit 1
           fi
+          for VSIX in "${VSIXES[@]}"; do
+            echo "publishing $VSIX as pre-release=$PRE"
+            if [ "$PRE" = "true" ]; then
+              npx --yes @vscode/vsce publish --pre-release --no-dependencies --packagePath "$VSIX"
+            else
+              npx --yes @vscode/vsce publish --no-dependencies --packagePath "$VSIX"
+            fi
+          done
         env:
           PRE: ${{ startsWith(github.ref_name, 'rc-') }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

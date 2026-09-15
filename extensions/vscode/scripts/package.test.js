@@ -110,6 +110,36 @@ test("package-all propagates pre-release and restores the host after a target fa
   assert.deepEqual(commands[1].slice(-1), ["--restore-host"]);
 });
 
+test("tag release packages, verifies, and publishes every supported target", () => {
+  const workflow = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      ".github",
+      "workflows",
+      "cukii-release.yml",
+    ),
+    "utf8",
+  );
+
+  assert.match(workflow, /npm run package-all/);
+  assert.match(workflow, /assert-cukii-cross-target-vsix\.ps1/);
+  assert.match(workflow, /name: all-targets-vsix/);
+  assert.match(workflow, /expected 5 target VSIX files/);
+  for (const target of [
+    "win32-x64",
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-x64",
+    "linux-arm64",
+  ]) {
+    assert.match(workflow, new RegExp(target));
+  }
+  assert.doesNotMatch(workflow, /name: win32-x64-vsix/);
+});
+
 test("package output path includes the requested target", () => {
   assert.equal(
     getPackageOutputPath("2.0.122", "win32-x64"),
