@@ -34,15 +34,23 @@ const {
 
 const extensionDir = path.join(__dirname, "..");
 
+const HOST_TARGET = `${process.platform}-${process.arch}`;
+
 function parseArgs(args) {
   let target;
+  let restoreHost = false;
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--target") {
       target = args[index + 1];
       index += 1;
+    } else if (args[index] === "--restore-host") {
+      restoreHost = true;
     } else {
       throw new Error(`Unsupported argument: ${args[index]}`);
     }
+  }
+  if (restoreHost) {
+    return { target: HOST_TARGET, restoreHost: true };
   }
   if (!target) {
     throw new Error(
@@ -54,7 +62,26 @@ function parseArgs(args) {
       `Unsupported target ${target} (one of: ${CROSS_TARGETS.join(", ")})`,
     );
   }
-  return target;
+  return { target, restoreHost: false };
+}
+
+/**
+ * Put the host's own native modules back.
+ *
+ * Cross-packaging overwrites shared trees in place - `core/node_modules/sqlite3`,
+ * `ffmpeg-static`, `sharp`, `@vscode/ripgrep` - because that is how the normal
+ * pipeline stages binaries. After a linux-arm64 build the working tree therefore
+ * holds ELF objects, and every host test that loads sqlite3 or ffmpeg fails with
+ * "is not a valid Win32 application". That is the build's doing, not a product
+ * regression, and it has to be undone explicitly rather than remembered.
+ */
+async function restoreHostNativeModules() {
+  console.log(`[info] Restoring host native modules for ${HOST_TARGET}`);
+  await stageRipgrepForTarget(HOST_TARGET, { extensionDir });
+  stageFfmpegForTarget(HOST_TARGET, { extensionDir });
+  stageSharpForTarget(HOST_TARGET, { extensionDir });
+  await copySqlite(HOST_TARGET);
+  console.log(`[info] Host native modules restored`);
 }
 
 function runNodeScript(script, scriptArgs, env) {
@@ -184,8 +211,11 @@ async function packageCrossTarget(target) {
 }
 
 if (require.main === module) {
-  const target = parseArgs(process.argv.slice(2));
-  packageCrossTarget(target).then(
+  const { target, restoreHost } = parseArgs(process.argv.slice(2));
+  const run = restoreHost
+    ? restoreHostNativeModules()
+    : packageCrossTarget(target);
+  run.then(
     () => process.exit(0),
     (error) => {
       console.error(error);
@@ -194,4 +224,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { packageCrossTarget, parseArgs };
+module.exports = { packageCrossTarget, parseArgs, restoreHostNativeModules };

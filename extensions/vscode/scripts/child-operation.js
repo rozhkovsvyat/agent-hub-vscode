@@ -1,3 +1,24 @@
+/**
+ * Marker that tells a build module it is running as the forked worker.
+ *
+ * These modules are both libraries (`prepackage` requires them for their exports)
+ * and their own child processes (`fork(__filename)`). They used to decide which
+ * role they were in by `typeof process.send === "function"`, which is true in ANY
+ * process that has an IPC channel to its parent - including a vitest worker. The
+ * worker handler then ran against vitest's own traffic, read `msg.payload.x` off
+ * an unrelated message and killed the test run with
+ * "Cannot read properties of undefined". `require.main === module` is no better:
+ * under vite-node/ts-node the entry point is the loader, not this file.
+ *
+ * An env variable we set ourselves at fork time is the only signal a foreign
+ * loader or an inherited IPC channel cannot imitate.
+ */
+const CHILD_OPERATION_ENV_MARKER = "CUKII_FORKED_BUILD_WORKER";
+
+function isForkedChildOperation(env = process.env) {
+  return env[CHILD_OPERATION_ENV_MARKER] === "1";
+}
+
 function runChildOperation({
   forkChild,
   modulePath,
@@ -10,6 +31,7 @@ function runChildOperation({
     child = forkChild(modulePath, {
       stdio: "inherit",
       ...(cwd ? { cwd } : {}),
+      env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
     });
   } catch (error) {
     return Promise.reject(error);
@@ -98,4 +120,9 @@ function sendChildResult(message, exitCode) {
   });
 }
 
-module.exports = { runChildOperation, sendChildResult };
+module.exports = {
+  CHILD_OPERATION_ENV_MARKER,
+  isForkedChildOperation,
+  runChildOperation,
+  sendChildResult,
+};

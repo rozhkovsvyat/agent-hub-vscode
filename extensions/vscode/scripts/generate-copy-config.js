@@ -8,7 +8,11 @@ const path = require("path");
 
 const { execCmdSync } = require("../../../scripts/util");
 
-const { runChildOperation, sendChildResult } = require("./child-operation");
+const {
+  isForkedChildOperation,
+  runChildOperation,
+  sendChildResult,
+} = require("./child-operation");
 const { continueDir } = require("./utils");
 
 async function generateConfigYamlSchema({
@@ -75,7 +79,7 @@ async function copyConfigSchema() {
   );
 }
 
-if (typeof process.send === "function") {
+if (isForkedChildOperation()) {
   process.once("message", async (msg) => {
     const { operation, skipInstall = false } = msg.payload;
     try {
