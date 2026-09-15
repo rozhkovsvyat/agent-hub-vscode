@@ -33,6 +33,7 @@ import {
   ensureBrokerVendorIntegration,
   registerBrokerSessionBinding,
 } from "./bridgeVendorMcp";
+import type { CukiiRunBinding } from "./bridgeRunBinding";
 import { describeBridgeLaunch, grokPromptJson } from "./grokPrompt";
 import {
   BridgeImageScope,
@@ -144,6 +145,7 @@ export function queuedFollowUpEchoMessageId(
 export type ClaudePermissionTransport = {
   panelId: string;
   sessionId: string;
+  runId?: string;
   onRequest: (request: ClaudePermissionRequest) => Promise<void> | void;
   /** Every change to the set of prompts still awaiting the user's answer. */
   onPendingChanged?: (requestIds: string[]) => void;
@@ -157,7 +159,10 @@ export type ClaudePermissionTransport = {
   /** Reports whether the spawned vendor process tree was verified terminated. */
   onTerminationResult?: (terminated: boolean) => void;
   /** Reports the vendor child pid once known; undefined on spawn failure. */
-  onChildSpawned?: (pid: number | undefined) => void;
+  onChildSpawned?: (
+    pid: number | undefined,
+    binding?: CukiiRunBinding,
+  ) => void;
   /** Run-owned files referenced by cold-start and broker-inbox image prompts. */
   imageScope?: BridgeImageScope;
   abortSignal?: AbortSignal;
@@ -1893,16 +1898,18 @@ async function* launchBridgeChild(options: {
     detached: process.platform !== "win32",
     windowsHide: true,
   });
-  if (child.pid && sessionId) {
-    registerBrokerSessionBinding(
-      child.pid,
-      sessionId,
-      queuedFollowUpMessageIds,
-    );
-  }
+  const runBinding =
+    child.pid && sessionId && permissionTransport?.runId
+      ? registerBrokerSessionBinding(
+          child.pid,
+          sessionId,
+          permissionTransport.runId,
+          queuedFollowUpMessageIds,
+        )
+      : undefined;
   // The pid is the only handle a dispose-time retry has when the primary
   // teardown could not verify death. Report it before any await can race it.
-  permissionTransport?.onChildSpawned?.(child.pid);
+  permissionTransport?.onChildSpawned?.(child.pid, runBinding);
   canary?.record("bridge_dispatch");
   let cancelled = false;
   let done = false;

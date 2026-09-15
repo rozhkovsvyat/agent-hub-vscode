@@ -5,10 +5,29 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BridgeQuestionBroker, bridgeQuestionsRoot } from "./bridgeQuestions";
+import type { CukiiRunBinding } from "./bridgeRunBinding";
 
 let root = "";
+const nonce = "a".repeat(64);
+const createdMs = Date.now() - 1_000;
 
-function writeRequest(id = "question-a") {
+const binding: CukiiRunBinding = {
+  version: 2,
+  vendorPid: 4242,
+  processStartToken: "start-token",
+  sessionId: "session-a",
+  runId: "run-a",
+  nonce,
+  createdMs,
+  expiresMs: createdMs + 60_000,
+};
+
+const bindingReader = vi.fn(() => binding);
+
+function writeRequest(
+  id = "question-a",
+  overrides: Record<string, unknown> = {},
+) {
   const directory = path.join(root, "session-a");
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, `${id}.json`);
@@ -17,7 +36,9 @@ function writeRequest(id = "question-a") {
     JSON.stringify({
       id,
       sessionId: "session-a",
-      createdMs: 1,
+      runId: "run-a",
+      producerNonce: nonce,
+      createdMs: createdMs + 1,
       status: "pending",
       questions: [
         {
@@ -30,6 +51,7 @@ function writeRequest(id = "question-a") {
           ],
         },
       ],
+      ...overrides,
     }),
   );
   return file;
@@ -39,6 +61,7 @@ describe("BridgeQuestionBroker", () => {
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-questions-"));
     process.env.CUKII_QUESTIONS_DIR = root;
+    bindingReader.mockClear();
   });
 
   afterEach(() => {
@@ -49,9 +72,13 @@ describe("BridgeQuestionBroker", () => {
   it("surfaces a pending request once and writes the exact correlated answer", () => {
     const file = writeRequest();
     const seen: any[] = [];
-    const broker = new BridgeQuestionBroker("session-a", "run-a", (item) =>
-      seen.push(item),
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      (item) => seen.push(item),
+      bindingReader,
     );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
     broker.tick();
     broker.tick();
     expect(seen).toHaveLength(1);
@@ -74,9 +101,13 @@ describe("BridgeQuestionBroker", () => {
   it("rejects stale panels, forged fingerprints, incomplete answers and replay", () => {
     writeRequest();
     const seen: any[] = [];
-    const broker = new BridgeQuestionBroker("session-a", "run-a", (item) =>
-      seen.push(item),
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      (item) => seen.push(item),
+      bindingReader,
     );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
     broker.tick();
     const base = {
       runId: "run-a",
@@ -105,7 +136,13 @@ describe("BridgeQuestionBroker", () => {
 
   it("cancels outstanding requests on run disposal", () => {
     const file = writeRequest();
-    const broker = new BridgeQuestionBroker("session-a", "run-a", () => {});
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      () => {},
+      bindingReader,
+    );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
     broker.start(60_000);
     broker.dispose("session replaced");
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
@@ -120,7 +157,12 @@ describe("BridgeQuestionBroker", () => {
     const spy = vi
       .spyOn(globalThis, "setInterval")
       .mockReturnValue({ unref } as unknown as ReturnType<typeof setInterval>);
-    const broker = new BridgeQuestionBroker("session-a", "run-a", () => {});
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      () => {},
+      bindingReader,
+    );
     broker.start();
     expect(unref).toHaveBeenCalled();
     broker.dispose();
@@ -146,9 +188,13 @@ describe("BridgeQuestionBroker", () => {
       "utf8",
     );
     const seen: unknown[] = [];
-    const broker = new BridgeQuestionBroker("session-a", "run-a", (item) =>
-      seen.push(item),
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      (item) => seen.push(item),
+      bindingReader,
     );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
     broker.tick();
     expect(seen).toEqual([]);
     expect(
@@ -160,5 +206,46 @@ describe("BridgeQuestionBroker", () => {
         cancelled: true,
       }),
     ).toBe(false);
+  });
+
+  it("rejects stale, foreign-run and forged-producer records", () => {
+    writeRequest("stale", { createdMs: createdMs - 1 });
+    writeRequest("foreign-run", { runId: "run-b" });
+    writeRequest("forged-producer", { producerNonce: "b".repeat(64) });
+    writeRequest("future", { createdMs: Date.now() + 60_000 });
+    const seen: unknown[] = [];
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      (item) => seen.push(item),
+      bindingReader,
+    );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
+    broker.tick();
+    expect(seen).toEqual([]);
+  });
+
+  it("refuses a vendor process bound to another run", () => {
+    const foreignReader = vi.fn(() => ({ ...binding, runId: "run-b" }));
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      () => {},
+      foreignReader,
+    );
+    expect(broker.bindVendorProcess(4242)).toBe(false);
+  });
+
+  it("reuses the verified spawn binding without a second OS probe", () => {
+    const reader = vi.fn(() => undefined);
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      () => {},
+      reader,
+    );
+    expect(broker.bindVendorProcess(4242, binding)).toBe(true);
+    expect(reader).not.toHaveBeenCalled();
+    expect(broker.bindVendorProcess(99, binding)).toBe(false);
   });
 });

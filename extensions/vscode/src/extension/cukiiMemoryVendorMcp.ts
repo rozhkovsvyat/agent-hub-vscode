@@ -24,18 +24,50 @@ function home(options?: MemoryMcpOptions): string {
 }
 
 function writeAtomic(target: string, body: string): void {
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   const tmp = `${target}.cukii-memory.tmp`;
-  fs.writeFileSync(tmp, body, { encoding: "utf8" });
+  fs.writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600 });
+  try {
+    fs.chmodSync(tmp, 0o600);
+  } catch {
+    // Windows ACLs are authoritative; POSIX configs are forced owner-only.
+  }
   fs.renameSync(tmp, target);
 }
 
 function relayEnvironment(descriptor: CukiiMemoryRelayDescriptor) {
   return {
     ELECTRON_RUN_AS_NODE: "1",
+    CUKII_MEMORY_MANAGED: "1",
     CUKII_MEMORY_RELAY_URL: descriptor.url,
     CUKII_MEMORY_RELAY_TOKEN: descriptor.capability,
   };
+}
+
+function isManagedJsonEntry(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as { args?: unknown; env?: Record<string, unknown> };
+  return (
+    Array.isArray(entry.args) &&
+    entry.args.some(
+      (item) =>
+        typeof item === "string" &&
+        path.basename(item) === "cukiiMemoryProxy.js",
+    ) &&
+    (entry.env?.CUKII_MEMORY_MANAGED === "1" ||
+      typeof entry.env?.CUKII_MEMORY_RELAY_URL === "string")
+  );
+}
+
+function readJsonOwnerConfig(configPath: string): {
+  mcpServers?: Record<string, unknown>;
+} {
+  if (!fs.existsSync(configPath)) return {};
+  const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("owner MCP config is not a JSON object");
+  }
+  return parsed as { mcpServers?: Record<string, unknown> };
 }
 
 export function memoryMcpEntry(descriptor: CukiiMemoryRelayDescriptor) {
@@ -51,11 +83,18 @@ function setJsonMemoryServer(
   descriptor: CukiiMemoryRelayDescriptor,
   options: { trust?: boolean } = {},
 ): void {
-  let config: { mcpServers?: Record<string, unknown> } = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, "utf8")) as typeof config;
-  } catch {
-    config = {};
+  const config = readJsonOwnerConfig(configPath);
+  if (
+    config.mcpServers !== undefined &&
+    (typeof config.mcpServers !== "object" ||
+      config.mcpServers === null ||
+      Array.isArray(config.mcpServers))
+  ) {
+    throw new Error("owner MCP servers config is not an object");
+  }
+  const existing = config.mcpServers?.[CUKII_MEMORY_MCP_NAME];
+  if (existing && !isManagedJsonEntry(existing)) {
+    throw new Error("owner already defines cukii-memory");
   }
   config.mcpServers = {
     ...(config.mcpServers ?? {}),
@@ -69,15 +108,81 @@ function setJsonMemoryServer(
 
 function removeJsonMemoryServer(configPath: string): void {
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
-      mcpServers?: Record<string, unknown>;
-    };
-    if (!config.mcpServers?.[CUKII_MEMORY_MCP_NAME]) return;
-    delete config.mcpServers[CUKII_MEMORY_MCP_NAME];
+    const config = readJsonOwnerConfig(configPath);
+    const servers = config.mcpServers;
+    const existing = servers?.[CUKII_MEMORY_MCP_NAME];
+    if (!existing || !isManagedJsonEntry(existing)) return;
+    delete servers[CUKII_MEMORY_MCP_NAME];
     writeAtomic(configPath, JSON.stringify(config, null, 2));
   } catch {
     // A missing or owner-managed unreadable config is left untouched.
   }
+}
+
+function tomlMemoryBlock(body: string): string | undefined {
+  const start = body.search(/^\s*\[mcp_servers\.cukii-memory\]\s*$/m);
+  if (start < 0) return undefined;
+  const tail = body.slice(start);
+  const next = tail
+    .slice(1)
+    .search(/^\s*\[mcp_servers\.(?!cukii-memory(?:\.env)?\])[^\]]+\]\s*$/m);
+  return next < 0 ? tail : tail.slice(0, next + 1);
+}
+
+function isManagedTomlConfig(body: string): boolean {
+  const block = tomlMemoryBlock(body);
+  return Boolean(
+    block &&
+      block.includes("cukiiMemoryProxy.js") &&
+      (block.includes("CUKII_MEMORY_MANAGED") ||
+        block.includes("CUKII_MEMORY_RELAY_URL")),
+  );
+}
+
+function configureCliVendor(
+  vendor: "codex" | "grok",
+  descriptor: CukiiMemoryRelayDescriptor,
+  addArgs: string[],
+  options?: MemoryMcpOptions,
+): boolean {
+  const run = options?.spawn ?? spawnSync;
+  const configPath = path.join(home(options), `.${vendor}`, "config.toml");
+  const before = fs.existsSync(configPath)
+    ? fs.readFileSync(configPath, "utf8")
+    : undefined;
+  const existing = before === undefined ? undefined : tomlMemoryBlock(before);
+  if (existing && !isManagedTomlConfig(before!)) return false;
+  const removeArgs =
+    vendor === "codex"
+      ? ["mcp", "remove", CUKII_MEMORY_MCP_NAME]
+      : ["mcp", "remove", "-s", "user", CUKII_MEMORY_MCP_NAME];
+  if (existing) {
+    const removed = run(vendor, removeArgs, {
+      timeout: 10_000,
+      encoding: "utf8",
+    });
+    if (removed.status !== 0) return false;
+  }
+  const added = run(vendor, addArgs, { timeout: 15_000, encoding: "utf8" });
+  if (added.status !== 0) {
+    if (before !== undefined) {
+      writeAtomic(configPath, before);
+    } else {
+      try {
+        const created = fs.readFileSync(configPath, "utf8");
+        if (isManagedTomlConfig(created)) fs.unlinkSync(configPath);
+      } catch {
+        // No prior owner file existed; leave only unknown, non-managed data.
+      }
+    }
+    return false;
+  }
+  try {
+    fs.chmodSync(configPath, 0o600);
+  } catch {
+    // Windows ACLs are authoritative.
+  }
+  return true;
 }
 
 function commandEnvironmentArgs(
@@ -92,13 +197,9 @@ function configureCodex(
   descriptor: CukiiMemoryRelayDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
-  const run = options?.spawn ?? spawnSync;
-  run("codex", ["mcp", "remove", CUKII_MEMORY_MCP_NAME], {
-    timeout: 10_000,
-    encoding: "utf8",
-  });
-  const result = run(
+  return configureCliVendor(
     "codex",
+    descriptor,
     [
       "mcp",
       "add",
@@ -108,25 +209,20 @@ function configureCodex(
       descriptor.nodePath,
       descriptor.proxyPath,
     ],
-    { timeout: 15_000, encoding: "utf8" },
+    options,
   );
-  return result.status === 0;
 }
 
 function configureGrok(
   descriptor: CukiiMemoryRelayDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
-  const run = options?.spawn ?? spawnSync;
-  run("grok", ["mcp", "remove", "-s", "user", CUKII_MEMORY_MCP_NAME], {
-    timeout: 10_000,
-    encoding: "utf8",
-  });
   const envArgs = Object.entries(relayEnvironment(descriptor)).flatMap(
     ([key, value]) => ["-e", `${key}=${value}`],
   );
-  const result = run(
+  return configureCliVendor(
     "grok",
+    descriptor,
     [
       "mcp",
       "add",
@@ -137,9 +233,8 @@ function configureGrok(
       descriptor.nodePath,
       descriptor.proxyPath,
     ],
-    { timeout: 15_000, encoding: "utf8" },
+    options,
   );
-  return result.status === 0;
 }
 
 export function ensureCukiiMemoryVendorMcp(
@@ -187,6 +282,14 @@ export function removeCukiiMemoryVendorMcp(
 ): void {
   const root = home(options);
   if (vendor === "codex" || vendor === "grok") {
+    const configPath = path.join(root, `.${vendor}`, "config.toml");
+    let body = "";
+    try {
+      body = fs.readFileSync(configPath, "utf8");
+    } catch {
+      return;
+    }
+    if (!isManagedTomlConfig(body)) return;
     const run = options?.spawn ?? spawnSync;
     const args =
       vendor === "codex"

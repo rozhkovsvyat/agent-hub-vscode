@@ -47,11 +47,17 @@ function windowsNpmInstallScript(packageName: string): string {
     "    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()",
     "    $principal = [Security.Principal.WindowsPrincipal]::new($identity)",
     "    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
-    "    if (-not $isAdmin) { throw 'Node.js LTS and npm are missing. Restart VS Code as Administrator, then select Install again.' }",
     "    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue",
     "    if (-not $winget) { throw 'Node.js LTS is missing and Windows Package Manager (winget) is unavailable. Install App Installer, then select Install again.' }",
-    "    & $winget.Source install --id OpenJS.NodeJS.LTS --exact --source winget --scope machine --accept-source-agreements --accept-package-agreements --disable-interactivity",
-    "    if ($LASTEXITCODE -ne 0) { throw \"winget could not install Node.js LTS (exit $LASTEXITCODE).\" }",
+    "    $wingetArgs = @('install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--source', 'winget', '--scope', 'machine', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')",
+    "    if ($isAdmin) {",
+    "      & $winget.Source @wingetArgs",
+    "      if ($LASTEXITCODE -ne 0) { throw \"winget could not install Node.js LTS (exit $LASTEXITCODE).\" }",
+    "    } else {",
+    "      [Console]::Error.WriteLine('Cukii: Node.js LTS is missing. Windows administrator approval is required for this installer only; approve the UAC prompt to continue.')",
+    "      $installer = Start-Process -FilePath $winget.Source -ArgumentList $wingetArgs -Verb RunAs -Wait -PassThru",
+    "      if ($installer.ExitCode -ne 0) { throw \"elevated winget could not install Node.js LTS (exit $($installer.ExitCode)).\" }",
+    "    }",
     "    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')",
     "    $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue",
     "    $npmPath = if ($npmCommand) { $npmCommand.Source } else { $null }",
@@ -59,7 +65,7 @@ function windowsNpmInstallScript(packageName: string): string {
     "      $fallbackNpm = Join-Path $programFiles 'nodejs\\npm.cmd'",
     "      if (Test-Path -LiteralPath $fallbackNpm) { $npmPath = $fallbackNpm }",
     "    }",
-    "    if (-not $npmPath) { throw 'Node.js LTS was installed, but npm.cmd is not discoverable. Restart VS Code, then select Install again.' }",
+    "    if (-not $npmPath) { throw 'Node.js LTS was installed, but npm.cmd is not discoverable. Restart the Cukii terminal flow, then select Install again.' }",
     "  }",
     "  & $npmPath install -g " + packageLiteral,
     "  if ($LASTEXITCODE -ne 0) { throw \"npm.cmd failed with exit $LASTEXITCODE.\" }",
@@ -98,6 +104,8 @@ function unixNpmInstallScript(
   platform: NodeJS.Platform,
 ): string {
   const bootstrap = unixNodeBootstrap(platform);
+  // Keep compound shell constructs on real line boundaries. Joining with
+  // semicolons turns `then` / `else` / `fi` into invalid `then;` tokens.
   return [
     "set -e",
     "if ! command -v npm >/dev/null 2>&1; then",
@@ -108,7 +116,7 @@ function unixNpmInstallScript(
     "if [ ! -w \"$cukii_prefix\" ]; then npm config set prefix \"$HOME/.local\"; export PATH=\"$HOME/.local/bin:$PATH\"; fi",
     `npm install -g ${shellLiteral(packageName)}`,
     "exit 0",
-  ].join("; ");
+  ].join("\n");
 }
 
 function cursorInstallScript(platform: NodeJS.Platform): string {

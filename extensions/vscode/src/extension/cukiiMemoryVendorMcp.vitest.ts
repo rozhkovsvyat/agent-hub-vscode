@@ -38,6 +38,7 @@ describe("Cukii memory vendor MCP registration", () => {
       args: [descriptor.proxyPath],
       env: {
         ELECTRON_RUN_AS_NODE: "1",
+        CUKII_MEMORY_MANAGED: "1",
         CUKII_MEMORY_RELAY_URL: descriptor.url,
         CUKII_MEMORY_RELAY_TOKEN: descriptor.capability,
       },
@@ -87,10 +88,106 @@ describe("Cukii memory vendor MCP registration", () => {
         }),
       ).toBe(true);
       const calls = (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls;
-      const addArguments = calls[1]?.[1] as string[];
+      const addArguments = calls.at(-1)?.[1] as string[];
       expect(addArguments).toContain("cukii-memory");
       expect(addArguments).toContain(descriptor.proxyPath);
       expect(JSON.stringify(calls)).not.toContain("remote-box-token");
     },
   );
+
+  it("leaves a torn owner JSON config byte-for-byte untouched", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".cursor", "mcp.json");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, '{"mcpServers":', "utf8");
+
+    expect(
+      ensureCukiiMemoryVendorMcp("cursor", descriptor, { userHome: root }),
+    ).toBe(false);
+    expect(fs.readFileSync(target, "utf8")).toBe('{"mcpServers":');
+  });
+
+  it("does not replace or remove an owner-defined cukii-memory server", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".qwen", "settings.json");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const owner = {
+      mcpServers: { "cukii-memory": { command: "owner-command" } },
+    };
+    fs.writeFileSync(target, JSON.stringify(owner), "utf8");
+
+    expect(
+      ensureCukiiMemoryVendorMcp("qwen", descriptor, { userHome: root }),
+    ).toBe(false);
+    removeCukiiMemoryVendorMcp("qwen", { userHome: root });
+    expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual(owner);
+  });
+
+  it("leaves a malformed owner MCP container byte-for-byte untouched", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".cursor", "mcp.json");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const owner = '{"mcpServers":"owner-format"}';
+    fs.writeFileSync(target, owner, "utf8");
+    expect(
+      ensureCukiiMemoryVendorMcp("cursor", descriptor, { userHome: root }),
+    ).toBe(false);
+    expect(fs.readFileSync(target, "utf8")).toBe(owner);
+  });
+
+  it("restores a managed CLI config when replacement fails", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".codex", "config.toml");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const original = [
+      "# owner setting",
+      "model = 'owner'",
+      "[mcp_servers.cukii-memory]",
+      `command = '${descriptor.nodePath}'`,
+      `args = ['${descriptor.proxyPath.replace(/\\/g, "\\\\")}']`,
+      "[mcp_servers.cukii-memory.env]",
+      "CUKII_MEMORY_RELAY_URL = 'http://127.0.0.1:1/mcp'",
+      "",
+    ].join("\n");
+    fs.writeFileSync(target, original, "utf8");
+    const spawn = vi
+      .fn()
+      .mockReturnValueOnce({ status: 0 })
+      .mockReturnValueOnce({ status: 1 }) as never;
+
+    expect(
+      ensureCukiiMemoryVendorMcp("codex", descriptor, {
+        userHome: root,
+        spawn,
+      }),
+    ).toBe(false);
+    expect(fs.readFileSync(target, "utf8")).toBe(original);
+  });
+
+  it("removes a newly-created managed CLI config when add fails", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".codex", "config.toml");
+    const spawn = vi.fn(() => {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(
+        target,
+        [
+          "[mcp_servers.cukii-memory]",
+          `command = '${descriptor.nodePath}'`,
+          `args = ['${descriptor.proxyPath.replace(/\\/g, "\\\\")}']`,
+          "[mcp_servers.cukii-memory.env]",
+          "CUKII_MEMORY_MANAGED = '1'",
+        ].join("\n"),
+        "utf8",
+      );
+      return { status: 1 };
+    }) as never;
+    expect(
+      ensureCukiiMemoryVendorMcp("codex", descriptor, {
+        userHome: root,
+        spawn,
+      }),
+    ).toBe(false);
+    expect(fs.existsSync(target)).toBe(false);
+  });
 });

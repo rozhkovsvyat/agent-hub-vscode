@@ -18,6 +18,7 @@ import {
   resetBrokerIntegrationMemoForTests,
   resolveBrokerDir,
 } from "./bridgeVendorMcp";
+import type { CukiiRunBinding } from "./bridgeRunBinding";
 
 describe("bridgeVendorMcp", () => {
   let home: string;
@@ -79,9 +80,20 @@ describe("bridgeVendorMcp", () => {
   describe("live session binding", () => {
     it("registers the exact vendor pid and session through the broker-owned helper", () => {
       const spawn = vi.fn().mockReturnValue({ status: 0 });
+      const binding: CukiiRunBinding = {
+        version: 2,
+        vendorPid: 4242,
+        processStartToken: "start-token",
+        sessionId: "session-safe_1",
+        runId: "run-safe_1",
+        nonce: "a".repeat(64),
+        createdMs: 1000,
+        expiresMs: 2000,
+      };
       const result = registerBrokerSessionBinding(
         4242,
         "session-safe_1",
+        "run-safe_1",
         ["pending-1", "pending-2"],
         {
           userHome: home,
@@ -90,10 +102,11 @@ describe("bridgeVendorMcp", () => {
             CUKII_BINDING_DIR: "D:/bindings",
           },
           spawn: spawn as never,
+          registerBinding: vi.fn(() => binding),
         },
       );
 
-      expect(result).toBe(true);
+      expect(result).toEqual(binding);
       expect(spawn).toHaveBeenCalledTimes(1);
       const [program, args, spawnOptions] = spawn.mock.calls[0];
       // `brokerPythonCommand` launches `python` on Windows (the py launcher
@@ -102,9 +115,8 @@ describe("bridgeVendorMcp", () => {
       expect(program).toBe(process.platform === "win32" ? "python" : "python3");
       expect(args).toEqual([
         path.join(brokerDir, "session_identity.py"),
-        "--register",
+        "--lease-existing",
         "4242",
-        "session-safe_1",
         "--message-id",
         "pending-1",
         "--message-id",
@@ -115,15 +127,26 @@ describe("bridgeVendorMcp", () => {
 
     it("fails open for an invalid pid or a rejected helper", () => {
       const spawn = vi.fn().mockReturnValue({ status: 1 });
-      expect(registerBrokerSessionBinding(0, "session", [], options())).toBe(
-        false,
-      );
       expect(
-        registerBrokerSessionBinding(4242, "session", [], {
+        registerBrokerSessionBinding(0, "session", "run", [], options()),
+      ).toBeUndefined();
+      expect(
+        registerBrokerSessionBinding(4242, "session", "run", ["pending"], {
           ...options(),
+          env: { CUKII_BROKER_DIR: brokerDir },
           spawn: spawn as never,
+          registerBinding: vi.fn((): CukiiRunBinding => ({
+            version: 2,
+            vendorPid: 4242,
+            processStartToken: "start-token",
+            sessionId: "session",
+            runId: "run",
+            nonce: "a".repeat(64),
+            createdMs: 1000,
+            expiresMs: 2000,
+          })),
         }),
-      ).toBe(false);
+      ).toBeUndefined();
     });
   });
 
@@ -460,7 +483,13 @@ describe("bridgeVendorMcp", () => {
         }),
       ).toEqual({ mcpAdded: true, hookAdded: false });
       expect(spawn.mock.calls[1][1]).toContain("user");
-      expect(fs.readdirSync(home)).toEqual([".qwen"]);
+      expect(fs.readdirSync(home).sort()).toEqual([".claude.json", ".qwen"]);
+      const claude = JSON.parse(
+        fs.readFileSync(path.join(home, ".claude.json"), "utf8"),
+      );
+      expect(claude.mcpServers["cukii-question"]).toMatchObject({
+        env: { CUKII_QUESTION_MANAGED: "1" },
+      });
     });
 
     it("wires kimi through mcp.json and the config.toml gate", () => {
@@ -475,11 +504,40 @@ describe("bridgeVendorMcp", () => {
       expect(result).toMatchObject({ mcpAdded: true, hookAdded: true });
     });
 
-    it("no-ops without a resolved broker package", () => {
+    it("installs the bundled question MCP without an external broker package", () => {
       fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
       const result = ensureBrokerVendorIntegration("composer-2-5", options());
-      expect(result?.skipped).toBe("broker package not resolved");
-      expect(fs.existsSync(path.join(home, ".cursor", "mcp.json"))).toBe(false);
+      expect(result).toEqual({ mcpAdded: true, hookAdded: false });
+      const config = JSON.parse(
+        fs.readFileSync(path.join(home, ".cursor", "mcp.json"), "utf8"),
+      );
+      expect(config.mcpServers["cukii-question"]).toMatchObject({
+        env: { CUKII_QUESTION_MANAGED: "1" },
+      });
+    });
+
+    it("does not overwrite a malformed owner MCP container", () => {
+      fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
+      const target = path.join(home, ".cursor", "mcp.json");
+      const owner = '{"mcpServers":"owner-format"}';
+      fs.writeFileSync(target, owner, "utf8");
+      const result = ensureBrokerVendorIntegration("composer-2-5", options());
+      expect(result?.mcpAdded).toBe(false);
+      expect(fs.readFileSync(target, "utf8")).toBe(owner);
+    });
+
+    it("does not repair a torn managed TOML block by appending a duplicate", () => {
+      fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+      const target = path.join(home, ".codex", "config.toml");
+      const owner = [
+        "model = 'owner'",
+        "# cukii-question managed begin",
+        "[mcp_servers.cukii-question]",
+      ].join("\n");
+      fs.writeFileSync(target, owner, "utf8");
+      const result = ensureBrokerVendorIntegration("codex-5-6-sol", options());
+      expect(result?.mcpAdded).toBe(false);
+      expect(fs.readFileSync(target, "utf8")).toBe(owner);
     });
   });
 });

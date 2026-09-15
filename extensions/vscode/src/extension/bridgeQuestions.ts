@@ -7,12 +7,18 @@ import type {
   CukiiUserQuestionRequest,
   CukiiUserQuestionResponse,
 } from "core/protocol/ideWebview";
+import {
+  readRunBindingForPid,
+  type CukiiRunBinding,
+} from "./bridgeRunBinding";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 
 type QuestionRecord = {
   id: string;
   sessionId: string;
+  runId: string;
+  producerNonce: string;
   createdMs: number;
   status: "pending" | "answered" | "cancelled";
   questions: CukiiUserQuestionRequest["questions"];
@@ -82,6 +88,9 @@ function questionFingerprint(record: QuestionRecord): string {
       JSON.stringify({
         id: record.id,
         sessionId: record.sessionId,
+        runId: record.runId,
+        producerNonce: record.producerNonce,
+        createdMs: record.createdMs,
         questions: record.questions,
       }),
     )
@@ -94,6 +103,9 @@ function readRecord(file: string): QuestionRecord | undefined {
     if (
       SAFE_SEGMENT.test(record?.id ?? "") &&
       SAFE_SEGMENT.test(record?.sessionId ?? "") &&
+      SAFE_SEGMENT.test(record?.runId ?? "") &&
+      /^[a-f0-9]{64}$/.test(record?.producerNonce ?? "") &&
+      Number.isSafeInteger(record?.createdMs) &&
       validQuestions(record?.questions) &&
       typeof record?.status === "string"
     ) {
@@ -131,7 +143,16 @@ function listRecords(
 function replaceRecord(file: string, record: QuestionRecord): boolean {
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
   try {
-    fs.writeFileSync(temporary, JSON.stringify(record), "utf8");
+    fs.writeFileSync(temporary, JSON.stringify(record), {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    try {
+      fs.chmodSync(temporary, 0o600);
+    } catch {
+      // Windows ACLs are authoritative.
+    }
     fs.renameSync(temporary, file);
     return true;
   } catch {
@@ -165,11 +186,14 @@ function answerIdsMatch(
 export class BridgeQuestionBroker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly pending = new Map<string, string>();
+  private binding: CukiiRunBinding | undefined;
 
   constructor(
     private readonly sessionId: string,
     private readonly runId: string,
     private readonly onRequest: (request: CukiiUserQuestionRequest) => void,
+    private readonly bindingReader: typeof readRunBindingForPid =
+      readRunBindingForPid,
   ) {}
 
   start(intervalMs = 250): void {
@@ -179,9 +203,38 @@ export class BridgeQuestionBroker {
     this.timer.unref?.();
   }
 
+  bindVendorProcess(
+    vendorPid: number,
+    verifiedBinding?: CukiiRunBinding,
+  ): boolean {
+    const binding = verifiedBinding ?? this.bindingReader(vendorPid);
+    if (
+      !binding ||
+      binding.vendorPid !== vendorPid ||
+      binding.sessionId !== this.sessionId ||
+      binding.runId !== this.runId
+    ) {
+      return false;
+    }
+    this.binding = binding;
+    this.tick();
+    return true;
+  }
+
   tick(): void {
+    if (!this.binding) return;
+    const now = Date.now();
     for (const { record } of listRecords(this.sessionId)) {
-      if (record.status !== "pending" || this.pending.has(record.id)) continue;
+      if (
+        record.status !== "pending" ||
+        record.runId !== this.runId ||
+        record.producerNonce !== this.binding.nonce ||
+        record.createdMs < this.binding.createdMs ||
+        record.createdMs > now + 5_000 ||
+        now - record.createdMs > 30 * 60_000 ||
+        this.pending.has(record.id)
+      )
+        continue;
       const fingerprint = questionFingerprint(record);
       this.pending.set(record.id, fingerprint);
       this.onRequest({
@@ -196,6 +249,7 @@ export class BridgeQuestionBroker {
 
   respond(response: CukiiUserQuestionResponse): boolean {
     if (
+      !this.binding ||
       response.runId !== this.runId ||
       response.sessionId !== this.sessionId ||
       this.pending.get(response.requestId) !== response.requestFingerprint
@@ -205,7 +259,13 @@ export class BridgeQuestionBroker {
     const item = listRecords(this.sessionId).find(
       ({ record }) => record.id === response.requestId,
     );
-    if (!item || item.record.status !== "pending") return false;
+    if (
+      !item ||
+      item.record.status !== "pending" ||
+      item.record.runId !== this.runId ||
+      item.record.producerNonce !== this.binding.nonce
+    )
+      return false;
     if (questionFingerprint(item.record) !== response.requestFingerprint) {
       return false;
     }
@@ -233,7 +293,11 @@ export class BridgeQuestionBroker {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     for (const { file, record } of listRecords(this.sessionId)) {
-      if (record.status === "pending") {
+      if (
+        record.status === "pending" &&
+        record.runId === this.runId &&
+        record.producerNonce === this.binding?.nonce
+      ) {
         replaceRecord(file, { ...record, status: "cancelled", reason });
       }
     }

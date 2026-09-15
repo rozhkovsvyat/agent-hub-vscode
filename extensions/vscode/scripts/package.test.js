@@ -15,6 +15,7 @@ const {
   collectTargetVsix,
   getVscePublishArgs,
   publishEveryTarget,
+  verifyPublishedCarrierHashes,
   waitForValidatedTargets,
 } = require("./publish-marketplace");
 const {
@@ -150,6 +151,10 @@ test("tag release packages, verifies, and publishes every supported target", () 
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: read/);
   assert.doesNotMatch(workflow, /VSCE_PAT/);
+  assert.doesNotMatch(
+    workflow,
+    /uses:\s+[^\s#]+@(v\d+|main|master)(?:\s|$)/,
+  );
   for (const target of [
     "win32-x64",
     "darwin-arm64",
@@ -280,6 +285,54 @@ test("marketplace completion rejects five validated carriers from the wrong chan
     }),
     /channel=stable validated=0\/5/,
   );
+});
+
+test("marketplace completion is bound to the exact local carrier bytes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-gallery-hash-"));
+  try {
+    const packages = TARGETS.map((target) => {
+      const filePath = path.join(root, `${target}.vsix`);
+      fs.writeFileSync(filePath, `carrier:${target}`);
+      return { target, filePath };
+    });
+    const queryVersions = async () =>
+      TARGETS.map((targetPlatform) => ({
+        version: "2.0.130",
+        targetPlatform,
+        flags: "validated",
+        files: [
+          {
+            assetType: "Microsoft.VisualStudio.Services.VSIXPackage",
+            source: `https://gallery.invalid/${targetPlatform}`,
+          },
+        ],
+      }));
+    const fetchImpl = async (source) => ({
+      ok: true,
+      status: 200,
+      async arrayBuffer() {
+        return Buffer.from(`carrier:${source.split("/").pop()}`);
+      },
+    });
+    await verifyPublishedCarrierHashes({
+      packages,
+      version: "2.0.130",
+      queryVersions,
+      fetchImpl,
+    });
+    fs.writeFileSync(packages[2].filePath, "mutated carrier");
+    await assert.rejects(
+      verifyPublishedCarrierHashes({
+        packages,
+        version: "2.0.130",
+        queryVersions,
+        fetchImpl,
+      }),
+      /Marketplace VSIX hash mismatch for darwin-x64/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("marketplace publisher refuses an incomplete local carrier set", () => {

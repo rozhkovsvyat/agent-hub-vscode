@@ -231,6 +231,7 @@ try {
         $sharpVendorLibrary,
         "extension/out/extension.js",
         "extension/out/cukiiMemoryProxy.js",
+        "extension/out/cukiiQuestionMcp.js",
         "extension/gui/assets/index.js",
         "extension/gui/assets/index.css"
     )

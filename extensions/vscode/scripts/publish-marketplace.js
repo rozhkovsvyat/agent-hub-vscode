@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
@@ -188,11 +189,72 @@ async function waitForValidatedTargets({
   throw new Error(`Marketplace validation timed out: ${lastState}`);
 }
 
+function sha256File(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+async function sha256Response(response) {
+  if (!response.ok) {
+    throw new Error(`Marketplace carrier download failed: HTTP ${response.status}`);
+  }
+  const hash = crypto.createHash("sha256");
+  if (response.body?.[Symbol.asyncIterator]) {
+    for await (const chunk of response.body) hash.update(Buffer.from(chunk));
+  } else {
+    hash.update(Buffer.from(await response.arrayBuffer()));
+  }
+  return hash.digest("hex");
+}
+
+async function verifyPublishedCarrierHashes({
+  packages,
+  version,
+  preRelease = false,
+  queryVersions = queryGalleryVersions,
+  fetchImpl = fetch,
+}) {
+  const versions = await queryVersions();
+  for (const pkg of packages) {
+    const published = versions.find(
+      (item) =>
+        item.version === version &&
+        item.targetPlatform === pkg.target &&
+        isPreReleaseVersion(item) === preRelease &&
+        String(item.flags)
+          .split(",")
+          .map((flag) => flag.trim())
+          .includes("validated"),
+    );
+    const packageAsset = published?.files?.find(
+      (item) =>
+        item.assetType === "Microsoft.VisualStudio.Services.VSIXPackage",
+    );
+    if (!packageAsset?.source) {
+      throw new Error(`Marketplace VSIX asset missing for ${pkg.target}`);
+    }
+    const localHash = sha256File(pkg.filePath);
+    const publishedHash = await sha256Response(
+      await fetchImpl(packageAsset.source),
+    );
+    if (localHash !== publishedHash) {
+      throw new Error(
+        `Marketplace VSIX hash mismatch for ${pkg.target}: local=${localHash} published=${publishedHash}`,
+      );
+    }
+    console.log(`CUKII-MARKETPLACE-HASH-PASS ${pkg.target} ${localHash}`);
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const packages = collectTargetVsix(options.vsixDir, options.version);
   await publishEveryTarget({ packages, preRelease: options.preRelease });
   await waitForValidatedTargets({
+    version: options.version,
+    preRelease: options.preRelease,
+  });
+  await verifyPublishedCarrierHashes({
+    packages,
     version: options.version,
     preRelease: options.preRelease,
   });
@@ -213,5 +275,6 @@ module.exports = {
   isPreReleaseVersion,
   parseArgs,
   publishEveryTarget,
+  verifyPublishedCarrierHashes,
   waitForValidatedTargets,
 };

@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
@@ -18,7 +18,10 @@ describe("vendorInstallTerminalSpec", () => {
     });
     expect(spec!.command).toContain("Get-Command npm.cmd");
     expect(spec!.command).toContain("OpenJS.NodeJS.LTS");
-    expect(spec!.command).toContain("Restart VS Code as Administrator");
+    expect(spec!.command).toContain("administrator approval is required");
+    expect(spec!.command).toContain("Start-Process");
+    expect(spec!.command).toContain("-Verb RunAs");
+    expect(spec!.command).not.toContain("Restart VS Code as Administrator");
     expect(spec!.command).toContain(
       "@xai-official/grok@latest",
     );
@@ -91,6 +94,22 @@ describe("vendorInstallTerminalSpec", () => {
     expect(spec.command).toContain("@openai/codex@latest");
     expect(spec.command).not.toContain("sudo npm install");
   });
+
+  it.each(["darwin", "linux"] as const)(
+    "emits a syntactically valid %s bash program",
+    (platform) => {
+      const spec = vendorInstallTerminalSpec("codex", platform)!;
+      const parsed = spawnSync("bash", ["-n"], {
+        input: spec.command,
+        encoding: "utf8",
+      });
+      expect(parsed.error).toBeUndefined();
+      expect(parsed.stderr).toBe("");
+      expect(parsed.status).toBe(0);
+      expect(spec.command).not.toContain("then;");
+      expect(spec.command).not.toContain("else;");
+    },
+  );
 
   it("uses Cursor's official platform-specific installers", () => {
     expect(vendorInstallTerminalSpec("cursor", "win32")!.command).toContain(

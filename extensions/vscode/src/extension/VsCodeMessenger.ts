@@ -1310,6 +1310,7 @@ export class VsCodeMessenger {
       const permissionTransport: ClaudePermissionTransport = {
         panelId: this.panelIdForProtocol(protocol),
         sessionId: msg.data.sessionId,
+        runId,
         onRequest: async (request) => {
           protocol.send("cukii/claudePermissionRequested", request);
         },
@@ -1354,7 +1355,7 @@ export class VsCodeMessenger {
             terminated,
           });
         },
-        onChildSpawned: (pid) => {
+        onChildSpawned: (pid, binding) => {
           childPid = pid;
           recordCukiiDiagnostic("bridge.child.spawned", {
             sessionId: msg.data.sessionId,
@@ -1363,6 +1364,7 @@ export class VsCodeMessenger {
           });
           // The coordinator reclaims zombie slots by probing this pid.
           run.childPid = pid;
+          if (pid) run.questionBroker.bindVendorProcess(pid, binding);
         },
         imageScope,
         abortSignal: controller.signal,

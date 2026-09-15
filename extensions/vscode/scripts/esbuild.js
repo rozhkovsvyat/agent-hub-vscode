@@ -290,6 +290,17 @@ const cukiiMemoryProxyEsbuildConfig = {
   plugins: [],
 };
 
+// Every Marketplace carrier includes the vendor-agnostic question MCP. It
+// resolves the live Cukii run binding locally, so a clean host does not depend
+// on the owner's separate agent-hub checkout.
+const cukiiQuestionMcpEsbuildConfig = {
+  ...esbuildConfig,
+  entryPoints: ["src/extension/cukiiQuestionMcp.ts"],
+  outfile: "out/cukiiQuestionMcp.js",
+  external: [],
+  plugins: [],
+};
+
 async function main() {
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
@@ -300,23 +311,29 @@ async function main() {
   } else if (flags.includes("--memory-proxy-only")) {
     await esbuild.build(cukiiMemoryProxyEsbuildConfig);
     console.log("Cukii memory MCP proxy esbuild complete");
+  } else if (flags.includes("--question-mcp-only")) {
+    await esbuild.build(cukiiQuestionMcpEsbuildConfig);
+    console.log("Cukii question MCP esbuild complete");
   } else if (flags.includes("--watch")) {
     const [
       extensionContext,
       voiceContext,
       permissionWorkerContext,
       memoryProxyContext,
+      questionMcpContext,
     ] = await Promise.all([
       esbuild.context(esbuildConfig),
       esbuild.context(voiceEsbuildConfig),
       esbuild.context(claudePermissionMcpWorkerEsbuildConfig),
       esbuild.context(cukiiMemoryProxyEsbuildConfig),
+      esbuild.context(cukiiQuestionMcpEsbuildConfig),
     ]);
     await Promise.all([
       extensionContext.watch(),
       voiceContext.watch(),
       permissionWorkerContext.watch(),
       memoryProxyContext.watch(),
+      questionMcpContext.watch(),
     ]);
   } else if (flags.includes("--notify")) {
     const inFile = esbuildConfig.entryPoints[0];
@@ -344,6 +361,7 @@ async function main() {
     await esbuild.build(voiceEsbuildConfig);
     await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
     await esbuild.build(cukiiMemoryProxyEsbuildConfig);
+    await esbuild.build(cukiiQuestionMcpEsbuildConfig);
     await esbuild.build(esbuildConfig);
   }
 }
