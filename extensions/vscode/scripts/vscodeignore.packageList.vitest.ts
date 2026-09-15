@@ -41,6 +41,7 @@ describe("VSIX package list", () => {
       "out/node_modules/onnxruntime-node/dist/index.js.map",
       "out/runtime/ffmpeg.exe",
       "out/runtime/ffmpeg.map",
+      "out/cukiiMemoryProxy.js",
     ]) {
       const destination = path.join(fixtureRoot, file);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -66,6 +67,7 @@ describe("VSIX package list", () => {
         "out/node_modules/@vscode/ripgrep/bin/rg.exe",
         "out/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node",
         "out/runtime/ffmpeg.exe",
+        "out/cukiiMemoryProxy.js",
       ]),
     );
     expect(packageList.filter((file) => file.endsWith(".map"))).toEqual([]);

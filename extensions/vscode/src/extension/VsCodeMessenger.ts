@@ -110,6 +110,10 @@ import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
 import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 import { BridgeQuestionBroker } from "./bridgeQuestions";
+import {
+  cukiiMemoryAccountForContext,
+  isCukiiMemoryAccountId,
+} from "./cukiiMemoryAccount";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -479,6 +483,7 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     const issueReporter = yougileIssueReporterForContext(context);
+    const memoryAccount = cukiiMemoryAccountForContext(context);
     this.webviewProtocol.onDispose((protocol) => {
       const run = this.bridgeRuns.activeFor(protocol);
       // Invalidate candidates already waiting behind this run before their
@@ -968,7 +973,11 @@ export class VsCodeMessenger {
       return vendorPermissionCapabilities(data.vendor);
     });
     this.onWebview("cukii/listVendorAccounts", async () => {
-      return listCukiiAccounts({ store: this.context.secrets });
+      const [accounts, memory] = await Promise.all([
+        listCukiiAccounts({ store: this.context.secrets }),
+        memoryAccount.status(),
+      ]);
+      return [...accounts, memory];
     });
     this.onWebview("cukii/listBrokerModelCatalog", async () => {
       return listBrokerModelCatalog();
@@ -1033,6 +1042,32 @@ export class VsCodeMessenger {
     this.onWebview("cukii/runVendorAuthAction", async (msg) => {
       clearBrokerVendorAccountCache();
       const action = msg.data.action as BrokerVendorAuthAction;
+      if (isCukiiMemoryAccountId(msg.data.vendor)) {
+        return memoryAccount.runAction(action, {
+          promptEndpoint: (defaultValue) =>
+            vscode.window.showInputBox({
+              ignoreFocusOut: true,
+              title: "Connect Cukii Box",
+              prompt: "Cukii Box MCP endpoint",
+              value: defaultValue,
+              validateInput: (value) => {
+                try {
+                  new URL(value);
+                  return undefined;
+                } catch {
+                  return "Enter a valid Cukii Box URL.";
+                }
+              },
+            }),
+          promptToken: () =>
+            vscode.window.showInputBox({
+              password: true,
+              ignoreFocusOut: true,
+              title: "Connect Cukii Box",
+              prompt: "Access token",
+            }),
+        });
+      }
       if (isYougileAccountId(msg.data.vendor)) {
         // Not a CLI account: no terminal is involved, so it returns before the
         // vendor terminal path below.
@@ -1334,7 +1369,15 @@ export class VsCodeMessenger {
       };
       this.registerBridgeCandidate(protocol, run);
       run.questionBroker.start();
-      const stream = streamBridgeChat(msg.data, permissionTransport);
+      const stream = (async function* () {
+        // Memory is additive and fail-open: an unavailable Box must not block
+        // the vendor run, but a connected account is wired before the CLI is
+        // spawned so its MCP discovery sees the current loopback relay.
+        await memoryAccount
+          .ensureForModel(msg.data.brokerModel)
+          .catch(() => false);
+        return yield* streamBridgeChat(msg.data, permissionTransport);
+      })();
       const messenger = this;
       const wrapped = (async function* () {
         try {

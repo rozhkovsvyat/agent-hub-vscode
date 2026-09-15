@@ -19,6 +19,17 @@ const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   logout: "Log out",
 };
 
+function accountActionLabel(
+  account: BrokerVendorAuthStatus,
+  action: BrokerVendorAuthAction,
+): string {
+  if (account.id === "memory") {
+    if (action === "login") return "Connect";
+    if (action === "logout") return "Disconnect";
+  }
+  return ACTION_LABELS[action];
+}
+
 /**
  * The subtitle and the action must describe the same account state. Hosts may
  * be older than the webview, and a transient probe failure may produce an
@@ -70,6 +81,7 @@ const ACCOUNT_GROUPS: ReadonlyArray<{
   label: string;
 }> = [
   { id: "vendor", label: "Vendors" },
+  { id: "memory", label: "Agent Memory" },
   { id: "testing", label: "Testing" },
 ];
 
@@ -331,7 +343,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                                 {isBusy ? (
                                   <CukiiCrumbs />
                                 ) : (
-                                  ACTION_LABELS[action]
+                                  accountActionLabel(account, action)
                                 )}
                               </button>
                             );

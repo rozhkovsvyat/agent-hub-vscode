@@ -279,6 +279,17 @@ const claudePermissionMcpWorkerEsbuildConfig = {
   plugins: [],
 };
 
+// Vendor CLIs start this as a standalone stdio MCP child. It speaks only to
+// the activation-scoped loopback relay owned by the extension host; the real
+// Cukii Box bearer token therefore never appears in a vendor config file.
+const cukiiMemoryProxyEsbuildConfig = {
+  ...esbuildConfig,
+  entryPoints: ["src/extension/cukiiMemoryProxy.ts"],
+  outfile: "out/cukiiMemoryProxy.js",
+  external: [],
+  plugins: [],
+};
+
 async function main() {
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
@@ -286,17 +297,26 @@ async function main() {
   if (flags.includes("--permission-worker-only")) {
     await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
     console.log("Claude permission MCP worker esbuild complete");
+  } else if (flags.includes("--memory-proxy-only")) {
+    await esbuild.build(cukiiMemoryProxyEsbuildConfig);
+    console.log("Cukii memory MCP proxy esbuild complete");
   } else if (flags.includes("--watch")) {
-    const [extensionContext, voiceContext, permissionWorkerContext] =
-      await Promise.all([
-        esbuild.context(esbuildConfig),
-        esbuild.context(voiceEsbuildConfig),
-        esbuild.context(claudePermissionMcpWorkerEsbuildConfig),
-      ]);
+    const [
+      extensionContext,
+      voiceContext,
+      permissionWorkerContext,
+      memoryProxyContext,
+    ] = await Promise.all([
+      esbuild.context(esbuildConfig),
+      esbuild.context(voiceEsbuildConfig),
+      esbuild.context(claudePermissionMcpWorkerEsbuildConfig),
+      esbuild.context(cukiiMemoryProxyEsbuildConfig),
+    ]);
     await Promise.all([
       extensionContext.watch(),
       voiceContext.watch(),
       permissionWorkerContext.watch(),
+      memoryProxyContext.watch(),
     ]);
   } else if (flags.includes("--notify")) {
     const inFile = esbuildConfig.entryPoints[0];
@@ -323,6 +343,7 @@ async function main() {
   } else {
     await esbuild.build(voiceEsbuildConfig);
     await esbuild.build(claudePermissionMcpWorkerEsbuildConfig);
+    await esbuild.build(cukiiMemoryProxyEsbuildConfig);
     await esbuild.build(esbuildConfig);
   }
 }

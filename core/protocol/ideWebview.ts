@@ -73,10 +73,10 @@ export type BrokerVendorModelCatalog = {
  * vendor row contract — probe, login, logout, account label — but never appear
  * in a model catalog, so they stay out of `BrokerVendorId`.
  */
-export type BrokerToolAccountId = "yougile";
+export type BrokerToolAccountId = "yougile" | "memory";
 
 /** Section of the Accounts dialog a row belongs to. */
-export type BrokerAccountGroup = "vendor" | "testing";
+export type BrokerAccountGroup = "vendor" | "memory" | "testing";
 
 export type BrokerVendorAuthStatus = {
   id: BrokerVendorId | BrokerToolAccountId;

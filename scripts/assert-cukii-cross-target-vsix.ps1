@@ -230,6 +230,7 @@ try {
         $voiceOnnxSharedLibrary,
         $sharpVendorLibrary,
         "extension/out/extension.js",
+        "extension/out/cukiiMemoryProxy.js",
         "extension/gui/assets/index.js",
         "extension/gui/assets/index.css"
     )

@@ -531,6 +531,31 @@ describe("VendorAccountsModal", () => {
     ).toBeTruthy();
   });
 
+  it("renders Cukii Box as Agent Memory with Connect/Disconnect copy", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "memory",
+        label: "Cukii Box",
+        group: "memory",
+        installed: true,
+        authenticated: false,
+        state: "disconnected",
+        actions: ["login"],
+      },
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    const memory = await screen.findByTestId("cukii-account-group-memory");
+    expect(memory.textContent).toContain("Agent Memory");
+    expect(memory.textContent).toContain("Cukii Box");
+    expect(memory.textContent).toContain("Connect");
+    expect(memory.textContent).not.toContain("Log in");
+  });
+
   it("keeps an ungrouped host in Vendors and hides the empty Testing group", async () => {
     // A host that predates grouping sends no `group` at all.
     const ideMessenger = new MockIdeMessenger();
