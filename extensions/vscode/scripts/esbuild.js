@@ -4,27 +4,59 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const { writeBuildTimestamp } = require("./utils");
+const {
+  ffmpegBinaryName,
+  sharpBindingName,
+  targetPlatformAndArch,
+} = require("./cross-target-packaging");
 
 const esbuild = require("esbuild");
 
 const flags = process.argv.slice(2);
 
-function getSharpNativeBindingPath(outputModules) {
+const HOST_TARGET = `${process.platform}-${process.arch}`;
+
+/**
+ * The platform this build is producing a VSIX for.
+ *
+ * `prepackage.js` already reads `CONTINUE_VSCODE_TARGET`; esbuild runs later in
+ * the same pipeline (vsce invokes it through `vscode:prepublish`) and has to
+ * stage the *same* platform, or the voice runtime silently ships the build
+ * host's binaries inside a foreign VSIX.
+ */
+function resolveTarget() {
+  const configured = (
+    process.env.CONTINUE_VSCODE_TARGET ||
+    process.env.CONTINUE_BUILD_TARGET ||
+    process.env.VSCODE_TARGET ||
+    ""
+  ).trim();
+  return configured || HOST_TARGET;
+}
+
+function getSharpNativeBindingPath(outputModules, target = HOST_TARGET) {
   return path.join(
     outputModules,
     "sharp",
     "build",
     "Release",
-    `sharp-${process.platform}-${process.arch}.node`,
+    sharpBindingName(target),
   );
 }
 
-function validateSharpNativeBinding(outputModules) {
-  const nativeBinding = getSharpNativeBindingPath(outputModules);
+function validateSharpNativeBinding(outputModules, target = HOST_TARGET) {
+  const nativeBinding = getSharpNativeBindingPath(outputModules, target);
   if (!fs.existsSync(nativeBinding)) {
     throw new Error(
       `Missing target-specific sharp native binding: ${nativeBinding}`,
     );
+  }
+
+  // A foreign binding cannot be dlopen'd here by construction, so presence is
+  // the only check a cross build can make. Loading stays mandatory for a native
+  // build, where an unloadable binding is a real and shippable defect.
+  if (target !== HOST_TARGET) {
+    return;
   }
 
   const load = spawnSync(
@@ -59,7 +91,11 @@ function copyPackageTree(
   }
 }
 
-function copySharpRuntime(outputModules, resolveFrom = __dirname) {
+function copySharpRuntime(
+  outputModules,
+  resolveFrom = __dirname,
+  target = HOST_TARGET,
+) {
   const stagingRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "cukii-sharp-runtime-"),
   );
@@ -68,16 +104,31 @@ function copySharpRuntime(outputModules, resolveFrom = __dirname) {
     // Validate a fresh copy first, so an old output binding cannot hide a
     // missing or broken binding in the package we are about to ship.
     copyPackageTree("sharp", stagingModules, resolveFrom);
-    validateSharpNativeBinding(stagingModules);
+    validateSharpNativeBinding(stagingModules, target);
     copyPackageTree("sharp", outputModules, resolveFrom);
-    validateSharpNativeBinding(outputModules);
+    validateSharpNativeBinding(outputModules, target);
   } finally {
     fs.rmSync(stagingRoot, { recursive: true, force: true });
   }
 }
 
-function copyVoiceRuntime() {
-  const source = require("ffmpeg-static");
+function copyVoiceRuntime(target = resolveTarget()) {
+  const { platform: targetPlatform, arch: targetArch } =
+    targetPlatformAndArch(target);
+
+  // `require("ffmpeg-static")` resolves the *host* binary name, so the path is
+  // built from the target instead. The cross-packaging driver has already
+  // downloaded the matching binary.
+  const source = path.join(
+    __dirname,
+    "..",
+    "node_modules",
+    "ffmpeg-static",
+    ffmpegBinaryName(target),
+  );
+  if (!fs.existsSync(source)) {
+    throw new Error(`Missing ffmpeg binary for ${target}: ${source}`);
+  }
   const runtimeDir = path.join(__dirname, "..", "out", "runtime");
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.copyFileSync(source, path.join(runtimeDir, path.basename(source)));
@@ -103,7 +154,7 @@ function copyVoiceRuntime() {
     });
   }
 
-  copySharpRuntime(outputModules);
+  copySharpRuntime(outputModules, __dirname, target);
 
   const nativeRoot = path.join(
     outputModules,
@@ -112,21 +163,26 @@ function copyVoiceRuntime() {
     "napi-v3",
   );
   for (const platform of fs.readdirSync(nativeRoot)) {
-    if (platform !== process.platform) {
+    if (platform !== targetPlatform) {
       fs.rmSync(path.join(nativeRoot, platform), {
         recursive: true,
         force: true,
       });
     }
   }
-  const platformRoot = path.join(nativeRoot, process.platform);
+  const platformRoot = path.join(nativeRoot, targetPlatform);
   for (const arch of fs.readdirSync(platformRoot)) {
-    if (arch !== process.arch) {
+    if (arch !== targetArch) {
       fs.rmSync(path.join(platformRoot, arch), {
         recursive: true,
         force: true,
       });
     }
+  }
+  if (!fs.existsSync(path.join(platformRoot, targetArch))) {
+    throw new Error(
+      `Missing onnxruntime binaries for ${target}: ${path.join(platformRoot, targetArch)}`,
+    );
   }
 }
 
@@ -273,7 +329,9 @@ async function main() {
 
 module.exports = {
   copySharpRuntime,
+  copyVoiceRuntime,
   getSharpNativeBindingPath,
+  resolveTarget,
   validateSharpNativeBinding,
 };
 

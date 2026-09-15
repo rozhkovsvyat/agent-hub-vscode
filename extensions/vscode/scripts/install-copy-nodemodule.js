@@ -12,8 +12,21 @@ const { rimrafSync } = require("rimraf");
 const { execCmdSync } = require("../../../scripts/util");
 const { runChildOperation, sendChildResult } = require("./child-operation");
 
-async function installNodeModuleInTempDirAndCopyToCurrent(packageName, toCopy) {
-  console.log(`Copying ${packageName} to ${toCopy}`);
+/**
+ * @param {string} packageName the module to install
+ * @param {string} toCopy directory inside node_modules to copy into
+ * @param {string} [version] exact version to install; without it npm resolves
+ *   `latest`, which for a native addon means an ABI that its JS wrapper cannot
+ *   load on the user's machine
+ */
+async function installNodeModuleInTempDirAndCopyToCurrent(
+  packageName,
+  toCopy,
+  version,
+) {
+  console.log(
+    `Copying ${packageName}${version ? `@${version}` : ""} to ${toCopy}`,
+  );
   // This is a way to install only one package without npm trying to install all the dependencies
   // Create a temporary directory for installing the package
   const adjustedName = packageName.replace(/@/g, "").replace("/", "-");
@@ -35,7 +48,8 @@ async function installNodeModuleInTempDirAndCopyToCurrent(packageName, toCopy) {
     process.chdir(tempDir);
 
     // Initialize a new package.json and install the package
-    execCmdSync(`npm init -y && npm i -f ${packageName} --no-save`);
+    const spec = version ? `${packageName}@${version}` : packageName;
+    execCmdSync(`npm init -y && npm i -f ${spec} --no-save`);
 
     console.log(
       `Contents of: ${packageName}`,
@@ -96,6 +110,7 @@ if (typeof process.send === "function") {
       await installNodeModuleInTempDirAndCopyToCurrent(
         msg.payload.packageName,
         msg.payload.toCopy,
+        msg.payload.version,
       );
       sendChildResult({ done: true }, 0);
     } catch (error) {
@@ -109,8 +124,9 @@ if (typeof process.send === "function") {
  * invoke a child process to install a node module into temporary directory and copy it over into node modules
  * @param {string} packageName the module to install and copy
  * @param {string} toCopy directory to copy into inside node modules
+ * @param {string} [version] exact version to install
  */
-async function installAndCopyNodeModules(packageName, toCopy) {
+async function installAndCopyNodeModules(packageName, toCopy, version) {
   return runChildOperation({
     forkChild: fork,
     modulePath: __filename,
@@ -118,6 +134,7 @@ async function installAndCopyNodeModules(packageName, toCopy) {
     payload: {
       packageName,
       toCopy,
+      version,
     },
   });
 }

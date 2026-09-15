@@ -11,6 +11,11 @@ const {
 } = require("../../../scripts/util/index");
 
 const { copySqlite } = require("./download-copy-sqlite");
+const {
+  LANCEDB_PACKAGES,
+  lancedbVersionForTarget,
+  readWrapperManifest,
+} = require("./cross-target-packaging");
 const { generateAndCopyConfigYamlSchema } = require("./generate-copy-config");
 const { installAndCopyNodeModules } = require("./install-copy-nodemodule");
 const { npmInstall } = require("./npm-install");
@@ -144,6 +149,21 @@ void (async () => {
         rimrafSync(path.join(__dirname, "../bin/napi-v3/win32"));
       }
 
+      // Dropping the other platforms is not enough: onnxruntime ships one
+      // directory per architecture, so a darwin-arm64 build kept darwin/x64 and
+      // carried ~23 MB of machine code that can never run on the target.
+      const platformBin = path.join(__dirname, `../bin/napi-v3/${os}`);
+      if (fs.existsSync(platformBin)) {
+        for (const entry of fs.readdirSync(platformBin)) {
+          if (entry !== arch) {
+            rimrafSync(path.join(platformBin, entry));
+            console.log(
+              `[info] Removed foreign onnxruntime arch ${os}/${entry}`,
+            );
+          }
+        }
+      }
+
       // Also don't want to include cuda/shared/tensorrt binaries, they are too large
       if (target.startsWith("linux")) {
         const filesToRemove = [
@@ -232,16 +252,7 @@ void (async () => {
     );
   });
 
-  const lancedbPackagesByTarget = {
-    "darwin-arm64": "@lancedb/vectordb-darwin-arm64",
-    "darwin-x64": "@lancedb/vectordb-darwin-x64",
-    "linux-arm64": "@lancedb/vectordb-linux-arm64-gnu",
-    "linux-x64": "@lancedb/vectordb-linux-x64-gnu",
-    "win32-x64": "@lancedb/vectordb-win32-x64-msvc",
-    "win32-arm64": "@lancedb/vectordb-win32-arm64-msvc",
-  };
-
-  const packageToInstall = lancedbPackagesByTarget[target];
+  const packageToInstall = LANCEDB_PACKAGES[target];
   let packageDirName;
   let expectedPackagePath;
   if (packageToInstall) {
@@ -260,10 +271,21 @@ void (async () => {
         dependencyName: packageToInstall,
         expectedPath: expectedPackagePath,
       });
-      console.log(
-        `[info] Installing LanceDB binary for ${target}: ${packageToInstall}`,
+      // Pin to the version the installed `vectordb` wrapper declares. Resolving
+      // `latest` here yields a native module from another major whose ABI the
+      // wrapper cannot load, and that only fails on the user's machine.
+      const lancedbVersion = lancedbVersionForTarget(
+        target,
+        readWrapperManifest(path.join(__dirname, "..")),
       );
-      await installAndCopyNodeModules(packageToInstall, "@lancedb");
+      console.log(
+        `[info] Installing LanceDB binary for ${target}: ${packageToInstall}@${lancedbVersion}`,
+      );
+      await installAndCopyNodeModules(
+        packageToInstall,
+        "@lancedb",
+        lancedbVersion,
+      );
       if (!fs.existsSync(expectedPackagePath)) {
         throw new Error(
           `Failed to install LanceDB binary at ${expectedPackagePath}`,
