@@ -34,6 +34,7 @@ vi.mock("./permissionCapabilities", () => ({
 }));
 
 import {
+  BROKER_NOT_ROUTABLE_GUIDANCE,
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
   bridgeFailureDetail,
@@ -60,6 +61,16 @@ import {
 } from "./bridgeModelCatalog";
 
 const promptFiles: string[] = [];
+
+describe("broker delegation recovery guidance", () => {
+  it("does not turn a scope routing failure into a false model/account outage", () => {
+    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("task/scope routing error");
+    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("never evidence");
+    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("route_reason");
+    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("explicit known vault scope");
+  });
+});
+
 afterEach(() => {
   for (const file of promptFiles.splice(0)) fs.rmSync(file, { force: true });
   vi.restoreAllMocks();

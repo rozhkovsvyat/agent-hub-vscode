@@ -432,6 +432,9 @@ function windowsCmdPath(): string {
   return fallback;
 }
 
+export const BROKER_NOT_ROUTABLE_GUIDANCE =
+  "A not_routable result is a task/scope routing error, never evidence that the requested model, account, or agent is unavailable. Read route_reason and retry broker_delegate once with an explicit known vault scope.";
+
 function buildPrompt(
   messages: ChatMessage[],
   brokerModel: BrokerModel,
@@ -461,7 +464,8 @@ function buildPrompt(
             ` model="${displayBridgeModel(brokerSubagent)}" and an EXPLICIT scope argument,` +
             " then poll broker_status and finish with broker_accept." +
             " The scope argument is mandatory unless the task text names the scope itself:" +
-            " without it routing cannot resolve and delegation is refused.",
+            " without it routing cannot resolve and delegation is refused. " +
+            BROKER_NOT_ROUTABLE_GUIDANCE,
           `(2) Work outside those vault roots — including this workspace at ${cwd} —` +
             " is not routable by the broker: run the native CLI yourself instead:" +
             ` ${nativeDelegateHint(brokerSubagent, cwd, permissionMode)}`,
