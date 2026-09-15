@@ -34,6 +34,7 @@ import {
   sortVendorAccountsByLabel,
   storedCodexAccountLabel,
   vendorAuthTerminalCommand,
+  vendorInstallTerminalOutcome,
   vendorAuthTransitionReached,
 } from "./bridgeVendorAuth";
 
@@ -1629,24 +1630,47 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("installs the latest official native CLI package", () => {
-    expect(vendorAuthTerminalCommand("claude", "install")?.command).toBe(
-      "npm install -g @anthropic-ai/claude-code@latest",
+    expect(vendorAuthTerminalCommand("claude", "install")?.command).toContain(
+      "@anthropic-ai/claude-code@latest",
     );
-    expect(vendorAuthTerminalCommand("codex", "install")?.command).toBe(
-      "npm install -g @openai/codex@latest",
+    expect(vendorAuthTerminalCommand("codex", "install")?.command).toContain(
+      "@openai/codex@latest",
     );
-    expect(vendorAuthTerminalCommand("grok", "install")?.command).toBe(
-      "npm install -g @xai-official/grok@latest",
+    expect(vendorAuthTerminalCommand("grok", "install")?.command).toContain(
+      "@xai-official/grok@latest",
     );
-    expect(vendorAuthTerminalCommand("kimi", "install")?.command).toBe(
-      "npm install -g @moonshot-ai/kimi-code@latest",
+    expect(vendorAuthTerminalCommand("kimi", "install")?.command).toContain(
+      "@moonshot-ai/kimi-code@latest",
     );
-    expect(vendorAuthTerminalCommand("qwen", "install")?.command).toBe(
-      "npm install -g @qwen-code/qwen-code@latest",
+    expect(vendorAuthTerminalCommand("qwen", "install")?.command).toContain(
+      "@qwen-code/qwen-code@latest",
     );
     expect(vendorAuthTerminalCommand("cursor", "install")?.command).toContain(
       "https://cursor.com/install?win32=true",
     );
+  });
+
+  it("settles a closed failed install instead of waiting for the auth cap", async () => {
+    await expect(
+      vendorInstallTerminalOutcome("grok", async () =>
+        notInstalledVendorStatus("grok"),
+      ),
+    ).resolves.toBe("command-failed");
+    await expect(
+      vendorInstallTerminalOutcome("grok", async () => ({
+        id: "grok",
+        label: "xAI",
+        installed: true,
+        authenticated: false,
+        state: "disconnected",
+        actions: ["login"],
+      })),
+    ).resolves.toBe("transition");
+    await expect(
+      vendorInstallTerminalOutcome("grok", async () => {
+        throw new Error("probe failed");
+      }),
+    ).resolves.toBe("command-failed");
   });
 
   it("detects missing executables from native Windows and WSL failures", () => {

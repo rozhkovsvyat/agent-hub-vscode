@@ -16,6 +16,10 @@ import * as path from "path";
 import { performance } from "perf_hooks";
 import { promisify } from "util";
 import { alibabaIdentity, type ProtectedSecretStore } from "./alibabaTokenPlan";
+import {
+  vendorInstallTerminalSpec,
+  type VendorInstallTerminalSpec,
+} from "./vendorCliInstaller";
 import { yougileAccountStatus } from "./yougileAccount";
 
 const execFileAsync = promisify(execFile);
@@ -1726,6 +1730,25 @@ export async function watchVendorAuthTransition(
   }
 }
 
+/**
+ * A one-shot install terminal exits on both success and failure. Its process
+ * exit alone is not the product result: only the normal vendor probe can prove
+ * that the CLI became spawnable. Returning a terminal outcome here lets the
+ * webview clear its loader immediately on a failed command instead of waiting
+ * for the five-minute auth cap.
+ */
+export async function vendorInstallTerminalOutcome(
+  vendor: VendorWithCli,
+  probe: (vendor: VendorWithCli) => Promise<BrokerVendorAuthStatus> = probeVendor,
+): Promise<"transition" | "command-failed"> {
+  try {
+    const status = await probe(vendor);
+    return status.installed ? "transition" : "command-failed";
+  } catch {
+    return "command-failed";
+  }
+}
+
 export function vendorAuthTransitionReached(
   action: BrokerVendorAuthAction,
   status: Pick<BrokerVendorAuthStatus, "installed" | "authenticated">,
@@ -1820,46 +1843,49 @@ export async function listCukiiAccounts(
 export function vendorAuthTerminalCommand(
   vendor: BrokerVendorId,
   action: BrokerVendorAuthAction,
-): { name: string; command: string; followup?: string } | undefined {
+):
+  | VendorInstallTerminalSpec
+  | {
+      name: string;
+      command: string;
+      followup?: string;
+      shellPath?: undefined;
+      shellArgs?: undefined;
+      closesTerminal?: false;
+    }
+  | undefined {
   const install = action === "install";
+  if (install) return vendorInstallTerminalSpec(vendor);
   const commands: Partial<
     Record<
       BrokerVendorId,
-      { install?: string; login?: string; logout?: string }
+      { login?: string; logout?: string }
     >
   > = {
     claude: {
-      install: "npm install -g @anthropic-ai/claude-code@latest",
       login: "claude auth login --claudeai",
       logout: "claude auth logout",
     },
     codex: {
-      install: "npm install -g @openai/codex@latest",
       login: "codex login --device-auth",
       logout: "codex logout",
     },
     grok: {
-      install: "npm install -g @xai-official/grok@latest",
       login: "grok login --oauth",
       logout: "grok logout",
     },
     cursor: {
-      install: "irm 'https://cursor.com/install?win32=true' | iex",
       login: "agent login",
       logout: "agent logout",
     },
     kimi: {
-      install: "npm install -g @moonshot-ai/kimi-code@latest",
       login: "kimi login --region global",
       logout: "kimi",
     },
-    qwen: {
-      install: "npm install -g @qwen-code/qwen-code@latest",
-    },
+    qwen: {},
   };
-  const command = install
-    ? commands[vendor]?.install
-    : action === "login"
+  const command =
+    action === "login"
       ? commands[vendor]?.login
       : commands[vendor]?.logout;
   if (!command) return undefined;

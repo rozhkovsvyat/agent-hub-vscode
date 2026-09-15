@@ -66,6 +66,42 @@ describe("VendorAccountsModal", () => {
     ).toBeDefined();
   });
 
+  it("stops the install loader and restores Retry after the terminal command fails", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "grok",
+        label: "xAI",
+        installed: false,
+        authenticated: false,
+        state: "unavailable",
+        accountLabel: "Not installed",
+        actions: ["install"],
+      },
+    ];
+    ideMessenger.responses["cukii/runVendorAuthAction"] = {
+      opened: true,
+      message:
+        "CLI installation failed. Fix the error shown in the terminal, then select Install again.",
+    };
+    const { user } = await renderWithProviders(
+      <VendorAccountsModal onClose={vi.fn()} />,
+      { mockIdeMessenger: ideMessenger },
+    );
+
+    const install = (await getElementByText("Install")) as HTMLButtonElement;
+    await user.click(install);
+
+    await getElementByText(
+      "CLI installation failed. Fix the error shown in the terminal, then select Install again.",
+    );
+    await waitFor(() => {
+      const retry = screen.getByText("Install") as HTMLButtonElement;
+      expect(retry).not.toBeDisabled();
+      expect(retry).toHaveAttribute("aria-busy", "false");
+    });
+  });
+
   it("never paints a stale refresh response after a newer refresh intent", async () => {
     const first = deferred<unknown>();
     const second = deferred<unknown>();

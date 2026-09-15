@@ -96,6 +96,7 @@ import {
   extractAuthFlowAssist,
   listCukiiAccounts,
   vendorAuthTerminalCommand,
+  vendorInstallTerminalOutcome,
   watchVendorAuthTransition,
 } from "./bridgeVendorAuth";
 import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
@@ -312,14 +313,33 @@ export class VsCodeMessenger {
 
   private async runAuthTerminalFlow(
     terminal: vscode.Terminal,
-    spec: { name: string; command: string; followup?: string },
+    spec: {
+      name: string;
+      command: string;
+      followup?: string;
+      closesTerminal?: boolean;
+    },
     vendor: BrokerVendorId,
     action: BrokerVendorAuthAction,
   ): Promise<{
-    outcome: "transition" | "terminal-closed" | "cap" | "timeout";
+    outcome:
+      | "transition"
+      | "command-failed"
+      | "terminal-closed"
+      | "cap"
+      | "timeout";
     assisted: string[];
   }> {
     const assisted: string[] = [];
+    // Subscribe before sending the command. A dependency preflight can reject
+    // immediately, and missing that fast close left the Accounts loader stuck
+    // until its five-minute cap.
+    let closeSubscription: vscode.Disposable | undefined;
+    const closed = new Promise<"terminal-closed">((resolve) => {
+      closeSubscription = vscode.window.onDidCloseTerminal((closedTerminal) => {
+        if (closedTerminal === terminal) resolve("terminal-closed");
+      });
+    });
     // Device-auth CLIs print a URL/code instead of opening a browser. Shell
     // integration is the only supported way to read terminal output; without
     // it the flow still works, just without the browser/clipboard assist.
@@ -371,36 +391,33 @@ export class VsCodeMessenger {
       }
     }
 
-    const closed = new Promise<"terminal-closed">((resolve) => {
-      const subscription = vscode.window.onDidCloseTerminal(
-        (closedTerminal) => {
-          if (closedTerminal === terminal) {
-            subscription.dispose();
-            resolve("terminal-closed");
-          }
-        },
-      );
+    let capTimer: NodeJS.Timeout | undefined;
+    const cap = new Promise<"cap">((resolve) => {
+      capTimer = setTimeout(() => resolve("cap"), 300_000);
     });
-    const cap = new Promise<"cap">((resolve) =>
-      setTimeout(() => resolve("cap"), 300_000),
-    );
     const controller = new AbortController();
     try {
+      const terminalFinished =
+        action === "install" && vendor !== "deepseek"
+          ? closed.then(() => vendorInstallTerminalOutcome(vendor))
+          : closed;
       return {
         outcome:
           vendor !== "deepseek"
             ? await Promise.race([
-                closed,
+                terminalFinished,
                 cap,
                 watchVendorAuthTransition(vendor, action, {
                   signal: controller.signal,
                 }),
               ])
-            : await Promise.race([closed, cap]),
+            : await Promise.race([terminalFinished, cap]),
         assisted,
       };
     } finally {
       controller.abort();
+      closeSubscription?.dispose();
+      if (capTimer) clearTimeout(capTimer);
     }
   }
 
@@ -1044,7 +1061,12 @@ export class VsCodeMessenger {
             "This vendor does not expose that CLI authentication action.",
         };
       }
-      const terminal = vscode.window.createTerminal({ name: spec.name });
+      const terminal = vscode.window.createTerminal({
+        name: spec.name,
+        ...(spec.shellPath
+          ? { shellPath: spec.shellPath, shellArgs: spec.shellArgs }
+          : {}),
+      });
       terminal.show();
       // Stay pending until the native flow completes so the accounts button
       // keeps its loader instead of snapping back to the pre-action state.
@@ -1064,7 +1086,9 @@ export class VsCodeMessenger {
       }
       const summary =
         action === "install"
-          ? flow.outcome === "terminal-closed"
+          ? flow.outcome === "command-failed"
+            ? "CLI installation failed. Fix the error shown in the terminal, then select Install again."
+            : flow.outcome === "terminal-closed" || flow.outcome === "transition"
             ? "CLI installation finished in the integrated terminal."
             : "Latest CLI installation is running in the integrated terminal."
           : flow.outcome === "transition"
