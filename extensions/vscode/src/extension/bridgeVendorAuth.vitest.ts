@@ -1592,6 +1592,19 @@ describe("Cukii vendor CLI accounts", () => {
       actions: ["logout"],
     });
     expect(connectedKimiWithoutIdentity).not.toHaveProperty("accountLabel");
+    expect(
+      classifyVendorAuthOutput(
+        "kimi",
+        "managed:kimi-code type=kimi models=4 source=oauth",
+        undefined,
+        false,
+      ),
+    ).toMatchObject({
+      state: "disconnected",
+      authenticated: false,
+      accountLabel: "Not logged in",
+      actions: ["login"],
+    });
     const labels = [
       classifyVendorAuthOutput("claude", '{"loggedIn":false}').accountLabel,
       classifyVendorAuthOutput("codex", "not logged in").accountLabel,
@@ -1780,7 +1793,8 @@ describe("Cukii vendor CLI accounts", () => {
       };
 
       try {
-        const [connected, rejected, timedOut] = await Promise.all([
+        const [connected, rejected, timedOut, loggedOutKimi] =
+          await Promise.all([
           probeVendorExecutable(
             "codex",
             fixture("codex", "echo Logged in using ChatGPT"),
@@ -1794,6 +1808,14 @@ describe("Cukii vendor CLI accounts", () => {
             "grok",
             fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
             { timeoutMs: 50 },
+          ),
+          probeVendorExecutable(
+            "kimi",
+            fixture(
+              "kimi",
+              "echo managed:kimi-code type=kimi models=4 source=oauth",
+            ),
+            { metadata: { credentials: [], credentialPresent: false } },
           ),
         ]);
 
@@ -1809,6 +1831,12 @@ describe("Cukii vendor CLI accounts", () => {
         expect(timedOut).toMatchObject({
           state: "unknown",
           accountLabel: "Account status unavailable",
+        });
+        expect(loggedOutKimi).toMatchObject({
+          state: "disconnected",
+          authenticated: false,
+          accountLabel: "Not logged in",
+          actions: ["login"],
         });
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });

@@ -339,6 +339,7 @@ export function classifyVendorAuthOutput(
   vendor: VendorWithCli,
   stdout: string,
   identityLabel?: string,
+  credentialPresent?: boolean,
 ): AuthClassification {
   const text = stdout.trim();
   const accountLabel =
@@ -420,6 +421,12 @@ export function classifyVendorAuthOutput(
     }
   }
   if (vendor === "kimi") {
+    // `kimi provider list` describes configured providers, not the current
+    // login. The managed provider can therefore keep printing `source=oauth`
+    // after `/logout`. An empty native credentials directory is authoritative
+    // evidence of a disconnected account; treating the provider declaration
+    // as auth left the Accounts row in the synthetic unknown state.
+    if (credentialPresent === false) return disconnected();
     return /source=oauth/i.test(text) ||
       nativeCliJsonIndicatesAuthenticated("kimi", text)
       ? connected(accountLabel, ["logout"])
@@ -1504,7 +1511,10 @@ function localMetadata(vendor: VendorWithCli): unknown {
         ".kimi-code",
         "credentials",
       );
-      return { credentials: localKimiCredentials(credentialsDirectory) };
+      return {
+        credentials: localKimiCredentials(credentialsDirectory),
+        credentialPresent: Boolean(kimiCredentialFingerprint(userHome)),
+      };
     }
     if (!file || !fs.existsSync(file)) return undefined;
     const raw = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
@@ -1631,8 +1641,15 @@ export async function probeVendorExecutable(
     const output = qwenProbe ? qwenProbe.output : `${stdout}\n${stderr}`;
     const outputIdentity = identityFromNativeCliOutput(vendor, output);
     const kimiCacheKey = `${executable}:${kimiCredentialFingerprint(os.homedir()) ?? "missing"}`;
+    const kimiCredentialPresent =
+      vendor === "kimi" && isRecord(metadata)
+        ? typeof metadata.credentialPresent === "boolean"
+          ? metadata.credentialPresent
+          : undefined
+        : undefined;
     const kimiIdentity =
       vendor === "kimi" &&
+      kimiCredentialPresent !== false &&
       !identity &&
       !outputIdentity &&
       (/source=oauth/i.test(output) ||
@@ -1650,6 +1667,7 @@ export async function probeVendorExecutable(
       vendor,
       output,
       identity ?? qwenProbe?.identity,
+      kimiCredentialPresent,
     );
     return {
       id: vendor,
@@ -1676,6 +1694,11 @@ export async function probeVendorExecutable(
         vendor,
         output,
         identity ?? qwenProbe?.identity,
+        vendor === "kimi" && isRecord(metadata)
+          ? typeof metadata.credentialPresent === "boolean"
+            ? metadata.credentialPresent
+            : undefined
+          : undefined,
       ),
     };
   }
