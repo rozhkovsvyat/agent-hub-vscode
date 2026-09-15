@@ -27,26 +27,42 @@ function packageAll({
   // then allow each platform's prepackage to consume that verified staging.
   prepareGui();
 
-  for (const platform of platforms) {
-    runCommand(
-      process.execPath,
-      [
-        path.join(__dirname, "prepackage-cross-platform.js"),
-        "--target",
-        platform,
-        "--gui-prepared",
-      ],
-      { stdio: "inherit", shell: false },
-    );
-    const packageArgs = [path.join(__dirname, "package.js")];
-    if (isPreRelease) {
-      packageArgs.push("--pre-release");
+  const driver = path.join(__dirname, "package-cross-target.js");
+  let buildError;
+  try {
+    for (const platform of platforms) {
+      const packageArgs = [driver, "--target", platform, "--gui-prepared"];
+      if (isPreRelease) {
+        packageArgs.push("--pre-release");
+      }
+      runCommand(process.execPath, packageArgs, {
+        stdio: "inherit",
+        shell: false,
+      });
     }
-    packageArgs.push("--target", platform);
-    runCommand(process.execPath, packageArgs, {
+  } catch (error) {
+    buildError = error;
+  }
+
+  try {
+    // Each target replaces native modules in-place. Restore the build host even
+    // when a target fails, otherwise the next local test/load uses foreign code.
+    runCommand(process.execPath, [driver, "--restore-host"], {
       stdio: "inherit",
       shell: false,
     });
+  } catch (restoreError) {
+    if (buildError) {
+      throw new AggregateError(
+        [buildError, restoreError],
+        "Cross-target packaging and host restoration both failed",
+      );
+    }
+    throw restoreError;
+  }
+
+  if (buildError) {
+    throw buildError;
   }
 }
 

@@ -27,7 +27,7 @@ async function installNodeModulesInVscode() {
 
 // Only the fork owns this handler; see `child-operation.js`. Required as a library
 // (for `npmInstall`), this module must add nothing to its host's IPC channel.
-if (isForkedChildOperation()) {
+if (isForkedChildOperation(__filename)) {
   process.on("message", handleWorkerMessage);
 }
 
@@ -54,7 +54,10 @@ function handleWorkerMessage(msg) {
 }
 
 async function npmInstall() {
-  const forkEnv = { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" };
+  const forkEnv = {
+    ...process.env,
+    [CHILD_OPERATION_ENV_MARKER]: path.resolve(__filename),
+  };
   const installVscodeChild = fork(__filename, {
     stdio: "inherit",
     env: forkEnv,

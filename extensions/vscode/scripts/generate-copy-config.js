@@ -79,7 +79,7 @@ async function copyConfigSchema() {
   );
 }
 
-if (isForkedChildOperation()) {
+if (isForkedChildOperation(__filename)) {
   process.once("message", async (msg) => {
     const { operation, skipInstall = false } = msg.payload;
     try {

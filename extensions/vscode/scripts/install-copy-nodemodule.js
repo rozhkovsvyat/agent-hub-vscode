@@ -108,7 +108,7 @@ async function installNodeModuleInTempDirAndCopyToCurrent(
   }
 }
 
-if (isForkedChildOperation()) {
+if (isForkedChildOperation(__filename)) {
   process.once("message", async (msg) => {
     try {
       await installNodeModuleInTempDirAndCopyToCurrent(

@@ -33,6 +33,7 @@ fs.mkdirSync(path.join(__dirname, "..", "out", "node_modules"), {
   recursive: true,
 });
 const skipInstalls = process.env.SKIP_INSTALLS === "true";
+const guiPrepared = process.env.CUKII_GUI_PREPARED === "true";
 
 // Get the target to package for
 let target = undefined;
@@ -98,14 +99,18 @@ void (async () => {
     );
   }
 
-  const guiBuildStart = Date.now();
-  console.log(
-    `[timer] Starting GUI build and copy at ${new Date().toISOString()}`,
-  );
-  buildAndCopyGui();
-  console.log(
-    `[timer] GUI build and copy completed in ${Date.now() - guiBuildStart}ms`,
-  );
+  if (guiPrepared) {
+    console.log("[info] Reusing GUI prepared by package-all");
+  } else {
+    const guiBuildStart = Date.now();
+    console.log(
+      `[timer] Starting GUI build and copy at ${new Date().toISOString()}`,
+    );
+    buildAndCopyGui();
+    console.log(
+      `[timer] GUI build and copy completed in ${Date.now() - guiBuildStart}ms`,
+    );
+  }
 
   // Copy over native / wasm modules //
   process.chdir(path.join(__dirname, ".."));

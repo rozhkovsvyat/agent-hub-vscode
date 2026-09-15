@@ -13,10 +13,23 @@
  * An env variable we set ourselves at fork time is the only signal a foreign
  * loader or an inherited IPC channel cannot imitate.
  */
+const path = require("path");
+
 const CHILD_OPERATION_ENV_MARKER = "CUKII_FORKED_BUILD_WORKER";
 
-function isForkedChildOperation(env = process.env) {
-  return env[CHILD_OPERATION_ENV_MARKER] === "1";
+function isForkedChildOperation(
+  modulePath,
+  env = process.env,
+  argv = process.argv,
+) {
+  if (!modulePath || !argv[1]) {
+    return false;
+  }
+  const expected = path.resolve(modulePath);
+  return (
+    env[CHILD_OPERATION_ENV_MARKER] === expected &&
+    path.resolve(argv[1]) === expected
+  );
 }
 
 function runChildOperation({
@@ -31,7 +44,10 @@ function runChildOperation({
     child = forkChild(modulePath, {
       stdio: "inherit",
       ...(cwd ? { cwd } : {}),
-      env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
+      env: {
+        ...process.env,
+        [CHILD_OPERATION_ENV_MARKER]: path.resolve(modulePath),
+      },
     });
   } catch (error) {
     return Promise.reject(error);
