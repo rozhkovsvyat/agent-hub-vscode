@@ -206,9 +206,35 @@ async function downloadTo(url, outputPath) {
 }
 
 /**
+ * Build a local-only tar invocation for a downloaded ripgrep archive.
+ *
+ * Windows bsdtar treats an absolute `D:\\...` argv as `host:path` unless
+ * `--force-local` is supplied.  Running in the archive directory with a
+ * basename is portable across the Windows/macOS/Linux tar implementations
+ * used by the release runners and cannot be parsed as a remote path.
+ */
+function ripgrepExtractionPlan(binDir, archivePath) {
+  const resolvedBinDir = path.resolve(binDir);
+  const resolvedArchive = path.resolve(archivePath);
+  if (path.dirname(resolvedArchive) !== resolvedBinDir) {
+    throw new Error(
+      `ripgrep archive must be inside its extraction directory: ${resolvedArchive}`,
+    );
+  }
+  return {
+    command: "tar",
+    args: ["-xf", path.basename(resolvedArchive), "-C", "."],
+    cwd: resolvedBinDir,
+  };
+}
+
+/**
  * Replace `@vscode/ripgrep/bin` with the target platform's prebuilt binary.
  */
-async function stageRipgrepForTarget(target, { extensionDir }) {
+async function stageRipgrepForTarget(
+  target,
+  { extensionDir, download = downloadTo, execute = execFileSync },
+) {
   const binDir = path.join(
     extensionDir,
     "node_modules",
@@ -225,9 +251,13 @@ async function stageRipgrepForTarget(target, { extensionDir }) {
     isWindowsTarget(target) ? "rg.zip" : "rg.tar.gz",
   );
   console.log(`[info] Downloading ripgrep for ${target}: ${url}`);
-  await downloadTo(url, archive);
+  await download(url, archive);
   // bsdtar (shipped with Windows) reads both tarballs and zips.
-  execFileSync("tar", ["-xf", archive, "-C", binDir], { stdio: "inherit" });
+  const extraction = ripgrepExtractionPlan(binDir, archive);
+  execute(extraction.command, extraction.args, {
+    cwd: extraction.cwd,
+    stdio: "inherit",
+  });
   fs.unlinkSync(archive);
 
   const binaryPath = path.join(binDir, ripgrepBinaryName(target));
@@ -355,6 +385,7 @@ module.exports = {
   readWrapperManifest,
   ripgrepAssetUrl,
   ripgrepBinaryName,
+  ripgrepExtractionPlan,
   sharpBindingName,
   sharpPlatformArch,
   stageFfmpegForTarget,

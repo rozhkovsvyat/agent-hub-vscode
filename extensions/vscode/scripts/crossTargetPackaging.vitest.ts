@@ -17,9 +17,11 @@ const {
   pruneForeignNativeModules,
   ripgrepAssetUrl,
   ripgrepBinaryName,
+  ripgrepExtractionPlan,
   sharpBindingName,
   sharpPlatformArch,
   stageFfmpegForTarget,
+  stageRipgrepForTarget,
   stageSharpForTarget,
   targetPlatformAndArch,
 } = require("./cross-target-packaging");
@@ -94,6 +96,76 @@ async function withTempExtensionDirAsync<T>(
 }
 
 describe("ripgrep prebuilt selection", () => {
+  it("extracts from a basename in cwd so Windows tar cannot parse drive:path", () => {
+    const plan = ripgrepExtractionPlan(
+      "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin",
+      "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin\\rg.zip",
+    );
+
+    expect(plan).toEqual({
+      command: "tar",
+      args: ["-xf", "rg.zip", "-C", "."],
+      cwd: "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin",
+    });
+    expect(plan.args.join(" ")).not.toContain(":");
+  });
+
+  it("rejects an archive outside the extraction directory", () => {
+    expect(() =>
+      ripgrepExtractionPlan(
+        "D:\\a\\repo\\bin",
+        "D:\\a\\repo\\other\\rg.zip",
+      ),
+    ).toThrow(/must be inside its extraction directory/);
+  });
+
+  it("passes only the archive basename to the tar invocation used by staging", async () => {
+    const extensionDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "cukii-cross-target-ripgrep-"),
+    );
+    try {
+      const calls: Array<{
+        command: string;
+        args: string[];
+        cwd?: string;
+      }> = [];
+
+      await stageRipgrepForTarget("win32-x64", {
+        extensionDir,
+        download: async (_url: string, archivePath: string) => {
+          fs.writeFileSync(archivePath, "fixture");
+          fs.writeFileSync(
+            path.join(path.dirname(archivePath), "rg.exe"),
+            "fixture",
+          );
+        },
+        execute: (
+          command: string,
+          args: string[],
+          options: { cwd?: string },
+        ) => calls.push({ command, args, cwd: options.cwd }),
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        command: "tar",
+        args: ["-xf", "rg.zip", "-C", "."],
+      });
+      expect(calls[0].args.join(" ")).not.toContain(":");
+      expect(calls[0].cwd).toBe(
+        path.join(
+          extensionDir,
+          "node_modules",
+          "@vscode",
+          "ripgrep",
+          "bin",
+        ),
+      );
+    } finally {
+      fs.rmSync(extensionDir, { recursive: true, force: true });
+    }
+  });
+
   it("names the asset @vscode/ripgrep would download natively on each target", () => {
     const base =
       "https://github.com/microsoft/ripgrep-prebuilt/releases/download/v13.0.0-10/ripgrep-v13.0.0-10";
