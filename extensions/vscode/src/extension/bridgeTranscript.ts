@@ -6,6 +6,26 @@ import { ChatMessage, MessageContent } from "core";
  */
 export const MAX_BRIDGE_TRANSCRIPT_CHARS = 120_000;
 
+/**
+ * Keep roughly the same conservative share of the selected model window
+ * instead of forcing every vendor through the smallest 200K-model budget.
+ * Characters are intentionally budgeted below tokens: code, JSON and
+ * Cyrillic can approach one token per character. Unknown models retain the
+ * proven 120K fallback.
+ */
+export function bridgeTranscriptCharLimit(model: string): number {
+  if (/^(?:fable|opus|sonnet)-5|^kimi-k3$|^deepseek-v4-pro$/.test(model)) {
+    return 600_000;
+  }
+  if (/^grok-4-|^cursor:grok-4\./.test(model)) {
+    return 300_000;
+  }
+  if (/^codex-5-|^kimi-k2|^kimi-k3-256k$/.test(model)) {
+    return 153_000;
+  }
+  return MAX_BRIDGE_TRANSCRIPT_CHARS;
+}
+
 export function contentToText(content: MessageContent): string {
   if (typeof content === "string") {
     return content;
@@ -25,12 +45,15 @@ function render(message: ChatMessage): string {
  * trimmed as the only way to honour the hard bound; the marker makes that loss
  * explicit rather than presenting it as a full conversation.
  */
-export function buildBridgeTranscript(messages: ChatMessage[]): string {
+export function buildBridgeTranscript(
+  messages: ChatMessage[],
+  maxChars = MAX_BRIDGE_TRANSCRIPT_CHARS,
+): string {
   const turns = messages
     .filter((message) => message.role !== "tool")
     .map(render);
   const full = turns.join("\n\n");
-  if (full.length <= MAX_BRIDGE_TRANSCRIPT_CHARS) {
+  if (full.length <= maxChars) {
     return full;
   }
 
@@ -42,9 +65,9 @@ export function buildBridgeTranscript(messages: ChatMessage[]): string {
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index];
     const separator = retained.length ? 2 : 0;
-    if (used + separator + turn.length > MAX_BRIDGE_TRANSCRIPT_CHARS) {
+    if (used + separator + turn.length > maxChars) {
       if (!retained.length) {
-        const available = MAX_BRIDGE_TRANSCRIPT_CHARS - used;
+        const available = maxChars - used;
         const body = available - currentTurnMarker.length;
         if (body > 0) {
           const head = Math.ceil(body / 2);

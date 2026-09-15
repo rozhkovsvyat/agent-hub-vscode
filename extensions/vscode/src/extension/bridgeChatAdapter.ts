@@ -39,7 +39,10 @@ import {
   parseSupportedVisionDataUrl,
   selectBridgeImageSources,
 } from "./bridgeImages";
-import { buildBridgeTranscript } from "./bridgeTranscript";
+import {
+  bridgeTranscriptCharLimit,
+  buildBridgeTranscript,
+} from "./bridgeTranscript";
 import { windowsVendorCliCandidates } from "./vendorCliCandidates";
 import {
   closeFollowers,
@@ -471,7 +474,13 @@ function buildPrompt(
             " those lines reads as a freeze.",
         ].join(" ");
 
-  const transcript = buildBridgeTranscript(messages);
+  const transcript = buildBridgeTranscript(
+    messages,
+    bridgeTranscriptCharLimit(brokerModel),
+  );
+  const transcriptWasTrimmed = transcript.includes(
+    "Only older Cukii history was omitted",
+  );
 
   return [
     "You are Cukii Broker running through a native bridge, not through the Continue chat model.",
@@ -481,6 +490,11 @@ function buildPrompt(
     selectedSubagentGuidance,
     "Use the local Codex/Claude/Grok/Cursor bridge environment and available Cukii MCP tools when delegation is useful.",
     "Answer in the user's language and keep normal chat continuity from the transcript.",
+    ...(transcriptWasTrimmed
+      ? [
+          "Older transcript was compacted to fit the selected model. Continue normally from the retained authoritative context; do not complain about truncation unless a missing fact actually blocks the task.",
+        ]
+      : []),
     "While working, write short status lines often — what you are doing now, not a spinner. Long silent stretches between tools read as a freeze.",
     ...brokerFactDisciplineDirective(),
     ...(isClaudeNativeModel(brokerModel)
