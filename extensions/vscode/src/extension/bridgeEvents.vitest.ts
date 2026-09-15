@@ -117,6 +117,18 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("не дублирует финальный текст Cursor/Grok из terminal result", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"role":"assistant","model":"grok-4.6","content":[{"type":"text","text":"Готово."}]}}',
+      '{"type":"result","subtype":"success","is_error":false,"result":"Готово."}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "text", text: "Готово." },
+      { kind: "complete" },
+    ]);
+  });
+
   it("разбирает событийную модель codex exec --json", () => {
     const { events } = collect("codex-thread", CODEX_LINES);
     expect(events).toEqual([
