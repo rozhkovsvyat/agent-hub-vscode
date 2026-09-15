@@ -206,6 +206,18 @@ try {
         'linux' { "extension/bin/napi-v3/$expectedPlatform/$expectedArch/libonnxruntime.so.1.14.0" }
         default { "extension/bin/napi-v3/$expectedPlatform/$expectedArch/onnxruntime.dll" }
     }
+    $voiceOnnxBase = "extension/out/node_modules/onnxruntime-node/bin/napi-v3/$expectedPlatform/$expectedArch"
+    $voiceOnnxSharedLibrary = switch ($expectedPlatform) {
+        'darwin' { "$voiceOnnxBase/libonnxruntime.1.14.0.dylib" }
+        'linux' { "$voiceOnnxBase/libonnxruntime.so.1.14.0" }
+        default { "$voiceOnnxBase/onnxruntime.dll" }
+    }
+    $sharpVendorPlatform = if ($expectedArch -eq 'arm64') { "$expectedPlatform-arm64v8" } else { "$expectedPlatform-$expectedArch" }
+    $sharpVendorLibrary = switch ($expectedPlatform) {
+        'darwin' { "extension/out/node_modules/sharp/vendor/8.14.5/$sharpVendorPlatform/lib/libvips-cpp.42.dylib" }
+        'linux' { "extension/out/node_modules/sharp/vendor/8.14.5/$sharpVendorPlatform/lib/libvips-cpp.so.42" }
+        default { "extension/out/node_modules/sharp/vendor/8.14.5/$sharpVendorPlatform/lib/libvips-42.dll" }
+    }
     $required = @(
         "extension/out/node_modules/@vscode/ripgrep/bin/rg$exe",
         "extension/out/node_modules/@lancedb/vectordb-$ExpectedTarget$lancedbSuffix/index.node",
@@ -214,10 +226,16 @@ try {
         "extension/out/build/Release/node_sqlite3.node",
         "extension/bin/napi-v3/$expectedPlatform/$expectedArch/onnxruntime_binding.node",
         $onnxSharedLibrary,
+        "$voiceOnnxBase/onnxruntime_binding.node",
+        $voiceOnnxSharedLibrary,
+        $sharpVendorLibrary,
         "extension/out/extension.js",
         "extension/gui/assets/index.js",
         "extension/gui/assets/index.css"
     )
+    if ($expectedPlatform -eq 'win32') {
+        $required += "$voiceOnnxBase/onnxruntime_providers_shared.dll"
+    }
     $entriesByName = @{}
     foreach ($entry in $entries) { $entriesByName[$entry.FullName] = $entry }
     foreach ($path in $required) {
