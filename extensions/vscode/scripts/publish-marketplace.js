@@ -10,8 +10,7 @@ const TARGETS = [
   "linux-arm64",
 ];
 const EXTENSION_ID = "cukii.cukii-vscode";
-const DUPLICATE_PATTERN =
-  /Target platform .* already exists and cannot be modified/i;
+const DUPLICATE_PATTERN = /already exists(?: and cannot be modified)?\.?/i;
 
 function parseArgs(args) {
   const parsed = { preRelease: false };
@@ -48,17 +47,23 @@ function collectTargetVsix(vsixDir, version) {
   return expected;
 }
 
-function runVscePublish({ filePath, preRelease }) {
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+function getVscePublishArgs({ filePath, preRelease }) {
   const args = [
     "--yes",
     "@vscode/vsce",
     "publish",
+    "--skip-duplicate",
     "--no-dependencies",
     "--packagePath",
     filePath,
   ];
   if (preRelease) args.splice(3, 0, "--pre-release");
+  return args;
+}
+
+function runVscePublish({ filePath, preRelease }) {
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  const args = getVscePublishArgs({ filePath, preRelease });
   const result = spawnSync(npx, args, { encoding: "utf8", env: process.env });
   return {
     status: result.status ?? 1,
@@ -132,8 +137,16 @@ async function queryGalleryVersions({ fetchImpl = fetch } = {}) {
   return payload.results?.[0]?.extensions?.[0]?.versions || [];
 }
 
+function isPreReleaseVersion(item) {
+  const property = item.properties?.find(
+    ({ key }) => key === "Microsoft.VisualStudio.Code.PreRelease",
+  );
+  return String(property?.value).toLowerCase() === "true";
+}
+
 async function waitForValidatedTargets({
   version,
+  preRelease = false,
   queryVersions = queryGalleryVersions,
   wait = delay,
   intervalMs = 15_000,
@@ -143,16 +156,23 @@ async function waitForValidatedTargets({
   const deadline = Date.now() + timeoutMs;
   let consecutive = 0;
   let lastState = "";
-  while (Date.now() < deadline) {
+  while (true) {
     const versions = await queryVersions();
     const matching = versions.filter((item) => item.version === version);
     const validated = new Set(
       matching
-        .filter((item) => String(item.flags).split(",").includes("validated"))
+        .filter((item) => isPreReleaseVersion(item) === preRelease)
+        .filter((item) =>
+          String(item.flags)
+            .split(",")
+            .map((flag) => flag.trim())
+            .includes("validated"),
+        )
         .map((item) => item.targetPlatform),
     );
     const missing = TARGETS.filter((target) => !validated.has(target));
-    const state = `validated=${validated.size}/5 missing=${missing.join(",")}`;
+    const channel = preRelease ? "preview" : "stable";
+    const state = `channel=${channel} validated=${validated.size}/5 missing=${missing.join(",")}`;
     if (state !== lastState) console.log(state);
     lastState = state;
     consecutive = missing.length === 0 ? consecutive + 1 : 0;
@@ -160,6 +180,7 @@ async function waitForValidatedTargets({
       console.log("CUKII-MARKETPLACE-FIVE-TARGETS-PASS");
       return;
     }
+    if (Date.now() >= deadline) break;
     await wait(intervalMs);
   }
   throw new Error(`Marketplace validation timed out: ${lastState}`);
@@ -169,7 +190,10 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const packages = collectTargetVsix(options.vsixDir, options.version);
   await publishEveryTarget({ packages, preRelease: options.preRelease });
-  await waitForValidatedTargets({ version: options.version });
+  await waitForValidatedTargets({
+    version: options.version,
+    preRelease: options.preRelease,
+  });
 }
 
 if (require.main === module) {
@@ -183,6 +207,8 @@ module.exports = {
   DUPLICATE_PATTERN,
   TARGETS,
   collectTargetVsix,
+  getVscePublishArgs,
+  isPreReleaseVersion,
   parseArgs,
   publishEveryTarget,
   waitForValidatedTargets,

@@ -13,6 +13,7 @@ const { packageAll } = require("./package-all");
 const {
   TARGETS,
   collectTargetVsix,
+  getVscePublishArgs,
   publishEveryTarget,
   waitForValidatedTargets,
 } = require("./publish-marketplace");
@@ -202,6 +203,34 @@ test("marketplace publisher is resumable after a partial failure", async () => {
   assert.deepEqual(accepted, new Set(TARGETS));
 });
 
+test("marketplace publisher delegates duplicate handling to vsce", () => {
+  assert.deepEqual(
+    getVscePublishArgs({ filePath: "linux-x64.vsix", preRelease: false }),
+    [
+      "--yes",
+      "@vscode/vsce",
+      "publish",
+      "--skip-duplicate",
+      "--no-dependencies",
+      "--packagePath",
+      "linux-x64.vsix",
+    ],
+  );
+  assert.deepEqual(
+    getVscePublishArgs({ filePath: "darwin-arm64.vsix", preRelease: true }),
+    [
+      "--yes",
+      "@vscode/vsce",
+      "publish",
+      "--pre-release",
+      "--skip-duplicate",
+      "--no-dependencies",
+      "--packagePath",
+      "darwin-arm64.vsix",
+    ],
+  );
+});
+
 test("marketplace completion requires two consecutive complete gallery snapshots", async () => {
   const snapshots = [
     TARGETS.slice(0, 4),
@@ -222,6 +251,30 @@ test("marketplace completion requires two consecutive complete gallery snapshots
       })),
   });
   assert.equal(queries, 5);
+});
+
+test("marketplace completion rejects five validated carriers from the wrong channel", async () => {
+  await assert.rejects(
+    waitForValidatedTargets({
+      version: "2.0.129",
+      preRelease: false,
+      timeoutMs: 0,
+      wait: async () => {},
+      queryVersions: async () =>
+        TARGETS.map((targetPlatform) => ({
+          version: "2.0.129",
+          targetPlatform,
+          flags: "validated",
+          properties: [
+            {
+              key: "Microsoft.VisualStudio.Code.PreRelease",
+              value: "true",
+            },
+          ],
+        })),
+    }),
+    /channel=stable validated=0\/5/,
+  );
 });
 
 test("marketplace publisher refuses an incomplete local carrier set", () => {
