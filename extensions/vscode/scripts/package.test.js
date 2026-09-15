@@ -147,6 +147,9 @@ test("tag release packages, verifies, and publishes every supported target", () 
     /path: extensions\/vscode\/cukii-vscode-\*-\*\.vsix/,
   );
   assert.match(workflow, /scripts\/publish-marketplace\.js/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /contents: read/);
+  assert.doesNotMatch(workflow, /VSCE_PAT/);
   for (const target of [
     "win32-x64",
     "darwin-arm64",
@@ -208,8 +211,9 @@ test("marketplace publisher delegates duplicate handling to vsce", () => {
     getVscePublishArgs({ filePath: "linux-x64.vsix", preRelease: false }),
     [
       "--yes",
-      "@vscode/vsce",
+      "@vscode/vsce@4.0.0",
       "publish",
+      "--oidc",
       "--skip-duplicate",
       "--no-dependencies",
       "--packagePath",
@@ -220,9 +224,10 @@ test("marketplace publisher delegates duplicate handling to vsce", () => {
     getVscePublishArgs({ filePath: "darwin-arm64.vsix", preRelease: true }),
     [
       "--yes",
-      "@vscode/vsce",
+      "@vscode/vsce@4.0.0",
       "publish",
       "--pre-release",
+      "--oidc",
       "--skip-duplicate",
       "--no-dependencies",
       "--packagePath",

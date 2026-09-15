@@ -106,11 +106,18 @@ jobs:
   publish-marketplace:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     # `marketplace` is an environment with required reviewers: a stable tag
     # waits for a human approval, exactly like the portal's prod gate.
     environment: ${{ startsWith(github.ref_name, 'rc-') && 'marketplace-preview' || 'marketplace' }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
 
       - name: Download VSIX
         uses: actions/download-artifact@v4
@@ -122,14 +129,9 @@ jobs:
         working-directory: extensions/vscode
         shell: bash
         run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "VSCE_PAT secret is not set; skipping publish (artifact is on the GitHub release)."
-            exit 0
-          fi
           VERSION=$(node -p "require('./package.json').version")
           ARGS=(scripts/publish-marketplace.js --vsix-dir ../../vsix --version "$VERSION")
           if [ "$PRE" = "true" ]; then ARGS+=(--pre-release); fi
           node "${ARGS[@]}"
         env:
           PRE: ${{ startsWith(github.ref_name, 'rc-') }}
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}

@@ -10,6 +10,7 @@ const TARGETS = [
   "linux-arm64",
 ];
 const EXTENSION_ID = "cukii.cukii-vscode";
+const VSCE_PACKAGE = "@vscode/vsce@4.0.0";
 const DUPLICATE_PATTERN = /already exists(?: and cannot be modified)?\.?/i;
 
 function parseArgs(args) {
@@ -50,8 +51,9 @@ function collectTargetVsix(vsixDir, version) {
 function getVscePublishArgs({ filePath, preRelease }) {
   const args = [
     "--yes",
-    "@vscode/vsce",
+    VSCE_PACKAGE,
     "publish",
+    "--oidc",
     "--skip-duplicate",
     "--no-dependencies",
     "--packagePath",
