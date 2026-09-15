@@ -7,6 +7,11 @@ const { rimrafSync } = require("rimraf");
 
 const { execCmdSync } = require("../../../scripts/util");
 
+const {
+  CHILD_OPERATION_ENV_MARKER,
+  isForkedChildOperation,
+} = require("./child-operation");
+
 /**
  * download a file using fetch API
  * @param {string} url
@@ -83,7 +88,27 @@ async function installAndCopyEsbuild(target) {
   fs.unlinkSync("node_modules/@esbuild/esbuild.zip");
 }
 
-process.on("message", (msg) => {
+// `copySqlite`/`copyEsbuild` run the work in `fork(__filename)`, so this handler
+// belongs to the forked child alone. Registering it unconditionally put it on every
+// process that merely *requires* this module for its exports, where it then crashed
+// on the first unrelated IPC message ("Cannot destructure property 'operation' of
+// 'msg.payload'") - a vitest worker talks to its parent over the same channel, and
+// the handler then answered vitest's own traffic with `process.send({error:true})`.
+//
+// The fork is identified by the shared env marker rather than `require.main ===
+// module`: under a custom module loader (vite-node, ts-node, jest) `require.main`
+// is not the real entry point, so that test passed inside a vitest worker and the
+// handler was installed anyway. See `child-operation.js` for the full rationale.
+if (isForkedChildOperation()) {
+  process.on("message", handleWorkerMessage);
+}
+
+function handleWorkerMessage(msg) {
+  // Defend the child too: the channel is shared, and a message without our payload
+  // must be ignored rather than take the process down.
+  if (!msg || !msg.payload) {
+    return;
+  }
   const { operation, target } = msg.payload;
   if (operation === "sqlite") {
     installAndCopySqlite(target)
@@ -101,13 +126,17 @@ process.on("message", (msg) => {
         process.send({ error: true });
       });
   }
-});
+}
 
 /**
  * @param {string} target the platform to build for
  */
 async function copySqlite(target) {
-  const child = fork(__filename, { stdio: "inherit", cwd: process.cwd() });
+  const child = fork(__filename, {
+    stdio: "inherit",
+    cwd: process.cwd(),
+    env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
+  });
   child.send({
     payload: {
       operation: "sqlite",
@@ -130,7 +159,11 @@ async function copySqlite(target) {
  * @param {string} target the platform to build for
  */
 async function copyEsbuild(target) {
-  const child = fork(__filename, { stdio: "inherit", cwd: process.cwd() });
+  const child = fork(__filename, {
+    stdio: "inherit",
+    cwd: process.cwd(),
+    env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
+  });
   child.send({
     payload: {
       operation: "esbuild",

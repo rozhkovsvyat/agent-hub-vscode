@@ -23,6 +23,9 @@ const {
   targetPlatformAndArch,
 } = require("./cross-target-packaging");
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { parseArgs } = require("./package-cross-target");
+
 interface RecordedInstall {
   script: string;
   cwd: string;
@@ -317,6 +320,29 @@ describe("voice runtime staging", () => {
   });
 });
 
+describe("cross-packaging driver arguments", () => {
+  it("requires a target it actually supports", () => {
+    expect(parseArgs(["--target", "darwin-arm64"])).toEqual({
+      target: "darwin-arm64",
+      restoreHost: false,
+    });
+    expect(() => parseArgs([])).toThrow(/--target is required/);
+    expect(() => parseArgs(["--target", "solaris-sparc"])).toThrow(
+      /Unsupported target/,
+    );
+    expect(() => parseArgs(["--oops"])).toThrow(/Unsupported argument/);
+  });
+
+  it("offers an explicit way back to the host, because packaging mutates shared trees", () => {
+    // A cross build overwrites core/node_modules/sqlite3 and ffmpeg-static in
+    // place, so after one the host's own tests cannot load them at all. The way
+    // back has to be a command, not a thing to remember.
+    const parsed = parseArgs(["--restore-host"]);
+    expect(parsed.restoreHost).toBe(true);
+    expect(parsed.target).toBe(`${process.platform}-${process.arch}`);
+  });
+});
+
 describe("foreign native module pruning", () => {
   it("keeps the target's modules and reports the rest", () => {
     expect(
@@ -389,5 +415,55 @@ describe("foreign native module pruning", () => {
     });
     expect(pruned).toEqual([]);
     expect(removed).toEqual([]);
+  });
+});
+
+describe("build modules required as libraries", () => {
+  // The module runs its own work in `fork(__filename)` and used to register the
+  // worker's `process.on("message")` handler at import time. Any process that
+  // merely required it for `copySqlite` - prepackage, the cross-target driver, a
+  // vitest worker - then crashed on the first unrelated IPC message, because the
+  // handler destructured `msg.payload` unconditionally.
+  // Every one of these is both a library (prepackage imports its exports) and its
+  // own forked worker. Deciding the role by `typeof process.send === "function"`
+  // installed the worker handler inside any IPC-connected process - a vitest worker
+  // included - which then answered vitest's own traffic and aborted the run.
+  it.each([
+    "./child-operation",
+    "./download-copy-sqlite",
+    "./npm-install",
+    "./install-copy-nodemodule",
+    "./generate-copy-config",
+  ])(
+    "registers no IPC handler when %s is required as a library",
+    (modulePath) => {
+      const before = process.listenerCount("message");
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require(modulePath);
+      expect(process.listenerCount("message")).toBe(before);
+    },
+  );
+
+  it("treats the fork marker as the only signal of worker role", () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const {
+      isForkedChildOperation,
+      CHILD_OPERATION_ENV_MARKER,
+    } = require("./child-operation");
+    // An IPC channel alone must not qualify: that is exactly the vitest case.
+    expect(isForkedChildOperation({})).toBe(false);
+    expect(isForkedChildOperation({ [CHILD_OPERATION_ENV_MARKER]: "0" })).toBe(
+      false,
+    );
+    expect(isForkedChildOperation({ [CHILD_OPERATION_ENV_MARKER]: "1" })).toBe(
+      true,
+    );
+  });
+
+  it("still exports the functions the build calls", () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const sqliteModule = require("./download-copy-sqlite");
+    expect(typeof sqliteModule.copySqlite).toBe("function");
+    expect(typeof sqliteModule.copyEsbuild).toBe("function");
   });
 });

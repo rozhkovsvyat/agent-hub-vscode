@@ -10,7 +10,11 @@ const ncp = require("ncp").ncp;
 const { rimrafSync } = require("rimraf");
 
 const { execCmdSync } = require("../../../scripts/util");
-const { runChildOperation, sendChildResult } = require("./child-operation");
+const {
+  isForkedChildOperation,
+  runChildOperation,
+  sendChildResult,
+} = require("./child-operation");
 
 /**
  * @param {string} packageName the module to install
@@ -104,7 +108,7 @@ async function installNodeModuleInTempDirAndCopyToCurrent(
   }
 }
 
-if (typeof process.send === "function") {
+if (isForkedChildOperation()) {
   process.once("message", async (msg) => {
     try {
       await installNodeModuleInTempDirAndCopyToCurrent(

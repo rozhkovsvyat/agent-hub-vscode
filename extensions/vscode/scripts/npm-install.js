@@ -7,6 +7,10 @@ const path = require("path");
 
 const { execCmdSync } = require("../../../scripts/util");
 
+const {
+  CHILD_OPERATION_ENV_MARKER,
+  isForkedChildOperation,
+} = require("./child-operation");
 const { continueDir } = require("./utils");
 
 async function installNodeModulesInGui() {
@@ -21,7 +25,16 @@ async function installNodeModulesInVscode() {
   console.log("[info] npm install in extensions/vscode completed");
 }
 
-process.on("message", (msg) => {
+// Only the fork owns this handler; see `child-operation.js`. Required as a library
+// (for `npmInstall`), this module must add nothing to its host's IPC channel.
+if (isForkedChildOperation()) {
+  process.on("message", handleWorkerMessage);
+}
+
+function handleWorkerMessage(msg) {
+  if (!msg || !msg.payload) {
+    return;
+  }
   const { targetDir } = msg.payload;
   if (targetDir === "gui") {
     installNodeModulesInGui()
@@ -38,16 +51,19 @@ process.on("message", (msg) => {
         process.send({ error: true });
       });
   }
-});
+}
 
 async function npmInstall() {
+  const forkEnv = { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" };
   const installVscodeChild = fork(__filename, {
     stdio: "inherit",
+    env: forkEnv,
   });
   installVscodeChild.send({ payload: { targetDir: "vscode" } });
 
   const installGuiChild = fork(__filename, {
     stdio: "inherit",
+    env: forkEnv,
   });
   installGuiChild.send({ payload: { targetDir: "gui" } });
 
