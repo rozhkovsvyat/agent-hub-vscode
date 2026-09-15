@@ -214,16 +214,21 @@ async function downloadTo(url, outputPath) {
  * used by the release runners and cannot be parsed as a remote path.
  */
 function ripgrepExtractionPlan(binDir, archivePath) {
-  const resolvedBinDir = path.resolve(binDir);
-  const resolvedArchive = path.resolve(archivePath);
-  if (path.dirname(resolvedArchive) !== resolvedBinDir) {
+  // Tests and release orchestration intentionally plan Windows carriers on
+  // Linux runners. `path.resolve("D:\\...")` uses the host flavour and turns
+  // that drive path into `<cwd>/D:\\...`; select the flavour from the input,
+  // not from the machine executing the plan.
+  const pathApi = /^[A-Za-z]:[\\/]/.test(binDir) ? path.win32 : path;
+  const resolvedBinDir = pathApi.resolve(binDir);
+  const resolvedArchive = pathApi.resolve(archivePath);
+  if (pathApi.dirname(resolvedArchive) !== resolvedBinDir) {
     throw new Error(
       `ripgrep archive must be inside its extraction directory: ${resolvedArchive}`,
     );
   }
   return {
     command: "tar",
-    args: ["-xf", path.basename(resolvedArchive), "-C", "."],
+    args: ["-xf", pathApi.basename(resolvedArchive), "-C", "."],
     cwd: resolvedBinDir,
   };
 }

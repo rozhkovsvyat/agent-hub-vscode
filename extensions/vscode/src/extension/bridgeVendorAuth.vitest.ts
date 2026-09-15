@@ -1658,9 +1658,14 @@ describe("Cukii vendor CLI accounts", () => {
     expect(vendorAuthTerminalCommand("qwen", "install")?.command).toContain(
       "@qwen-code/qwen-code@latest",
     );
-    expect(vendorAuthTerminalCommand("cursor", "install")?.command).toContain(
-      "https://cursor.com/install?win32=true",
-    );
+    const cursorInstall = vendorAuthTerminalCommand("cursor", "install")?.command;
+    expect(cursorInstall).toContain("https://cursor.com/install");
+    if (process.platform === "win32") {
+      expect(cursorInstall).toContain("?win32=true");
+    } else {
+      expect(cursorInstall).toContain("bash");
+      expect(cursorInstall).not.toContain("?win32=true");
+    }
   });
 
   it("settles a closed failed install instead of waiting for the auth cap", async () => {
