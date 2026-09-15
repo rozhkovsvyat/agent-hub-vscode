@@ -104,27 +104,21 @@ function windowsLineage(startPid: number): ProcessSnapshot[] {
   );
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    `$current = ${startPid}`,
-    "$out = @()",
-    `for ($i = 0; $i -lt ${MAX_ANCESTORS} -and $current -gt 0; $i++) {`,
-    '  $p = Get-CimInstance Win32_Process -Filter "ProcessId = $current"',
-    "  if (-not $p) { break }",
-    "  $g = Get-Process -Id $current -ErrorAction Stop",
-    "  $out += [pscustomobject]@{ pid = [int]$current; parentPid = [int]$p.ParentProcessId; startToken = [string]$g.StartTime.ToUniversalTime().ToFileTimeUtc() }",
-    "  $current = [int]$p.ParentProcessId",
+    "$out = Get-CimInstance Win32_Process | ForEach-Object {",
+    "  [pscustomobject]@{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; startToken = [string]$_.CreationDate.ToUniversalTime().ToFileTimeUtc() }",
     "}",
     "$out | ConvertTo-Json -Compress",
   ].join("\r\n");
   const result = spawnSync(
     powershell,
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { encoding: "utf8", timeout: 8_000, windowsHide: true },
+    { encoding: "utf8", timeout: 3_000, windowsHide: true },
   );
   if (result.status !== 0 || !String(result.stdout || "").trim()) return [];
   try {
     const parsed = JSON.parse(String(result.stdout)) as unknown;
     const rows = Array.isArray(parsed) ? parsed : [parsed];
-    return rows
+    const snapshots = rows
       .map((row) => row as Partial<ProcessSnapshot>)
       .filter(
         (row): row is ProcessSnapshot =>
@@ -133,6 +127,19 @@ function windowsLineage(startPid: number): ProcessSnapshot[] {
           typeof row.startToken === "string" &&
           row.startToken.length > 0,
       );
+    const byPid = new Map(snapshots.map((row) => [row.pid, row]));
+    const lineage: ProcessSnapshot[] = [];
+    const visited = new Set<number>();
+    let current = startPid;
+    for (let index = 0; index < MAX_ANCESTORS; index += 1) {
+      if (current <= 0 || visited.has(current)) break;
+      visited.add(current);
+      const snapshot = byPid.get(current);
+      if (!snapshot) break;
+      lineage.push(snapshot);
+      current = snapshot.parentPid;
+    }
+    return lineage;
   } catch {
     return [];
   }
@@ -234,7 +241,14 @@ export function resolveAncestorRunBinding(
   parentPid = process.ppid,
   nowMs = Date.now(),
 ): CukiiRunBinding | undefined {
-  const lineage = processLineage(parentPid);
+  return resolveRunBindingFromLineage(processLineage(parentPid), nowMs);
+}
+
+/** Resolve only owner files after one bounded OS process-tree snapshot. */
+export function resolveRunBindingFromLineage(
+  lineage: ProcessSnapshot[],
+  nowMs = Date.now(),
+): CukiiRunBinding | undefined {
   for (let index = 0; index < lineage.length; index += 1) {
     if (!lineageHasValidStartOrder(lineage.slice(0, index + 1))) return undefined;
     const process = lineage[index];

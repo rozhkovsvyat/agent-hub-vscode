@@ -290,7 +290,7 @@ function gateCommand(
 }
 
 /** qwen: settings.json carries both mcpServers and hooks (JSON-safe edit). */
-export function ensureQwenBrokerRegistration(
+function ensureQwenBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -356,8 +356,22 @@ export function ensureQwenBrokerRegistration(
   return { mcpAdded, hookAdded };
 }
 
+export function ensureQwenBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const settingsPath = path.join(home(options), ".qwen", "settings.json");
+  try {
+    return withOwnerFileLock(settingsPath, () =>
+      ensureQwenBrokerRegistrationUnlocked(brokerDir, options),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "qwen config busy" };
+  }
+}
+
 /** cursor: ~/.cursor/mcp.json only; hooks are not a cursor-agent surface. */
-export function ensureCursorBrokerRegistration(
+function ensureCursorBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -380,8 +394,22 @@ export function ensureCursorBrokerRegistration(
   return { mcpAdded: true, hookAdded: false };
 }
 
+export function ensureCursorBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const configPath = path.join(home(options), ".cursor", "mcp.json");
+  try {
+    return withOwnerFileLock(configPath, () =>
+      ensureCursorBrokerRegistrationUnlocked(brokerDir, options),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "cursor config busy" };
+  }
+}
+
 /** claude: use the official CLI so its large user config is never rewritten. */
-export function ensureClaudeBrokerRegistration(
+function ensureClaudeBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -424,6 +452,20 @@ export function ensureClaudeBrokerRegistration(
   }
 }
 
+export function ensureClaudeBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const configPath = path.join(home(options), ".claude.json");
+  try {
+    return withOwnerFileLock(configPath, () =>
+      ensureClaudeBrokerRegistrationUnlocked(brokerDir, options),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "claude config busy" };
+  }
+}
+
 function tomlLiteral(value: string): string {
   // TOML literal strings pass Windows backslashes through untouched; only a
   // quote inside the path forces the basic-string escape route.
@@ -436,7 +478,7 @@ function tomlLiteral(value: string): string {
  * TOML when appended at the end, so the managed block never reformats the
  * owner's file; a timestamped backup is written first.
  */
-export function ensureCodexBrokerRegistration(
+function ensureCodexBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -481,8 +523,22 @@ export function ensureCodexBrokerRegistration(
   return { mcpAdded: !hasMcp, hookAdded: !hasGate };
 }
 
+export function ensureCodexBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const configPath = path.join(home(options), ".codex", "config.toml");
+  try {
+    return withOwnerFileLock(configPath, () =>
+      ensureCodexBrokerRegistrationUnlocked(brokerDir, options),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "codex config busy" };
+  }
+}
+
 /** grok: official `mcp add` for the server, a plugin-owned hook file alongside agent-hub.json. */
-export function ensureGrokBrokerRegistration(
+function ensureGrokBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -549,13 +605,27 @@ export function ensureGrokBrokerRegistration(
   return { mcpAdded, hookAdded };
 }
 
+export function ensureGrokBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const configPath = path.join(home(options), ".grok", "config.toml");
+  try {
+    return withOwnerFileLock(configPath, () =>
+      ensureGrokBrokerRegistrationUnlocked(brokerDir, options),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "grok config busy" };
+  }
+}
+
 /**
  * kimi: ~/.kimi-code/mcp.json carries the server (same shape as cursor's),
  * config.toml gets an append-only [[hooks]] block. Kimi parses the deny
  * envelope natively on PreToolUse (canary-verified on 0.38.0), so the gate
  * registers directly, without the prompt-injection adapter.
  */
-export function ensureKimiBrokerRegistration(
+function ensureKimiBrokerRegistrationUnlocked(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): VendorRegistration {
@@ -604,6 +674,24 @@ export function ensureKimiBrokerRegistration(
     hookAdded = false;
   }
   return { mcpAdded, hookAdded };
+}
+
+export function ensureKimiBrokerRegistration(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): VendorRegistration {
+  const kimiDir = path.join(home(options), ".kimi-code");
+  const mcpPath = path.join(kimiDir, "mcp.json");
+  const hookPath = path.join(kimiDir, "config.toml");
+  try {
+    return withOwnerFileLock(mcpPath, () =>
+      withOwnerFileLock(hookPath, () =>
+        ensureKimiBrokerRegistrationUnlocked(brokerDir, options),
+      ),
+    );
+  } catch {
+    return { mcpAdded: false, hookAdded: false, skipped: "kimi config busy" };
+  }
 }
 
 /**

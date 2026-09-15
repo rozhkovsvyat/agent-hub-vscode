@@ -34,19 +34,45 @@ describe("owner file transaction", () => {
       expect(fs.statSync(target).mode & 0o777).toBe(0o600);
   });
 
-  it("recovers only a stale lock and removes its own lock receipt", () => {
+  it("recovers only a stale lock whose owning process is proven dead", () => {
     const target = fixture();
     const lock = `${target}.cukii.lock`;
-    fs.writeFileSync(lock, "dead-host", { mode: 0o600 });
+    fs.writeFileSync(lock, `424242:1:${"a".repeat(32)}`, { mode: 0o600 });
     const stale = new Date(Date.now() - 60_000);
     fs.utimesSync(lock, stale, stale);
-    const result = withOwnerFileLock(target, () => {
-      writeOwnerFileAtomic(target, "complete");
-      return "ok";
-    });
+    const result = withOwnerFileLock(
+      target,
+      () => {
+        writeOwnerFileAtomic(target, "complete");
+        return "ok";
+      },
+      { processAlive: () => false },
+    );
     expect(result).toBe("ok");
     expect(fs.readFileSync(target, "utf8")).toBe("complete");
     expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it("never steals an old lock from a live owner", () => {
+    const target = fixture();
+    const lock = `${target}.cukii.lock`;
+    fs.writeFileSync(lock, `424242:1:${"b".repeat(32)}`, { mode: 0o600 });
+    const stale = new Date(Date.now() - 60_000);
+    fs.utimesSync(lock, stale, stale);
+    let ran = false;
+    const started = Date.now();
+    expect(() =>
+      withOwnerFileLock(
+        target,
+        () => {
+          ran = true;
+        },
+        { processAlive: () => true, timeoutMs: 50 },
+      ),
+    ).toThrow(/timed out waiting/);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(ran).toBe(false);
+    expect(fs.existsSync(lock)).toBe(true);
   });
 
   it("serializes a competing process so read-modify-write fields are not lost", async () => {

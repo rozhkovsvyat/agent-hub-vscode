@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import { resolveAncestorRunBinding } from "./bridgeRunBinding";
+import {
+  processLineage,
+  resolveRunBindingFromLineage,
+} from "./bridgeRunBinding";
 import { resolveWithBoundedRetry } from "./bindingRetry";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
@@ -112,7 +115,13 @@ async function requestUserInput(argumentsValue: unknown) {
   // The vendor can launch its MCP child a few milliseconds before the host's
   // post-spawn CIM/proc lookup publishes the run binding. Treat that as a
   // bounded startup race, not a terminal user-question failure.
-  const binding = await resolveWithBoundedRetry(resolveAncestorRunBinding);
+  // Capturing Windows ancestry can involve WMI, so do it once. The bounded
+  // retry then polls only owner files while the Extension Host publishes the
+  // binding; one slow OS snapshot cannot multiply into minutes of blocking.
+  const lineage = processLineage(process.ppid);
+  const binding = await resolveWithBoundedRetry(() =>
+    resolveRunBindingFromLineage(lineage),
+  );
   if (!binding) return { cancelled: true, reason: "Cukii run binding unavailable" };
   const questions = normalizeQuestions(
     (argumentsValue as { questions?: unknown } | undefined)?.questions,

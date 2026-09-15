@@ -26,4 +26,22 @@ describe("resolveWithBoundedRetry", () => {
     ).resolves.toBeUndefined();
     expect(sleep).toHaveBeenCalledTimes(2);
   });
+
+  it("does not repeat a resolver that consumed the common deadline", async () => {
+    let clock = 1_000;
+    const resolve = vi.fn(() => {
+      clock += 8_000;
+      return undefined;
+    });
+    const sleep = vi.fn(async () => undefined);
+    await expect(
+      resolveWithBoundedRetry(resolve, {
+        timeoutMs: 5_000,
+        now: () => clock,
+        sleep,
+      }),
+    ).resolves.toBeUndefined();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

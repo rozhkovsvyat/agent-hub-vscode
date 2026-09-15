@@ -7,8 +7,31 @@ const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
 const waitCell = new Int32Array(new SharedArrayBuffer(4));
 
+type OwnerFileLockOptions = {
+  now?: () => number;
+  processAlive?: (pid: number) => boolean;
+  timeoutMs?: number;
+};
+
 function pause(milliseconds: number): void {
   Atomics.wait(waitCell, 0, 0, milliseconds);
+}
+
+function defaultProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another security context.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function lockOwnerPid(token: string): number | undefined {
+  const match = token.match(/^(\d+):\d+:[a-f0-9]{32}$/);
+  if (!match) return undefined;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
 }
 
 /**
@@ -16,11 +39,17 @@ function pause(milliseconds: number): void {
  * The lock is advisory for Cukii processes, exclusive on NTFS/POSIX, and has a
  * bounded stale recovery path for an Extension Host that died mid-update.
  */
-export function withOwnerFileLock<T>(target: string, action: () => T): T {
+export function withOwnerFileLock<T>(
+  target: string,
+  action: () => T,
+  options: OwnerFileLockOptions = {},
+): T {
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   const lockPath = `${target}.cukii.lock`;
-  const token = `${process.pid}:${Date.now()}:${randomBytes(16).toString("hex")}`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
+  const processAlive = options.processAlive ?? defaultProcessAlive;
+  const token = `${process.pid}:${now()}:${randomBytes(16).toString("hex")}`;
+  const deadline = now() + (options.timeoutMs ?? LOCK_TIMEOUT_MS);
   let descriptor: number | undefined;
 
   while (descriptor === undefined) {
@@ -31,14 +60,20 @@ export function withOwnerFileLock<T>(target: string, action: () => T): T {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
-        if (Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+        const ageMs = now() - fs.statSync(lockPath).mtimeMs;
+        const ownerPid = lockOwnerPid(fs.readFileSync(lockPath, "utf8"));
+        if (
+          ageMs > LOCK_STALE_MS &&
+          ownerPid !== undefined &&
+          !processAlive(ownerPid)
+        ) {
           fs.unlinkSync(lockPath);
           continue;
         }
       } catch {
         continue;
       }
-      if (Date.now() >= deadline) {
+      if (now() >= deadline) {
         throw new Error(`timed out waiting for Cukii owner-file lock: ${target}`);
       }
       pause(LOCK_WAIT_MS);
