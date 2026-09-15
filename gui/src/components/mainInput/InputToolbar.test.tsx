@@ -160,6 +160,44 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(availableModelForBlankSession("qwen-3-8-max", [])).toBeUndefined();
   });
 
+  it("hides every vendor-dependent control when no CLI exposes a live model", async () => {
+    const mockIdeMessenger = new MockIdeMessenger();
+    let catalogRequests = 0;
+    mockIdeMessenger.responseHandlers["cukii/listBrokerModelCatalog"] =
+      async () => {
+        catalogRequests += 1;
+        return [];
+      };
+
+    const { user } = await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+    });
+
+    await waitFor(() => expect(catalogRequests).toBe(1));
+    expect(
+      document.querySelector('[data-testid="cukii-model-pill"]'),
+    ).toBeNull();
+    expect(document.body.textContent).not.toContain("Bypass permissions");
+
+    await user.click(await getElementByTestId("broker-menu-button"));
+    expect(await getElementByText("Manage accounts…")).toBeDefined();
+    expect(
+      document.querySelector('[data-testid="broker-switch-model"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-autocompact-slider"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-effort-slider"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-thinking-toggle"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="cukii-speed-toggle"]'),
+    ).toBeNull();
+  });
+
   it("reconciles the bootstrap model after the first account login closes", async () => {
     const mockIdeMessenger = new MockIdeMessenger();
     let catalogRequests = 0;

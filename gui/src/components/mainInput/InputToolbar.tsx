@@ -199,6 +199,9 @@ function InputToolbar(props: InputToolbarProps) {
   const [panelDraftResolved, setPanelDraftResolved] = useState(false);
   const reconciledCatalogSession = useRef<string>();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelCatalogAvailability, setModelCatalogAvailability] = useState<
+    "loading" | "available" | "empty" | "unavailable"
+  >("loading");
   const selectedVendor = brokerVendorForModel(brokerModel ?? "qwen-3-8-max");
   const [permissionCapabilities, setPermissionCapabilities] = useState<{
     vendor: BrokerVendorId;
@@ -287,6 +290,10 @@ function InputToolbar(props: InputToolbarProps) {
   }, [issueCapability, props.isMainInput, refreshIssueCapability]);
 
   useEffect(() => {
+    if (modelCatalogAvailability !== "available") {
+      setPermissionCapabilities(null);
+      return;
+    }
     let cancelled = false;
     setPermissionCapabilities(null);
     void ideMessenger
@@ -302,7 +309,7 @@ function InputToolbar(props: InputToolbarProps) {
     return () => {
       cancelled = true;
     };
-  }, [ideMessenger, selectedVendor]);
+  }, [ideMessenger, modelCatalogAvailability, selectedVendor]);
 
   const updateBrokerPreferences = (
     nextModel: BrokerModel,
@@ -438,12 +445,12 @@ function InputToolbar(props: InputToolbarProps) {
     if (
       !props.isMainInput ||
       !panelDraftResolved ||
-      historyLength > 0 ||
       reconciledCatalogSession.current === sessionId
     ) {
       return;
     }
     let cancelled = false;
+    setModelCatalogAvailability("loading");
     void ideMessenger
       .request("cukii/listBrokerModelCatalog", undefined)
       .then((response) => {
@@ -453,14 +460,18 @@ function InputToolbar(props: InputToolbarProps) {
           brokerModel,
           response.content,
         );
-        if (!available) return;
         reconciledCatalogSession.current = sessionId;
-        if (available !== brokerModel) {
+        setModelCatalogAvailability(available ? "available" : "empty");
+        if (historyLength === 0 && available && available !== brokerModel) {
           updateBrokerPreferences(available, "auto");
         }
       })
       .catch(() => {
         // A failed catalog probe is not evidence that another model is usable.
+        if (!cancelled) {
+          reconciledCatalogSession.current = sessionId;
+          setModelCatalogAvailability("unavailable");
+        }
       });
     return () => {
       cancelled = true;
@@ -479,6 +490,7 @@ function InputToolbar(props: InputToolbarProps) {
     !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
   const isRetry = props.toolbarOptions?.enterText === "Retry";
   const showStop = isStreaming && (props.isInputEmpty ?? true);
+  const hasLiveBrokerModel = modelCatalogAvailability === "available";
   const currentModel = brokerModel ?? "opus-5";
   const currentModelInfo = modelInfo(currentModel);
   const currentLabel = currentModelInfo
@@ -721,7 +733,7 @@ function InputToolbar(props: InputToolbarProps) {
                       </button>
                     )}
                     <CommandSectionHeader divided>Model</CommandSectionHeader>
-                    {showAction("Switch model") && (
+                    {hasLiveBrokerModel && showAction("Switch model") && (
                       <button
                         data-testid="broker-switch-model"
                         {...commandActionProps("Switch model")}
@@ -737,7 +749,7 @@ function InputToolbar(props: InputToolbarProps) {
                         </span>
                       </button>
                     )}
-                    {showAction("Autocompact") && (
+                    {hasLiveBrokerModel && showAction("Autocompact") && (
                       <CukiiAutocompactRow
                         className={menuItemClass}
                         autocompact={brokerAutocompact}
@@ -753,7 +765,7 @@ function InputToolbar(props: InputToolbarProps) {
                         }
                       />
                     )}
-                    {showAction("Effort") && (
+                    {hasLiveBrokerModel && showAction("Effort") && (
                       <CukiiEffortRow
                         className={`${menuItemClass} cukii-effort-menu-row`}
                         model={currentModel}
@@ -768,7 +780,9 @@ function InputToolbar(props: InputToolbarProps) {
                         }
                       />
                     )}
-                    {nativeThinkingAvailable && showAction("Thinking") && (
+                    {hasLiveBrokerModel &&
+                      nativeThinkingAvailable &&
+                      showAction("Thinking") && (
                       <button
                         data-testid="cukii-thinking-toggle"
                         {...commandActionProps("Thinking")}
@@ -799,7 +813,9 @@ function InputToolbar(props: InputToolbarProps) {
                     )}
                     {/* A route without a native accelerated tier shows no row
                         at all instead of a permanently disabled one. */}
-                    {nativeFastAvailable && showAction("Fast mode") && (
+                    {hasLiveBrokerModel &&
+                      nativeFastAvailable &&
+                      showAction("Fast mode") && (
                       <button
                         data-testid="cukii-speed-toggle"
                         {...commandActionProps("Fast mode")}
@@ -869,7 +885,7 @@ function InputToolbar(props: InputToolbarProps) {
 
           {/* MAX/Claude-style model pill rides right next to the "/" command
               control; it opens the same picker as "Switch model…". */}
-          {!isInEdit && (
+          {!isInEdit && hasLiveBrokerModel && (
             <button
               type="button"
               data-testid="cukii-model-pill"
@@ -912,7 +928,7 @@ function InputToolbar(props: InputToolbarProps) {
         </div>
 
         <div className="cukii-footer-secondary-actions flex shrink-0 items-center gap-2">
-          {!isInEdit && (
+          {!isInEdit && hasLiveBrokerModel && (
             <PermissionModeControl
               brokerModel={currentModel}
               permissionMode={brokerPermissionMode}
@@ -986,7 +1002,7 @@ function InputToolbar(props: InputToolbarProps) {
         </div>
       </div>
 
-      {modelPickerOpen && (
+      {modelPickerOpen && hasLiveBrokerModel && (
         <ModelPickerModal
           onClose={() => setModelPickerOpen(false)}
           onSelect={(model) =>
