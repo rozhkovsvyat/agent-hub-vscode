@@ -188,6 +188,20 @@ export function usageWindowsFromEvent(event: any): CukiiVendorUsageWindow[] {
     .filter((item): item is CukiiVendorUsageWindow => Boolean(item));
 }
 
+function completedBackgroundAgentStatus(
+  text: string,
+): Extract<BridgeEvent, { kind: "thinking" }> | undefined {
+  const match = /^Background agent ["“]([^"”\r\n]+)["”] completed\.$/.exec(
+    text.trim(),
+  );
+  if (!match) return undefined;
+  return {
+    kind: "thinking",
+    text: `[nested worker ${match[1]}]\nstatus: completed`,
+    vendorActivity: true,
+  };
+}
+
 /**
  * The loader must not guess from quiet stdout: a long command can still be
  * doing useful work. We only recognise a shell tool whose *entire* command is
@@ -318,7 +332,12 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
         case "text": {
           const text = asText(block.text);
           if (text) {
-            out.push({ kind: "text", text });
+            out.push(
+              completedBackgroundAgentStatus(text) ?? {
+                kind: "text",
+                text,
+              },
+            );
           }
           break;
         }

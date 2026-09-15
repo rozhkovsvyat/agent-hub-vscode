@@ -221,6 +221,32 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("routes Qwen background-agent completion to the worker timeline", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Background agent \\\"general-purpose: Review PostToolUse dispatch candidate\\\" completed."}]}}',
+    ]);
+
+    expect(events).toEqual([
+      {
+        kind: "thinking",
+        text: "[nested worker general-purpose: Review PostToolUse dispatch candidate]\nstatus: completed",
+        vendorActivity: true,
+      },
+    ]);
+  });
+
+  it("keeps ordinary assistant prose that merely mentions a background agent", () => {
+    const text = 'The Background agent "review" completed after one retry.';
+    const { events } = collect("anthropic-envelope", [
+      JSON.stringify({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text }] },
+      }),
+    ]);
+
+    expect(events).toEqual([{ kind: "text", text }]);
+  });
+
   it("разбирает событийную модель codex exec --json", () => {
     const { events } = collect("codex-thread", CODEX_LINES);
     expect(events).toEqual([
