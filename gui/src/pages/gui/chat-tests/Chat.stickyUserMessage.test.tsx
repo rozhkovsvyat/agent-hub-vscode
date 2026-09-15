@@ -100,50 +100,41 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(stickyMaskRule).not.toContain("--vscode-sideBar-background");
 });
 
-test("maps scroll distance to a reversible pixel-by-pixel sticky fold", () => {
+test("collapses a long prompt immediately at or above the sticky edge", () => {
   const fullHeight = 140;
-  const forward = [100, 120, 140, 180, 220].map((scrollTop) =>
+  expect(
     resolveStickyCollapseGeometry({
       fullHeight,
-      isAtStickyEdge: true,
-      scrollTop,
-      stickyStartScrollTop: 100,
+      hasReachedStickyEdge: true,
     }),
-  );
-
-  expect(forward.map(({ visibleHeight }) => visibleHeight)).toEqual([
-    140, 120, 100, 60, 20,
-  ]);
-  expect(forward.map(({ phase }) => phase)).toEqual([
-    "folding",
-    "folding",
-    "folding",
-    "folding",
-    "collapsed",
-  ]);
-
-  const reverse = [220, 180, 140, 120, 100].map(
-    (scrollTop) =>
-      resolveStickyCollapseGeometry({
-        fullHeight,
-        isAtStickyEdge: true,
-        scrollTop,
-        stickyStartScrollTop: 100,
-      }).visibleHeight,
-  );
-  expect(reverse).toEqual([20, 60, 100, 120, 140]);
+  ).toEqual({ phase: "collapsed", progress: 1, visibleHeight: 20 });
 
   expect(
     resolveStickyCollapseGeometry({
       fullHeight,
-      isAtStickyEdge: false,
-      scrollTop: 220,
-      stickyStartScrollTop: 100,
+      hasReachedStickyEdge: false,
     }),
   ).toEqual({ phase: "flow", progress: 0, visibleHeight: 140 });
+
+  // A one-line message keeps its ordinary geometry even at the sticky edge.
+  expect(
+    resolveStickyCollapseGeometry({
+      fullHeight: 20,
+      hasReachedStickyEdge: true,
+    }),
+  ).toEqual({ phase: "flow", progress: 0, visibleHeight: 20 });
+
+  // Attachment strips are content height, not a special exception: once the
+  // combined capsule is taller than one line it follows the same fold rule.
+  expect(
+    resolveStickyCollapseGeometry({
+      fullHeight: 60,
+      hasReachedStickyEdge: true,
+    }),
+  ).toEqual({ phase: "collapsed", progress: 1, visibleHeight: 20 });
 });
 
-test("keeps the pre-paint flow origin when streamed markdown becomes long after the row sticks", async () => {
+test("collapses when streamed markdown becomes long after the row sticks", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
@@ -292,7 +283,7 @@ test("keeps the pre-paint flow origin when streamed markdown becomes long after 
   }
 });
 
-test("uses the turn flow origin when a restored session mounts with the row already sticky", async () => {
+test("collapses a restored long prompt that mounts already sticky", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
@@ -474,7 +465,7 @@ test("uses the turn flow origin when a restored session mounts with the row alre
   }
 });
 
-test("folds a long prompt only after it actually sticks to the transcript top", async () => {
+test("collapses a long prompt immediately at the sticky edge and keeps it collapsed while displaced", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
@@ -580,35 +571,16 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
     transcript.scrollTop = 100;
     act(() => transcript.dispatchEvent(new Event("scroll")));
 
-    // Touching the sticky edge starts at the full height. Each subsequent
-    // scroll pixel clips one content pixel while the row's flow height stays
-    // fixed, so the transcript anchor cannot jump.
+    // The first contact with the sticky edge collapses immediately. There is
+    // no intermediate orange block that consumes more of the transcript.
     await waitFor(() =>
-      expect(content.dataset.cukiiScrollFolding).toBe("true"),
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
     );
     expect(
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("140px");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    ).toBe("20px");
     const stableFlowHeight = row.style.getPropertyValue(
       "--cukii-sticky-flow-height",
-    );
-
-    transcript.scrollTop = 140;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(
-        content.style.getPropertyValue("--cukii-sticky-visible-height"),
-      ).toBe("100px"),
-    );
-    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
-      stableFlowHeight,
-    );
-
-    transcript.scrollTop = 220;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
     );
     const clippedContent = bubble?.querySelector(
       ".cukii-user-message-content--collapsed",
@@ -684,36 +656,35 @@ test("folds a long prompt only after it actually sticks to the transcript top", 
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
 
-    // Reversing the wheel reveals the same pixels in reverse and still does
-    // not alter the row's document-flow height.
+    // Reversing the wheel while the row remains at the sticky edge does not
+    // re-expand it or alter the row's document-flow height.
     transcript.scrollTop = 180;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
       expect(
         content.style.getPropertyValue("--cukii-sticky-visible-height"),
-      ).toBe("60px"),
+      ).toBe("20px"),
     );
     expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
       stableFlowHeight,
     );
 
-    // The end of a turn pushes its formerly sticky row above the viewport.
-    // A one-sided `<=` check misclassified this negative top as still pinned.
+    // The next sticky turn can push this row above the viewport. It must stay
+    // collapsed instead of expanding into a large block while leaving.
     rowTop = -20;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
-      expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed"),
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
     );
-    expect(container.querySelector('[aria-label="Show more"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Show more"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Show less"]')).toBeNull();
 
-    // The prompt body is text, not a control. Once the row leaves the sticky
-    // edge it stays fully expanded and clicking the ordinary chat message can
-    // neither collapse it nor bring the chevron back.
+    // The prompt body is text, not a control. Clicking it cannot expand the
+    // displaced sticky message; only the chevron controls that state.
     await user.click(
       bubble?.querySelector(".cukii-user-message-content") as HTMLElement,
     );
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
     expect(bubble).not.toHaveClass("cukii-user-bubble--expanded");
     expect(canonicalCss()).toMatch(
       /\.cukii-user-content-shell\s*\{[^}]*cursor:\s*default/s,

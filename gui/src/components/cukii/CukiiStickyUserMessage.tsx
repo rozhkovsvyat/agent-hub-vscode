@@ -9,20 +9,16 @@ import {
 
 export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 20;
 
-type StickyCollapsePhase = "flow" | "folding" | "collapsed";
+type StickyCollapsePhase = "flow" | "collapsed";
 
 interface StickyCollapseGeometryArgs {
   fullHeight: number;
-  isAtStickyEdge: boolean;
-  scrollTop: number;
-  stickyStartScrollTop: number;
+  hasReachedStickyEdge: boolean;
 }
 
 export function resolveStickyCollapseGeometry({
   fullHeight,
-  isAtStickyEdge,
-  scrollTop,
-  stickyStartScrollTop,
+  hasReachedStickyEdge,
 }: StickyCollapseGeometryArgs): {
   phase: StickyCollapsePhase;
   progress: number;
@@ -34,44 +30,14 @@ export function resolveStickyCollapseGeometry({
   );
   const collapseDistance =
     naturalHeight - CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
-  if (!isAtStickyEdge || collapseDistance <= 0) {
+  if (!hasReachedStickyEdge || collapseDistance <= 0) {
     return { phase: "flow", progress: 0, visibleHeight: naturalHeight };
   }
-
-  const consumed = Math.max(
-    0,
-    Math.min(collapseDistance, scrollTop - stickyStartScrollTop),
-  );
-  const progress = consumed / collapseDistance;
   return {
-    phase: consumed >= collapseDistance ? "collapsed" : "folding",
-    progress,
-    visibleHeight: naturalHeight - consumed,
+    phase: "collapsed",
+    progress: 1,
+    visibleHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
   };
-}
-
-function offsetTopInside(element: HTMLElement, ancestor: HTMLElement) {
-  let node: HTMLElement | null = element;
-  let offset = 0;
-  while (node && node !== ancestor) {
-    offset += node.offsetTop;
-    node = node.offsetParent as HTMLElement | null;
-  }
-  return node === ancestor ? offset : undefined;
-}
-
-function stickyFlowOriginInside(row: HTMLElement, transcript: HTMLElement) {
-  // Once CSS `position: sticky` pins the row, Chromium changes the row's
-  // offsetTop to its painted position. The containing turn remains in normal
-  // document flow, and the sticky user row is its first layout child, so the
-  // turn is the stable origin even when a restored session mounts at the
-  // bottom with the row already pinned.
-  const turn = row.closest<HTMLElement>(".cukii-turn");
-  if (turn && turn !== row && transcript.contains(turn)) {
-    const turnOffset = offsetTopInside(turn, transcript);
-    if (turnOffset !== undefined) return turnOffset;
-  }
-  return offsetTopInside(row, transcript);
 }
 
 interface CukiiStickyUserMessageProps {
@@ -82,9 +48,10 @@ interface CukiiStickyUserMessageProps {
 }
 
 /**
- * Long prompts fold to one line only while their row is physically pinned to
- * the transcript top. Cukii keeps the fold toggle and delivery metadata in one
- * compact MAX-style footer so neither state creates a second toolbar row.
+ * Long prompts fold to one line as soon as their row reaches the transcript
+ * top and remain folded while a newer sticky turn displaces them upward.
+ * Cukii keeps the fold toggle and delivery metadata in one compact MAX-style
+ * footer so neither state creates a second toolbar row.
  */
 export function CukiiStickyUserMessage({
   bubbleClassName,
@@ -97,7 +64,6 @@ export function CukiiStickyUserMessage({
   const [isExpanded, setIsExpanded] = useState(false);
   const isExpandedRef = useRef(isExpanded);
   const naturalContentHeightRef = useRef(0);
-  const stickyStartScrollTopRef = useRef<number | undefined>();
   const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
   isExpandedRef.current = isExpanded;
 
@@ -106,8 +72,6 @@ export function CukiiStickyUserMessage({
     if (!content) return;
 
     naturalContentHeightRef.current = 0;
-    stickyStartScrollTopRef.current = undefined;
-
     const measure = () => {
       naturalContentHeightRef.current = Math.max(
         naturalContentHeightRef.current,
@@ -202,20 +166,6 @@ export function CukiiStickyUserMessage({
       const rowRect = row.getBoundingClientRect();
       const rowTopFromScrollport = rowRect.top - transcriptRect.top;
 
-      // Capture the row's document-flow origin even while Markdown is still
-      // reporting zero/one-line height. In a real streamed turn, parent
-      // auto-scroll can pin the row before the delayed content measurement
-      // flips `isLongPrompt`; Blink then exposes a painted sticky offset equal
-      // to the current scrollTop. Adopting that late value leaves no remaining
-      // scroll distance and progress stays at 0 forever.
-      if (rowTopFromScrollport > 1) {
-        stickyStartScrollTopRef.current =
-          transcript.scrollTop + rowTopFromScrollport;
-      } else if (stickyStartScrollTopRef.current === undefined) {
-        stickyStartScrollTopRef.current =
-          stickyFlowOriginInside(row, transcript) ?? transcript.scrollTop;
-      }
-
       const fullHeight = naturalContentHeightRef.current;
       if (
         !isLongPrompt ||
@@ -225,13 +175,14 @@ export function CukiiStickyUserMessage({
         return;
       }
 
-      const isAtStickyEdge =
-        transcript.scrollTop > 0 && Math.abs(rowTopFromScrollport) <= 1;
+      // Collapse as soon as the row reaches the sticky edge. A previous row
+      // pushed above it by the next sticky prompt stays collapsed while it
+      // leaves the viewport instead of expanding into a large orange block.
+      const hasReachedStickyEdge =
+        transcript.scrollTop > 0 && rowTopFromScrollport <= 1;
       const geometry = resolveStickyCollapseGeometry({
         fullHeight,
-        isAtStickyEdge,
-        scrollTop: transcript.scrollTop,
-        stickyStartScrollTop: stickyStartScrollTopRef.current,
+        hasReachedStickyEdge,
       });
       const visibleHeight =
         isExpandedRef.current || geometry.phase === "flow"
