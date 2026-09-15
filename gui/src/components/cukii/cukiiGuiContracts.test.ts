@@ -104,6 +104,28 @@ describe("Cukii GUI contracts", () => {
     expect(submitRules).not.toMatch(/#(?:f48771|e9775f|fff(?:fff)?)/);
   });
 
+  it("uses the message-capsule radius for the composer and Start/Stop", () => {
+    const css = source("index.css");
+    const assistantStart = css.indexOf(".cukii-assistant-bubble {");
+    const assistantRule = css.slice(
+      assistantStart,
+      css.indexOf("}", assistantStart) + 1,
+    );
+    const composerStart = css.indexOf(
+      ".cukii-main-input-shell .cukii-input-box {",
+    );
+    const composerRule = css.slice(
+      composerStart,
+      css.indexOf("}", composerStart) + 1,
+    );
+    const submitStart = css.lastIndexOf("button.cukii-submit-button,");
+    const submitRule = css.slice(submitStart, css.indexOf("}", submitStart) + 1);
+
+    expect(assistantRule).toContain("border-radius: 16px;");
+    expect(composerRule).toContain("border-radius: 16px !important;");
+    expect(submitRule).toContain("border-radius: 16px !important;");
+  });
+
   it("declares cookie-orange focus and semantic invalid-state precedence", () => {
     // JSDOM does not evaluate :focus-within. Assert the canonical stylesheet
     // selector and declarations directly rather than testing a fake pseudo-state.

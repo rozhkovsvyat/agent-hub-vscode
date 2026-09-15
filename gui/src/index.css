@@ -268,7 +268,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 .cukii-main-input-shell .cukii-input-box {
   background: var(--vscode-menu-background, #252526) !important;
   border: 1px solid var(--vscode-widget-border, #2a2b2c) !important;
-  border-radius: 8px !important;
+  border-radius: 16px !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   min-height: 78px;
   padding: 0 !important;
@@ -1896,7 +1896,7 @@ button.cukii-submit-button:hover {
   min-height: 26px !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 5px !important;
+  border-radius: 16px !important;
   background: var(--cukii-primary-action-background) !important;
   box-shadow: none !important;
   color: var(--cukii-primary-action-icon) !important;
