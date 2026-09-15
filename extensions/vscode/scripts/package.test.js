@@ -311,6 +311,14 @@ test("carrier gate rejects empty and unrecognized native files", async () => {
     assert.notEqual(result.status, 0, output);
     assert.match(output, /empty native\/runtime executable/);
     assert.match(output, /unrecognized native\/runtime executable format/);
+    assert.match(
+      output,
+      /required file missing: extension\/out\/node_modules\/onnxruntime-node\/bin\/napi-v3\/darwin\/arm64\/onnxruntime_binding\.node/,
+    );
+    assert.match(
+      output,
+      /required file missing: extension\/out\/node_modules\/sharp\/vendor\/8\.14\.5\/darwin-arm64v8\/lib\/libvips-cpp\.42\.dylib/,
+    );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
