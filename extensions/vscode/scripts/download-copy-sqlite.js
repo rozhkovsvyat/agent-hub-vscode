@@ -99,7 +99,7 @@ async function installAndCopyEsbuild(target) {
 // module`: under a custom module loader (vite-node, ts-node, jest) `require.main`
 // is not the real entry point, so that test passed inside a vitest worker and the
 // handler was installed anyway. See `child-operation.js` for the full rationale.
-if (isForkedChildOperation()) {
+if (isForkedChildOperation(__filename)) {
   process.on("message", handleWorkerMessage);
 }
 
@@ -135,7 +135,10 @@ async function copySqlite(target) {
   const child = fork(__filename, {
     stdio: "inherit",
     cwd: process.cwd(),
-    env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
+    env: {
+      ...process.env,
+      [CHILD_OPERATION_ENV_MARKER]: path.resolve(__filename),
+    },
   });
   child.send({
     payload: {
@@ -162,7 +165,10 @@ async function copyEsbuild(target) {
   const child = fork(__filename, {
     stdio: "inherit",
     cwd: process.cwd(),
-    env: { ...process.env, [CHILD_OPERATION_ENV_MARKER]: "1" },
+    env: {
+      ...process.env,
+      [CHILD_OPERATION_ENV_MARKER]: path.resolve(__filename),
+    },
   });
   child.send({
     payload: {

@@ -1,9 +1,11 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const JSZip = require("jszip");
 
 const { runChildOperation } = require("./child-operation");
 const { generateConfigYamlSchema } = require("./generate-copy-config");
@@ -36,7 +38,7 @@ test("rejects a hostile package target before any command is launched", () => {
   assert.equal(parsePackageArgs(["--target", "linux-x64"]).target, "linux-x64");
 });
 
-test("package-all prepares fresh GUI staging once before every target", () => {
+test("package-all prepares GUI once and routes every target through the hardened driver", () => {
   let stagedAsset = "stale";
   let prepareCount = 0;
   const commands = [];
@@ -55,17 +57,57 @@ test("package-all prepares fresh GUI staging once before every target", () => {
   });
 
   assert.equal(prepareCount, 1);
-  assert.equal(commands.length, 4);
+  assert.equal(commands.length, 3);
+  assert.equal(path.basename(commands[0][0]), "package-cross-target.js");
   assert.deepEqual(commands[0].slice(-3), [
     "--target",
     "linux-x64",
     "--gui-prepared",
   ]);
-  assert.deepEqual(commands[2].slice(-3), [
+  assert.equal(path.basename(commands[1][0]), "package-cross-target.js");
+  assert.deepEqual(commands[1].slice(-3), [
     "--target",
     "darwin-arm64",
     "--gui-prepared",
   ]);
+  assert.deepEqual(commands[2].slice(-1), ["--restore-host"]);
+  assert.equal(path.basename(commands[2][0]), "package-cross-target.js");
+  assert.equal(
+    commands.some((args) =>
+      args.some((arg) => String(arg).includes("prepackage-cross-platform")),
+    ),
+    false,
+  );
+});
+
+test("package-all propagates pre-release and restores the host after a target failure", () => {
+  const commands = [];
+  const targetFailure = new Error("target failed");
+
+  assert.throws(
+    () =>
+      packageAll({
+        args: ["--pre-release"],
+        platforms: ["linux-x64", "darwin-arm64"],
+        prepareGui() {},
+        runCommand(_command, args) {
+          commands.push(args);
+          if (args.includes("linux-x64")) {
+            throw targetFailure;
+          }
+        },
+      }),
+    (error) => error === targetFailure,
+  );
+
+  assert.equal(commands.length, 2);
+  assert.deepEqual(commands[0].slice(-4), [
+    "--target",
+    "linux-x64",
+    "--gui-prepared",
+    "--pre-release",
+  ]);
+  assert.deepEqual(commands[1].slice(-1), ["--restore-host"]);
 });
 
 test("package output path includes the requested target", () => {
@@ -221,4 +263,55 @@ test("skip-install mode rejects a hidden native dependency install", () => {
       expectedPath: "missing-package",
     }),
   );
+});
+
+test("carrier gate rejects empty and unrecognized native files", async () => {
+  const tempRoot = fs.mkdtempSync(
+    path.join(
+      process.platform === "win32" && fs.existsSync("D:\\Scratch")
+        ? "D:\\Scratch"
+        : os.tmpdir(),
+      "cukii-carrier-negative-",
+    ),
+  );
+  try {
+    const vsixPath = path.join(tempRoot, "broken-darwin-arm64.vsix");
+    const zip = new JSZip();
+    zip.file(
+      "extension.vsixmanifest",
+      '<PackageManifest TargetPlatform="darwin-arm64" />',
+    );
+    zip.file("extension/package.json", JSON.stringify({ version: "0.0.0" }));
+    zip.file("extension/out/build/Release/empty.node", Buffer.alloc(0));
+    zip.file("extension/out/build/Release/text.node", "not machine code");
+    fs.writeFileSync(vsixPath, await zip.generateAsync({ type: "nodebuffer" }));
+
+    const gatePath = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "scripts",
+      "assert-cukii-cross-target-vsix.ps1",
+    );
+    const result = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        gatePath,
+        "-VsixPath",
+        vsixPath,
+        "-ExpectedTarget",
+        "darwin-arm64",
+      ],
+      { encoding: "utf8" },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /empty native\/runtime executable/);
+    assert.match(output, /unrecognized native\/runtime executable format/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

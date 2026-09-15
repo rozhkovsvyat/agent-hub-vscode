@@ -1,6 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { fork } from "child_process";
 
 import { describe, expect, it } from "vitest";
 
@@ -24,7 +25,14 @@ const {
 } = require("./cross-target-packaging");
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parseArgs } = require("./package-cross-target");
+const { ensureLancedbForTarget, parseArgs } = require("./package-cross-target");
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const {
+  UNIX_EXECUTABLE_ENTRIES,
+  UNIX_EXECUTABLE_MODE,
+  patchExecutableModesInBuffer,
+} = require("./zip-executable-mode");
 
 interface RecordedInstall {
   script: string;
@@ -52,6 +60,38 @@ const VECTORDB_MANIFEST = {
     "@lancedb/vectordb-win32-x64-msvc": "0.4.20",
   },
 };
+
+function centralDirectoryOnlyZip(entries: string[]): Buffer {
+  const centralEntries = entries.map((name) => {
+    const encodedName = Buffer.from(name, "utf8");
+    const header = Buffer.alloc(46 + encodedName.length);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(encodedName.length, 28);
+    header.writeUInt32LE((0o100666 << 16) >>> 0, 38);
+    encodedName.copy(header, 46);
+    return header;
+  });
+  const directory = Buffer.concat(centralEntries);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(directory.length, 12);
+  eocd.writeUInt32LE(0, 16);
+  return Buffer.concat([directory, eocd]);
+}
+
+async function withTempExtensionDirAsync<T>(
+  run: (extensionDir: string) => Promise<T>,
+): Promise<T> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-cross-target-"));
+  try {
+    return await run(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
 
 describe("ripgrep prebuilt selection", () => {
   it("names the asset @vscode/ripgrep would download natively on each target", () => {
@@ -120,6 +160,94 @@ describe("LanceDB native package selection", () => {
     expect(() => lancedbVersionForTarget("darwin-arm64", undefined)).toThrow(
       /refusing to install an unversioned native module/,
     );
+  });
+
+  it("replaces a target package whose directory exists at the wrong ABI version", async () => {
+    await withTempExtensionDirAsync(async (extensionDir) => {
+      const wrapperDir = path.join(extensionDir, "node_modules", "vectordb");
+      const nativeDir = path.join(
+        extensionDir,
+        "node_modules",
+        "@lancedb",
+        "vectordb-darwin-arm64",
+      );
+      fs.mkdirSync(wrapperDir, { recursive: true });
+      fs.mkdirSync(nativeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(wrapperDir, "package.json"),
+        JSON.stringify(VECTORDB_MANIFEST),
+      );
+      fs.writeFileSync(
+        path.join(nativeDir, "package.json"),
+        JSON.stringify({ version: "0.21.2" }),
+      );
+
+      const installs: string[][] = [];
+      const removed: string[] = [];
+      await ensureLancedbForTarget("darwin-arm64", {
+        extensionRoot: extensionDir,
+        remove: (target: string) => {
+          removed.push(target);
+          fs.rmSync(target, { recursive: true, force: true });
+        },
+        install: async (...args: string[]) => {
+          installs.push(args);
+          fs.mkdirSync(nativeDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(nativeDir, "package.json"),
+            JSON.stringify({ version: "0.4.20" }),
+          );
+        },
+      });
+
+      expect(removed).toEqual([nativeDir]);
+      expect(installs).toEqual([
+        ["@lancedb/vectordb-darwin-arm64", "@lancedb", "0.4.20"],
+      ]);
+    });
+  });
+});
+
+describe("VSIX Unix executable metadata", () => {
+  it("marks only the shipped Unix executables as 0100755", () => {
+    const unrelated = "extension/out/extension.js";
+    const buffer = centralDirectoryOnlyZip([
+      ...UNIX_EXECUTABLE_ENTRIES,
+      unrelated,
+    ]);
+
+    expect(patchExecutableModesInBuffer(buffer)).toEqual(
+      [...UNIX_EXECUTABLE_ENTRIES].sort(),
+    );
+
+    let offset = 0;
+    const modes = new Map<string, number>();
+    const hosts = new Map<string, number>();
+    for (let index = 0; index < 3; index += 1) {
+      const nameLength = buffer.readUInt16LE(offset + 28);
+      const name = buffer.toString(
+        "utf8",
+        offset + 46,
+        offset + 46 + nameLength,
+      );
+      modes.set(name, buffer.readUInt32LE(offset + 38) >>> 16);
+      hosts.set(name, buffer.readUInt16LE(offset + 4) >>> 8);
+      offset += 46 + nameLength;
+    }
+
+    for (const executable of UNIX_EXECUTABLE_ENTRIES) {
+      expect(modes.get(executable)).toBe(UNIX_EXECUTABLE_MODE);
+      expect(hosts.get(executable)).toBe(3);
+    }
+    expect(modes.get(unrelated)).toBe(0o100666);
+  });
+
+  it("NEGATIVE CONTROL: refuses a VSIX missing either required executable", () => {
+    expect(() =>
+      patchExecutableModesInBuffer(
+        centralDirectoryOnlyZip([UNIX_EXECUTABLE_ENTRIES[0]]),
+      ),
+    ).toThrow(/Executable entries missing/);
   });
 });
 
@@ -325,6 +453,21 @@ describe("cross-packaging driver arguments", () => {
     expect(parseArgs(["--target", "darwin-arm64"])).toEqual({
       target: "darwin-arm64",
       restoreHost: false,
+      preRelease: false,
+      guiPrepared: false,
+    });
+    expect(
+      parseArgs([
+        "--target",
+        "darwin-arm64",
+        "--pre-release",
+        "--gui-prepared",
+      ]),
+    ).toEqual({
+      target: "darwin-arm64",
+      restoreHost: false,
+      preRelease: true,
+      guiPrepared: true,
     });
     expect(() => parseArgs([])).toThrow(/--target is required/);
     expect(() => parseArgs(["--target", "solaris-sparc"])).toThrow(
@@ -340,6 +483,11 @@ describe("cross-packaging driver arguments", () => {
     const parsed = parseArgs(["--restore-host"]);
     expect(parsed.restoreHost).toBe(true);
     expect(parsed.target).toBe(`${process.platform}-${process.arch}`);
+    expect(parsed.preRelease).toBe(false);
+    expect(parsed.guiPrepared).toBe(false);
+    expect(() =>
+      parseArgs(["--restore-host", "--target", "linux-x64"]),
+    ).toThrow(/cannot be combined/);
   });
 });
 
@@ -436,11 +584,28 @@ describe("build modules required as libraries", () => {
     "./generate-copy-config",
   ])(
     "registers no IPC handler when %s is required as a library",
-    (modulePath) => {
-      const before = process.listenerCount("message");
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      require(modulePath);
-      expect(process.listenerCount("message")).toBe(before);
+    async (modulePath) => {
+      const absoluteModulePath = require.resolve(modulePath);
+      const probePath = path.join(__dirname, "ipc-import-probe.js");
+      const result = await new Promise<{
+        before?: number;
+        after?: number;
+        error?: string;
+      }>((resolve, reject) => {
+        const child = fork(probePath, [absoluteModulePath], {
+          stdio: ["ignore", "ignore", "ignore", "ipc"],
+          env: { ...process.env, CUKII_FORKED_BUILD_WORKER: "inherited-noise" },
+        });
+        child.once("message", (message) => resolve(message as any));
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (code !== 0) {
+            reject(new Error(`IPC import probe exited with ${code}`));
+          }
+        });
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.after).toBe(result.before);
     },
   );
 
@@ -451,13 +616,24 @@ describe("build modules required as libraries", () => {
       CHILD_OPERATION_ENV_MARKER,
     } = require("./child-operation");
     // An IPC channel alone must not qualify: that is exactly the vitest case.
-    expect(isForkedChildOperation({})).toBe(false);
-    expect(isForkedChildOperation({ [CHILD_OPERATION_ENV_MARKER]: "0" })).toBe(
+    const modulePath = path.join(__dirname, "fake-worker.js");
+    expect(isForkedChildOperation(modulePath, {}, ["node", modulePath])).toBe(
       false,
     );
-    expect(isForkedChildOperation({ [CHILD_OPERATION_ENV_MARKER]: "1" })).toBe(
-      true,
-    );
+    expect(
+      isForkedChildOperation(
+        modulePath,
+        { [CHILD_OPERATION_ENV_MARKER]: modulePath },
+        ["node", modulePath],
+      ),
+    ).toBe(true);
+    expect(
+      isForkedChildOperation(
+        modulePath,
+        { [CHILD_OPERATION_ENV_MARKER]: modulePath },
+        ["node", path.join(__dirname, "descendant.js")],
+      ),
+    ).toBe(false);
   });
 
   it("still exports the functions the build calls", () => {

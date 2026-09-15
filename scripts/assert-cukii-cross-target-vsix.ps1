@@ -145,10 +145,12 @@ try {
 
     # 2. Every native file must belong to the declared platform.
     $nativePattern = '\.(node|dylib|so|so\.[0-9.]+|dll)$'
-    $nativeEntries = $entries | Where-Object { $_.FullName -match $nativePattern -and $_.Length -gt 0 }
+    $nativeEntries = $entries | Where-Object { $_.FullName -match $nativePattern }
     # Executables carry no extension outside Windows; check them by known name.
     $executableNames = @('rg', 'rg.exe', 'ffmpeg', 'ffmpeg.exe')
-    $executableEntries = $entries | Where-Object { $executableNames -contains (Split-Path -Leaf $_.FullName) -and $_.Length -gt 0 }
+    $executableEntries = $entries | Where-Object { $executableNames -contains (Split-Path -Leaf $_.FullName) }
+    $executablePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($entry in $executableEntries) { $executablePaths.Add($entry.FullName) | Out-Null }
 
     # `win-ca` disables itself off Windows (`api.disabled = process.platform !== 'win32'`)
     # and never dlopens these bindings there, but esbuild resolves them statically into
@@ -160,16 +162,37 @@ try {
     $foreign = 0
     $inert = 0
     foreach ($entry in @($nativeEntries) + @($executableEntries)) {
+        if ($entry.Length -le 0) {
+            Add-Failure "empty native/runtime executable: $($entry.FullName)"
+            $foreign++
+            continue
+        }
         $identity = Get-BinaryIdentity (Read-EntryHead $entry) $null
         $inspected++
-        if ($identity.platform -eq 'unknown') { continue }  # scripts and text stubs
         if ($entry.FullName -match $inertWindowsBindings) { $inert++; continue }
-        if ($identity.platform -ne $expectedPlatform) {
+        if ($identity.platform -eq 'unknown') {
+            Add-Failure "unrecognized native/runtime executable format in $($entry.FullName)"
+            $foreign++
+        } elseif ($identity.arch -eq 'universal') {
+            # A fat Mach-O needs slice-level parsing before it can prove the target
+            # CPU is present. Target-specific packages do not need fat binaries, so
+            # fail closed instead of treating an uninspected container as a match.
+            Add-Failure "unverified universal binary in target-specific package: $($entry.FullName)"
+            $foreign++
+        } elseif ($identity.platform -ne $expectedPlatform) {
             Add-Failure ("foreign platform {0} ({1}) in {2}" -f $identity.platform, $identity.arch, $entry.FullName)
             $foreign++
-        } elseif ($identity.arch -ne $expectedArch -and $identity.arch -ne 'universal') {
+        } elseif ($identity.arch -ne $expectedArch) {
             Add-Failure ("wrong arch {0} in {1}" -f $identity.arch, $entry.FullName)
             $foreign++
+        }
+
+        if ($expectedPlatform -ne 'win32' -and $executablePaths.Contains($entry.FullName)) {
+            $unixMode = ($entry.ExternalAttributes -shr 16) -band 0xFFFF
+            if (($unixMode -band 0x49) -eq 0) {
+                Add-Failure ("Unix executable has no execute bits (mode {0}): {1}" -f [Convert]::ToString($unixMode, 8), $entry.FullName)
+                $foreign++
+            }
         }
     }
     Add-Check ("native binaries inspected: {0}, foreign: {1}, inert win-ca bindings allowed: {2}" -f $inspected, $foreign, $inert)
@@ -178,6 +201,11 @@ try {
     $exe = if ($expectedPlatform -eq 'win32') { '.exe' } else { '' }
     $sharpArch = switch ($expectedArch) { 'arm64' { 'arm64v8' } default { $expectedArch } }
     $lancedbSuffix = switch ($expectedPlatform) { 'win32' { '-msvc' } 'linux' { '-gnu' } default { '' } }
+    $onnxSharedLibrary = switch ($expectedPlatform) {
+        'darwin' { "extension/bin/napi-v3/$expectedPlatform/$expectedArch/libonnxruntime.1.14.0.dylib" }
+        'linux' { "extension/bin/napi-v3/$expectedPlatform/$expectedArch/libonnxruntime.so.1.14.0" }
+        default { "extension/bin/napi-v3/$expectedPlatform/$expectedArch/onnxruntime.dll" }
+    }
     $required = @(
         "extension/out/node_modules/@vscode/ripgrep/bin/rg$exe",
         "extension/out/node_modules/@lancedb/vectordb-$ExpectedTarget$lancedbSuffix/index.node",
@@ -185,13 +213,19 @@ try {
         "extension/out/runtime/ffmpeg$exe",
         "extension/out/build/Release/node_sqlite3.node",
         "extension/bin/napi-v3/$expectedPlatform/$expectedArch/onnxruntime_binding.node",
+        $onnxSharedLibrary,
+        "extension/out/extension.js",
         "extension/gui/assets/index.js",
         "extension/gui/assets/index.css"
     )
-    $names = [System.Collections.Generic.HashSet[string]]::new()
-    foreach ($entry in $entries) { $names.Add($entry.FullName) | Out-Null }
+    $entriesByName = @{}
+    foreach ($entry in $entries) { $entriesByName[$entry.FullName] = $entry }
     foreach ($path in $required) {
-        if (-not $names.Contains($path)) { Add-Failure "required file missing: $path" }
+        if (-not $entriesByName.ContainsKey($path)) {
+            Add-Failure "required file missing: $path"
+        } elseif ($entriesByName[$path].Length -le 0) {
+            Add-Failure "required file empty: $path"
+        }
     }
     Add-Check ("required runtime files checked: {0}" -f $required.Count)
 
