@@ -47,6 +47,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     brokerPermissionMode: "bypass",
   },
   "cukii/getActiveEditorSelectionState": { hasSelection: false },
+  "cukii/getActiveChatContext": null,
   "cukii/listPermissionCapabilities": [
     {
       vendor: "claude",

@@ -13,6 +13,7 @@ import Stats from "./pages/stats";
 import ThemePage from "./styles/ThemePage";
 import { ROUTES } from "./util/navigation";
 import CukiiSessionNavigator from "./pages/sessions/CukiiSessionNavigator";
+import { CukiiVendorUsageDetails } from "./pages/sessions/CukiiVendorUsage";
 
 document.documentElement.dataset.cukiiSurface = window.cukiiSurface ?? "chat";
 // Panel ids carry a random suffix now; derive the alternating tone from a
@@ -63,6 +64,13 @@ const router = createMemoryRouter([
   most of which interact with redux etc.
 */
 function App() {
+  if (window.cukiiSurface === "usage") {
+    return (
+      <VscThemeProvider>
+        <CukiiVendorUsageDetails vendor={window.cukiiVendor ?? undefined} />
+      </VscThemeProvider>
+    );
+  }
   if (window.cukiiSurface === "sidebar") {
     return (
       <VscThemeProvider>

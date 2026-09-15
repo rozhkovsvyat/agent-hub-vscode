@@ -6,6 +6,10 @@ import { ContextMenuConfig, ILLM, ModelInstaller } from "core";
 import { CompletionProvider } from "core/autocomplete/CompletionProvider";
 import { ConfigHandler } from "core/config/ConfigHandler";
 import { EXTENSION_NAME } from "core/util/constants";
+import {
+  cukiiVendorLabel,
+  type BrokerVendorId,
+} from "core/cukiiVendorRegistry";
 import { Core } from "core/core";
 import { walkDirAsync } from "core/indexing/walkDir";
 import { isModelInstaller } from "core/llm";
@@ -38,6 +42,7 @@ import {
 import { ContinueConsoleWebviewViewProvider } from "./ContinueConsoleWebviewViewProvider";
 import { ContinueGUIWebviewViewProvider } from "./ContinueGUIWebviewViewProvider";
 import {
+  activeCukiiChatContext,
   cukiiPanelRegistry as fullScreenPanels,
   CUKII_BLANK_PANEL_TITLE,
   getCukiiRenameTarget,
@@ -117,6 +122,10 @@ function attachFullScreenPanel(
       "cukii/openChatPanelsChanged",
       listOpenCukiiPanels(),
     );
+    sidebar.webviewProtocol.send(
+      "cukii/activeChatContextChanged",
+      activeCukiiChatContext(),
+    );
   };
 
   notifyPanelList();
@@ -131,6 +140,11 @@ function attachFullScreenPanel(
       fullScreenPanels.updateTitle(panelId, data.title.trim());
       panel.title = data.title.trim();
     }
+    notifyPanelList();
+  });
+
+  protocol.on("cukii/panelModelChanged", ({ data }) => {
+    fullScreenPanels.updateModel(panelId, data.brokerModel);
     notifyPanelList();
   });
 
@@ -158,6 +172,7 @@ function attachFullScreenPanel(
   panel.onDidChangeViewState(({ webviewPanel }) => {
     if (webviewPanel.active) {
       fullScreenPanels.markActive(panelId);
+      notifyPanelList();
     }
   });
 
@@ -279,6 +294,17 @@ const getCommandsMap: (
   core,
   editDecorationManager,
 ) => {
+  const notifyPanelState = () => {
+    sidebar.webviewProtocol.send(
+      "cukii/openChatPanelsChanged",
+      listOpenCukiiPanels(),
+    );
+    sidebar.webviewProtocol.send(
+      "cukii/activeChatContextChanged",
+      activeCukiiChatContext(),
+    );
+  };
+
   async function ensureActiveChatPanel(): Promise<CukiiPanelHost | undefined> {
     const active = fullScreenPanels.lastActive();
     if (active) {
@@ -892,6 +918,7 @@ const getCommandsMap: (
         ) {
           existing.panel.panel.reveal();
           fullScreenPanels.markActive(existing.id);
+          notifyPanelState();
           return;
         }
       }
@@ -904,6 +931,7 @@ const getCommandsMap: (
         if (existing) {
           existing.panel.panel.reveal();
           fullScreenPanels.markActive(existing.id);
+          notifyPanelState();
           return;
         }
       }
@@ -960,6 +988,7 @@ const getCommandsMap: (
         if (racedExisting) {
           racedExisting.panel.panel.reveal();
           fullScreenPanels.markActive(racedExisting.id);
+          notifyPanelState();
           return;
         }
         initialTitle = known.title;
@@ -996,6 +1025,36 @@ const getCommandsMap: (
         initialTitle,
         options.suppressInitialChordCharacter,
       );
+    },
+    "cukii.openVendorUsageDetails": async ({
+      vendor,
+    }: {
+      vendor: BrokerVendorId;
+    }) => {
+      const protocol = sidebar.webviewProtocol.cloneHandlers();
+      const panelId = `usage-${vendor}-${randomUUID()}`;
+      const panel = vscode.window.createWebviewPanel(
+        "cukii.vendorUsage",
+        `Account & Usage — ${cukiiVendorLabel(vendor)}`,
+        vscode.ViewColumn.Beside,
+        { retainContextWhenHidden: true, enableScripts: true },
+      );
+      panel.webview.html = sidebar.getSidebarContent(
+        extensionContext,
+        panel,
+        undefined,
+        true,
+        protocol,
+        "usage",
+        undefined,
+        panelId,
+        false,
+        vendor,
+      );
+      protocol.on("cukii/closeVendorUsageDetails", () => {
+        panel.dispose();
+      });
+      panel.onDidDispose(() => protocol.dispose());
     },
     "cukii.renameChatPanel": async () => {
       const targets = listCukiiRenameTargets(fullScreenPanels);

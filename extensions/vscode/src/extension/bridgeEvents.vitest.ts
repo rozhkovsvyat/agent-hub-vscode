@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { BridgeEvent, BridgeEventParser } from "./bridgeEvents";
+import {
+  BridgeEvent,
+  BridgeEventParser,
+  usageWindowsFromEvent,
+} from "./bridgeEvents";
 
 /**
  * Фикстуры — строки из РЕАЛЬНЫХ прогонов CLI (claude stream-json,
@@ -58,6 +62,94 @@ function collect(
 }
 
 describe("BridgeEventParser", () => {
+  it("normalizes Claude and Codex quota receipts without confusing context usage", () => {
+    expect(
+      usageWindowsFromEvent({
+        rate_limit_info: {
+          unifiedWindows: {
+            five_hour: { utilization: 0.48, resetsAt: 1_789_494_600 },
+            seven_day: { utilization: 0.53, resetsAt: 1_789_753_800 },
+            seven_day_overage_included: { utilization: 0.05 },
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        id: "five_hour",
+        label: "Session (5hr)",
+        utilization: 0.48,
+        resetsAt: 1_789_494_600,
+      },
+      {
+        id: "seven_day",
+        label: "Weekly (7 day)",
+        utilization: 0.53,
+        resetsAt: 1_789_753_800,
+      },
+      { id: "model_scoped", label: "Fable limit", utilization: 0.05 },
+    ]);
+    expect(
+      usageWindowsFromEvent({
+        type: "token_count",
+        rate_limits: {
+          primary: {
+            used_percent: 9,
+            window_minutes: 10_080,
+            resets_at: 1_789_753_800,
+          },
+          secondary: {
+            used_percent: 31,
+            window_minutes: 300,
+            resets_at: 1_789_494_600,
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        id: "secondary:300",
+        label: "Session (5hr)",
+        utilization: 0.31,
+        resetsAt: 1_789_494_600,
+      },
+      {
+        id: "primary:10080",
+        label: "Weekly (7 day)",
+        utilization: 0.09,
+        resetsAt: 1_789_753_800,
+      },
+    ]);
+    expect(
+      usageWindowsFromEvent({ context_window: { used_percentage: 98 } }),
+    ).toEqual([]);
+  });
+
+  it("emits a private usage event without transcript text", () => {
+    const { events } = collect("anthropic-envelope", [
+      JSON.stringify({
+        type: "system",
+        subtype: "rate_limit_event",
+        rate_limit_info: {
+          unifiedWindows: {
+            five_hour: { utilization: 0.25, resetsAt: 1_789_494_600 },
+          },
+        },
+      }),
+    ]);
+    expect(events).toEqual([
+      {
+        kind: "usage",
+        windows: [
+          {
+            id: "five_hour",
+            label: "Session (5hr)",
+            utilization: 0.25,
+            resetsAt: 1_789_494_600,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("разбирает конверт claude stream-json", () => {
     const { events, parser } = collect("anthropic-envelope", CLAUDE_LINES);
     expect(parser.sawStructuredOutput).toBe(true);

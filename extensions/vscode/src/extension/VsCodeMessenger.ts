@@ -23,9 +23,13 @@ import type {
   CukiiIssueReportReceipt,
   CukiiPermissionMode,
   CukiiSteerReceipt,
+  CukiiVendorUsageSnapshot,
 } from "core/protocol/ideWebview";
 import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
-import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
+import {
+  brokerVendorForModel,
+  coerceStoredPermissionMode,
+} from "core/cukiiPermissionModes";
 import { InProcessMessenger, Message } from "core/protocol/messenger";
 import {
   CORE_TO_WEBVIEW_PASS_THROUGH,
@@ -36,6 +40,7 @@ import * as vscode from "vscode";
 
 import { ApplyManager } from "../apply";
 import {
+  activeCukiiChatContext,
   cukiiPanelRegistry,
   listOpenCukiiPanels,
   syncCukiiPanelTitleForSession,
@@ -95,6 +100,7 @@ import {
   clearBrokerVendorAccountCache,
   extractAuthFlowAssist,
   listCukiiAccounts,
+  probeBrokerVendorAccount,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
   watchVendorAuthTransition,
@@ -107,6 +113,10 @@ import { BridgeQuestionBroker } from "./bridgeQuestions";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
+
+function vendorUsageStorageKey(vendor: BrokerVendorId): string {
+  return `cukii.vendorUsage.${vendor}`;
+}
 
 function sourceProtocol(
   message: Message,
@@ -517,6 +527,35 @@ export class VsCodeMessenger {
     });
 
     this.onWebview("cukii/listOpenChatPanels", () => listOpenCukiiPanels());
+    this.onWebview("cukii/getActiveChatContext", () =>
+      activeCukiiChatContext(),
+    );
+    this.onWebview("cukii/getVendorUsage", async ({ data }) => {
+      const cached = this.context.globalState.get<CukiiVendorUsageSnapshot>(
+        vendorUsageStorageKey(data.vendor),
+      );
+      // The sidebar follows one active vendor. Probing every installed CLI on
+      // each tab switch makes this decorative surface contend with the real
+      // chat process and can hold the sidebar for multiple command timeouts.
+      const account =
+        data.vendor === "deepseek"
+          ? undefined
+          : await probeBrokerVendorAccount(data.vendor);
+      return {
+        vendor: data.vendor,
+        ...(account?.accountLabel
+          ? { accountLabel: account.accountLabel }
+          : {}),
+        windows: cached?.vendor === data.vendor ? cached.windows : [],
+        ...(cached?.observedAt ? { observedAt: cached.observedAt } : {}),
+      };
+    });
+    this.onWebview("cukii/openVendorUsageDetails", async ({ data }) => {
+      await vscode.commands.executeCommand(
+        "cukii.openVendorUsageDetails",
+        data,
+      );
+    });
 
     // A session that starts streaming or raises a permission prompt changes
     // the drawer's Active count and status chips without any panel list
@@ -1253,6 +1292,19 @@ export class VsCodeMessenger {
           });
           if (event.kind === "start") cancellation.toolStarted(event.id);
           else cancellation.toolFinished(event.id);
+        },
+        onUsage: (windows) => {
+          const vendor = brokerVendorForModel(msg.data.brokerModel);
+          const snapshot: CukiiVendorUsageSnapshot = {
+            vendor,
+            windows,
+            observedAt: Math.floor(Date.now() / 1_000),
+          };
+          void this.context.globalState
+            .update(vendorUsageStorageKey(vendor), snapshot)
+            .then(() => {
+              this.webviewProtocol.send("cukii/vendorUsageChanged", snapshot);
+            });
         },
         // This is deliberately sent over the active extension/webview channel.
         // The local canary controller watches this iframe over CDP; a Remote-SSH

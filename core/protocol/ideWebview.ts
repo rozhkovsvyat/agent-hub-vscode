@@ -112,6 +112,29 @@ export type CukiiOpenChatPanel = {
   attention?: CukiiSessionAttention;
 };
 
+/** The editor tab whose vendor currently owns the session navigator header. */
+export type CukiiActiveChatContext = {
+  panelId: string;
+  sessionId?: string;
+  brokerModel?: BrokerModel;
+};
+
+export type CukiiVendorUsageWindow = {
+  id: string;
+  label: string;
+  /** Normalized 0..1, matching the native Claude usage contract. */
+  utilization: number;
+  /** Unix seconds; absent when the vendor does not disclose a reset. */
+  resetsAt?: number;
+};
+
+export type CukiiVendorUsageSnapshot = {
+  vendor: BrokerVendorId;
+  accountLabel?: string;
+  windows: CukiiVendorUsageWindow[];
+  observedAt?: number;
+};
+
 export type CukiiSteerReceipt = {
   messageId: string;
   sessionId: string;
@@ -340,6 +363,12 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   /** Reply to a run-bound request_user_input MCP call. */
   "cukii/respondUserQuestion": [CukiiUserQuestionResponse, void];
   "cukii/listVendorAccounts": [undefined, BrokerVendorAuthStatus[]];
+  "cukii/getVendorUsage": [
+    { vendor: BrokerVendorId },
+    CukiiVendorUsageSnapshot,
+  ];
+  "cukii/openVendorUsageDetails": [{ vendor: BrokerVendorId }, void];
+  "cukii/closeVendorUsageDetails": [undefined, void];
   "cukii/listBrokerModelCatalog": [undefined, BrokerVendorModelCatalog[]];
   "cukii/pickAttachmentFiles": [undefined, CukiiPickedFile[]];
   "cukii/getIssueReportCapability": [
@@ -437,7 +466,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     void,
   ];
   "cukii/listOpenChatPanels": [undefined, CukiiOpenChatPanel[]];
+  "cukii/getActiveChatContext": [undefined, CukiiActiveChatContext | null];
   "cukii/panelSessionChanged": [{ sessionId: string; title?: string }, void];
+  "cukii/panelModelChanged": [{ brokerModel: BrokerModel }, void];
   /** The chat webview could not restore its requested saved session. */
   "cukii/initialSessionLoadFailed": [{ sessionId: string }, void];
   "cukii/renameSession": [
@@ -491,6 +522,8 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   newSession: [undefined, void];
   "cukii/getActiveSessionId": [undefined, string];
   "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
+  "cukii/activeChatContextChanged": [CukiiActiveChatContext | null, void];
+  "cukii/vendorUsageChanged": [CukiiVendorUsageSnapshot, void];
   "cukii/activeEditorSelectionChanged": [{ hasSelection: boolean }, void];
   /** A real Claude `--permission-prompt-tool` request, scoped to this panel. */
   "cukii/claudePermissionRequested": [

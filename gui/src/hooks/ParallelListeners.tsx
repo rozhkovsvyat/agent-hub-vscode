@@ -61,6 +61,7 @@ function ParallelListeners() {
   // Load symbols for chat on any session change
   const sessionId = useAppSelector((state) => state.session.id);
   const sessionTitle = useAppSelector((state) => state.session.title);
+  const brokerModel = useAppSelector((state) => state.session.brokerModel);
   const historyLength = useAppSelector((state) => state.session.history.length);
   const lastSessionId = useAppSelector((store) => store.session.lastSessionId);
   const [initialSessionId] = useState(
@@ -70,6 +71,11 @@ function ParallelListeners() {
   );
 
   useWebviewListener("cukii/getActiveSessionId", async () => sessionId || "");
+
+  useEffect(() => {
+    if (window.cukiiSurface !== "chat" || !brokerModel) return;
+    ideMessenger.post("cukii/panelModelChanged", { brokerModel });
+  }, [brokerModel, ideMessenger]);
 
   useEffect(() => {
     if (window.cukiiSurface !== "chat" || !sessionId || historyLength === 0) {

@@ -53,7 +53,7 @@ export function shouldOpenLegacyOnboarding({
   isHome,
   isNewUser,
 }: {
-  surface?: "sidebar" | "chat";
+  surface?: "sidebar" | "chat" | "usage";
   isHome: boolean;
   isNewUser: boolean;
 }): boolean {

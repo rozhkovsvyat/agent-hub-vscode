@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeCukiiChatContext,
   CukiiPanelRegistry,
   CUKII_BLANK_PANEL_TITLE,
   getCukiiRenameTarget,
@@ -21,6 +22,30 @@ describe("CukiiPanelRegistry", () => {
     expect(registry.size).toBe(3);
     expect(registry.lastActive()?.id).toBe("three");
     expect(listOpenCukiiPanels(registry)).toEqual([]);
+  });
+
+  it("reports the focused panel model, including an unsaved blank tab", () => {
+    const registry = new CukiiPanelRegistry<{ panel: { title: string } }>();
+    registry.add("first", { panel: { title: "First" } }, "session-1");
+    registry.updateModel("first", "codex-5-6-sol");
+    registry.add("blank", { panel: { title: CUKII_BLANK_PANEL_TITLE } });
+    registry.updateModel("blank", "kimi-k3");
+
+    expect(activeCukiiChatContext(registry)).toEqual({
+      panelId: "blank",
+      brokerModel: "kimi-k3",
+    });
+
+    registry.markActive("first");
+    expect(activeCukiiChatContext(registry)).toEqual({
+      panelId: "first",
+      sessionId: "session-1",
+      brokerModel: "codex-5-6-sol",
+    });
+
+    registry.remove("first");
+    registry.remove("blank");
+    expect(activeCukiiChatContext(registry)).toBeNull();
   });
 
   it("focuses a persisted session without collapsing other panels", () => {

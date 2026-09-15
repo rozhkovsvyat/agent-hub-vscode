@@ -13,7 +13,10 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { BaseSessionMetadata } from "core";
-import type { CukiiOpenChatPanel } from "core/protocol/ideWebview";
+import type {
+  CukiiActiveChatContext,
+  CukiiOpenChatPanel,
+} from "core/protocol/ideWebview";
 import {
   useCallback,
   useContext,
@@ -50,6 +53,7 @@ import {
   toggleTabStateFilter,
   type SessionFilters,
 } from "./cukiiSessionFilters";
+import { CukiiVendorUsageSection } from "./CukiiVendorUsage";
 
 const STORAGE_KEY = "cukii.session-groups.v1";
 // Survives remounts: once this window has touched the journal-side copy,
@@ -457,6 +461,9 @@ export default function CukiiSessionNavigator() {
   const messenger = useContext(IdeMessengerContext);
   const [sessions, setSessions] = useState<BaseSessionMetadata[]>([]);
   const [openPanels, setOpenPanels] = useState<CukiiOpenChatPanel[]>([]);
+  const [activeChat, setActiveChat] = useState<CukiiActiveChatContext | null>(
+    null,
+  );
   const [query, setQuery] = useState("");
   /* The search field is collapsed behind a magnifier, exactly as in Claude's
      sidebar: closed there is no field at all, only a 24×24 button next to
@@ -509,7 +516,7 @@ export default function CukiiSessionNavigator() {
 
   const load = useCallback(async () => {
     const sequence = ++loadSequenceRef.current;
-    const [historyResult, panelResult] = await Promise.all([
+    const [historyResult, panelResult, activeResult] = await Promise.all([
       // 🔴 The explicit limit is the navigator's horizon. `history/list`
       // defaults to the 100 newest sessions, so without it the 101st chat
       // simply stops being listed — it is not deleted, not archived, just
@@ -517,6 +524,7 @@ export default function CukiiSessionNavigator() {
       // metadata only (no session bodies), so asking for all of them is cheap.
       messenger.request("history/list", { limit: 1_000_000 }),
       messenger.request("cukii/listOpenChatPanels", undefined),
+      messenger.request("cukii/getActiveChatContext", undefined),
     ]);
     if (sequence !== loadSequenceRef.current) return;
     if (historyResult.status === "success") {
@@ -555,6 +563,9 @@ export default function CukiiSessionNavigator() {
             return known ? { ...panel, title: known.title } : panel;
           }),
       );
+    }
+    if (activeResult.status === "success") {
+      setActiveChat(activeResult.content);
     }
   }, [messenger]);
 
@@ -682,6 +693,11 @@ export default function CukiiSessionNavigator() {
       await load();
     },
     [load],
+  );
+  useWebviewListener(
+    "cukii/activeChatContextChanged",
+    async (active) => setActiveChat(active),
+    [],
   );
   useWebviewListener(
     "cukii/sessionTitleChanged",
@@ -1058,6 +1074,7 @@ export default function CukiiSessionNavigator() {
 
   return (
     <Shell data-testid="cukii-session-navigator">
+      <CukiiVendorUsageSection brokerModel={activeChat?.brokerModel} />
       <Action
         className="cukii-session-action"
         onClick={() =>

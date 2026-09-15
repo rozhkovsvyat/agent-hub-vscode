@@ -1,5 +1,9 @@
 import type * as vscode from "vscode";
-import type { CukiiSessionAttention } from "core/protocol/ideWebview";
+import type {
+  BrokerModel,
+  CukiiActiveChatContext,
+  CukiiSessionAttention,
+} from "core/protocol/ideWebview";
 import { cukiiSessionAttention } from "./extension/cukiiSessionAttention";
 import type { VsCodeWebviewProtocol } from "./webviewProtocol";
 
@@ -13,6 +17,7 @@ export type CukiiPanelEntry<TPanel> = {
   panel: TPanel;
   sessionId?: string;
   displayTitle?: string;
+  brokerModel?: BrokerModel;
 };
 
 /**
@@ -65,6 +70,11 @@ export class CukiiPanelRegistry<TPanel> {
       return;
     }
     entry.displayTitle = title;
+  }
+
+  updateModel(id: string, brokerModel: BrokerModel): void {
+    const entry = this.entries.get(id);
+    if (entry) entry.brokerModel = brokerModel;
   }
 
   markActive(id: string): void {
@@ -138,6 +148,20 @@ export function listOpenCukiiPanels<TPanel extends CukiiPanelTitleHost>(
       title: entry.displayTitle!.trim(),
       attention: attentionFor(entry.sessionId!),
     }));
+}
+
+export function activeCukiiChatContext<TPanel extends CukiiPanelTitleHost>(
+  registry?: CukiiPanelRegistry<TPanel>,
+): CukiiActiveChatContext | null {
+  const panelRegistry =
+    registry ?? (cukiiPanelRegistry as unknown as CukiiPanelRegistry<TPanel>);
+  const entry = panelRegistry.lastActive();
+  if (!entry) return null;
+  return {
+    panelId: entry.id,
+    ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
+    ...(entry.brokerModel ? { brokerModel: entry.brokerModel } : {}),
+  };
 }
 
 /**

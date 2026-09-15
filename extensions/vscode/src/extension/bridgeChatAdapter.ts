@@ -17,6 +17,7 @@ import type {
   BrokerSpeed,
   BrokerSubagent,
   CukiiPermissionMode,
+  CukiiVendorUsageWindow,
 } from "core/protocol/ideWebview";
 import * as vscode from "vscode";
 import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
@@ -150,6 +151,7 @@ export type ClaudePermissionTransport = {
   onBrokerDisposed?: (broker: ClaudePermissionBroker) => void;
   steering?: BridgeSteeringController;
   onToolActivity?: (event: { kind: "start" | "finish"; id: string }) => void;
+  onUsage?: (windows: CukiiVendorUsageWindow[]) => void;
   /** Local-controller receipt channel. Never persist canary events on Remote-SSH. */
   onRuntimeCanaryEvent?: RuntimeCanaryReporter;
   /** Reports whether the spawned vendor process tree was verified terminated. */
@@ -1543,6 +1545,8 @@ export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
           cukiiToolError: event.isError,
         },
       ] as unknown as ChatMessage[];
+    case "usage":
+      return [];
     case "wait":
       return [
         {
@@ -1946,6 +1950,10 @@ async function* launchBridgeChild(options: {
       }
       if (event.kind === "toolResult") {
         permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
+      }
+      if (event.kind === "usage") {
+        permissionTransport?.onUsage?.(event.windows);
+        continue;
       }
       if (event.kind === "text") {
         canaryResponse += event.text;

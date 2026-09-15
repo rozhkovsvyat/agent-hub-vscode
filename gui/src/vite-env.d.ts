@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  cukiiSurface?: "sidebar" | "chat";
+  cukiiSurface?: "sidebar" | "chat" | "usage";
+  cukiiVendor?: import("core/protocol/ideWebview").BrokerVendorId | null;
   cukiiPanelId?: string;
   initialSessionId?: string | null;
   cukiiVscode?: {

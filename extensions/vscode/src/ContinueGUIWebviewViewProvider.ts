@@ -7,6 +7,7 @@ import { VsCodeWebviewProtocol } from "./webviewProtocol";
 import { getCukiiWebviewStateBootstrap } from "./cukiiWebviewState";
 
 import type { FileEdit } from "core";
+import type { BrokerVendorId } from "core/protocol/ideWebview";
 
 export class ContinueGUIWebviewViewProvider
   implements vscode.WebviewViewProvider
@@ -71,10 +72,11 @@ export class ContinueGUIWebviewViewProvider
     edits: FileEdit[] | undefined = undefined,
     isFullScreen = false,
     protocol: VsCodeWebviewProtocol = this.webviewProtocol,
-    surface: "sidebar" | "chat" = isFullScreen ? "chat" : "sidebar",
+    surface: "sidebar" | "chat" | "usage" = isFullScreen ? "chat" : "sidebar",
     initialSessionId?: string,
     panelId: string = surface,
     suppressInitialChordCharacter = false,
+    initialVendor?: BrokerVendorId,
   ): string {
     const extensionUri = getExtensionUri();
     let scriptUri: string;
@@ -203,6 +205,7 @@ export class ContinueGUIWebviewViewProvider
         <script>window.isFullScreen = ${isFullScreen}</script>
         <script>window.cukiiSurface = "${surface}"</script>
         <script>window.cukiiPanelId = ${serializedPanelId}</script>
+        <script>window.cukiiVendor = ${JSON.stringify(initialVendor ?? null)}</script>
         <script>
           ${getCukiiWebviewStateBootstrap(initialSessionId)}
         </script>

@@ -1,3 +1,5 @@
+import type { CukiiVendorUsageWindow } from "core/protocol/ideWebview";
+
 /**
  * Разбор структурного вывода нативных CLI в события моста.
  *
@@ -29,6 +31,8 @@ export type BridgeEvent =
     }
   | { kind: "toolStart"; id: string; name: string; args: string }
   | { kind: "toolResult"; id: string; output: string; isError: boolean }
+  /** Native subscription/rate-limit receipt; never rendered as chat text. */
+  | { kind: "usage"; windows: CukiiVendorUsageWindow[] }
   | { kind: "error"; text: string }
   /** A vendor's explicit failed turn receipt; it settles the GUI run. */
   | { kind: "terminalError"; text: string }
@@ -84,6 +88,104 @@ function asText(value: unknown): string {
     return "";
   }
   return JSON.stringify(value);
+}
+
+function resetEpochSeconds(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000
+      ? Math.round(value / 1_000)
+      : Math.round(value);
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? Math.round(parsed / 1_000) : undefined;
+}
+
+function usageWindow(
+  id: string,
+  label: string,
+  value: any,
+): CukiiVendorUsageWindow | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value.utilization ?? value.used_percent ?? value.usedPercentage;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  const utilization = raw > 1 ? raw / 100 : raw;
+  if (utilization < 0) return undefined;
+  const resetsAt = resetEpochSeconds(value.resetsAt ?? value.resets_at);
+  return {
+    id,
+    label,
+    utilization: Math.min(1, utilization),
+    ...(resetsAt ? { resetsAt } : {}),
+  };
+}
+
+function windowLabel(minutes: number | undefined, fallback: string): string {
+  if (minutes === 300) return "Session (5hr)";
+  if (minutes === 10_080) return "Weekly (7 day)";
+  if (!minutes || !Number.isFinite(minutes)) return fallback;
+  if (minutes % 1_440 === 0) return `${minutes / 1_440} day limit`;
+  if (minutes % 60 === 0) return `${minutes / 60} hour limit`;
+  return `${minutes} minute limit`;
+}
+
+/**
+ * Normalize only quota windows carried by the native vendor protocol. Context
+ * fullness and per-session token spend are deliberately excluded: presenting
+ * either as subscription headroom would be a convincing but false number.
+ */
+export function usageWindowsFromEvent(event: any): CukiiVendorUsageWindow[] {
+  const unified =
+    event?.rate_limit_info?.unifiedWindows ??
+    event?.rateLimitInfo?.unifiedWindows ??
+    event?.payload?.rate_limit_info?.unifiedWindows;
+  if (unified && typeof unified === "object") {
+    return [
+      usageWindow("five_hour", "Session (5hr)", unified.five_hour),
+      usageWindow("seven_day", "Weekly (7 day)", unified.seven_day),
+      usageWindow(
+        "model_scoped",
+        String(unified.modelLabel ?? "Fable limit"),
+        unified.seven_day_overage_included,
+      ),
+    ].filter((item): item is CukiiVendorUsageWindow => Boolean(item));
+  }
+
+  const rateLimits = event?.rate_limits ?? event?.payload?.rate_limits;
+  if (!rateLimits || typeof rateLimits !== "object") return [];
+
+  if (rateLimits.five_hour || rateLimits.seven_day || rateLimits.model_scoped) {
+    const modelScoped = Array.isArray(rateLimits.model_scoped)
+      ? rateLimits.model_scoped[0]
+      : rateLimits.model_scoped;
+    return [
+      usageWindow("five_hour", "Session (5hr)", rateLimits.five_hour),
+      usageWindow("seven_day", "Weekly (7 day)", rateLimits.seven_day),
+      usageWindow(
+        "model_scoped",
+        String(modelScoped?.label ?? modelScoped?.model ?? "Model limit"),
+        modelScoped,
+      ),
+    ].filter((item): item is CukiiVendorUsageWindow => Boolean(item));
+  }
+
+  return ["secondary", "primary"]
+    .map((key) => {
+      const value = rateLimits[key];
+      const minutes =
+        typeof value?.window_minutes === "number"
+          ? value.window_minutes
+          : undefined;
+      return usageWindow(
+        `${key}:${minutes ?? "unknown"}`,
+        windowLabel(
+          minutes,
+          key === "primary" ? "Primary limit" : "Secondary limit",
+        ),
+        value,
+      );
+    })
+    .filter((item): item is CukiiVendorUsageWindow => Boolean(item));
 }
 
 /**
@@ -479,6 +581,8 @@ export class BridgeEventParser {
         : this.format === "kimi-ndjson"
           ? parseKimiNdjson(event)
           : parseAnthropicEnvelope(event);
+    const usage = usageWindowsFromEvent(event);
+    if (usage.length > 0) parsed.unshift({ kind: "usage", windows: usage });
     const events = parsed.flatMap((parsedEvent) => {
       // Deduplicate only Claude's explicitly-labelled synthetic hook feedback.
       // Assistant text is deliberately never compared: two equal model turns
