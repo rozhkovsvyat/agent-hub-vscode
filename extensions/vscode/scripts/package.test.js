@@ -11,6 +11,12 @@ const { runChildOperation } = require("./child-operation");
 const { generateConfigYamlSchema } = require("./generate-copy-config");
 const { packageAll } = require("./package-all");
 const {
+  TARGETS,
+  collectTargetVsix,
+  publishEveryTarget,
+  waitForValidatedTargets,
+} = require("./publish-marketplace");
+const {
   getPackageOutputPath,
   packageExtension,
   parsePackageArgs,
@@ -127,7 +133,19 @@ test("tag release packages, verifies, and publishes every supported target", () 
   assert.match(workflow, /npm run package-all/);
   assert.match(workflow, /assert-cukii-cross-target-vsix\.ps1/);
   assert.match(workflow, /name: all-targets-vsix/);
-  assert.match(workflow, /expected 5 target VSIX files/);
+  assert.match(
+    workflow,
+    /extensions\/vscode\/build\/cukii-vscode-\$target-\$version\.vsix/,
+  );
+  assert.match(
+    workflow,
+    /path: extensions\/vscode\/build\/cukii-vscode-\*-\*\.vsix/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /path: extensions\/vscode\/cukii-vscode-\*-\*\.vsix/,
+  );
+  assert.match(workflow, /scripts\/publish-marketplace\.js/);
   for (const target of [
     "win32-x64",
     "darwin-arm64",
@@ -138,6 +156,90 @@ test("tag release packages, verifies, and publishes every supported target", () 
     assert.match(workflow, new RegExp(target));
   }
   assert.doesNotMatch(workflow, /name: win32-x64-vsix/);
+});
+
+test("marketplace publisher is resumable after a partial failure", async () => {
+  const packages = TARGETS.map((target) => ({
+    target,
+    filePath: `${target}.vsix`,
+  }));
+  const accepted = new Set();
+  const firstRunAttempts = new Map();
+
+  await assert.rejects(
+    publishEveryTarget({
+      packages,
+      maxAttempts: 2,
+      wait: async () => {},
+      runPublish: async ({ target }) => {
+        firstRunAttempts.set(target, (firstRunAttempts.get(target) || 0) + 1);
+        if (target === "darwin-x64") {
+          return { status: 1, output: "simulated network failure" };
+        }
+        accepted.add(target);
+        return { status: 0, output: "" };
+      },
+    }),
+    /Marketplace publication incomplete.*darwin-x64/s,
+  );
+  assert.deepEqual(new Set(firstRunAttempts.keys()), new Set(TARGETS));
+  assert.equal(firstRunAttempts.get("darwin-x64"), 2);
+
+  await publishEveryTarget({
+    packages,
+    wait: async () => {},
+    runPublish: async ({ target }) => {
+      if (accepted.has(target)) {
+        return {
+          status: 1,
+          output: `Target platform ${target} already exists and cannot be modified`,
+        };
+      }
+      accepted.add(target);
+      return { status: 0, output: "" };
+    },
+  });
+  assert.deepEqual(accepted, new Set(TARGETS));
+});
+
+test("marketplace completion requires two consecutive complete gallery snapshots", async () => {
+  const snapshots = [
+    TARGETS.slice(0, 4),
+    TARGETS,
+    TARGETS.slice(0, 4),
+    TARGETS,
+    TARGETS,
+  ];
+  let queries = 0;
+  await waitForValidatedTargets({
+    version: "2.0.129",
+    wait: async () => {},
+    queryVersions: async () =>
+      snapshots[queries++].map((targetPlatform) => ({
+        version: "2.0.129",
+        targetPlatform,
+        flags: "validated",
+      })),
+  });
+  assert.equal(queries, 5);
+});
+
+test("marketplace publisher refuses an incomplete local carrier set", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-publish-set-"));
+  try {
+    for (const target of TARGETS.slice(0, 4)) {
+      fs.writeFileSync(
+        path.join(tempRoot, `cukii-vscode-${target}-2.0.129.vsix`),
+        "fixture",
+      );
+    }
+    assert.throws(
+      () => collectTargetVsix(tempRoot, "2.0.129"),
+      /Missing target VSIX files: linux-arm64/,
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("package output path includes the requested target", () => {
