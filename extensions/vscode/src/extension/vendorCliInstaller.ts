@@ -281,17 +281,34 @@ function unixNpmInstallScript(
     `npm install -g --prefix "${npmPrefix}" ${shellLiteral(packageName)}`,
     `[ -x "${installedProgram}" ] || { echo 'Cukii: npm finished, but ${programName} was not installed at ${installedProgram}.' >&2; exit 29; }`,
     // npm's shim for these packages is a Node script, so the installed entry
-    // point must not depend on the caller having `node` on PATH. Move the shim
-    // aside and own the entry point with a plain `/bin/sh` wrapper: that works
-    // from any shell, including fish, where `VAR=value command` is not syntax.
-    `mkdir -p "${libexec}"`,
-    `rm -f "${libexecProgram}"`,
-    `mv "${installedProgram}" "${libexecProgram}"`,
+    // point must not depend on the caller having `node` on PATH. Cukii owns
+    // the entry point with a plain `/bin/sh` wrapper: that works from any
+    // shell, including fish, where `VAR=value command` is not syntax.
+    //
+    // 🔴 How the wrapper reaches the real program depends on what npm left
+    // behind, and getting this wrong failed the macOS gate for both vendors at
+    // once. A global bin entry is normally a *relative* symlink into
+    // `lib/node_modules`, so moving it re-bases `../lib/...` onto the new
+    // parent and leaves a dangling link; it must be resolved instead. A real
+    // file has to be moved aside, or the wrapper would exec itself.
+    `if [ -L "${installedProgram}" ]; then`,
+    `  cukii_real=$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "${installedProgram}") || ` +
+      `{ echo 'Cukii: could not resolve where npm installed ${programName}.' >&2; exit 31; }`,
+    "else",
+    `  mkdir -p "${libexec}"`,
+    `  rm -f "${libexecProgram}"`,
+    `  mv "${installedProgram}" "${libexecProgram}"`,
+    `  cukii_real="${libexecProgram}"`,
+    "fi",
+    `[ -f "$cukii_real" ] || { echo "Cukii: the installed ${programName} is missing at $cukii_real." >&2; exit 31; }`,
+    // Remove the entry before writing: `cat >` through a surviving symlink
+    // would overwrite the package's own file inside lib/node_modules.
+    `rm -f "${installedProgram}"`,
     `cat > "${installedProgram}" <<CUKII_VENDOR_WRAPPER`,
     "#!/bin/sh",
     `PATH="${nodeHome}/bin:\\$PATH"`,
     "export PATH",
-    `exec "${libexecProgram}" "\\$@"`,
+    `exec "$cukii_real" "\\$@"`,
     "CUKII_VENDOR_WRAPPER",
     `chmod +x "${installedProgram}"`,
     // 🔴 Verify without Cukii's own PATH, never in this script's environment.

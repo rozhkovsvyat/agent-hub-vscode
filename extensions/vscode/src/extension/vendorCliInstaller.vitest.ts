@@ -249,14 +249,30 @@ describe("vendorInstallTerminalSpec", () => {
         const installed = `$HOME/.local/bin/${program}`;
         const moved = `$HOME/.local/libexec/cukii/${program}`;
 
+        // 🔴 A global npm bin entry is a relative symlink into
+        // `lib/node_modules`. Moving it re-bases `../lib/...` onto the new
+        // parent and leaves a dangling link, which is what failed the macOS
+        // gate for claude and codex alike. It must be resolved in place, and
+        // only a real file may be moved aside.
+        expect(command).toContain(`if [ -L "${installed}" ]; then`);
+        expect(command).toContain("realpathSync");
         expect(command).toContain(`mv "${installed}" "${moved}"`);
+        expect(command).toContain(`cukii_real="${moved}"`);
+        // The entry must be unlinked before the wrapper is written, or `cat >`
+        // follows the symlink and overwrites the package's own file.
+        expect(command.indexOf(`rm -f "${installed}"`)).toBeGreaterThan(
+          command.indexOf(`if [ -L "${installed}" ]; then`),
+        );
+        expect(command.indexOf(`rm -f "${installed}"`)).toBeLessThan(
+          command.indexOf(`cat > "${installed}" <<CUKII_VENDOR_WRAPPER`),
+        );
         expect(command).toContain(
           `cat > "${installed}" <<CUKII_VENDOR_WRAPPER`,
         );
         expect(command).toContain(
           'PATH="$HOME/.local/share/cukii/node/bin:\\$PATH"',
         );
-        expect(command).toContain(`exec "${moved}" "\\$@"`);
+        expect(command).toContain('exec "$cukii_real" "\\$@"');
         expect(command).toContain(`chmod +x "${installed}"`);
         // A `/bin/sh` script, not an inline `VAR=value command` prefix: the
         // latter is not valid syntax in fish, which is a legitimate default

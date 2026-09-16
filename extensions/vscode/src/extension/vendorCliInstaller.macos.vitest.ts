@@ -57,6 +57,14 @@ it
         onOutput: (chunk) => chunks.push(chunk),
       });
 
+      // 🔴 The assertion diff shows the exit code and nothing else, and this
+      // gate has already failed twice on a runner nobody can log into. The
+      // installer's own words have to reach the CI log.
+      if (result.exitCode !== 0) {
+        console.error(
+          `[cukii ${vendor} install failed with ${result.exitCode}]\n${chunks.join("")}`,
+        );
+      }
       expect({ result, output: chunks.join("") }).toMatchObject({
         result: { exitCode: 0, signal: null },
       });
