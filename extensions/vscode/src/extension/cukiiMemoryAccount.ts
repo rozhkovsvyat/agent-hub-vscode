@@ -12,6 +12,12 @@ import { brokerVendorForModel } from "core/cukiiPermissionModes";
 
 import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
+  fetchDisciplineBlock,
+  installDisciplineBlock,
+  removeDisciplineBlock,
+  type DisciplineInstallReport,
+} from "./cukiiMemoryDiscipline";
+import {
   ensureCukiiMemoryVendorMcp,
   removeCukiiMemoryVendorMcp,
   type CukiiMemoryRelayDescriptor,
@@ -44,6 +50,16 @@ type MemoryVendorMcp = {
     descriptor: CukiiMemoryRelayDescriptor,
   ): boolean;
   remove(vendor: BrokerVendorId): void;
+};
+
+type MemoryDiscipline = {
+  fetch(
+    endpoint: string,
+    token: string,
+    httpFetch: MemoryFetch,
+  ): Promise<string>;
+  install(block: string): DisciplineInstallReport;
+  remove(): DisciplineInstallReport;
 };
 
 type MemoryFetch = typeof fetch;
@@ -278,6 +294,7 @@ class CukiiMemoryRelay {
 export class CukiiMemoryAccountController {
   private relay?: CukiiMemoryRelay;
   private relayConnection?: string;
+  private disciplineRun?: Promise<DisciplineInstallReport>;
 
   constructor(
     private readonly store: ProtectedSecretStore,
@@ -289,7 +306,44 @@ export class CukiiMemoryAccountController {
         ensureCukiiMemoryVendorMcp(vendor, descriptor),
       remove: (vendor) => removeCukiiMemoryVendorMcp(vendor),
     },
+    private readonly discipline: MemoryDiscipline = {
+      fetch: (endpoint, token, httpFetch) =>
+        fetchDisciplineBlock(endpoint, token, httpFetch),
+      install: (block) => installDisciplineBlock(block),
+      remove: () => removeDisciplineBlock(),
+    },
   ) {}
+
+  /**
+   * Install the discipline once per activation, and retry on the next spawn if
+   * the box was briefly unreachable.
+   *
+   * 🔴 It runs from `ensureForModel`, not only from the Log in button. An owner
+   * who connected under 2.0.133 never presses Connect again, so wiring this to
+   * the button alone would ship the fix to nobody already affected.
+   */
+  private async ensureDiscipline(
+    refresh = false,
+  ): Promise<DisciplineInstallReport> {
+    if (refresh) this.disciplineRun = undefined;
+    if (!this.disciplineRun) {
+      this.disciplineRun = (async () => {
+        const connection = await this.connection();
+        if (!connection) throw new Error("Cukii Box is not connected.");
+        const block = await this.discipline.fetch(
+          connection.endpoint,
+          connection.token,
+          this.httpFetch,
+        );
+        return this.discipline.install(block);
+      })().catch((error: unknown) => {
+        // A transient outage must not disable discipline for the whole session.
+        this.disciplineRun = undefined;
+        throw error;
+      });
+    }
+    return this.disciplineRun;
+  }
 
   private async connection(): Promise<MemoryConnection | undefined> {
     return parseConnection(await this.store.get(CUKII_MEMORY_SECRET_KEY));
@@ -361,7 +415,9 @@ export class CukiiMemoryAccountController {
       this.relay?.dispose();
       this.relay = undefined;
       this.relayConnection = undefined;
+      this.disciplineRun = undefined;
       for (const vendor of ALL_MEMORY_VENDORS) this.vendorMcp.remove(vendor);
+      this.discipline.remove();
       return { opened: false, message: "Cukii Box disconnected." };
     }
     if (action !== "login") {
@@ -388,9 +444,25 @@ export class CukiiMemoryAccountController {
     const configured = ALL_MEMORY_VENDORS.filter((vendor) =>
       this.vendorMcp.ensure(vendor, descriptor),
     );
+    // Connecting the memory without the discipline is what 2.0.133 shipped:
+    // the agent could read the vault but never learned it had to. Report the
+    // outcome instead of implying it, so a silent failure stays visible.
+    let disciplineNote = "";
+    try {
+      const report = await this.ensureDiscipline(true);
+      const touched = report.written.length + report.unchanged.length;
+      disciplineNote =
+        report.failed.length > 0
+          ? ` Discipline installed in ${touched} agent files, ${report.failed.length} failed.`
+          : ` Discipline installed in ${touched} agent files.`;
+    } catch (error) {
+      disciplineNote = ` Discipline not installed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
     return {
       opened: false,
-      message: `Cukii Box connected for ${configured.length} vendor CLIs.`,
+      message: `Cukii Box connected for ${configured.length} vendor CLIs.${disciplineNote}`,
     };
   }
 
@@ -398,7 +470,10 @@ export class CukiiMemoryAccountController {
     const descriptor = await this.descriptor();
     if (!descriptor) return false;
     const vendor = brokerVendorForModel(model);
-    return this.vendorMcp.ensure(vendor, descriptor);
+    const configured = this.vendorMcp.ensure(vendor, descriptor);
+    // Fail-open: a CLI must still start when the discipline cannot be written.
+    await this.ensureDiscipline().catch(() => undefined);
+    return configured;
   }
 
   dispose(): void {

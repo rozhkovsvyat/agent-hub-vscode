@@ -160,4 +160,112 @@ describe("Cukii Box account", () => {
       actions: ["login"],
     });
   });
+
+  it("installs the discipline on a session that never presses Log in again", async () => {
+    // 🔴 The regression from 2.0.133: memory connected, discipline absent. An
+    // owner who connected on the old build never opens Manage Accounts again,
+    // so binding this to the button alone would ship it to nobody affected.
+    const store = new MemoryStore();
+    const boxToken = "d".repeat(43);
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({
+        endpoint: "https://box.example.test/mcp",
+        token: boxToken,
+      }),
+    );
+    const installed: string[] = [];
+    const empty = { written: [], unchanged: [], failed: [] };
+    const controller = new CukiiMemoryAccountController(
+      store,
+      extensionRoot(),
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      { ensure: vi.fn(() => true), remove: vi.fn() },
+      {
+        fetch: async (endpoint, token) => {
+          expect(token).toBe(boxToken);
+          return `block-for:${endpoint}`;
+        },
+        install: (block) => {
+          installed.push(block);
+          return { ...empty, written: ["CLAUDE.md"] };
+        },
+        remove: () => empty,
+      },
+    );
+
+    expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
+    expect(installed).toEqual(["block-for:https://box.example.test/mcp"]);
+
+    // Once per activation, not once per CLI spawn.
+    await controller.ensureForModel("claude-opus-5");
+    expect(installed).toHaveLength(1);
+    controller.dispose();
+  });
+
+  it("keeps the CLI starting when the box cannot serve the discipline, and retries", async () => {
+    const store = new MemoryStore();
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({
+        endpoint: "https://box.example.test/mcp",
+        token: "e".repeat(43),
+      }),
+    );
+    const empty = { written: [], unchanged: [], failed: [] };
+    let attempts = 0;
+    const controller = new CukiiMemoryAccountController(
+      store,
+      extensionRoot(),
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      { ensure: vi.fn(() => true), remove: vi.fn() },
+      {
+        fetch: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("box unreachable");
+          return "recovered";
+        },
+        install: () => ({ ...empty, written: ["CLAUDE.md"] }),
+        remove: () => empty,
+      },
+    );
+
+    // Fail-open: a dead box must not block the vendor CLI from starting.
+    expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
+    expect(attempts).toBe(1);
+    // A rejected attempt is not memoized, so the next spawn tries again.
+    expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
+    expect(attempts).toBe(2);
+    controller.dispose();
+  });
+
+  it("takes the discipline back out when the owner disconnects", async () => {
+    const store = new MemoryStore();
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({
+        endpoint: "https://box.example.test/mcp",
+        token: "f".repeat(43),
+      }),
+    );
+    const empty = { written: [], unchanged: [], failed: [] };
+    const remove = vi.fn(() => empty);
+    const controller = new CukiiMemoryAccountController(
+      store,
+      extensionRoot(),
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      { ensure: vi.fn(() => true), remove: vi.fn() },
+      { fetch: async () => "block", install: () => empty, remove },
+    );
+
+    await controller.runAction("logout", {
+      promptEndpoint: async () => undefined,
+      promptToken: async () => undefined,
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(store.values.get(CUKII_MEMORY_SECRET_KEY)).toBeUndefined();
+  });
 });
