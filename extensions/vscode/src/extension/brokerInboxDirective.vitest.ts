@@ -41,6 +41,12 @@ describe("broker inbox steering gate", () => {
       );
       // The strict gate is part of the contract the model is told about.
       expect(lines[0]).toContain("force-delivered");
+      // A vendor that truncates the denial reason, or that reaches MCP only
+      // through one generic invoker, must still be able to release the gate:
+      // without both escapes Grok 4.6 spent a whole session denied.
+      expect(lines[0]).toContain("opens with the exact ack IDs");
+      expect(lines[0]).toContain("through a generic invoker");
+      expect(lines[0]).toContain("replayOutstanding=true to recover it");
       expect(lines[0]).toContain("A normal follow-up must never stop the run");
       expect(lines[0]).toContain(
         "only an explicit stop/cancel request ends the run",
