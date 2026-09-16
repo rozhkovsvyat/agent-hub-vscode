@@ -294,14 +294,21 @@ function unixNpmInstallScript(
     `exec "${libexecProgram}" "\\$@"`,
     "CUKII_VENDOR_WRAPPER",
     `chmod +x "${installedProgram}"`,
-    // 🔴 Verify in a clean environment, never in this script's own. PATH here
-    // already carries the private Node — the single environment in which the
-    // CLI could always start — so checking here proves only that the installer
-    // can run what the installer just prepared. That false pass is exactly
-    // what let 2.0.132 report "installation verified" for a `codex` the owner
-    // could not launch at all.
-    `env -i HOME="$HOME" PATH=/usr/bin:/bin "${installedProgram}" --version >/dev/null 2>&1 || ` +
-      `{ echo 'Cukii: ${programName} was installed but cannot start from a clean shell.' >&2; exit 30; }`,
+    // 🔴 Verify without Cukii's own PATH, never in this script's environment.
+    // PATH here already carries the private Node — the single environment in
+    // which the CLI could always start — so checking here proves only that the
+    // installer can run what the installer just prepared. That false pass is
+    // exactly what let 2.0.132 report "installation verified" for a `codex`
+    // the owner could not launch at all. Only PATH is replaced: wiping the
+    // whole environment would also test conditions no user ever has, and a
+    // check that fails for its own reasons blocks a correct install.
+    // The captured output is reported rather than discarded, because a check
+    // that hides its reason is what kept this defect a bare "exit code 1".
+    `if ! cukii_verify=$(env PATH=/usr/bin:/bin:/usr/sbin:/sbin "${installedProgram}" --version 2>&1); then`,
+    `  echo 'Cukii: ${programName} was installed but cannot start without Cukii on PATH.' >&2`,
+    '  echo "$cukii_verify" >&2',
+    "  exit 30",
+    "fi",
     `echo 'Cukii: ${programName} installed successfully at ${installedProgram}.'`,
     "exit 0",
   ].join("\n");

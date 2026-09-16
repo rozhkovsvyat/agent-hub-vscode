@@ -223,11 +223,14 @@ describe("vendorInstallTerminalSpec", () => {
           .find((line) => line.includes(`/bin/${program}" --version`));
 
         expect({ vendor, verify }).toMatchObject({
-          verify: expect.stringContaining("env -i "),
+          verify: expect.stringContaining("env PATH=/usr/bin:/bin"),
         });
         // The negative control on the check itself: the private runtime must
         // be unreachable from the environment that declares the CLI working.
         expect(verify).not.toContain("share/cukii/node");
+        // A check that discards the reason is how this defect survived two
+        // releases as a bare "exit code 1".
+        expect(command).toContain('echo "$cukii_verify" >&2');
       }
     },
   );
