@@ -567,15 +567,38 @@ export function resolveNativeCli(vendor: VendorWithCli): string | undefined {
   );
 }
 
+function posixShellLiteral(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * Bind a login/logout command to the installed CLI and put Cukii's private
+ * Node on PATH *inside the command*.
+ *
+ * 🔴 `TerminalOptions.env` is not enough on macOS. A default login zsh runs
+ * `path_helper`, which rebuilds PATH and can drop the injected runtime. That
+ * is how 2.0.133 still printed `env: node: No such file or directory` for an
+ * already-installed `@openai/codex` shim (card 3d82899a): install wrote a
+ * wrapper only on a fresh Install click, and Log in opened the user's shell.
+ * Prefixing PATH on the command line survives path_helper; `/bin/sh` (not a
+ * login shell) is the other half, because fish cannot parse `VAR=value cmd`.
+ */
 export function bindUnixVendorAuthExecutable(
   command: string,
   executable: string | undefined,
+  userHome: string = os.homedir(),
 ): string {
   if (!executable || !path.posix.isAbsolute(executable)) return command;
   const separator = command.indexOf(" ");
   const suffix = separator >= 0 ? command.slice(separator) : "";
-  const quoted = `'${executable.replace(/'/g, `'"'"'`)}'`;
-  return `${quoted}${suffix}`;
+  const quoted = posixShellLiteral(executable);
+  const nodeBin = path.posix.join(
+    userHome.replace(/\\/g, "/"),
+    ...CUKII_UNIX_NODE_HOME_SEGMENTS,
+    "bin",
+  );
+  const quotedNode = posixShellLiteral(nodeBin);
+  return `PATH=${quotedNode}:"$PATH" ${quoted}${suffix}`;
 }
 
 function quoteCmdToken(value: string): string {
@@ -1911,19 +1934,25 @@ export async function listCukiiAccounts(
 export function vendorAuthTerminalCommand(
   vendor: BrokerVendorId,
   action: BrokerVendorAuthAction,
+  options: {
+    platform?: NodeJS.Platform;
+    userHome?: string;
+    executable?: string;
+  } = {},
 ):
   | VendorInstallTerminalSpec
   | {
       name: string;
       command: string;
       followup?: string;
-      shellPath?: undefined;
-      shellArgs?: undefined;
+      shellPath?: string;
+      shellArgs?: string[];
       closesTerminal?: false;
     }
   | undefined {
   const install = action === "install";
-  if (install) return vendorInstallTerminalSpec(vendor);
+  const platform = options.platform ?? process.platform;
+  if (install) return vendorInstallTerminalSpec(vendor, platform);
   const commands: Partial<
     Record<BrokerVendorId, { login?: string; logout?: string }>
   > = {
@@ -1953,15 +1982,20 @@ export function vendorAuthTerminalCommand(
     action === "login" ? commands[vendor]?.login : commands[vendor]?.logout;
   if (!command) return undefined;
   const resolvedCommand =
-    process.platform === "win32" || vendor === "deepseek"
+    platform === "win32" || vendor === "deepseek"
       ? command
       : bindUnixVendorAuthExecutable(
           command,
-          resolveNativeCli(vendor as VendorWithCli),
+          options.executable ?? resolveNativeCli(vendor as VendorWithCli),
+          options.userHome ?? os.homedir(),
         );
   return {
     name: `Cukii · ${vendor} ${action}`,
     command: resolvedCommand,
+    // A macOS login zsh rebuilds PATH via path_helper. /bin/sh is not a login
+    // shell, understands `PATH=... cmd`, and is the same interpreter the
+    // installer wrapper already uses — so fish cannot break the prefix either.
+    ...(platform !== "win32" ? { shellPath: "/bin/sh", shellArgs: [] } : {}),
     ...(vendor === "kimi" && action === "logout"
       ? { followup: "/logout" }
       : {}),

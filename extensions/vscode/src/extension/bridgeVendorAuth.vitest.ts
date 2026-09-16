@@ -49,11 +49,39 @@ describe("Cukii vendor CLI accounts", () => {
       bindUnixVendorAuthExecutable(
         "claude auth login --claudeai",
         "/Users/owner with space/.local/bin/claude",
+        "/Users/owner with space",
       ),
-    ).toBe("'/Users/owner with space/.local/bin/claude' auth login --claudeai");
+    ).toBe(
+      `PATH='/Users/owner with space/.local/share/cukii/node/bin':"$PATH" '/Users/owner with space/.local/bin/claude' auth login --claudeai`,
+    );
     expect(
       bindUnixVendorAuthExecutable("claude auth login --claudeai", "claude"),
     ).toBe("claude auth login --claudeai");
+  });
+
+  it("puts the private Node on the Codex login command itself so a login shell cannot drop it", () => {
+    // The owner's screenshot of card 3d82899a: the terminal ran this absolute
+    // shim and died in `env: node`. The prefix is the command, not Terminal env.
+    expect(
+      bindUnixVendorAuthExecutable(
+        "codex login --device-auth",
+        "/Users/svyat/.local/bin/codex",
+        "/Users/svyat",
+      ),
+    ).toBe(
+      `PATH='/Users/svyat/.local/share/cukii/node/bin':"$PATH" '/Users/svyat/.local/bin/codex' login --device-auth`,
+    );
+    const spec = vendorAuthTerminalCommand("codex", "login", {
+      platform: "darwin",
+      userHome: "/Users/svyat",
+      executable: "/Users/svyat/.local/bin/codex",
+    });
+    expect(spec).toMatchObject({
+      shellPath: "/bin/sh",
+      shellArgs: [],
+    });
+    expect(spec?.command).toContain("share/cukii/node/bin");
+    expect(spec?.command).toMatch(/^PATH=/);
   });
 
   it("classifies real CLI status shapes without a decorative local flag", () => {

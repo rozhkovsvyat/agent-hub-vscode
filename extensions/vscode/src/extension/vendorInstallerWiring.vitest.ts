@@ -107,6 +107,12 @@ describe("vendor CLI launch environment", () => {
     expect(env).toBeLessThan(show);
   });
 
+  it("does not let a macOS login shell replace the vendor PATH", () => {
+    expect(authSource).toContain('shellPath: "/bin/sh"');
+    expect(authSource).toContain(`PATH=\${quotedNode}:"$PATH"`);
+    expect(authSource).toContain("path_helper");
+  });
+
   // A missing interpreter does not fail the spawn: the kernel runs
   // `/usr/bin/env`, which exits 127 on its own, so the preflight saw success
   // and the real cause reached the owner as an opaque dead stream.
