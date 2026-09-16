@@ -1,4 +1,4 @@
-const { fork } = require("child_process");
+const { execFileSync, fork } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -8,9 +8,14 @@ const { rimrafSync } = require("rimraf");
 const { execCmdSync } = require("../../../scripts/util");
 
 const {
-  CHILD_OPERATION_ENV_MARKER,
   isForkedChildOperation,
+  runChildOperation,
+  sendChildResult,
 } = require("./child-operation");
+const {
+  assertRipgrepArchiveSignature,
+  ripgrepExtractionPlan,
+} = require("./cross-target-packaging");
 
 /**
  * download a file using fetch API
@@ -58,20 +63,42 @@ async function downloadSqlite(target, targetDir) {
   await downloadFile(downloadUrl, targetDir);
 }
 
-async function installAndCopySqlite(target) {
+async function installAndCopySqlite(
+  target,
+  {
+    execute = execFileSync,
+    platform = process.platform,
+    environment = process.env,
+    download = downloadSqlite,
+    sqliteDir: suppliedSqliteDir,
+  } = {},
+) {
   // Replace the installed with pre-built
   console.log("[info] Downloading pre-built sqlite3 binary");
   // pnpm installs `core/node_modules/sqlite3` as a symlink into the store, and
   // GNU tar refuses to write through one ("Cannot extract through symlink"),
   // which failed the whole prepackage. Resolve to the real store directory
   // first; on a plain npm tree realpath is a no-op.
-  const sqliteDir = fs.realpathSync("../../core/node_modules/sqlite3");
+  const sqliteDir = suppliedSqliteDir
+    ? fs.realpathSync(suppliedSqliteDir)
+    : fs.realpathSync("../../core/node_modules/sqlite3");
   rimrafSync(path.join(sqliteDir, "build"));
   const archive = path.join(sqliteDir, "build.tar.gz");
-  await downloadSqlite(target, archive);
-  // `-C` rather than `cd &&`: the store may sit on another drive, where a bare
-  // `cd` in cmd.exe changes nothing and the extraction lands in the wrong tree.
-  execCmdSync(`tar -xvzf "${archive}" -C "${sqliteDir}"`);
+  await download(target, archive);
+  assertRipgrepArchiveSignature(archive);
+  // Git Bash prepends GNU tar to PATH on Windows; with a drive-letter argument
+  // it interprets `D:\...` as a remote host. Use the same trusted, local-only
+  // extraction plan as ripgrep: System32 bsdtar on Windows, basename in cwd on
+  // every platform, and no shell parsing.
+  const extraction = ripgrepExtractionPlan(sqliteDir, archive, {
+    platform,
+    environment,
+  });
+  execute(extraction.command, extraction.args, {
+    cwd: extraction.cwd,
+    stdio: "inherit",
+    shell: false,
+  });
   fs.unlinkSync(archive);
 }
 
@@ -100,95 +127,55 @@ async function installAndCopyEsbuild(target) {
 // is not the real entry point, so that test passed inside a vitest worker and the
 // handler was installed anyway. See `child-operation.js` for the full rationale.
 if (isForkedChildOperation(__filename)) {
-  process.on("message", handleWorkerMessage);
-}
-
-function handleWorkerMessage(msg) {
-  // Defend the child too: the channel is shared, and a message without our payload
-  // must be ignored rather than take the process down.
-  if (!msg || !msg.payload) {
-    return;
-  }
-  const { operation, target } = msg.payload;
-  if (operation === "sqlite") {
-    installAndCopySqlite(target)
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-  if (operation === "esbuild") {
-    installAndCopyEsbuild(target)
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-}
-
-/**
- * @param {string} target the platform to build for
- */
-async function copySqlite(target) {
-  const child = fork(__filename, {
-    stdio: "inherit",
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      [CHILD_OPERATION_ENV_MARKER]: path.resolve(__filename),
-    },
-  });
-  child.send({
-    payload: {
-      operation: "sqlite",
-      target,
-    },
-  });
-
-  return new Promise((resolve, reject) => {
-    child.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      } else {
-        resolve();
+  process.once("message", async (msg) => {
+    try {
+      if (!msg?.payload) {
+        throw new Error("Child operation payload is required");
       }
-    });
+      const { operation, target } = msg.payload;
+      if (operation === "sqlite") {
+        await installAndCopySqlite(target);
+      } else if (operation === "esbuild") {
+        await installAndCopyEsbuild(target);
+      } else {
+        throw new Error(`Unknown download-copy operation: ${String(operation)}`);
+      }
+      sendChildResult({ done: true }, 0);
+    } catch (error) {
+      console.error(error);
+      sendChildResult({ error: true, message: String(error) }, 1);
+    }
   });
 }
 
 /**
  * @param {string} target the platform to build for
  */
-async function copyEsbuild(target) {
-  const child = fork(__filename, {
-    stdio: "inherit",
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      [CHILD_OPERATION_ENV_MARKER]: path.resolve(__filename),
-    },
+async function copySqlite(target, options = {}) {
+  return runChildOperation({
+    forkChild: options.forkChild ?? fork,
+    modulePath: __filename,
+    cwd: options.cwd ?? process.cwd(),
+    payload: { operation: "sqlite", target },
+    timeoutMs: options.timeoutMs,
   });
-  child.send({
-    payload: {
-      operation: "esbuild",
-      target,
-    },
-  });
+}
 
-  return new Promise((resolve, reject) => {
-    child.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      } else {
-        resolve();
-      }
-    });
+/**
+ * @param {string} target the platform to build for
+ */
+async function copyEsbuild(target, options = {}) {
+  return runChildOperation({
+    forkChild: options.forkChild ?? fork,
+    modulePath: __filename,
+    cwd: options.cwd ?? process.cwd(),
+    payload: { operation: "esbuild", target },
+    timeoutMs: options.timeoutMs,
   });
 }
 
 module.exports = {
+  installAndCopySqlite,
   downloadSqlite,
   copySqlite,
   copyEsbuild,

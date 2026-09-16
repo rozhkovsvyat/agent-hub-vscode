@@ -9,6 +9,10 @@ const JSZip = require("jszip");
 
 const { runChildOperation } = require("./child-operation");
 const {
+  copySqlite,
+  installAndCopySqlite,
+} = require("./download-copy-sqlite");
+const {
   assertRipgrepArchiveSignature,
   ripgrepExtractionPlan,
   stageRipgrepForTarget,
@@ -178,6 +182,47 @@ test("ripgrep archives are rejected by signature before extraction", () => {
       }).command,
       "D:\\Windows\\System32\\tar.exe",
     );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("sqlite staging uses trusted local tar and rejects silent child exit", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-sqlite-tar-"));
+  let invocation;
+
+  try {
+    await installAndCopySqlite("win32-x64", {
+      sqliteDir: tempRoot,
+      platform: "win32",
+      environment: {
+        PATH: "C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\System32",
+        SystemRoot: "C:\\Windows",
+      },
+      async download(_target, archivePath) {
+        fs.writeFileSync(archivePath, Buffer.from([0x1f, 0x8b, 0x08, 0x00]));
+      },
+      execute(command, args, options) {
+        invocation = { command, args, options };
+      },
+    });
+
+    assert.equal(invocation.command, "C:\\Windows\\System32\\tar.exe");
+    assert.deepEqual(invocation.args, ["-xf", "build.tar.gz", "-C", "."]);
+    assert.equal(invocation.options.cwd, fs.realpathSync(tempRoot));
+    assert.equal(invocation.options.shell, false);
+    assert.equal(fs.existsSync(path.join(tempRoot, "build.tar.gz")), false);
+
+    const child = new EventEmitter();
+    child.send = (_message, callback) => callback?.();
+    child.kill = () => {};
+    const operation = copySqlite("win32-x64", {
+      forkChild: () => child,
+      cwd: tempRoot,
+      timeoutMs: 1_000,
+    });
+    process.nextTick(() => child.emit("exit", 1, null));
+    await assert.rejects(operation, /Child operation failed \(code=1/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
