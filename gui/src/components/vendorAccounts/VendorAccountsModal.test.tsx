@@ -531,7 +531,7 @@ describe("VendorAccountsModal", () => {
     ).toBeTruthy();
   });
 
-  it("renders Cukii Box as Agent Memory with Connect/Disconnect copy", async () => {
+  it("renders Cukii Box as Agent Memory with the shared login copy", async () => {
     const ideMessenger = new MockIdeMessenger();
     ideMessenger.responses["cukii/listVendorAccounts"] = [
       {
@@ -552,8 +552,11 @@ describe("VendorAccountsModal", () => {
     const memory = await screen.findByTestId("cukii-account-group-memory");
     expect(memory.textContent).toContain("Agent Memory");
     expect(memory.textContent).toContain("Cukii Box");
-    expect(memory.textContent).toContain("Connect");
-    expect(memory.textContent).not.toContain("Log in");
+    // One vocabulary for the whole dialog, not a second pair of verbs for the
+    // same state (owner request, board card 39b4d2fe).
+    expect(memory.textContent).toContain("Log in");
+    expect(memory.textContent).toContain("Not logged in");
+    expect(memory.textContent).not.toContain("Connect");
   });
 
   it("keeps an ungrouped host in Vendors and hides the empty Testing group", async () => {

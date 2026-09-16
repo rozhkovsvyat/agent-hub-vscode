@@ -2,7 +2,19 @@ import { execFileSync, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
-import { vendorInstallTerminalSpec } from "./vendorCliInstaller";
+import {
+  vendorInstallTerminalSpec,
+  vendorSpawnEnv,
+} from "./vendorCliInstaller";
+
+const NPM_ONLY_VENDORS = ["claude", "codex", "grok", "kimi", "qwen"] as const;
+const NPM_ONLY_PROGRAMS: Record<(typeof NPM_ONLY_VENDORS)[number], string> = {
+  claude: "claude",
+  codex: "codex",
+  grok: "grok",
+  kimi: "kimi",
+  qwen: "qwen",
+};
 
 describe("vendorInstallTerminalSpec", () => {
   it("uses npm.cmd and winget Node.js LTS without weakening Windows policy", () => {
@@ -195,6 +207,62 @@ describe("vendorInstallTerminalSpec", () => {
     15_000,
   );
 
+  // 🔴 2.0.132 published a `codex` the owner could not launch at all: the
+  // installer decided success by running the CLI while its own PATH still
+  // carried the private Node — the one environment in which an npm shim can
+  // start. Nothing downstream could disagree, so "installation verified"
+  // appeared next to a CLI that died in its own shebang (card 3d82899a).
+  it.each(["darwin", "linux"] as const)(
+    "decides a %s install from a clean environment, not the installer's own",
+    (platform) => {
+      for (const vendor of NPM_ONLY_VENDORS) {
+        const program = NPM_ONLY_PROGRAMS[vendor];
+        const command = vendorInstallTerminalSpec(vendor, platform)!.command;
+        const verify = command
+          .split("\n")
+          .find((line) => line.includes(`/bin/${program}" --version`));
+
+        expect({ vendor, verify }).toMatchObject({
+          verify: expect.stringContaining("env -i "),
+        });
+        // The negative control on the check itself: the private runtime must
+        // be unreachable from the environment that declares the CLI working.
+        expect(verify).not.toContain("share/cukii/node");
+      }
+    },
+  );
+
+  // The npm shim for these packages is a Node script — the registry lists
+  // `bin/codex.js` for `@openai/codex` — so the installed entry point must
+  // carry its own runtime instead of trusting the caller's PATH. Anthropic
+  // ships a native executable, which is why the same installer looked healthy
+  // for one vendor out of five.
+  it.each(["darwin", "linux"] as const)(
+    "owns the %s entry point with a wrapper that needs nothing on PATH",
+    (platform) => {
+      for (const vendor of NPM_ONLY_VENDORS) {
+        const program = NPM_ONLY_PROGRAMS[vendor];
+        const command = vendorInstallTerminalSpec(vendor, platform)!.command;
+        const installed = `$HOME/.local/bin/${program}`;
+        const moved = `$HOME/.local/libexec/cukii/${program}`;
+
+        expect(command).toContain(`mv "${installed}" "${moved}"`);
+        expect(command).toContain(
+          `cat > "${installed}" <<CUKII_VENDOR_WRAPPER`,
+        );
+        expect(command).toContain(
+          'PATH="$HOME/.local/share/cukii/node/bin:\\$PATH"',
+        );
+        expect(command).toContain(`exec "${moved}" "\\$@"`);
+        expect(command).toContain(`chmod +x "${installed}"`);
+        // A `/bin/sh` script, not an inline `VAR=value command` prefix: the
+        // latter is not valid syntax in fish, which is a legitimate default
+        // shell for an owner we cannot reach from here.
+        expect(command).toContain("#!/bin/sh");
+      }
+    },
+  );
+
   it("uses Cursor's official platform-specific installers", () => {
     expect(vendorInstallTerminalSpec("cursor", "win32")!.command).toContain(
       "https://cursor.com/install?win32=true",
@@ -208,5 +276,46 @@ describe("vendorInstallTerminalSpec", () => {
 
   it("does not invent an installer for a postponed vendor", () => {
     expect(vendorInstallTerminalSpec("deepseek", "linux")).toBeUndefined();
+  });
+});
+
+// Defense in depth beside the installed wrapper: a vendor that updates itself
+// through npm rewrites the shim and drops the wrapper, and Cukii's own probes
+// and chat bridge have to keep launching the CLI through that.
+describe("vendorSpawnEnv", () => {
+  it("puts the private runtime and the installed CLI directory first", () => {
+    expect(
+      vendorSpawnEnv({ PATH: "/usr/bin:/bin" }, "/Users/owner", "darwin").PATH,
+    ).toBe(
+      "/Users/owner/.local/share/cukii/node/bin:/Users/owner/.local/bin:/usr/bin:/bin",
+    );
+  });
+
+  it("does not duplicate a directory the host already exported", () => {
+    expect(
+      vendorSpawnEnv(
+        { PATH: "/Users/owner/.local/bin:/usr/bin" },
+        "/Users/owner",
+        "darwin",
+      ).PATH,
+    ).toBe(
+      "/Users/owner/.local/share/cukii/node/bin:/Users/owner/.local/bin:/usr/bin",
+    );
+  });
+
+  it("honours a lowercase path key instead of adding a second one", () => {
+    const env = vendorSpawnEnv({ path: "/usr/bin" }, "/Users/owner", "darwin");
+    expect(Object.keys(env)).toEqual(["path"]);
+    expect(env.path).toBe(
+      "/Users/owner/.local/share/cukii/node/bin:/Users/owner/.local/bin:/usr/bin",
+    );
+  });
+
+  // Windows installs Node machine-wide through winget, so there is no private
+  // runtime to inject and no `:`-delimited PATH to rewrite.
+  it("leaves Windows untouched", () => {
+    expect(
+      vendorSpawnEnv({ Path: "C:\\Windows" }, "C:\\Users\\owner", "win32"),
+    ).toEqual({ Path: "C:\\Windows" });
   });
 });

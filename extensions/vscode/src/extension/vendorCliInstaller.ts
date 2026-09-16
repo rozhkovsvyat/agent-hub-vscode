@@ -1,4 +1,5 @@
 import type { BrokerVendorId } from "core/protocol/ideWebview";
+import * as os from "os";
 import * as path from "path";
 
 export type VendorInstallTerminalSpec = {
@@ -45,6 +46,59 @@ export const CUKII_UNIX_NODE_HOME_SEGMENTS = [
   "cukii",
   "node",
 ] as const;
+/** Where the npm shim is moved so Cukii can own the entry point itself. */
+export const CUKII_UNIX_LIBEXEC_SEGMENTS = [
+  ".local",
+  "libexec",
+  "cukii",
+] as const;
+
+/**
+ * Directories a Cukii-installed vendor CLI needs on PATH at *every* launch.
+ *
+ * 🔴 Every npm-only vendor exposes a Node script as its executable — the
+ * registry lists `bin/codex.js` for `@openai/codex` — so `#!/usr/bin/env node`
+ * has to resolve each time the CLI starts, not only while npm runs. Putting
+ * the private runtime on PATH inside the installer alone let the install
+ * verify itself and then fail for the owner with `env: node: No such file or
+ * directory` (board card 3d82899a, 2026-09-16). Anthropic ships a native
+ * executable instead, which is why the defect showed on one vendor out of five
+ * and looked like an OpenAI problem.
+ */
+export function cukiiVendorPathSegments(
+  userHome: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (platform === "win32") return [];
+  const home = (...segments: readonly string[]) =>
+    path.posix.join(userHome, ...segments);
+  return [
+    home(...CUKII_UNIX_NODE_HOME_SEGMENTS, "bin"),
+    home(...CUKII_UNIX_NPM_PREFIX_SEGMENTS, "bin"),
+  ];
+}
+
+/**
+ * Environment for spawning a vendor CLI from the extension host.
+ *
+ * Defense in depth next to the installed wrapper: a vendor that updates itself
+ * through npm rewrites the shim and drops the wrapper, and Cukii's own probes
+ * and bridge must keep working through that.
+ */
+export function vendorSpawnEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  userHome: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const segments = cukiiVendorPathSegments(userHome, platform);
+  if (segments.length === 0) return { ...env };
+  const key =
+    Object.keys(env).find((name) => name.toLowerCase() === "path") ?? "PATH";
+  const inherited = (env[key] ?? "")
+    .split(":")
+    .filter((segment) => segment && !segments.includes(segment));
+  return { ...env, [key]: [...segments, ...inherited].join(":") };
+}
 
 /**
  * Pinned only as a fallback for when nodejs.org cannot be asked which release
@@ -194,7 +248,9 @@ function unixNpmInstallScript(
   const bootstrap = unixNodeBootstrap();
   const nodeHome = `$HOME/${CUKII_UNIX_NODE_HOME_SEGMENTS.join("/")}`;
   const npmPrefix = `$HOME/${CUKII_UNIX_NPM_PREFIX_SEGMENTS.join("/")}`;
+  const libexec = `$HOME/${CUKII_UNIX_LIBEXEC_SEGMENTS.join("/")}`;
   const installedProgram = `${npmPrefix}/bin/${programName}`;
+  const libexecProgram = `${libexec}/${programName}`;
   // Keep compound shell constructs on real line boundaries. Joining with
   // semicolons turns `then` / `else` / `fi` into invalid `then;` tokens.
   return [
@@ -224,7 +280,28 @@ function unixNpmInstallScript(
     `mkdir -p "${npmPrefix}"`,
     `npm install -g --prefix "${npmPrefix}" ${shellLiteral(packageName)}`,
     `[ -x "${installedProgram}" ] || { echo 'Cukii: npm finished, but ${programName} was not installed at ${installedProgram}.' >&2; exit 29; }`,
-    `"${installedProgram}" --version >/dev/null 2>&1 || { echo 'Cukii: ${programName} was installed but cannot start.' >&2; exit 30; }`,
+    // npm's shim for these packages is a Node script, so the installed entry
+    // point must not depend on the caller having `node` on PATH. Move the shim
+    // aside and own the entry point with a plain `/bin/sh` wrapper: that works
+    // from any shell, including fish, where `VAR=value command` is not syntax.
+    `mkdir -p "${libexec}"`,
+    `rm -f "${libexecProgram}"`,
+    `mv "${installedProgram}" "${libexecProgram}"`,
+    `cat > "${installedProgram}" <<CUKII_VENDOR_WRAPPER`,
+    "#!/bin/sh",
+    `PATH="${nodeHome}/bin:\\$PATH"`,
+    "export PATH",
+    `exec "${libexecProgram}" "\\$@"`,
+    "CUKII_VENDOR_WRAPPER",
+    `chmod +x "${installedProgram}"`,
+    // 🔴 Verify in a clean environment, never in this script's own. PATH here
+    // already carries the private Node — the single environment in which the
+    // CLI could always start — so checking here proves only that the installer
+    // can run what the installer just prepared. That false pass is exactly
+    // what let 2.0.132 report "installation verified" for a `codex` the owner
+    // could not launch at all.
+    `env -i HOME="$HOME" PATH=/usr/bin:/bin "${installedProgram}" --version >/dev/null 2>&1 || ` +
+      `{ echo 'Cukii: ${programName} was installed but cannot start from a clean shell.' >&2; exit 30; }`,
     `echo 'Cukii: ${programName} installed successfully at ${installedProgram}.'`,
     "exit 0",
   ].join("\n");

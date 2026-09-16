@@ -20,6 +20,7 @@ import {
   CUKII_UNIX_NODE_HOME_SEGMENTS,
   CUKII_UNIX_NPM_PREFIX_SEGMENTS,
   vendorInstallTerminalSpec,
+  vendorSpawnEnv,
   type VendorInstallTerminalSpec,
 } from "./vendorCliInstaller";
 import { yougileAccountStatus } from "./yougileAccount";
@@ -1675,6 +1676,10 @@ export async function probeVendorExecutable(
       windowsHide: true,
       maxBuffer: 256 * 1024,
       windowsVerbatimArguments: spec.windowsVerbatimArguments,
+      // Without the private Node on PATH an npm-shim CLI dies in its own
+      // shebang, and the row then reports "Account status unavailable" for a
+      // vendor that is installed and merely unlaunchable (card 3d82899a).
+      env: vendorSpawnEnv(),
     });
     const output = qwenProbe ? qwenProbe.output : `${stdout}\n${stderr}`;
     const outputIdentity = identityFromNativeCliOutput(vendor, output);

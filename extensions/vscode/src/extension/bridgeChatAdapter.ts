@@ -46,6 +46,7 @@ import {
   buildBridgeTranscript,
 } from "./bridgeTranscript";
 import { windowsVendorCliCandidates } from "./vendorCliCandidates";
+import { cukiiVendorPathSegments, vendorSpawnEnv } from "./vendorCliInstaller";
 import {
   closeFollowers,
   drainFollowers,
@@ -159,10 +160,7 @@ export type ClaudePermissionTransport = {
   /** Reports whether the spawned vendor process tree was verified terminated. */
   onTerminationResult?: (terminated: boolean) => void;
   /** Reports the vendor child pid once known; undefined on spawn failure. */
-  onChildSpawned?: (
-    pid: number | undefined,
-    binding?: CukiiRunBinding,
-  ) => void;
+  onChildSpawned?: (pid: number | undefined, binding?: CukiiRunBinding) => void;
   /** Run-owned files referenced by cold-start and broker-inbox image prompts. */
   imageScope?: BridgeImageScope;
   abortSignal?: AbortSignal;
@@ -739,16 +737,39 @@ export function claudeInitialContent(
   return parts;
 }
 
-function commandCandidates(program: string): string[] {
-  if (
-    process.platform !== "win32" ||
-    program.includes("\\") ||
-    program.includes("/")
-  ) {
+/**
+ * Where the bridge looks for a vendor CLI before falling back to PATH.
+ *
+ * 🔴 Exported for test only. Trusting PATH alone on macOS is what made
+ * 2.0.132 answer "Opus 5 bridge is unavailable: cannot start claude" for an
+ * owner whose Accounts row showed that same CLI signed in (board card
+ * f236681a): the probe resolves an absolute path, the bridge did not, and a
+ * GUI VS Code gets its PATH from `path_helper`, which never lists
+ * `~/.local/bin`.
+ */
+export function commandCandidates(
+  program: string,
+  platform: NodeJS.Platform = process.platform,
+  userHome: string = os.homedir(),
+): string[] {
+  if (program.includes("\\") || program.includes("/")) {
     return [program];
   }
 
-  const home = os.homedir();
+  const home = userHome;
+  if (platform !== "win32") {
+    // A GUI VS Code on macOS takes PATH from `path_helper`, which never
+    // contains `~/.local/bin` — the directory the Cukii installer writes to.
+    // Resolving by bare name alone made the bridge unable to launch a vendor
+    // CLI that was installed and working in the owner's own terminal.
+    return [
+      ...cukiiVendorPathSegments(home, platform).map((segment) =>
+        path.posix.join(segment, program),
+      ),
+      program,
+    ];
+  }
+
   return [
     // Avoid the npm .cmd shim for `--prompt-json`: cmd.exe has a much smaller
     // command-line budget than the native Grok executable. The shared list puts
@@ -950,9 +971,17 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
   // Re-resolve after creation: an existing/replaced leaf may itself be a
   // junction and must not escape the verified scratch root.
   const inheritedEnv = bridgeStorageProcessEnv();
+  // One ordering rule for every Cukii-spawned vendor process, kept in a single
+  // place: the private Node first, then the installed CLI directory. An npm
+  // shim resolves `#!/usr/bin/env node` on every launch, so a host PATH
+  // without the private runtime kills the child in its own shebang.
+  const resolvedPath =
+    process.platform === "win32"
+      ? segments.join(path.delimiter)
+      : (vendorSpawnEnv({ PATH: segments.join(":") }, home).PATH ?? "");
   const env: BridgeEnv = {
     ...inheritedEnv,
-    [pathKey]: segments.join(path.delimiter),
+    [pathKey]: resolvedPath,
     ...(process.platform === "win32" ? { ComSpec: windowsCmdPath() } : {}),
     CUKII_BRIDGE_MODE: "broker",
     CUKII_BROKER_MODEL: model,
@@ -981,6 +1010,19 @@ function ensureProgramAvailable(route: BridgeRoute): ResolvedCommand {
     throw new Error(
       `${route.label} bridge is unavailable: cannot start "${route.program}". ` +
         "Install/authenticate the native CLI or select another broker model.",
+    );
+  }
+  // A shebang script whose interpreter is missing still spawns successfully:
+  // the kernel runs `/usr/bin/env`, which exits 127 on its own. `probe.error`
+  // stays empty, so this preflight used to pass and the real failure reached
+  // the owner as an opaque dead stream. 126/127 only — any other non-zero exit
+  // is the vendor's own business and must not block the route.
+  if (probe.status === 126 || probe.status === 127) {
+    const reason = (probe.stderr ?? "").trim().split("\n")[0];
+    throw new Error(
+      `${route.label} bridge is unavailable: "${route.program}" could not be executed` +
+        (reason ? ` (${reason})` : "") +
+        ". Reinstall it from Accounts, or select another broker model.",
     );
   }
   return resolveCommand(route.program, route.args);

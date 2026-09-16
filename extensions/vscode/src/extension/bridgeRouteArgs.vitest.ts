@@ -43,6 +43,7 @@ import {
   bridgeProcessFailureTerminalEvent,
   claudeInitialContent,
   claudeStreamingInput,
+  commandCandidates,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
   nativePromptCacheArgs,
@@ -67,7 +68,9 @@ describe("broker delegation recovery guidance", () => {
     expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("task/scope routing error");
     expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("never evidence");
     expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("route_reason");
-    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("explicit known vault scope");
+    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain(
+      "explicit known vault scope",
+    );
   });
 });
 
@@ -1442,5 +1445,50 @@ describe("native bridge argv", () => {
     expect(resolveAt).toBeGreaterThan(-1);
     expect(assertAt).toBeGreaterThan(resolveAt);
     expect(launchAt).toBeGreaterThan(assertAt);
+  });
+});
+
+// 🔴 The owner's Accounts row showed Anthropic signed in while starting an
+// Opus 5 session answered "Opus 5 bridge is unavailable: cannot start
+// \"claude\"" (board card f236681a, Cukii 2.0.132 on darwin). The row and the
+// bridge disagreed because only the row resolved an absolute path: a GUI
+// VS Code takes PATH from `path_helper`, which never lists `~/.local/bin`, so
+// on macOS the bridge was left with a bare name and nothing to find.
+describe("unix vendor CLI resolution", () => {
+  it.each(["darwin", "linux"] as const)(
+    "looks in the Cukii install locations before PATH on %s",
+    (platform) => {
+      expect(commandCandidates("claude", platform, "/Users/owner")).toEqual([
+        "/Users/owner/.local/share/cukii/node/bin/claude",
+        "/Users/owner/.local/bin/claude",
+        "claude",
+      ]);
+    },
+  );
+
+  it("keeps PATH as the last resort, never the first answer", () => {
+    const candidates = commandCandidates("codex", "darwin", "/Users/owner");
+    const installed = candidates.indexOf("/Users/owner/.local/bin/codex");
+    // Assert presence before order: comparing indexes alone passes vacuously
+    // when the explicit location is absent, which is the regression itself.
+    expect(installed).toBeGreaterThanOrEqual(0);
+    expect(candidates.at(-1)).toBe("codex");
+    expect(installed).toBeLessThan(candidates.indexOf("codex"));
+  });
+
+  it("leaves an explicit path alone on every platform", () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
+      expect(
+        commandCandidates("/opt/homebrew/bin/claude", platform, "/Users/owner"),
+      ).toEqual(["/opt/homebrew/bin/claude"]);
+    }
+  });
+
+  it("still probes the Windows product locations on win32", () => {
+    const candidates = commandCandidates("codex", "win32", "C:\\Users\\owner");
+    expect(candidates).not.toContain(
+      "C:\\Users\\owner/.local/share/cukii/node/bin/codex",
+    );
+    expect(candidates.at(-1)).toBe("codex");
   });
 });

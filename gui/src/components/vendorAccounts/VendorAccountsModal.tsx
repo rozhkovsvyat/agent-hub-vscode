@@ -19,14 +19,18 @@ const ACTION_LABELS: Record<BrokerVendorAuthAction, string> = {
   logout: "Log out",
 };
 
+/**
+ * Every row uses the same three words — Log in / Log out / Not logged in.
+ *
+ * Cukii Box used to say Connect/Disconnect. The owner asked for one vocabulary
+ * across the dialog (board card 39b4d2fe): the box is about to grow a real
+ * login, so a second pair of verbs for the same state would only teach two
+ * names for one thing.
+ */
 function accountActionLabel(
-  account: BrokerVendorAuthStatus,
+  _account: BrokerVendorAuthStatus,
   action: BrokerVendorAuthAction,
 ): string {
-  if (account.id === "memory") {
-    if (action === "login") return "Connect";
-    if (action === "logout") return "Disconnect";
-  }
   return ACTION_LABELS[action];
 }
 
