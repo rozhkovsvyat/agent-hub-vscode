@@ -16,8 +16,33 @@ jobs:
   checks:
     uses: ./.github/workflows/cukii-ci.yml
 
-  build:
+  macos-vendor-bootstrap:
     needs: checks
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Build shared packages
+        run: node ./scripts/build-packages.js
+
+      - name: Install extension test dependencies
+        working-directory: extensions/vscode
+        run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run the real Anthropic bootstrap through Cukii on macOS
+        working-directory: extensions/vscode
+        run: npm test -- src/extension/vendorCliInstaller.macos.vitest.ts
+        env:
+          CUKII_REAL_VENDOR_INSTALL_SMOKE: "1"
+
+  build:
+    needs: [checks, macos-vendor-bootstrap]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

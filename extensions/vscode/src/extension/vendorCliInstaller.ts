@@ -22,6 +22,14 @@ const NPM_VENDOR_PACKAGES: Partial<Record<BrokerVendorId, string>> = {
   qwen: "@qwen-code/qwen-code@latest",
 };
 
+const NPM_VENDOR_PROGRAMS: Partial<Record<BrokerVendorId, string>> = {
+  claude: "claude",
+  codex: "codex",
+  grok: "grok",
+  kimi: "kimi",
+  qwen: "qwen",
+};
+
 /**
  * Where a Unix install puts things, as path segments under the user's home.
  *
@@ -106,11 +114,11 @@ function windowsNpmInstallScript(packageName: string): string {
     "    $wingetArgs = @('install', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--source', 'winget', '--scope', 'machine', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')",
     "    if ($isAdmin) {",
     "      & $winget.Source @wingetArgs",
-    "      if ($LASTEXITCODE -ne 0) { throw \"winget could not install Node.js LTS (exit $LASTEXITCODE).\" }",
+    '      if ($LASTEXITCODE -ne 0) { throw "winget could not install Node.js LTS (exit $LASTEXITCODE)." }',
     "    } else {",
     "      [Console]::Error.WriteLine('Cukii: Node.js LTS is missing. Windows administrator approval is required for this installer only; approve the UAC prompt to continue.')",
     "      $installer = Start-Process -FilePath $winget.Source -ArgumentList $wingetArgs -Verb RunAs -Wait -PassThru",
-    "      if ($installer.ExitCode -ne 0) { throw \"elevated winget could not install Node.js LTS (exit $($installer.ExitCode)).\" }",
+    '      if ($installer.ExitCode -ne 0) { throw "elevated winget could not install Node.js LTS (exit $($installer.ExitCode))." }',
     "    }",
     "    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')",
     "    $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue",
@@ -122,7 +130,7 @@ function windowsNpmInstallScript(packageName: string): string {
     "    if (-not $npmPath) { throw 'Node.js LTS was installed, but npm.cmd is not discoverable. Restart the Cukii terminal flow, then select Install again.' }",
     "  }",
     "  & $npmPath install -g " + packageLiteral,
-    "  if ($LASTEXITCODE -ne 0) { throw \"npm.cmd failed with exit $LASTEXITCODE.\" }",
+    '  if ($LASTEXITCODE -ne 0) { throw "npm.cmd failed with exit $LASTEXITCODE." }',
     "  exit 0",
     "} catch {",
     "  [Console]::Error.WriteLine('Cukii: ' + $_.Exception.Message)",
@@ -178,10 +186,14 @@ function unixNodeBootstrap(): string[] {
   ];
 }
 
-function unixNpmInstallScript(packageName: string): string {
+function unixNpmInstallScript(
+  packageName: string,
+  programName: string,
+): string {
   const bootstrap = unixNodeBootstrap();
   const nodeHome = `$HOME/${CUKII_UNIX_NODE_HOME_SEGMENTS.join("/")}`;
   const npmPrefix = `$HOME/${CUKII_UNIX_NPM_PREFIX_SEGMENTS.join("/")}`;
+  const installedProgram = `${npmPrefix}/bin/${programName}`;
   // Keep compound shell constructs on real line boundaries. Joining with
   // semicolons turns `then` / `else` / `fi` into invalid `then;` tokens.
   return [
@@ -197,34 +209,28 @@ function unixNpmInstallScript(packageName: string): string {
     ...bootstrap.map((line) => `  ${line}`),
     "fi",
     "command -v npm >/dev/null 2>&1 || { echo 'Cukii: Node.js was installed, but npm is not discoverable. Restart VS Code, then select Install again.' >&2; exit 23; }",
-    "cukii_prefix=$(npm config get prefix)",
-    `if [ ! -w "$cukii_prefix" ]; then`,
-    `  npm config set prefix "${npmPrefix}"`,
-    `  PATH="${npmPrefix}/bin:$PATH"`,
-    "  export PATH",
-    "fi",
-    `npm install -g ${shellLiteral(packageName)}`,
+    // A deterministic user-owned prefix is critical. Reading npm's current
+    // global prefix reintroduces the exact failure from 2.0.130: on a Mac with
+    // Homebrew it can point outside $HOME and ask for administrator approval.
+    `mkdir -p "${npmPrefix}"`,
+    `npm install -g --prefix "${npmPrefix}" ${shellLiteral(packageName)}`,
+    `[ -x "${installedProgram}" ] || { echo 'Cukii: npm finished, but ${programName} was not installed at ${installedProgram}.' >&2; exit 29; }`,
+    `"${installedProgram}" --version >/dev/null 2>&1 || { echo 'Cukii: ${programName} was installed but cannot start.' >&2; exit 30; }`,
+    `echo 'Cukii: ${programName} installed successfully at ${installedProgram}.'`,
     "exit 0",
   ].join("\n");
 }
 
 /**
- * Vendors whose own installer places a self-contained binary under $HOME.
+ * Vendors whose own installer is the only supported non-package-manager path.
  *
- * Preferred over npm wherever it exists: it needs neither Node nor elevation,
- * and Anthropic's installer actively refuses to run under sudo — running it
- * that way would put the binary in root's home where the owner's shell cannot
- * see it.
+ * Claude intentionally uses the deterministic npm path above. In 2.0.131 its
+ * downloaded installer returned exit 1 on the owner's Mac while the terminal
+ * closed before preserving the reason. The npm package is published by
+ * Anthropic, and the Cukii-owned Node and prefix keep it user-local and
+ * observable.
  */
 function nativeUnixInstallScript(vendor: BrokerVendorId): string | undefined {
-  if (vendor === "claude") {
-    return [
-      ...unixPreflight(),
-      "command -v curl >/dev/null 2>&1 || { echo 'Cukii: curl is required to install Claude Code.' >&2; exit 20; }",
-      "curl -fsSL https://claude.ai/install.sh | bash",
-      "exit 0",
-    ].join("\n");
-  }
   if (vendor === "cursor") {
     return [
       ...unixPreflight(),
@@ -273,9 +279,12 @@ export function vendorInstallTerminalSpec(
     };
   }
 
+  const programName = NPM_VENDOR_PROGRAMS[vendor];
   return {
     name: `Cukii · ${vendor} install`,
-    command: nativeUnixInstallScript(vendor) ?? unixNpmInstallScript(packageName!),
+    command:
+      nativeUnixInstallScript(vendor) ??
+      unixNpmInstallScript(packageName!, programName!),
     shellPath: "/bin/bash",
     shellArgs: ["--noprofile", "--norc"],
     closesTerminal: true,

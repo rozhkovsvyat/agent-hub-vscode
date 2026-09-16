@@ -154,7 +154,7 @@ test("Ctrl+Backspace does not cancel a streaming response", async () => {
   expect(store.getState().session.isStreaming).toBe(true);
 });
 
-test("generic streaming renders no detached toolbar or stop hint", async () => {
+test("streaming toolbar has no Ctrl+Backspace stop hint", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -164,11 +164,12 @@ test("generic streaming renders no detached toolbar or stop hint", async () => {
   const toolbar = container.querySelector(
     '[data-testid="cukii-streaming-toolbar"]',
   );
-  expect(toolbar).toBeNull();
-  expect(container.textContent ?? "").not.toMatch(/Backspace.*stop/i);
+  expect(toolbar).not.toBeNull();
+  expect(toolbar?.textContent ?? "").not.toMatch(/Backspace/i);
+  expect(toolbar?.textContent ?? "").not.toMatch(/to stop/i);
 });
 
-test("generic streaming keeps layout without adding a loader row", async () => {
+test("streaming loader lives in the transcript, not on the composer", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -181,20 +182,21 @@ test("generic streaming keeps layout without adding a loader row", async () => {
   const transcript = container.querySelector(".cukii-transcript");
   const composer = container.querySelector(".cukii-main-input-shell");
 
-  expect(toolbar).toBeNull();
+  expect(toolbar).not.toBeNull();
   expect(transcript).not.toBeNull();
-  expect(composer).not.toBeNull();
+  expect(transcript?.contains(toolbar)).toBe(true);
+  expect(composer?.contains(toolbar)).toBe(false);
   expect(
     container.querySelector("[data-testid='cukii-spinner-row']"),
-  ).toBeNull();
+  ).not.toBeNull();
   expect(container.querySelector(".cukii-composer-spacer")).not.toBeNull();
   expect(container.querySelector(".cukii-message-gradient")).not.toBeNull();
 });
 
-test("streaming never reserves space for a removed Generating toolbar", () => {
+test("streaming spacer makes the 16px loader band symmetric without changing idle backing", () => {
   expect(composerSpacerHeight(103, false)).toBe(103);
-  expect(composerSpacerHeight(103, true)).toBe(103);
-  expect(composerSpacerHeight(4, true)).toBe(4);
+  expect(composerSpacerHeight(103, true)).toBe(95);
+  expect(composerSpacerHeight(4, true)).toBe(0);
 });
 
 test("user bubbles are not timeline items", async () => {
@@ -707,7 +709,7 @@ test("renders a persisted Claude-style model switch boundary before the next tur
   expect(css).toContain("@media screen and (max-width: 330px)");
 });
 
-test("generic streaming appends no loader after the current transcript", async () => {
+test("streaming toolbar follows the current transcript", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -756,11 +758,13 @@ test("generic streaming appends no loader after the current transcript", async (
   );
   const currentTranscript = await getElementByText("Current transcript");
 
-  expect(currentTranscript).not.toBeNull();
-  expect(toolbar).toBeNull();
+  expect(toolbar).not.toBeNull();
+  expect(toolbar?.compareDocumentPosition(currentTranscript) ?? 0).toBe(
+    Node.DOCUMENT_POSITION_PRECEDING,
+  );
 });
 
-test("thinking label renders without a detached streaming loader", async () => {
+test("thinking label sits above the streaming loader", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
 
   await act(async () => {
@@ -799,7 +803,10 @@ test("thinking label renders without a detached streaming loader", async () => {
 
   expect(thinking.textContent).toMatch(/Thinking/);
   expect(thinking.querySelector(".cukii-thinking-glyph")).toBeNull();
-  expect(toolbar).toBeNull();
+  expect(toolbar).not.toBeNull();
+  expect(toolbar?.compareDocumentPosition(thinking) ?? 0).toBe(
+    Node.DOCUMENT_POSITION_PRECEDING,
+  );
 });
 
 test("shell tool calls render compact IN/OUT command cards without legacy terminals", async () => {
@@ -867,7 +874,7 @@ test("shell tool calls render compact IN/OUT command cards without legacy termin
   });
 });
 
-test("tool start/start/complete race keeps only the latest tool active", async () => {
+test("tool start/start/complete race keeps the stream loader active while a tool is active", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
   const tools = ["first", "second"].map((id) => ({
     toolCallId: id,
@@ -899,28 +906,33 @@ test("tool start/start/complete race keeps only the latest tool active", async (
     store.dispatch(setToolCallCalling({ toolCallId: "second" }));
   });
   expect(container.querySelectorAll('[data-cukii-active="true"]')).toHaveLength(
-    1,
+    2,
   );
   expect(
     container.querySelector(".cukii-timeline-current")?.textContent,
   ).toContain("Shell");
   expect(
-    container.querySelector('[data-testid="cukii-spinner-row"]'),
-  ).toBeNull();
+    container.querySelector('[data-testid="cukii-spinner-row"] .cukii-crumbs'),
+  ).toHaveClass("cukii-crumbs-active");
 
   await act(async () => {
     store.dispatch(acceptToolCall({ toolCallId: "second" }));
     store.dispatch(acceptToolCall({ toolCallId: "first" }));
   });
-  expect(container.querySelectorAll('[data-cukii-active="true"]')).toHaveLength(
-    0,
+  const active = container.querySelectorAll('[data-cukii-active="true"]');
+  expect(active).toHaveLength(1);
+  expect(active[0]).toHaveAttribute("data-testid", "cukii-spinner-row");
+  const spinner = container.querySelector('[data-testid="cukii-spinner-row"]');
+  const cards = container.querySelectorAll(
+    '[data-testid="cukii-command-card"]',
   );
-  expect(
-    container.querySelector('[data-testid="cukii-spinner-row"]'),
-  ).toBeNull();
+  expect(spinner?.compareDocumentPosition(cards[cards.length - 1]) ?? 0).toBe(
+    Node.DOCUMENT_POSITION_PRECEDING,
+  );
 });
 
-test("only an explicit bridge wait renders a status during streaming", async () => {
+test("loader renders and cycles for an active tool, but yields to bridge wait and edit mode", async () => {
+  vi.useFakeTimers();
   const { store, container } = await renderWithProviders(<Chat />);
   await act(async () => {
     store.dispatch({ type: "session/setActive" });
@@ -930,12 +942,24 @@ test("only an explicit bridge wait renders a status during streaming", async () 
       }),
     );
   });
-  expect(
-    container.querySelector('[data-testid="cukii-streaming-toolbar"]'),
-  ).toBeNull();
-  expect(
-    container.querySelector('[data-testid="cukii-spinner-row"]'),
-  ).toBeNull();
+  const toolbar = container.querySelector(
+    '[data-testid="cukii-streaming-toolbar"]',
+  );
+  expect(toolbar).not.toBeNull();
+  expect(toolbar?.querySelector(".cukii-crumbs")).toHaveClass(
+    "cukii-crumbs-active",
+  );
+  await act(async () => {
+    vi.advanceTimersByTime(4_000);
+  });
+  expect(toolbar?.textContent).toContain("Combulating..");
+  const css = canonicalCss();
+  expect(css).toMatch(
+    /\.cukii-crumbs-active circle\s*\{[^}]*animation:\s*cukiiCrumbVertex\s+1\.26s[^}]*infinite/s,
+  );
+  expect(css).not.toMatch(
+    /\.cukii-crumbs-active circle\s*\{[^}]*animation-fill-mode/s,
+  );
 
   await act(async () => {
     store.dispatch(setBridgeWait({ condition: "Waiting for bridge" }));
@@ -962,6 +986,7 @@ test("only an explicit bridge wait renders a status during streaming", async () 
   expect(
     container.querySelector('[data-testid="cukii-waiting-receipt"]'),
   ).toBeNull();
+  vi.useRealTimers();
 });
 
 test("Interrupted is a sibling timeline row, never a detached transcript footer", async () => {

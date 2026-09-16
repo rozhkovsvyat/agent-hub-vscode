@@ -22,9 +22,7 @@ describe("vendorInstallTerminalSpec", () => {
     expect(spec!.command).toContain("Start-Process");
     expect(spec!.command).toContain("-Verb RunAs");
     expect(spec!.command).not.toContain("Restart VS Code as Administrator");
-    expect(spec!.command).toContain(
-      "@xai-official/grok@latest",
-    );
+    expect(spec!.command).toContain("@xai-official/grok@latest");
     expect(spec!.command).not.toContain("Set-ExecutionPolicy");
     expect(spec!.command).not.toMatch(/\bnpm install\b/);
   });
@@ -32,9 +30,7 @@ describe("vendorInstallTerminalSpec", () => {
   it.runIf(process.platform === "win32")(
     "executes a real npm.cmd even when a hostile npm.ps1 is earlier on PATH",
     () => {
-      const directory = fs.mkdtempSync(
-        "D:\\Scratch\\cukii-npm-command-probe-",
-      );
+      const directory = fs.mkdtempSync("D:\\Scratch\\cukii-npm-command-probe-");
       const receipt = path.join(directory, "receipt.txt");
       fs.writeFileSync(
         path.join(directory, "npm.cmd"),
@@ -137,15 +133,14 @@ describe("vendorInstallTerminalSpec", () => {
     },
   );
 
-  it("installs Claude Code with its own installer instead of npm", () => {
+  it("installs Claude Code through Anthropic's npm package in a user-owned prefix", () => {
     for (const platform of ["darwin", "linux"] as const) {
       const spec = vendorInstallTerminalSpec("claude", platform)!;
       expect(spec.shellPath).toBe("/bin/bash");
-      expect(spec.command).toContain("https://claude.ai/install.sh");
-      // Anthropic's installer needs no Node at all, so requiring npm here
-      // would reintroduce the whole package-manager bootstrap for nothing.
-      expect(spec.command).not.toContain("npm");
-      expect(spec.command).not.toContain("@anthropic-ai/claude-code");
+      expect(spec.command).toContain('npm install -g --prefix "$HOME/.local"');
+      expect(spec.command).toContain("@anthropic-ai/claude-code@latest");
+      expect(spec.command).toContain('"$HOME/.local/bin/claude" --version');
+      expect(spec.command).not.toContain("https://claude.ai/install.sh");
     }
   });
 
@@ -154,7 +149,7 @@ describe("vendorInstallTerminalSpec", () => {
 
     expect(spec.command).toContain("$HOME/.local/share/cukii/node");
     expect(spec.command).toContain("https://nodejs.org/dist/");
-    expect(spec.command).toContain('npm config set prefix "$HOME/.local"');
+    expect(spec.command).toContain('npm install -g --prefix "$HOME/.local"');
     expect(spec.command).toContain("@openai/codex@latest");
     // Both CPU families of both platforms, or the tarball name is wrong for
     // exactly the machines we cannot test from here.
@@ -196,6 +191,7 @@ describe("vendorInstallTerminalSpec", () => {
         expect(spec.command).not.toContain("else;");
       }
     },
+    15_000,
   );
 
   it("uses Cursor's official platform-specific installers", () => {

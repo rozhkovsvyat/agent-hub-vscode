@@ -114,6 +114,7 @@ import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
 } from "./cukiiMemoryAccount";
+import { runVendorInstallProcess } from "./vendorCliInstallProcess";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -1135,6 +1136,50 @@ export class VsCodeMessenger {
           opened: false,
           message:
             "This vendor does not expose that CLI authentication action.",
+        };
+      }
+      if (
+        action === "install" &&
+        vendor !== "deepseek" &&
+        spec.closesTerminal === true
+      ) {
+        const output = vscode.window.createOutputChannel(
+          `Cukii · ${vendor} install`,
+        );
+        output.clear();
+        output.appendLine(
+          `Installing ${vendor} without administrator rights...`,
+        );
+        output.show(true);
+        const result = await runVendorInstallProcess(spec, {
+          onOutput: (chunk) => output.append(chunk),
+        });
+        clearBrokerVendorAccountCache();
+        const installed =
+          result.exitCode === 0
+            ? await vendorInstallTerminalOutcome(vendor)
+            : "command-failed";
+        if (installed === "transition") {
+          output.appendLine("\nCukii: installation verified.");
+          return {
+            opened: true,
+            message: "CLI installation completed and was verified.",
+          };
+        }
+
+        const processResult = result.error
+          ? result.error.message
+          : result.signal
+            ? `terminated by ${result.signal}`
+            : `exited with code ${result.exitCode ?? "unknown"}`;
+        output.appendLine(`\nCukii: installation failed (${processResult}).`);
+        void vscode.window.showErrorMessage(
+          `Cukii could not install ${vendor}: ${processResult}. The full installer output is open in the Output panel.`,
+        );
+        return {
+          opened: true,
+          message:
+            "CLI installation failed. The full error is preserved in the Cukii installer output; fix it, then select Install again.",
         };
       }
       const terminal = vscode.window.createTerminal({

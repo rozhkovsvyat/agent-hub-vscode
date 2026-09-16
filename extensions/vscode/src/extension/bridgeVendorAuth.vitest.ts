@@ -13,6 +13,7 @@ import type {
 
 import {
   accountLabelFromAuthMetadata,
+  bindUnixVendorAuthExecutable,
   nativeCliCandidates,
   probeSpec,
   notInstalledVendorStatus,
@@ -42,6 +43,18 @@ describe("Cukii vendor CLI accounts", () => {
   function jwt(payload: Record<string, unknown>): string {
     return `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
   }
+
+  it("binds Unix auth to the installed absolute CLI even when GUI PATH is stale", () => {
+    expect(
+      bindUnixVendorAuthExecutable(
+        "claude auth login --claudeai",
+        "/Users/owner with space/.local/bin/claude",
+      ),
+    ).toBe("'/Users/owner with space/.local/bin/claude' auth login --claudeai");
+    expect(
+      bindUnixVendorAuthExecutable("claude auth login --claudeai", "claude"),
+    ).toBe("claude auth login --claudeai");
+  });
 
   it("classifies real CLI status shapes without a decorative local flag", () => {
     expect(
@@ -1680,8 +1693,10 @@ describe("Cukii vendor CLI accounts", () => {
     // Claude ships a self-contained installer on Unix and only uses the npm
     // package on Windows, so asserting the package name unconditionally would
     // pass here and fail on the very platform the owner reported from.
-    const claudeInstall = vendorAuthTerminalCommand("claude", "install")
-      ?.command;
+    const claudeInstall = vendorAuthTerminalCommand(
+      "claude",
+      "install",
+    )?.command;
     if (process.platform === "win32") {
       expect(claudeInstall).toContain("@anthropic-ai/claude-code@latest");
     } else {
@@ -1699,7 +1714,10 @@ describe("Cukii vendor CLI accounts", () => {
     expect(vendorAuthTerminalCommand("qwen", "install")?.command).toContain(
       "@qwen-code/qwen-code@latest",
     );
-    const cursorInstall = vendorAuthTerminalCommand("cursor", "install")?.command;
+    const cursorInstall = vendorAuthTerminalCommand(
+      "cursor",
+      "install",
+    )?.command;
     expect(cursorInstall).toContain("https://cursor.com/install");
     if (process.platform === "win32") {
       expect(cursorInstall).toContain("?win32=true");
@@ -1841,29 +1859,29 @@ describe("Cukii vendor CLI accounts", () => {
       try {
         const [connected, rejected, timedOut, loggedOutKimi] =
           await Promise.all([
-          probeVendorExecutable(
-            "codex",
-            fixture("codex", "echo Logged in using ChatGPT"),
-            { metadata: undefined },
-          ),
-          probeVendorExecutable(
-            "claude",
-            fixture("claude", "echo Not signed in\r\nexit /b 1"),
-          ),
-          probeVendorExecutable(
-            "grok",
-            fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
-            { timeoutMs: 50 },
-          ),
-          probeVendorExecutable(
-            "kimi",
-            fixture(
-              "kimi",
-              "echo managed:kimi-code type=kimi models=4 source=oauth",
+            probeVendorExecutable(
+              "codex",
+              fixture("codex", "echo Logged in using ChatGPT"),
+              { metadata: undefined },
             ),
-            { metadata: { credentials: [], credentialPresent: false } },
-          ),
-        ]);
+            probeVendorExecutable(
+              "claude",
+              fixture("claude", "echo Not signed in\r\nexit /b 1"),
+            ),
+            probeVendorExecutable(
+              "grok",
+              fixture("grok", "ping 127.0.0.1 -n 3 > nul"),
+              { timeoutMs: 50 },
+            ),
+            probeVendorExecutable(
+              "kimi",
+              fixture(
+                "kimi",
+                "echo managed:kimi-code type=kimi models=4 source=oauth",
+              ),
+              { metadata: { credentials: [], credentialPresent: false } },
+            ),
+          ]);
 
         expect(connected).toMatchObject({
           state: "connected",

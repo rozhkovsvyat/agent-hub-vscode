@@ -566,6 +566,17 @@ export function resolveNativeCli(vendor: VendorWithCli): string | undefined {
   );
 }
 
+export function bindUnixVendorAuthExecutable(
+  command: string,
+  executable: string | undefined,
+): string {
+  if (!executable || !path.posix.isAbsolute(executable)) return command;
+  const separator = command.indexOf(" ");
+  const suffix = separator >= 0 ? command.slice(separator) : "";
+  const quoted = `'${executable.replace(/'/g, `'"'"'`)}'`;
+  return `${quoted}${suffix}`;
+}
+
 function quoteCmdToken(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -1789,7 +1800,9 @@ export async function watchVendorAuthTransition(
  */
 export async function vendorInstallTerminalOutcome(
   vendor: VendorWithCli,
-  probe: (vendor: VendorWithCli) => Promise<BrokerVendorAuthStatus> = probeVendor,
+  probe: (
+    vendor: VendorWithCli,
+  ) => Promise<BrokerVendorAuthStatus> = probeVendor,
 ): Promise<"transition" | "command-failed"> {
   try {
     const status = await probe(vendor);
@@ -1907,10 +1920,7 @@ export function vendorAuthTerminalCommand(
   const install = action === "install";
   if (install) return vendorInstallTerminalSpec(vendor);
   const commands: Partial<
-    Record<
-      BrokerVendorId,
-      { login?: string; logout?: string }
-    >
+    Record<BrokerVendorId, { login?: string; logout?: string }>
   > = {
     claude: {
       login: "claude auth login --claudeai",
@@ -1935,13 +1945,18 @@ export function vendorAuthTerminalCommand(
     qwen: {},
   };
   const command =
-    action === "login"
-      ? commands[vendor]?.login
-      : commands[vendor]?.logout;
+    action === "login" ? commands[vendor]?.login : commands[vendor]?.logout;
   if (!command) return undefined;
+  const resolvedCommand =
+    process.platform === "win32" || vendor === "deepseek"
+      ? command
+      : bindUnixVendorAuthExecutable(
+          command,
+          resolveNativeCli(vendor as VendorWithCli),
+        );
   return {
     name: `Cukii · ${vendor} ${action}`,
-    command,
+    command: resolvedCommand,
     ...(vendor === "kimi" && action === "logout"
       ? { followup: "/logout" }
       : {}),

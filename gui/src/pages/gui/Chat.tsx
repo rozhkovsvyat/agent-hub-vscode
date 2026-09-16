@@ -59,7 +59,10 @@ import { cancelStream } from "../../redux/thunks/cancelStream";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
-import { CukiiWaitingReceipt } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
+import {
+  CukiiStreamingToolbar,
+  CukiiWaitingReceipt,
+} from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
@@ -107,18 +110,25 @@ export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
 export const CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX = 40;
 export const CLAUDE_COMPOSER_BOTTOM_INSET_PX = 16;
+export const CUKII_STREAMING_LOADER_GAP_PX = 16;
 
 /**
  * The transcript ends 40px above its scroll bottom while the overlaid composer
  * ends 16px above the viewport bottom. Claude reserves the full composer
- * height, leaving the resulting 24px visual band. Streaming does not add a
- * detached loader row, so the spacer always follows the measured composer.
+ * height, leaving the resulting 24px visual band. While Cukii's explicit
+ * streaming row is visible, the owner requires the band below it to equal the
+ * measured 16px band above it, so only that state shortens the spacer by 8px.
  */
 export function composerSpacerHeight(
   composerHeight: number,
-  _streamingLoaderVisible = false,
+  streamingLoaderVisible: boolean,
 ): number {
-  return Math.max(0, composerHeight);
+  const referenceGap =
+    CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX - CLAUDE_COMPOSER_BOTTOM_INSET_PX;
+  const desiredGap = streamingLoaderVisible
+    ? CUKII_STREAMING_LOADER_GAP_PX
+    : referenceGap;
+  return Math.max(0, composerHeight - referenceGap + desiredGap);
 }
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
@@ -480,7 +490,11 @@ export function Chat() {
   );
   // Rendering belongs to the active stream, not to whether its latest event is
   // a tool call. A tool may be quiet for seconds while the stream is alive.
-  const transcriptComposerSpacer = composerSpacerHeight(composerHeight);
+  const shouldRenderStreamingToolbar = isStreaming && !isInEdit && !bridgeWait;
+  const transcriptComposerSpacer = composerSpacerHeight(
+    composerHeight,
+    shouldRenderStreamingToolbar,
+  );
 
   // Right-click on capsules uses the native webview context menu; session
   // commands reach it through the extension's webview/context contribution.
@@ -897,9 +911,19 @@ export function Chat() {
           </>
         )}
         <InlineErrorMessage />
-        {isStreaming && !isInEdit && bridgeWait ? (
-          <CukiiWaitingReceipt wait={bridgeWait} />
-        ) : null}
+        {isStreaming &&
+          !isInEdit &&
+          (bridgeWait ? (
+            <CukiiWaitingReceipt wait={bridgeWait} />
+          ) : shouldRenderStreamingToolbar ? (
+            <div
+              className="cukii-spinner-row"
+              data-testid="cukii-spinner-row"
+              data-cukii-active="true"
+            >
+              <CukiiStreamingToolbar active />
+            </div>
+          ) : null)}
         {!isSessionLoading && (
           <div
             aria-hidden="true"

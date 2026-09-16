@@ -28,17 +28,28 @@ describe("vendor installer host wiring", () => {
     expect(messengerSource).toContain(
       "closed.then(() => vendorInstallTerminalOutcome(vendor))",
     );
-    expect(messengerSource).toContain(
-      'flow.outcome === "command-failed"',
-    );
+    expect(messengerSource).toContain('flow.outcome === "command-failed"');
     expect(messengerSource).toContain(
       "CLI installation failed. Fix the error shown in the terminal, then select Install again.",
     );
   });
 
-  it("creates install terminals with the platform-specific shell plan", () => {
+  it("runs finite installers as captured processes and keeps terminals for interactive auth only", () => {
+    const installBranch = messengerSource.indexOf('action === "install"');
+    const processRun = messengerSource.indexOf(
+      "runVendorInstallProcess(spec",
+      installBranch,
+    );
+    const terminal = messengerSource.indexOf(
+      "vscode.window.createTerminal",
+      installBranch,
+    );
+
+    expect(installBranch).toBeGreaterThan(0);
+    expect(processRun).toBeGreaterThan(installBranch);
+    expect(terminal).toBeGreaterThan(processRun);
     expect(messengerSource).toContain(
-      "{ shellPath: spec.shellPath, shellArgs: spec.shellArgs }",
+      "The full installer output is open in the Output panel.",
     );
   });
 });
