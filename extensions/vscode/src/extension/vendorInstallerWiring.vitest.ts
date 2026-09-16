@@ -94,6 +94,19 @@ describe("vendor CLI launch environment", () => {
     );
   });
 
+  it("opens login and logout terminals with the shared vendor PATH", () => {
+    const terminal = messengerSource.indexOf(
+      "vscode.window.createTerminal",
+      messengerSource.indexOf('action === "install"'),
+    );
+    const env = messengerSource.indexOf("env: vendorSpawnEnv()", terminal);
+    const show = messengerSource.indexOf("terminal.show()", terminal);
+
+    expect(terminal).toBeGreaterThan(0);
+    expect(env).toBeGreaterThan(terminal);
+    expect(env).toBeLessThan(show);
+  });
+
   // A missing interpreter does not fail the spawn: the kernel runs
   // `/usr/bin/env`, which exits 127 on its own, so the preflight saw success
   // and the real cause reached the owner as an opaque dead stream.

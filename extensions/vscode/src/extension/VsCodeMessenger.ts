@@ -115,6 +115,7 @@ import {
   isCukiiMemoryAccountId,
 } from "./cukiiMemoryAccount";
 import { runVendorInstallProcess } from "./vendorCliInstallProcess";
+import { vendorSpawnEnv } from "./vendorCliInstaller";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -1182,8 +1183,15 @@ export class VsCodeMessenger {
             "CLI installation failed. The full error is preserved in the Cukii installer output; fix it, then select Install again.",
         };
       }
+      // Interactive login still runs the vendor's own npm shim. 2.0.132 left
+      // that shim on PATH without the private Node, so `codex login` died in
+      // `env: node: No such file or directory` (card 3d82899a) even after a
+      // successful install. The wrapper written at install time covers a
+      // fresh CLI; this env covers the already-installed shim and a vendor
+      // that rewrites itself.
       const terminal = vscode.window.createTerminal({
         name: spec.name,
+        env: vendorSpawnEnv(),
         ...(spec.shellPath
           ? { shellPath: spec.shellPath, shellArgs: spec.shellArgs }
           : {}),
