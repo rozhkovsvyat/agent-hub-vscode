@@ -158,14 +158,15 @@ describe("vendorInstallTerminalSpec", () => {
     }
   });
 
-  it("reuses a Node it already installed instead of downloading it again", () => {
+  it("reuses only a suitable Cukii-owned Node and ignores the system npm", () => {
     const command = vendorInstallTerminalSpec("grok", "linux")!.command;
-    const reuseAt = command.indexOf(
-      'if [ -x "$HOME/.local/share/cukii/node/bin/npm" ]',
-    );
+    const probeAt = command.indexOf("cukii_node_major=0");
     const downloadAt = command.indexOf("https://nodejs.org/dist/");
-    expect(reuseAt).toBeGreaterThanOrEqual(0);
-    expect(downloadAt).toBeGreaterThan(reuseAt);
+    expect(probeAt).toBeGreaterThanOrEqual(0);
+    expect(command).toContain('[ "$cukii_node_major" -lt 22 ]');
+    expect(command).toContain('PATH="$HOME/.local/share/cukii/node/bin:$PATH"');
+    expect(command).not.toContain("if ! command -v npm");
+    expect(downloadAt).toBeGreaterThan(probeAt);
   });
 
   it.each(["darwin", "linux"] as const)(

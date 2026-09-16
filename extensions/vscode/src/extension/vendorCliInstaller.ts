@@ -52,6 +52,7 @@ export const CUKII_UNIX_NODE_HOME_SEGMENTS = [
  * an older Node, never a failed install.
  */
 const NODE_LTS_FALLBACK_VERSION = "v24.21.0";
+const MIN_VENDOR_NODE_MAJOR = 22;
 
 const NO_ADMIN_NOTICE =
   "Cukii: installing into your home directory. No administrator rights are required.";
@@ -198,17 +199,25 @@ function unixNpmInstallScript(
   // semicolons turns `then` / `else` / `fi` into invalid `then;` tokens.
   return [
     ...unixPreflight(),
-    // A Node installed by an earlier run lives outside the PATH a GUI VS Code
-    // inherits, so it has to be put back before deciding npm is missing —
-    // otherwise every install re-downloads Node.
-    `if [ -x "${nodeHome}/bin/npm" ]; then`,
-    `  PATH="${nodeHome}/bin:$PATH"`,
-    "  export PATH",
+    // Never trust a system npm here. `@anthropic-ai/claude-code@latest`
+    // currently requires Node >=22, while a managed Mac can legitimately
+    // expose Node 18/20. Using only the Cukii-owned runtime keeps the first
+    // install deterministic and prevents npm's global prefix or engine policy
+    // from silently changing the result.
+    "cukii_node_major=0",
+    `if [ -x "${nodeHome}/bin/node" ] && [ -x "${nodeHome}/bin/npm" ]; then`,
+    `  cukii_node_version=$("${nodeHome}/bin/node" -p 'process.versions.node' 2>/dev/null || true)`,
+    '  cukii_node_major="${cukii_node_version%%.*}"',
+    "  case \"$cukii_node_major\" in ''|*[!0-9]*) cukii_node_major=0 ;; esac",
     "fi",
-    "if ! command -v npm >/dev/null 2>&1; then",
+    `if [ "$cukii_node_major" -lt ${MIN_VENDOR_NODE_MAJOR} ]; then`,
     ...bootstrap.map((line) => `  ${line}`),
     "fi",
-    "command -v npm >/dev/null 2>&1 || { echo 'Cukii: Node.js was installed, but npm is not discoverable. Restart VS Code, then select Install again.' >&2; exit 23; }",
+    `PATH="${nodeHome}/bin:$PATH"`,
+    "export PATH",
+    `cukii_node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)`,
+    `if [ "$cukii_node_major" -lt ${MIN_VENDOR_NODE_MAJOR} ]; then echo 'Cukii: the private Node.js runtime is too old for vendor CLIs.' >&2; exit 23; fi`,
+    "command -v npm >/dev/null 2>&1 || { echo 'Cukii: Node.js was installed, but npm is not discoverable. Select Install again.' >&2; exit 23; }",
     // A deterministic user-owned prefix is critical. Reading npm's current
     // global prefix reintroduces the exact failure from 2.0.130: on a Mac with
     // Homebrew it can point outside $HOME and ask for administrator approval.
