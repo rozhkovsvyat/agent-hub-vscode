@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {
+  assertRipgrepArchiveSignature,
   CROSS_TARGETS,
   ffmpegBinaryName,
   foreignLancedbDirectories,
@@ -100,10 +101,14 @@ describe("ripgrep prebuilt selection", () => {
     const plan = ripgrepExtractionPlan(
       "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin",
       "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin\\rg.zip",
+      {
+        platform: "win32",
+        environment: { SystemRoot: "C:\\Windows" },
+      },
     );
 
     expect(plan).toEqual({
-      command: "tar",
+      command: "C:\\Windows\\System32\\tar.exe",
       args: ["-xf", "rg.zip", "-C", "."],
       cwd: "D:\\a\\repo\\node_modules\\@vscode\\ripgrep\\bin",
     });
@@ -132,8 +137,13 @@ describe("ripgrep prebuilt selection", () => {
 
       await stageRipgrepForTarget("win32-x64", {
         extensionDir,
+        platform: "win32",
+        environment: { SystemRoot: "C:\\Windows" },
         download: async (_url: string, archivePath: string) => {
-          fs.writeFileSync(archivePath, "fixture");
+          fs.writeFileSync(
+            archivePath,
+            Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+          );
           fs.writeFileSync(
             path.join(path.dirname(archivePath), "rg.exe"),
             "fixture",
@@ -148,7 +158,7 @@ describe("ripgrep prebuilt selection", () => {
 
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
-        command: "tar",
+        command: "C:\\Windows\\System32\\tar.exe",
         args: ["-xf", "rg.zip", "-C", "."],
       });
       expect(calls[0].args.join(" ")).not.toContain(":");
@@ -164,6 +174,17 @@ describe("ripgrep prebuilt selection", () => {
     } finally {
       fs.rmSync(extensionDir, { recursive: true, force: true });
     }
+  });
+
+  it("rejects an HTML error page before invoking the archive extractor", () => {
+    withTempExtensionDir((extensionDir) => {
+      const archivePath = path.join(extensionDir, "rg.zip");
+      fs.writeFileSync(archivePath, "<!doctype html>gateway error");
+
+      expect(() => assertRipgrepArchiveSignature(archivePath)).toThrow(
+        /invalid ZIP signature/i,
+      );
+    });
   });
 
   it("names the asset @vscode/ripgrep would download natively on each target", () => {
