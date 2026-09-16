@@ -1690,18 +1690,12 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("installs the latest official native CLI package", () => {
-    // Claude ships a self-contained installer on Unix and only uses the npm
-    // package on Windows, so asserting the package name unconditionally would
-    // pass here and fail on the very platform the owner reported from.
     const claudeInstall = vendorAuthTerminalCommand(
       "claude",
       "install",
     )?.command;
-    if (process.platform === "win32") {
-      expect(claudeInstall).toContain("@anthropic-ai/claude-code@latest");
-    } else {
-      expect(claudeInstall).toContain("https://claude.ai/install.sh");
-    }
+    expect(claudeInstall).toContain("@anthropic-ai/claude-code@latest");
+    expect(claudeInstall).not.toContain("https://claude.ai/install.sh");
     expect(vendorAuthTerminalCommand("codex", "install")?.command).toContain(
       "@openai/codex@latest",
     );
