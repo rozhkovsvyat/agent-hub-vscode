@@ -111,7 +111,7 @@ export function CukiiUserQuestionPrompt() {
     <form
       aria-label="User question"
       aria-modal="true"
-      className="cukii-user-question fixed bottom-5 right-5 z-[2001] w-[min(460px,calc(100vw-2rem))]"
+      className="cukii-user-question cukii-menu-surface fixed bottom-24 right-5 z-[2001] w-[min(460px,calc(100vw-2rem))]"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();

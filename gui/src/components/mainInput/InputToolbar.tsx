@@ -23,6 +23,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { modelPillNeedsOwnRow } from "./modelPillLayout";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
 import {
@@ -524,7 +525,10 @@ function InputToolbar(props: InputToolbarProps) {
       return;
     }
     const update = () => {
-      setModelPillOnOwnRow(actions.getBoundingClientRect().height > 30);
+      const height = actions.getBoundingClientRect().height;
+      setModelPillOnOwnRow((current) =>
+        modelPillNeedsOwnRow(current, height),
+      );
     };
     update();
     if (typeof ResizeObserver === "undefined") return;

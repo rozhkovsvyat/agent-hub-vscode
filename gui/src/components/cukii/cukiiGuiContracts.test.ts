@@ -422,6 +422,21 @@ describe("Cukii GUI contracts", () => {
     expect(toolbar).toContain("primaryActionsRef");
     expect(toolbar).toContain("modelPillOnOwnRow");
     expect(toolbar).toContain("cukii-input-footer--model-row");
+    expect(toolbar).toContain("modelPillNeedsOwnRow");
+
+    const questionCss = source("index.css");
+    const questionBlock = questionCss.slice(
+      questionCss.indexOf(".cukii-user-question {"),
+      questionCss.indexOf(".cukii-footer-icon"),
+    );
+    expect(questionBlock).toMatch(
+      /\.cukii-user-question\s*\{[\s\S]*?border-radius: 16px;/,
+    );
+    expect(questionBlock).toMatch(
+      /\.cukii-user-question-actions button\[type="submit"\]\s*\{[\s\S]*?background: var\(--cukii-primary-action-background, #e3a867\);/,
+    );
+    expect(questionBlock).not.toContain("#0e639c");
+    expect(questionBlock).not.toContain("#007fd4");
 
     // Scope toggle: the single Milky (-0) knob switch pinned to the right
     // edge, symmetric with the "Select a model" title; ON (orange) is the
