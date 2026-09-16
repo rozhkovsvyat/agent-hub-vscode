@@ -18,7 +18,12 @@ const {
   stageRipgrepForTarget,
 } = require("./cross-target-packaging");
 const { generateConfigYamlSchema } = require("./generate-copy-config");
-const { packageAll } = require("./package-all");
+const {
+  HOST_TARGET,
+  PLATFORMS,
+  SUPPORTED_PLATFORMS,
+  packageAll,
+} = require("./package-all");
 const {
   TARGETS,
   collectTargetVsix,
@@ -125,6 +130,13 @@ test("package-all propagates pre-release and restores the host after a target fa
     "--pre-release",
   ]);
   assert.deepEqual(commands[1].slice(-1), ["--restore-host"]);
+});
+
+test("package-all leaves the host carrier output in the source tree for activation binding", () => {
+  assert.deepEqual(new Set(PLATFORMS), new Set(SUPPORTED_PLATFORMS));
+  if (SUPPORTED_PLATFORMS.includes(HOST_TARGET)) {
+    assert.equal(PLATFORMS.at(-1), HOST_TARGET);
+  }
 });
 
 test("Windows ripgrep extraction bypasses a hostile Git Bash tar on PATH", async () => {

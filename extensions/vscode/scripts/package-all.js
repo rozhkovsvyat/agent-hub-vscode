@@ -3,13 +3,22 @@ const path = require("path");
 
 const { buildAndCopyGui } = require("./build-copy-gui");
 
-const PLATFORMS = [
+const HOST_TARGET = `${process.platform}-${process.arch}`;
+const SUPPORTED_PLATFORMS = [
   "win32-x64",
   // "win32-arm64", can't be built due to no sqlite3 binaries
   "linux-x64",
   "linux-arm64",
   "darwin-x64",
   "darwin-arm64",
+];
+// Every target rebuilds the shared `out/` tree. Keep the build host last so the
+// source output left behind is the exact output packaged into the host carrier;
+// activation then binds that carrier byte-for-byte to this worktree instead of
+// accidentally comparing it with the final foreign target's bundle.
+const PLATFORMS = [
+  ...SUPPORTED_PLATFORMS.filter((target) => target !== HOST_TARGET),
+  ...SUPPORTED_PLATFORMS.filter((target) => target === HOST_TARGET),
 ];
 
 function packageAll({
@@ -70,4 +79,4 @@ if (require.main === module) {
   packageAll();
 }
 
-module.exports = { PLATFORMS, packageAll };
+module.exports = { HOST_TARGET, PLATFORMS, SUPPORTED_PLATFORMS, packageAll };
