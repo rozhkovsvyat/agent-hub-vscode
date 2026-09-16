@@ -1551,6 +1551,40 @@ describe("Cukii vendor CLI accounts", () => {
     },
   );
 
+  // A GUI VS Code on macOS gets PATH from path_helper, which never includes
+  // ~/.local/bin — exactly where both native vendor installers and our own npm
+  // prefix put the executable. Probing PATH alone reported "Not installed" for
+  // a working CLI and looped the owner back into the installer.
+  it.each(["darwin", "linux"] as const)(
+    "finds a %s CLI in the home directories installers actually write to",
+    (platform) => {
+      const candidates = nativeCliCandidates(
+        "claude",
+        "/Users/owner",
+        platform,
+      );
+
+      expect(candidates).toContain("/Users/owner/.local/bin/claude");
+      expect(candidates).toContain(
+        "/Users/owner/.local/share/cukii/node/bin/claude",
+      );
+      expect(candidates).toContain("/opt/homebrew/bin/claude");
+      expect(candidates).toContain("/usr/local/bin/claude");
+      // PATH stays the fallback, never the first answer: a bare name always
+      // "resolves", so putting it first would hide every explicit location.
+      expect(candidates.at(-1)).toBe("claude");
+      expect(candidates.indexOf("/Users/owner/.local/bin/claude")).toBeLessThan(
+        candidates.indexOf("claude"),
+      );
+    },
+  );
+
+  it("keeps the Cursor executable name when searching Unix home directories", () => {
+    expect(nativeCliCandidates("cursor", "/Users/owner", "darwin")).toContain(
+      "/Users/owner/.local/bin/agent",
+    );
+  });
+
   it("uses the required disconnected, unavailable, and connected fallback copy", () => {
     expect(notInstalledVendorStatus("cursor")).toMatchObject({
       installed: false,
@@ -1643,9 +1677,16 @@ describe("Cukii vendor CLI accounts", () => {
   });
 
   it("installs the latest official native CLI package", () => {
-    expect(vendorAuthTerminalCommand("claude", "install")?.command).toContain(
-      "@anthropic-ai/claude-code@latest",
-    );
+    // Claude ships a self-contained installer on Unix and only uses the npm
+    // package on Windows, so asserting the package name unconditionally would
+    // pass here and fail on the very platform the owner reported from.
+    const claudeInstall = vendorAuthTerminalCommand("claude", "install")
+      ?.command;
+    if (process.platform === "win32") {
+      expect(claudeInstall).toContain("@anthropic-ai/claude-code@latest");
+    } else {
+      expect(claudeInstall).toContain("https://claude.ai/install.sh");
+    }
     expect(vendorAuthTerminalCommand("codex", "install")?.command).toContain(
       "@openai/codex@latest",
     );

@@ -17,6 +17,8 @@ import { performance } from "perf_hooks";
 import { promisify } from "util";
 import { alibabaIdentity, type ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
+  CUKII_UNIX_NODE_HOME_SEGMENTS,
+  CUKII_UNIX_NPM_PREFIX_SEGMENTS,
   vendorInstallTerminalSpec,
   type VendorInstallTerminalSpec,
 } from "./vendorCliInstaller";
@@ -452,6 +454,32 @@ function existingCodexExtensionPaths(userHome: string): string[] {
 }
 
 /**
+ * Where a Unix CLI can be without being on PATH.
+ *
+ * 🔴 A GUI VS Code on macOS does not inherit the login shell's PATH: launched
+ * from the Dock it gets what `path_helper` builds, which never contains
+ * `~/.local/bin`. Probing PATH alone therefore reports "Not installed" for a
+ * CLI that is installed and working in the user's terminal — and the UI then
+ * offers Install again, looping the owner back into the installer that just
+ * succeeded. The install path and this list must be read as one pair.
+ */
+function unixCliCandidates(program: string, userHome: string): string[] {
+  const home = (...segments: readonly string[]) =>
+    path.posix.join(userHome, ...segments);
+  return [
+    // Both native vendor installers and our npm prefix land here.
+    home(...CUKII_UNIX_NPM_PREFIX_SEGMENTS, "bin", program),
+    // Node installed by Cukii itself, for the npm-only vendors.
+    home(...CUKII_UNIX_NODE_HOME_SEGMENTS, "bin", program),
+    // Homebrew, both Apple-silicon and Intel prefixes, then Linux/manual.
+    path.posix.join("/opt/homebrew/bin", program),
+    path.posix.join("/usr/local/bin", program),
+    // PATH last: it is the least specific answer, not the first one.
+    program,
+  ];
+}
+
+/**
  * Only known Windows product locations are probed.  In particular, do not use
  * a bare command on Windows: it could resolve to a WSL/Cygwin shim rather than
  * the installed Windows product we are describing in the UI.
@@ -463,7 +491,7 @@ export function nativeCliCandidates(
   windowsEnv: WindowsEnvironment = process.env as WindowsEnvironment,
 ): string[] {
   const program = CLI_PROGRAMS[vendor];
-  if (platform !== "win32") return [program];
+  if (platform !== "win32") return unixCliCandidates(program, userHome);
   const paths = path.win32;
   const localAppData =
     windowsEnv.LOCALAPPDATA ?? paths.join(userHome, "AppData", "Local");
@@ -529,7 +557,6 @@ export function nativeCliCandidates(
     ),
     paths.join(userHome, "scoop", "persist", "nodejs", "bin", `${program}.cmd`),
     paths.join(userHome, "AppData", "Roaming", "npm", `${program}.cmd`),
-    ...(platform === "win32" ? [] : [program]),
   ];
 }
 

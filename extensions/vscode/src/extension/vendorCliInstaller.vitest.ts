@@ -72,42 +72,129 @@ describe("vendorInstallTerminalSpec", () => {
     },
   );
 
-  it("bootstraps Homebrew and Node on an unprepared Mac", () => {
-    const spec = vendorInstallTerminalSpec("claude", "darwin")!;
+  // The defect this replaces: on an unprepared Mac the installer installed
+  // Homebrew, whose own installer requires administrator rights. The owner got
+  // two password prompts and `/bin/bash --noprofile --norc` exited 1
+  // (screenshot, 2026-09-16). Nothing Cukii installs may need elevation.
+  it.each(["darwin", "linux"] as const)(
+    "never asks %s for elevation, a system package manager, or PowerShell",
+    (platform) => {
+      for (const vendor of [
+        "claude",
+        "codex",
+        "grok",
+        "kimi",
+        "qwen",
+        "cursor",
+      ] as const) {
+        const command = vendorInstallTerminalSpec(vendor, platform)!.command;
+        for (const forbidden of [
+          "sudo",
+          "brew",
+          "apt-get",
+          "dnf",
+          "yum",
+          "zypper",
+          "pacman",
+          "irm",
+          "iex",
+          "powershell",
+          "winget",
+        ]) {
+          // Match the program being *invoked*, not merely named: the preflight
+          // warning has to be able to say the word "sudo" to explain itself.
+          const invoked = new RegExp(String.raw`(^|[\n;&|(]\s*)${forbidden}\s`);
+          expect({
+            vendor,
+            platform,
+            forbidden,
+            invoked: invoked.test(command),
+          }).toMatchObject({ invoked: false });
+        }
+        expect(command).not.toContain("Homebrew");
+        expect(command).toContain("No administrator rights are required");
+      }
+    },
+  );
 
-    expect(spec.shellPath).toBe("/bin/bash");
-    expect(spec.command).toContain("Homebrew/install/HEAD/install.sh");
-    expect(spec.command).toContain("brew install node");
-    expect(spec.command).toContain("npm config set prefix \"$HOME/.local\"");
-    expect(spec.command).toContain("@anthropic-ai/claude-code@latest");
-    expect(spec.command).not.toContain("winget");
+  // Told before anything is downloaded, per the owner's request to be warned
+  // up front. The warning is that elevation is wrong here, not required.
+  it.each(["darwin", "linux"] as const)(
+    "refuses an elevated %s run before touching the machine",
+    (platform) => {
+      for (const vendor of ["claude", "codex", "cursor"] as const) {
+        const command = vendorInstallTerminalSpec(vendor, platform)!.command;
+        const refusalAt = command.indexOf('if [ "$(id -u)" -eq 0 ]');
+        expect(refusalAt).toBeGreaterThanOrEqual(0);
+        expect(command).toContain("do not run this installer with sudo");
+        expect(command).toContain("exit 27");
+        // Nothing may be downloaded or written before the refusal decides.
+        for (const effect of ["curl ", "mkdir ", "rm -rf", "npm install"]) {
+          const effectAt = command.indexOf(effect);
+          if (effectAt >= 0) expect(effectAt).toBeGreaterThan(refusalAt);
+        }
+      }
+    },
+  );
+
+  it("installs Claude Code with its own installer instead of npm", () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const spec = vendorInstallTerminalSpec("claude", platform)!;
+      expect(spec.shellPath).toBe("/bin/bash");
+      expect(spec.command).toContain("https://claude.ai/install.sh");
+      // Anthropic's installer needs no Node at all, so requiring npm here
+      // would reintroduce the whole package-manager bootstrap for nothing.
+      expect(spec.command).not.toContain("npm");
+      expect(spec.command).not.toContain("@anthropic-ai/claude-code");
+    }
   });
 
-  it("uses supported system package managers and a user npm prefix on Linux", () => {
-    const spec = vendorInstallTerminalSpec("codex", "linux")!;
+  it("installs Node under $HOME for the npm-only vendors", () => {
+    const spec = vendorInstallTerminalSpec("codex", "darwin")!;
 
-    for (const manager of ["apt-get", "dnf", "yum", "zypper", "pacman"]) {
-      expect(spec.command).toContain(manager);
-    }
-    expect(spec.command).toContain("root or sudo");
-    expect(spec.command).toContain("npm config set prefix \"$HOME/.local\"");
+    expect(spec.command).toContain("$HOME/.local/share/cukii/node");
+    expect(spec.command).toContain("https://nodejs.org/dist/");
+    expect(spec.command).toContain('npm config set prefix "$HOME/.local"');
     expect(spec.command).toContain("@openai/codex@latest");
-    expect(spec.command).not.toContain("sudo npm install");
+    // Both CPU families of both platforms, or the tarball name is wrong for
+    // exactly the machines we cannot test from here.
+    for (const token of ["arm64", "x64", "Darwin", "Linux"]) {
+      expect(spec.command).toContain(token);
+    }
+  });
+
+  it("reuses a Node it already installed instead of downloading it again", () => {
+    const command = vendorInstallTerminalSpec("grok", "linux")!.command;
+    const reuseAt = command.indexOf(
+      'if [ -x "$HOME/.local/share/cukii/node/bin/npm" ]',
+    );
+    const downloadAt = command.indexOf("https://nodejs.org/dist/");
+    expect(reuseAt).toBeGreaterThanOrEqual(0);
+    expect(downloadAt).toBeGreaterThan(reuseAt);
   });
 
   it.each(["darwin", "linux"] as const)(
-    "emits a syntactically valid %s bash program",
+    "emits a syntactically valid %s bash program for every vendor",
     (platform) => {
-      const spec = vendorInstallTerminalSpec("codex", platform)!;
-      const parsed = spawnSync("bash", ["-n"], {
-        input: spec.command,
-        encoding: "utf8",
-      });
-      expect(parsed.error).toBeUndefined();
-      expect(parsed.stderr).toBe("");
-      expect(parsed.status).toBe(0);
-      expect(spec.command).not.toContain("then;");
-      expect(spec.command).not.toContain("else;");
+      for (const vendor of [
+        "claude",
+        "codex",
+        "grok",
+        "kimi",
+        "qwen",
+        "cursor",
+      ] as const) {
+        const spec = vendorInstallTerminalSpec(vendor, platform)!;
+        const parsed = spawnSync("bash", ["-n"], {
+          input: spec.command,
+          encoding: "utf8",
+        });
+        expect(parsed.error).toBeUndefined();
+        expect(`${vendor}: ${parsed.stderr}`).toBe(`${vendor}: `);
+        expect(parsed.status).toBe(0);
+        expect(spec.command).not.toContain("then;");
+        expect(spec.command).not.toContain("else;");
+      }
     },
   );
 
@@ -117,9 +204,8 @@ describe("vendorInstallTerminalSpec", () => {
     );
     for (const platform of ["darwin", "linux"] as const) {
       const spec = vendorInstallTerminalSpec("cursor", platform)!;
-      expect(spec.command).toBe(
-        "set -e; curl https://cursor.com/install -fsS | bash; exit 0",
-      );
+      expect(spec.command).toContain("curl https://cursor.com/install -fsS");
+      expect(spec.command).not.toContain("win32=true");
     }
   });
 
