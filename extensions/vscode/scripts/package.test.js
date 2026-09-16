@@ -8,6 +8,11 @@ const test = require("node:test");
 const JSZip = require("jszip");
 
 const { runChildOperation } = require("./child-operation");
+const {
+  assertRipgrepArchiveSignature,
+  ripgrepExtractionPlan,
+  stageRipgrepForTarget,
+} = require("./cross-target-packaging");
 const { generateConfigYamlSchema } = require("./generate-copy-config");
 const { packageAll } = require("./package-all");
 const {
@@ -116,6 +121,66 @@ test("package-all propagates pre-release and restores the host after a target fa
     "--pre-release",
   ]);
   assert.deepEqual(commands[1].slice(-1), ["--restore-host"]);
+});
+
+test("Windows ripgrep extraction bypasses a hostile Git Bash tar on PATH", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-rg-win-"));
+  const extensionDir = path.join(tempRoot, "extension");
+  const hostilePath = `C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\System32`;
+  let invoked;
+
+  try {
+    await stageRipgrepForTarget("win32-x64", {
+      extensionDir,
+      platform: "win32",
+      environment: {
+        PATH: hostilePath,
+        SystemRoot: "C:\\Windows",
+      },
+      async download(_url, archivePath) {
+        fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+        fs.writeFileSync(archivePath, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      },
+      execute(command, args, options) {
+        invoked = { command, args, options };
+        fs.writeFileSync(path.join(options.cwd, "rg.exe"), "fixture");
+      },
+    });
+
+    assert.equal(invoked.command, "C:\\Windows\\System32\\tar.exe");
+    assert.deepEqual(invoked.args, ["-xf", "rg.zip", "-C", "."]);
+    assert.equal(invoked.options.shell, false);
+    assert.doesNotMatch(invoked.command, /Git[\\/]usr[\\/]bin/i);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("ripgrep archives are rejected by signature before extraction", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-rg-signature-"));
+  const zipPath = path.join(tempRoot, "rg.zip");
+  const gzipPath = path.join(tempRoot, "rg.tar.gz");
+
+  try {
+    fs.writeFileSync(zipPath, "<!doctype html>gateway error");
+    fs.writeFileSync(gzipPath, Buffer.from([0x1f, 0x8b, 0x08, 0x00]));
+
+    assert.throws(
+      () => assertRipgrepArchiveSignature(zipPath),
+      /invalid ZIP signature/i,
+    );
+    assert.doesNotThrow(() => assertRipgrepArchiveSignature(gzipPath));
+
+    assert.equal(
+      ripgrepExtractionPlan("C:\\work\\bin", "C:\\work\\bin\\rg.zip", {
+        platform: "win32",
+        environment: { SystemRoot: "D:\\Windows" },
+      }).command,
+      "D:\\Windows\\System32\\tar.exe",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("tag release packages, verifies, and publishes every supported target", () => {

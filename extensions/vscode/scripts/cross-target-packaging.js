@@ -213,7 +213,11 @@ async function downloadTo(url, outputPath) {
  * basename is portable across the Windows/macOS/Linux tar implementations
  * used by the release runners and cannot be parsed as a remote path.
  */
-function ripgrepExtractionPlan(binDir, archivePath) {
+function ripgrepExtractionPlan(
+  binDir,
+  archivePath,
+  { platform = process.platform, environment = process.env } = {},
+) {
   // Tests and release orchestration intentionally plan Windows carriers on
   // Linux runners. `path.resolve("D:\\...")` uses the host flavour and turns
   // that drive path into `<cwd>/D:\\...`; select the flavour from the input,
@@ -226,11 +230,66 @@ function ripgrepExtractionPlan(binDir, archivePath) {
       `ripgrep archive must be inside its extraction directory: ${resolvedArchive}`,
     );
   }
+  let command = "tar";
+  if (platform === "win32") {
+    const systemRoot =
+      environment.SystemRoot ||
+      environment.SYSTEMROOT ||
+      environment.WINDIR ||
+      environment.windir;
+    if (!systemRoot) {
+      throw new Error(
+        "SystemRoot is required to select the trusted Windows tar.exe",
+      );
+    }
+    // GitHub's bash shell puts GNU tar ahead of Windows bsdtar on PATH. GNU
+    // tar cannot extract the ripgrep ZIP carrier, so bind to the signed OS
+    // binary instead of trusting the caller's PATH.
+    command = path.win32.join(systemRoot, "System32", "tar.exe");
+  }
   return {
-    command: "tar",
+    command,
     args: ["-xf", pathApi.basename(resolvedArchive), "-C", "."],
     cwd: resolvedBinDir,
   };
+}
+
+function assertRipgrepArchiveSignature(archivePath) {
+  const header = Buffer.alloc(4);
+  const descriptor = fs.openSync(archivePath, "r");
+  let bytesRead;
+  try {
+    bytesRead = fs.readSync(descriptor, header, 0, header.length, 0);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+
+  if (archivePath.toLowerCase().endsWith(".zip")) {
+    const zipMagic =
+      bytesRead === 4 &&
+      header[0] === 0x50 &&
+      header[1] === 0x4b &&
+      ((header[2] === 0x03 && header[3] === 0x04) ||
+        (header[2] === 0x05 && header[3] === 0x06) ||
+        (header[2] === 0x07 && header[3] === 0x08));
+    if (!zipMagic) {
+      throw new Error(
+        `Downloaded ripgrep archive has an invalid ZIP signature: ${archivePath}`,
+      );
+    }
+    return;
+  }
+
+  if (archivePath.toLowerCase().endsWith(".tar.gz")) {
+    if (bytesRead < 2 || header[0] !== 0x1f || header[1] !== 0x8b) {
+      throw new Error(
+        `Downloaded ripgrep archive has an invalid GZip signature: ${archivePath}`,
+      );
+    }
+    return;
+  }
+
+  throw new Error(`Unsupported ripgrep archive format: ${archivePath}`);
 }
 
 /**
@@ -238,7 +297,13 @@ function ripgrepExtractionPlan(binDir, archivePath) {
  */
 async function stageRipgrepForTarget(
   target,
-  { extensionDir, download = downloadTo, execute = execFileSync },
+  {
+    extensionDir,
+    download = downloadTo,
+    execute = execFileSync,
+    platform = process.platform,
+    environment = process.env,
+  },
 ) {
   const binDir = path.join(
     extensionDir,
@@ -257,11 +322,17 @@ async function stageRipgrepForTarget(
   );
   console.log(`[info] Downloading ripgrep for ${target}: ${url}`);
   await download(url, archive);
-  // bsdtar (shipped with Windows) reads both tarballs and zips.
-  const extraction = ripgrepExtractionPlan(binDir, archive);
+  assertRipgrepArchiveSignature(archive);
+  // Windows bsdtar reads both tarballs and zips. Its absolute path is required
+  // because Git Bash exposes an incompatible GNU tar first on PATH.
+  const extraction = ripgrepExtractionPlan(binDir, archive, {
+    platform,
+    environment,
+  });
   execute(extraction.command, extraction.args, {
     cwd: extraction.cwd,
     stdio: "inherit",
+    shell: false,
   });
   fs.unlinkSync(archive);
 
@@ -375,6 +446,7 @@ function readWrapperManifest(extensionDir) {
 }
 
 module.exports = {
+  assertRipgrepArchiveSignature,
   CROSS_TARGETS,
   LANCEDB_PACKAGES,
   RIPGREP_ASSET_TARGETS,
