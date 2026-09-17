@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  resolveOwnerFile,
   withOwnerFileLock,
   writeOwnerFileAtomic,
 } from "./ownerFileTransaction";
@@ -29,6 +30,24 @@ export const CUKII_BUNDLED_RULES_PATH = ["media", "cukii-memory-rules.md"];
 
 const MAX_RULES_BYTES = 64 * 1024;
 const MIN_RULES_BYTES = 64;
+
+/**
+ * The one clause the document exists for.
+ *
+ * Both sources are held to it, because the size floor alone accepts anything
+ * with two markers around ten characters. A block that never names the tool it
+ * is supposed to mandate is not the discipline, it is silence with markers.
+ */
+const CUKII_RULES_SENTINEL = "memory_search";
+
+/**
+ * 🔴 The install runs on the extension host thread, now on every activation.
+ * Another window holding this lock is inside a read-merge-write that takes
+ * milliseconds, so a short wait is enough to serialize them; a long one only
+ * buys a frozen editor when the holder is already gone. A target missed this
+ * way is retried on the next attempt instead of blocking the window.
+ */
+const DISCIPLINE_LOCK_TIMEOUT_MS = 750;
 
 export type DisciplineInstallReport = {
   written: string[];
@@ -60,22 +79,87 @@ export function disciplineUrl(endpoint: string): string {
   return url.toString();
 }
 
+type DisciplineSpan = { begin: number; end: number };
+
 /**
- * Accept only a document that carries both markers.
+ * Marker lines: a whole line, outside fenced code.
+ *
+ * 🔴 This replaces `indexOf`, which was the defect behind the worst outcome
+ * this module can produce. A file that *mentions* a marker — «блок между
+ * `<!-- cukii-memory:begin -->` и закрывающим» — read as a file that *carries*
+ * one, and the splice then replaced everything from that sentence to the real
+ * end marker, deleting the owner's hand-written sections in between. These
+ * files are exactly where such a note gets written, so a mention must never
+ * count as the block.
+ */
+function markerLines(text: string): { begins: number[]; ends: number[] } {
+  const begins: number[] = [];
+  const ends: number[] = [];
+  let fenced = false;
+  let offset = 0;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      fenced = !fenced;
+    } else if (!fenced && trimmed === CUKII_RULES_BEGIN) {
+      begins.push(offset);
+    } else if (!fenced && trimmed === CUKII_RULES_END) {
+      ends.push(offset + line.length);
+    }
+    offset += line.length + 1;
+  }
+  return { begins, ends };
+}
+
+/**
+ * Where the block lives, or nothing when the file does not carry one.
+ *
+ * 🔴 Anything ambiguous is refused instead of guessed: two blocks, a block
+ * whose end marker is missing, an end marker standing before its begin. The
+ * old code guessed, and each guess had a victim — a half-written file lost
+ * everything after the marker, a stray end marker made every install append
+ * another copy that logout could no longer remove. A refusal is reported per
+ * target and leaves the file byte-for-byte as the owner left it.
+ */
+function disciplineSpan(
+  text: string,
+  subject: string,
+): DisciplineSpan | undefined {
+  const { begins, ends } = markerLines(text);
+  if (begins.length === 0 && ends.length === 0) return undefined;
+  if (begins.length === 1 && ends.length === 1 && ends[0] > begins[0]) {
+    return { begin: begins[0], end: ends[0] };
+  }
+  throw new Error(
+    `${subject} carries a malformed Cukii block (${begins.length} begin, ${ends.length} end markers); refusing to touch it`,
+  );
+}
+
+/**
+ * Accept only a document that carries the marked discipline.
  *
  * 🔴 Without this an HTML error page, a captive-portal redirect or a 404 body
  * would be appended verbatim to the owner's CLAUDE.md — the file that steers
  * every future session. A broken fetch must leave the machine untouched.
+ *
+ * Line endings are normalized so the copy from the box and the copy from the
+ * VSIX are the same text: otherwise a CRLF asset and an LF response are two
+ * different blocks, and every switch between sources rewrites all three files.
  */
 export function parseDisciplineBlock(body: string): string {
-  const begin = body.indexOf(CUKII_RULES_BEGIN);
-  const end = body.indexOf(CUKII_RULES_END);
-  if (begin < 0 || end < 0 || end < begin) {
+  const text = body.replace(/\r\n/g, "\n");
+  const span = disciplineSpan(text, "Cukii discipline document");
+  if (!span) {
     throw new Error("Cukii discipline document is missing its markers.");
   }
-  const block = body.slice(begin, end + CUKII_RULES_END.length).trim();
+  const block = text.slice(span.begin, span.end).trim();
   if (block.length < MIN_RULES_BYTES) {
     throw new Error("Cukii discipline document is too short to be real.");
+  }
+  if (!block.includes(CUKII_RULES_SENTINEL)) {
+    throw new Error(
+      `Cukii discipline document never names ${CUKII_RULES_SENTINEL}.`,
+    );
   }
   return block;
 }
@@ -126,12 +210,9 @@ export function bundledDisciplineBlock(extensionPath: string): string {
  * the caller can stay silent instead of rewriting on every activation.
  */
 export function mergeDisciplineBlock(existing: string, block: string): string {
-  const begin = existing.indexOf(CUKII_RULES_BEGIN);
-  const end = existing.indexOf(CUKII_RULES_END);
-  if (begin >= 0 && end > begin) {
-    const head = existing.slice(0, begin);
-    const tail = existing.slice(end + CUKII_RULES_END.length);
-    const merged = `${head}${block}${tail}`;
+  const span = disciplineSpan(existing, "This agent file");
+  if (span) {
+    const merged = `${existing.slice(0, span.begin)}${block}${existing.slice(span.end)}`;
     return merged === existing ? existing : merged;
   }
   if (!existing.trim()) return `${block}\n`;
@@ -140,12 +221,11 @@ export function mergeDisciplineBlock(existing: string, block: string): string {
 
 /** Cut the block out, leaving every hand-written line around it intact. */
 export function stripDisciplineBlock(existing: string): string {
-  const begin = existing.indexOf(CUKII_RULES_BEGIN);
-  const end = existing.indexOf(CUKII_RULES_END);
-  if (begin < 0 || end <= begin) return existing;
-  const head = existing.slice(0, begin).replace(/\s+$/, "");
-  const tail = existing.slice(end + CUKII_RULES_END.length).replace(/^\s+/, "");
-  if (!head && !tail) return "";
+  const span = disciplineSpan(existing, "This agent file");
+  if (!span) return existing;
+  const head = existing.slice(0, span.begin).replace(/\s+$/, "");
+  const tail = existing.slice(span.end).replace(/^\s+/, "");
+  if (!head) return tail;
   return tail ? `${head}\n\n${tail}` : `${head}\n`;
 }
 
@@ -169,18 +249,23 @@ export function installDisciplineBlock(
   };
   for (const target of targets) {
     try {
-      withOwnerFileLock(target, () => {
-        const existing = fs.existsSync(target)
-          ? fs.readFileSync(target, "utf8")
-          : "";
-        const merged = mergeDisciplineBlock(existing, block);
-        if (merged === existing) {
-          report.unchanged.push(target);
-          return;
-        }
-        writeOwnerFileAtomic(target, merged);
-        report.written.push(target);
-      });
+      const file = resolveOwnerFile(target);
+      withOwnerFileLock(
+        file,
+        () => {
+          const existing = fs.existsSync(file)
+            ? fs.readFileSync(file, "utf8")
+            : "";
+          const merged = mergeDisciplineBlock(existing, block);
+          if (merged === existing) {
+            report.unchanged.push(target);
+            return;
+          }
+          writeOwnerFileAtomic(file, merged);
+          report.written.push(target);
+        },
+        { timeoutMs: DISCIPLINE_LOCK_TIMEOUT_MS },
+      );
     } catch (error) {
       report.failed.push({
         target,
@@ -212,14 +297,15 @@ export function removeDisciplineBlock(
         report.unchanged.push(target);
         continue;
       }
-      withOwnerFileLock(target, () => {
-        const existing = fs.readFileSync(target, "utf8");
+      const file = resolveOwnerFile(target);
+      withOwnerFileLock(file, () => {
+        const existing = fs.readFileSync(file, "utf8");
         const stripped = stripDisciplineBlock(existing);
         if (stripped === existing) {
           report.unchanged.push(target);
           return;
         }
-        writeOwnerFileAtomic(target, stripped);
+        writeOwnerFileAtomic(file, stripped);
         report.written.push(target);
       });
     } catch (error) {

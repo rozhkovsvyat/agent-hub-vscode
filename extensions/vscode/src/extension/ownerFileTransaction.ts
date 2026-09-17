@@ -5,6 +5,16 @@ import path from "node:path";
 const LOCK_WAIT_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
+/**
+ * When a lock is older than this, its owner is gone whatever the pid says.
+ *
+ * 🔴 The liveness check alone can never clear a lock whose pid was reused by an
+ * unrelated process: `processAlive` keeps answering yes forever, so every later
+ * transaction on that file waits out the full timeout. The critical section is
+ * a read, a merge and one atomic write — nothing legitimate holds it for
+ * minutes, so age is the safer authority once it gets this large.
+ */
+const LOCK_ABANDON_MS = 10 * 60_000;
 const waitCell = new Int32Array(new SharedArrayBuffer(4));
 
 type OwnerFileLockOptions = {
@@ -54,19 +64,25 @@ export function withOwnerFileLock<T>(
 
   while (descriptor === undefined) {
     try {
-      descriptor = fs.openSync(lockPath, "wx", 0o600);
-      fs.writeFileSync(descriptor, token, { encoding: "utf8" });
-      fs.fsyncSync(descriptor);
+      const opened = fs.openSync(lockPath, "wx", 0o600);
+      try {
+        fs.writeFileSync(opened, token, { encoding: "utf8" });
+        fs.fsyncSync(opened);
+      } catch (error) {
+        fs.closeSync(opened);
+        throw error;
+      }
+      descriptor = opened;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
         const ageMs = now() - fs.statSync(lockPath).mtimeMs;
         const ownerPid = lockOwnerPid(fs.readFileSync(lockPath, "utf8"));
-        if (
+        const dead =
           ageMs > LOCK_STALE_MS &&
           ownerPid !== undefined &&
-          !processAlive(ownerPid)
-        ) {
+          !processAlive(ownerPid);
+        if (dead || ageMs > LOCK_ABANDON_MS) {
           fs.unlinkSync(lockPath);
           continue;
         }
@@ -74,7 +90,11 @@ export function withOwnerFileLock<T>(
         continue;
       }
       if (now() >= deadline) {
-        throw new Error(`timed out waiting for Cukii owner-file lock: ${target}`);
+        // Name the lock, not just the file: this message is the only thing an
+        // owner has to act on when a transaction cannot get through.
+        throw new Error(
+          `timed out waiting for Cukii owner-file lock ${lockPath}; delete it if no editor window is updating ${path.basename(target)}`,
+        );
       }
       pause(LOCK_WAIT_MS);
     }
@@ -89,6 +109,24 @@ export function withOwnerFileLock<T>(
     } catch {
       // A crashed/stale owner may already have removed the lock.
     }
+  }
+}
+
+/**
+ * Write through a symlink instead of replacing it.
+ *
+ * 🔴 `renameSync` publishes over the link itself. An owner who points
+ * `~/.claude/CLAUDE.md` at the file in their vault would get the link silently
+ * swapped for a plain copy, the real contract left without the block, and a
+ * report that says `written`. Resolving first also keeps two paths that name
+ * one file behind one lock.
+ */
+export function resolveOwnerFile(target: string): string {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    // Missing file, or a path we may not resolve: write where we were told.
+    return target;
   }
 }
 

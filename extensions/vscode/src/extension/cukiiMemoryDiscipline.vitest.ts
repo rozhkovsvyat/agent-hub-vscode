@@ -38,6 +38,9 @@ const BLOCK = `${CUKII_RULES_BEGIN}
 memory_search. Рабочая дисциплина тоже лежит в памяти, подними её сама.
 ${CUKII_RULES_END}`;
 
+const count = (text: string, marker: string): number =>
+  text.split(marker).length - 1;
+
 describe("Cukii discipline bootstrap", () => {
   it("targets exactly the files the vendor CLIs read at session start", () => {
     // Claude Code loads ~/.claude/CLAUDE.md, Codex ~/.codex/AGENTS.md, Cursor
@@ -67,10 +70,144 @@ describe("Cukii discipline bootstrap", () => {
       parseDisciplineBlock("<html><body>404 Not Found</body></html>"),
     ).toThrow(/markers/);
     expect(() => parseDisciplineBlock("")).toThrow(/markers/);
+    // A marker counts only when it owns its line, so a one-liner mentioning
+    // both is not a document with a block — it is prose.
     expect(() =>
       parseDisciplineBlock(`${CUKII_RULES_BEGIN}tiny${CUKII_RULES_END}`),
+    ).toThrow(/missing its markers/);
+    expect(() =>
+      parseDisciplineBlock(`${CUKII_RULES_BEGIN}\nок\n${CUKII_RULES_END}`),
     ).toThrow(/too short/);
+    // 🔴 Two markers around anything at all used to be enough. The document
+    // has to mandate the tool it exists for, or it installs silence.
+    expect(() =>
+      parseDisciplineBlock(
+        `${CUKII_RULES_BEGIN}\n${"будь хорошим агентом. ".repeat(6)}\n${CUKII_RULES_END}`,
+      ),
+    ).toThrow(/never names memory_search/);
     expect(parseDisciplineBlock(`noise\n${BLOCK}\ntrailing`)).toBe(BLOCK);
+  });
+
+  it("reads the box copy and the shipped copy as the same text", () => {
+    // The asset is packed on Windows and served from Linux. Without this the
+    // two sources are different blocks, and every switch between them rewrites
+    // all three of the owner's files for no reason.
+    expect(parseDisciplineBlock(BLOCK.replace(/\n/g, "\r\n"))).toBe(BLOCK);
+  });
+
+  it("leaves the owner's sections alone in a file that documents the markers", () => {
+    // 🔴 The defect this whole revision exists for. `indexOf` matched the
+    // marker inside the owner's own sentence, so the splice ran from that
+    // sentence to the real end marker and deleted both sections in between —
+    // reproduced on the shipped block, second install, no exotic input.
+    const existing = [
+      "# Мои правила",
+      "",
+      "## Память",
+      "",
+      `Плагин Cukii вклеивает свой блок между \`${CUKII_RULES_BEGIN}\` и закрывающим маркером.`,
+      "",
+      "Выглядит это так:",
+      "",
+      "```markdown",
+      CUKII_RULES_BEGIN,
+      "пример блока",
+      CUKII_RULES_END,
+      "```",
+      "",
+      "## 🔴 Санкция даётся один раз",
+      "",
+      "Сказали «снеси» — снеси, второго вопроса быть не должно.",
+      "",
+      "## Worktree: граница target",
+      "",
+      "Временный worktree — только в D:\\Scratch.",
+      "",
+    ].join("\n");
+
+    const once = mergeDisciplineBlock(existing, BLOCK);
+    const twice = mergeDisciplineBlock(once, BLOCK);
+    expect(twice).toBe(once);
+    for (const text of [once, twice]) {
+      expect(text).toContain("Санкция даётся один раз");
+      expect(text).toContain("Worktree: граница target");
+      expect(text).toContain("Плагин Cukii вклеивает свой блок между");
+      expect(text).toContain("пример блока");
+      // The mention, the fenced example and exactly one real block.
+      expect(count(text, CUKII_RULES_BEGIN)).toBe(3);
+    }
+    // And the block still comes out cleanly, leaving the mention and the
+    // example where the owner wrote them.
+    const stripped = stripDisciplineBlock(once);
+    expect(stripped).toBe(existing.replace(/\s+$/, "") + "\n");
+    expect(stripped).toContain("пример блока");
+  });
+
+  it("refuses a half-written block instead of deleting the text after it", () => {
+    // Reachable without anyone's mistake: an interrupted write by the macOS
+    // bootstrap, or the owner trimming the file by hand.
+    const existing = `# head\n\n${CUKII_RULES_BEGIN}\nполовина правил\n\n# owner tail\n`;
+    expect(() => mergeDisciplineBlock(existing, BLOCK)).toThrow(
+      /1 begin, 0 end/,
+    );
+
+    const root = home();
+    const claude = path.join(root, ".claude", "CLAUDE.md");
+    fs.mkdirSync(path.dirname(claude), { recursive: true });
+    fs.writeFileSync(claude, existing);
+    const report = installDisciplineBlock(BLOCK, root);
+    // The file is left byte-for-byte as the owner left it, the reason is
+    // reported, and the other two targets are not held hostage by it.
+    expect(fs.readFileSync(claude, "utf8")).toBe(existing);
+    expect(report.failed.map((entry) => entry.target)).toEqual([claude]);
+    expect(report.failed[0].reason).toMatch(/malformed/);
+    expect(report.written).toHaveLength(2);
+  });
+
+  it("refuses a stray end marker instead of appending another copy", () => {
+    // 🔴 With `indexOf` this file failed the `end > begin` test, fell through to
+    // the append branch, and grew one more block on every activation — while
+    // logout could no longer remove any of them.
+    const existing = `# head\n\n${CUKII_RULES_END}\n\n# tail\n`;
+    expect(() => mergeDisciplineBlock(existing, BLOCK)).toThrow(
+      /0 begin, 1 end/,
+    );
+
+    const root = home();
+    const agents = path.join(root, "AGENTS.md");
+    fs.writeFileSync(agents, existing);
+    for (let run = 0; run < 3; run++) installDisciplineBlock(BLOCK, root);
+    expect(fs.readFileSync(agents, "utf8")).toBe(existing);
+    expect(count(fs.readFileSync(agents, "utf8"), CUKII_RULES_BEGIN)).toBe(0);
+    // Two blocks in one file is the same refusal, so logout cannot guess either.
+    expect(() => stripDisciplineBlock(`${BLOCK}\n\n${BLOCK}\n`)).toThrow(
+      /2 begin, 2 end/,
+    );
+  });
+
+  it("writes through a symlinked target instead of replacing the link", () => {
+    // The owner keeps the source of truth in the vault and links to it, so
+    // publishing over the link would leave the real contract without the block
+    // and still report success.
+    const root = home();
+    const real = path.join(root, "vault-CLAUDE.md");
+    fs.writeFileSync(real, "# из волта\n");
+    const claude = path.join(root, ".claude", "CLAUDE.md");
+    fs.mkdirSync(path.dirname(claude), { recursive: true });
+    try {
+      fs.symlinkSync(real, claude);
+    } catch (error) {
+      // Creating one needs a privilege on Windows; the guard can only be
+      // asserted where symlinks exist at all.
+      expect((error as NodeJS.ErrnoException).code).toMatch(/EPERM|EACCES/);
+      return;
+    }
+
+    installDisciplineBlock(BLOCK, root);
+    expect(fs.lstatSync(claude).isSymbolicLink()).toBe(true);
+    const target = fs.readFileSync(real, "utf8");
+    expect(target).toContain("из волта");
+    expect(target).toContain("memory_search");
   });
 
   it("keeps the owner's own instructions when it adds the block", () => {

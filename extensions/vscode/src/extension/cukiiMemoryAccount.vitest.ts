@@ -8,6 +8,7 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
   CUKII_MEMORY_SECRET_KEY,
   CukiiMemoryAccountController,
+  cukiiMemoryAccountForContext,
   describeDisciplineOutcome,
   normalizeMemoryEndpoint,
   probeCukiiMemory,
@@ -249,9 +250,149 @@ describe("Cukii Box account", () => {
     expect(outcome?.source).toBe("bundled");
     expect(outcome?.boxError).toContain("box unreachable");
     expect(outcome?.written).toEqual(["CLAUDE.md"]);
-    // The reason has to be readable on a machine nobody can debug remotely.
-    expect(log.join("\n")).toContain("box unreachable");
+    // 🔴 The failing request has to name itself in the log. Asserting that the
+    // words appear *somewhere* passes on the summary line `record` writes, so
+    // deleting the line that reports the request would stay green.
+    expect(
+      log.filter((line) => line.startsWith("box copy unavailable")),
+    ).toEqual(["box copy unavailable: box unreachable"]);
     controller.dispose();
+  });
+
+  it("goes back to the box after a run served from the shipped copy", async () => {
+    // 🔴 2.0.135 memoized the fallback as a finished job: one failed request
+    // pinned the window to the copy inside the VSIX for as long as it stayed
+    // open, so editing the rules in the vault stopped reaching the machine.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const store = new MemoryStore();
+      await store.store(
+        CUKII_MEMORY_SECRET_KEY,
+        JSON.stringify({
+          endpoint: "https://box.example.test/mcp",
+          token: "g".repeat(43),
+        }),
+      );
+      const empty = { written: [], unchanged: [], failed: [] };
+      const installed: string[] = [];
+      let boxUp = false;
+      const controller = new CukiiMemoryAccountController(
+        store,
+        extensionRoot(),
+        process.execPath,
+        vi.fn() as unknown as typeof fetch,
+        { ensure: vi.fn(() => true), remove: vi.fn() },
+        {
+          fetch: async () => {
+            if (!boxUp) throw new Error("box unreachable");
+            return "fresh-box-block";
+          },
+          bundled: () => "shipped-block",
+          install: (block) => {
+            installed.push(block);
+            return { ...empty, written: ["CLAUDE.md"] };
+          },
+          remove: () => empty,
+        },
+      );
+
+      await controller.ensureForModel("claude-opus-5");
+      expect(installed).toEqual(["shipped-block"]);
+
+      // Not once per message: inside the window the box is left alone.
+      boxUp = true;
+      await controller.ensureForModel("claude-opus-5");
+      expect(installed).toEqual(["shipped-block"]);
+
+      vi.setSystemTime(Date.now() + 5 * 60_000);
+      await controller.ensureForModel("claude-opus-5");
+      expect(installed).toEqual(["shipped-block", "fresh-box-block"]);
+      expect(controller.lastDisciplineOutcome()?.source).toBe("box");
+
+      // A finished run is remembered, so the box is not polled again.
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      await controller.ensureForModel("claude-opus-5");
+      expect(installed).toHaveLength(2);
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tries again later when a target could not be written", async () => {
+    // A locked or read-only file is reported, not swallowed — and `install`
+    // returns that report instead of throwing, which is how a run where
+    // nothing landed still counted as done.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const store = new MemoryStore();
+      await store.store(
+        CUKII_MEMORY_SECRET_KEY,
+        JSON.stringify({
+          endpoint: "https://box.example.test/mcp",
+          token: "h".repeat(43),
+        }),
+      );
+      let attempts = 0;
+      const controller = new CukiiMemoryAccountController(
+        store,
+        extensionRoot(),
+        process.execPath,
+        vi.fn() as unknown as typeof fetch,
+        { ensure: vi.fn(() => true), remove: vi.fn() },
+        {
+          fetch: async () => "block",
+          bundled: () => "shipped-block",
+          install: () => {
+            attempts += 1;
+            return {
+              written: [],
+              unchanged: [],
+              failed: [
+                { target: "CLAUDE.md", reason: "locked by another window" },
+              ],
+            };
+          },
+          remove: () => ({ written: [], unchanged: [], failed: [] }),
+        },
+      );
+
+      await controller.ensureForModel("claude-opus-5");
+      expect(attempts).toBe(1);
+      expect(
+        describeDisciplineOutcome(controller.lastDisciplineOutcome()!),
+      ).toContain("locked by another window");
+      await controller.ensureForModel("claude-opus-5");
+      expect(attempts).toBe(1);
+      vi.setSystemTime(Date.now() + 5 * 60_000);
+      await controller.ensureForModel("claude-opus-5");
+      expect(attempts).toBe(2);
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("installs the discipline when the extension activates, not only on a spawn", async () => {
+    // 🔴 The trigger itself, asserted where it lives. In 2.0.134 the only
+    // trigger sat behind a chat spawn, so a machine that never reached that
+    // path came up without the contract and said nothing. With no stored
+    // connection the attempt cannot touch a file, so the line it writes is
+    // both the proof that activation installs and that the log is wired.
+    const log: string[] = [];
+    const subscriptions: { dispose(): void }[] = [];
+    const context = {
+      secrets: new MemoryStore(),
+      extensionPath: extensionRoot(),
+      subscriptions,
+    } as unknown as Parameters<typeof cukiiMemoryAccountForContext>[0];
+
+    cukiiMemoryAccountForContext(context, (line) => log.push(line));
+    await vi.waitFor(() => expect(log).toHaveLength(1));
+    expect(log).toEqual([
+      "discipline NOT installed: Cukii Box is not connected.",
+    ]);
+    for (const item of subscriptions) item.dispose();
   });
 
   it("keeps the CLI starting when neither copy can be installed, and retries", async () => {
@@ -309,12 +450,22 @@ describe("Cukii Box account", () => {
   });
 
   it("reports why nothing was installed when the box is not connected", async () => {
+    const empty = { written: [], unchanged: [], failed: [] };
     const controller = new CukiiMemoryAccountController(
       new MemoryStore(),
       extensionRoot(),
       process.execPath,
       vi.fn() as unknown as typeof fetch,
       { ensure: vi.fn(() => true), remove: vi.fn() },
+      // Explicit, even though this run stops before the installer: the default
+      // writes into the real ~/.claude/CLAUDE.md, and a test that ever reaches
+      // it would edit the contract of whoever runs the suite.
+      {
+        fetch: async () => "block",
+        bundled: () => "shipped-block",
+        install: () => empty,
+        remove: () => empty,
+      },
     );
     const outcome = await controller.installDisciplineNow();
     expect(outcome.source).toBe("none");

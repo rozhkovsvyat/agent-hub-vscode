@@ -78,6 +78,16 @@ export type DisciplineOutcome = {
   error?: string;
 };
 
+/**
+ * How long a window keeps an unfinished discipline run before trying again.
+ *
+ * 🔴 Both extremes are defects. Never retrying is what 2.0.135 shipped: a
+ * single failed request pinned the window to the copy inside the VSIX, so an
+ * edit in the vault stopped reaching a machine that stayed open for days.
+ * Retrying on every message would mean one request to the box per chat turn.
+ */
+const DISCIPLINE_RETRY_MS = 5 * 60_000;
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -325,8 +335,9 @@ class CukiiMemoryRelay {
 export class CukiiMemoryAccountController {
   private relay?: CukiiMemoryRelay;
   private relayConnection?: string;
-  private disciplineRun?: Promise<DisciplineInstallReport>;
+  private disciplineRun?: Promise<DisciplineOutcome>;
   private disciplineOutcome?: DisciplineOutcome;
+  private disciplineRetryAfter?: number;
 
   constructor(
     private readonly store: ProtectedSecretStore,
@@ -361,18 +372,17 @@ export class CukiiMemoryAccountController {
   }
 
   /**
-   * Install the discipline once per activation, and retry on the next spawn if
-   * the box was briefly unreachable.
+   * Install the discipline once per activation, and try again later when the
+   * run did not finish the job.
    *
    * 🔴 It runs from `ensureForModel`, not only from the Log in button. An owner
    * who connected under 2.0.133 never presses Connect again, so wiring this to
    * the button alone would ship the fix to nobody already affected.
    */
-  private async ensureDiscipline(
-    refresh = false,
-  ): Promise<DisciplineInstallReport> {
-    if (refresh) this.disciplineRun = undefined;
+  private async ensureDiscipline(refresh = false): Promise<DisciplineOutcome> {
+    if (refresh || this.disciplineDue()) this.disciplineRun = undefined;
     if (!this.disciplineRun) {
+      this.disciplineRetryAfter = undefined;
       this.disciplineRun = (async () => {
         const connection = await this.connection();
         if (!connection) throw new Error("Cukii Box is not connected.");
@@ -397,8 +407,17 @@ export class CukiiMemoryAccountController {
         }
 
         const report = this.discipline.install(block);
-        this.record({ source, boxError, ...report });
-        return report;
+        const outcome: DisciplineOutcome = { source, boxError, ...report };
+        this.record(outcome);
+        // 🔴 Only a run that reached the box and wrote everywhere is finished.
+        // 2.0.135 memoized the fallback as a success, so one failed request
+        // pinned the window to the copy inside the VSIX until it was reopened —
+        // a vault edit stopped arriving, and a target that was locked at that
+        // moment never got a second chance.
+        if (source !== "box" || report.failed.length > 0) {
+          this.disciplineRetryAfter = Date.now() + DISCIPLINE_RETRY_MS;
+        }
+        return outcome;
       })().catch((error: unknown) => {
         // A transient outage must not disable discipline for the whole session.
         this.disciplineRun = undefined;
@@ -420,6 +439,14 @@ export class CukiiMemoryAccountController {
     this.log(describeDisciplineOutcome(outcome));
   }
 
+  /** An unfinished run is retried — but not once per message. */
+  private disciplineDue(): boolean {
+    return (
+      this.disciplineRetryAfter !== undefined &&
+      Date.now() >= this.disciplineRetryAfter
+    );
+  }
+
   /**
    * Install the discipline now and say what happened.
    *
@@ -429,19 +456,18 @@ export class CukiiMemoryAccountController {
    */
   async installDisciplineNow(): Promise<DisciplineOutcome> {
     try {
-      await this.ensureDiscipline(true);
-    } catch {
-      // `record` already captured the reason; the outcome below carries it.
-    }
-    return (
-      this.disciplineOutcome ?? {
+      return await this.ensureDiscipline(true);
+    } catch (error: unknown) {
+      // Return the reason this run failed, not the shared field: an activation
+      // run finishing in parallel would otherwise answer for the command.
+      return {
         source: "none",
         written: [],
         unchanged: [],
         failed: [],
-        error: "Cukii Box is not connected.",
-      }
-    );
+        error: errorText(error),
+      };
+    }
   }
 
   private async connection(): Promise<MemoryConnection | undefined> {
@@ -515,6 +541,7 @@ export class CukiiMemoryAccountController {
       this.relay = undefined;
       this.relayConnection = undefined;
       this.disciplineRun = undefined;
+      this.disciplineRetryAfter = undefined;
       for (const vendor of ALL_MEMORY_VENDORS) this.vendorMcp.remove(vendor);
       this.discipline.remove();
       return { opened: false, message: "Cukii Box disconnected." };
@@ -548,11 +575,11 @@ export class CukiiMemoryAccountController {
     // outcome instead of implying it, so a silent failure stays visible.
     let disciplineNote = "";
     try {
-      const report = await this.ensureDiscipline(true);
-      const touched = report.written.length + report.unchanged.length;
+      const outcome = await this.ensureDiscipline(true);
+      const touched = outcome.written.length + outcome.unchanged.length;
       disciplineNote =
-        report.failed.length > 0
-          ? ` Discipline installed in ${touched} agent files, ${report.failed.length} failed.`
+        outcome.failed.length > 0
+          ? ` Discipline installed in ${touched} agent files, ${outcome.failed.length} failed.`
           : ` Discipline installed in ${touched} agent files.`;
     } catch (error) {
       disciplineNote = ` Discipline not installed: ${

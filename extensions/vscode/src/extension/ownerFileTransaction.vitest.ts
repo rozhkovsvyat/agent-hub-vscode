@@ -75,6 +75,47 @@ describe("owner file transaction", () => {
     expect(fs.existsSync(lock)).toBe(true);
   });
 
+  it("reclaims a lock nobody can prove dead once it is abandoned", () => {
+    // 🔴 A pid gets reused. The liveness check then answers "alive" forever, so
+    // an orphaned lock made every later transaction on that file wait out the
+    // full timeout — on the activation path that is a frozen editor window,
+    // repeated on every start, until the owner finds the file by hand.
+    const target = fixture();
+    const lock = `${target}.cukii.lock`;
+    fs.writeFileSync(lock, `${process.pid}:1:${"c".repeat(32)}`, {
+      mode: 0o600,
+    });
+    let ran = false;
+    withOwnerFileLock(
+      target,
+      () => {
+        ran = true;
+        writeOwnerFileAtomic(target, "complete");
+      },
+      {
+        // Eleven minutes after the lock was taken, with its pid still live.
+        now: () => Date.now() + 11 * 60_000,
+        processAlive: () => true,
+        timeoutMs: 200,
+      },
+    );
+    expect(ran).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe("complete");
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it("names the lock file when it gives up, since that is what the owner has to act on", () => {
+    const target = fixture();
+    const lock = `${target}.cukii.lock`;
+    fs.writeFileSync(lock, `424242:1:${"d".repeat(32)}`, { mode: 0o600 });
+    expect(() =>
+      withOwnerFileLock(target, () => undefined, {
+        processAlive: () => true,
+        timeoutMs: 50,
+      }),
+    ).toThrow(lock);
+  });
+
   it("serializes a competing process so read-modify-write fields are not lost", async () => {
     const target = fixture();
     const ready = `${target}.child-ready`;
@@ -120,13 +161,14 @@ describe("owner file transaction", () => {
       );
     });
 
-    const childResult = await new Promise<{ code: number | null; stderr: string }>(
-      (resolve) => {
-        let stderr = "";
-        child.stderr.on("data", (chunk) => (stderr += String(chunk)));
-        child.on("exit", (code) => resolve({ code, stderr }));
-      },
-    );
+    const childResult = await new Promise<{
+      code: number | null;
+      stderr: string;
+    }>((resolve) => {
+      let stderr = "";
+      child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+      child.on("exit", (code) => resolve({ code, stderr }));
+    });
     expect(childResult).toEqual({ code: 0, stderr: "" });
     expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual({
       base: true,
