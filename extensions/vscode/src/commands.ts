@@ -52,6 +52,10 @@ import {
   syncCukiiPanelTitleForSession,
   type CukiiPanelHost,
 } from "./cukiiPanelRegistry";
+import {
+  cukiiMemoryAccountForContext,
+  describeDisciplineOutcome,
+} from "./extension/cukiiMemoryAccount";
 import { cukiiSessionAttention } from "./extension/cukiiSessionAttention";
 import { processDiff } from "./diff/processDiff";
 import { VerticalDiffManager } from "./diff/vertical/manager";
@@ -1055,6 +1059,20 @@ const getCommandsMap: (
         panel.dispose();
       });
       panel.onDidDispose(() => protocol.dispose());
+    },
+    // A machine that ended up without the memory contract has to be fixable and
+    // explainable by its owner, not only by someone reading the extension host.
+    "cukii.installMemoryDiscipline": async () => {
+      const outcome =
+        await cukiiMemoryAccountForContext(
+          extensionContext,
+        ).installDisciplineNow();
+      const text = `Cukii: ${describeDisciplineOutcome(outcome)}`;
+      if (outcome.error || outcome.failed.length > 0) {
+        void vscode.window.showErrorMessage(text);
+        return;
+      }
+      void vscode.window.showInformationMessage(text);
     },
     "cukii.renameChatPanel": async () => {
       const targets = listCukiiRenameTargets(fullScreenPanels);

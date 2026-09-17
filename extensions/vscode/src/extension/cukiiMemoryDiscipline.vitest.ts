@@ -5,8 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CUKII_BUNDLED_RULES_PATH,
   CUKII_RULES_BEGIN,
   CUKII_RULES_END,
+  bundledDisciplineBlock,
   disciplineTargets,
   disciplineUrl,
   fetchDisciplineBlock,
@@ -175,5 +177,29 @@ describe("Cukii discipline bootstrap", () => {
         huge,
       ),
     ).rejects.toThrow(/too large/);
+  });
+
+  it("ships a real discipline inside the extension", () => {
+    // 🔴 This is the fallback that keeps an unreachable box from costing the
+    // whole contract, so its absence has to be a red test and not a machine
+    // that quietly comes up without rules.
+    const extensionRoot = path.resolve(__dirname, "..", "..");
+    const asset = path.join(extensionRoot, ...CUKII_BUNDLED_RULES_PATH);
+    expect(fs.existsSync(asset)).toBe(true);
+
+    const block = bundledDisciplineBlock(extensionRoot);
+    expect(block.startsWith(CUKII_RULES_BEGIN)).toBe(true);
+    expect(block.endsWith(CUKII_RULES_END)).toBe(true);
+    // The rules have to name the memory tools; a stub would install silence.
+    expect(block).toContain("memory_search");
+  });
+
+  it("refuses a bundled asset that lost its markers", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-bundled-"));
+    roots.push(root);
+    const asset = path.join(root, ...CUKII_BUNDLED_RULES_PATH);
+    fs.mkdirSync(path.dirname(asset), { recursive: true });
+    fs.writeFileSync(asset, "# rules\n\nno markers here\n");
+    expect(() => bundledDisciplineBlock(root)).toThrow(/missing its markers/);
   });
 });

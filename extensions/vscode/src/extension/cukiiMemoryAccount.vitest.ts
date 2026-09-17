@@ -8,6 +8,7 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
   CUKII_MEMORY_SECRET_KEY,
   CukiiMemoryAccountController,
+  describeDisciplineOutcome,
   normalizeMemoryEndpoint,
   probeCukiiMemory,
 } from "./cukiiMemoryAccount";
@@ -187,6 +188,7 @@ describe("Cukii Box account", () => {
           expect(token).toBe(boxToken);
           return `block-for:${endpoint}`;
         },
+        bundled: () => "bundled-block",
         install: (block) => {
           installed.push(block);
           return { ...empty, written: ["CLAUDE.md"] };
@@ -204,7 +206,10 @@ describe("Cukii Box account", () => {
     controller.dispose();
   });
 
-  it("keeps the CLI starting when the box cannot serve the discipline, and retries", async () => {
+  it("falls back to the shipped copy when the box cannot serve the discipline", async () => {
+    // 🔴 The 2.0.134 regression: the box was the only source, so one failed
+    // request left the machine with working memory and no contract. A network
+    // blink must cost freshness, never the discipline itself.
     const store = new MemoryStore();
     await store.store(
       CUKII_MEMORY_SECRET_KEY,
@@ -214,7 +219,53 @@ describe("Cukii Box account", () => {
       }),
     );
     const empty = { written: [], unchanged: [], failed: [] };
+    const installed: string[] = [];
+    const log: string[] = [];
+    const root = extensionRoot();
+    const controller = new CukiiMemoryAccountController(
+      store,
+      root,
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      { ensure: vi.fn(() => true), remove: vi.fn() },
+      {
+        fetch: async () => {
+          throw new Error("box unreachable");
+        },
+        bundled: (extensionPath) => `bundled-from:${extensionPath}`,
+        install: (block) => {
+          installed.push(block);
+          return { ...empty, written: ["CLAUDE.md"] };
+        },
+        remove: () => empty,
+      },
+      (line) => log.push(line),
+    );
+
+    expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
+    expect(installed).toEqual([`bundled-from:${root}`]);
+
+    const outcome = controller.lastDisciplineOutcome();
+    expect(outcome?.source).toBe("bundled");
+    expect(outcome?.boxError).toContain("box unreachable");
+    expect(outcome?.written).toEqual(["CLAUDE.md"]);
+    // The reason has to be readable on a machine nobody can debug remotely.
+    expect(log.join("\n")).toContain("box unreachable");
+    controller.dispose();
+  });
+
+  it("keeps the CLI starting when neither copy can be installed, and retries", async () => {
+    const store = new MemoryStore();
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({
+        endpoint: "https://box.example.test/mcp",
+        token: "f".repeat(43),
+      }),
+    );
+    const empty = { written: [], unchanged: [], failed: [] };
     let attempts = 0;
+    const log: string[] = [];
     const controller = new CukiiMemoryAccountController(
       store,
       extensionRoot(),
@@ -223,21 +274,54 @@ describe("Cukii Box account", () => {
       { ensure: vi.fn(() => true), remove: vi.fn() },
       {
         fetch: async () => {
+          throw new Error("box unreachable");
+        },
+        bundled: () => {
           attempts += 1;
-          if (attempts === 1) throw new Error("box unreachable");
-          return "recovered";
+          throw new Error("bundled asset missing");
         },
         install: () => ({ ...empty, written: ["CLAUDE.md"] }),
         remove: () => empty,
       },
+      (line) => log.push(line),
     );
 
     // Fail-open: a dead box must not block the vendor CLI from starting.
     expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
     expect(attempts).toBe(1);
+    expect(controller.lastDisciplineOutcome()).toMatchObject({
+      source: "none",
+      error: "bundled asset missing",
+    });
     // A rejected attempt is not memoized, so the next spawn tries again.
     expect(await controller.ensureForModel("claude-opus-5")).toBe(true);
     expect(attempts).toBe(2);
+    // 🔴 Silence is what made 2.0.134 undiagnosable from any other machine, and
+    // the spawn path is exactly where the rejection used to vanish — so assert
+    // that this caller reports it, not merely that the reason appears somewhere.
+    expect(
+      log.filter((line) => line.includes("skipped for this spawn")),
+    ).toEqual([
+      "discipline skipped for this spawn: bundled asset missing",
+      "discipline skipped for this spawn: bundled asset missing",
+    ]);
+    controller.dispose();
+  });
+
+  it("reports why nothing was installed when the box is not connected", async () => {
+    const controller = new CukiiMemoryAccountController(
+      new MemoryStore(),
+      extensionRoot(),
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      { ensure: vi.fn(() => true), remove: vi.fn() },
+    );
+    const outcome = await controller.installDisciplineNow();
+    expect(outcome.source).toBe("none");
+    expect(outcome.error).toContain("not connected");
+    expect(describeDisciplineOutcome(outcome)).toContain(
+      "discipline NOT installed",
+    );
     controller.dispose();
   });
 
@@ -258,7 +342,12 @@ describe("Cukii Box account", () => {
       process.execPath,
       vi.fn() as unknown as typeof fetch,
       { ensure: vi.fn(() => true), remove: vi.fn() },
-      { fetch: async () => "block", install: () => empty, remove },
+      {
+        fetch: async () => "block",
+        bundled: () => "bundled-block",
+        install: () => empty,
+        remove,
+      },
     );
 
     await controller.runAction("logout", {

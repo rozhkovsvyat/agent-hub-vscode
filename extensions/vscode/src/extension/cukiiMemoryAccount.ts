@@ -12,6 +12,7 @@ import { brokerVendorForModel } from "core/cukiiPermissionModes";
 
 import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
+  bundledDisciplineBlock,
   fetchDisciplineBlock,
   installDisciplineBlock,
   removeDisciplineBlock,
@@ -58,11 +59,41 @@ type MemoryDiscipline = {
     token: string,
     httpFetch: MemoryFetch,
   ): Promise<string>;
+  bundled(extensionPath: string): string;
   install(block: string): DisciplineInstallReport;
   remove(): DisciplineInstallReport;
 };
 
 type MemoryFetch = typeof fetch;
+
+/** What the last discipline attempt actually did, for the owner to read. */
+export type DisciplineOutcome = {
+  source: "box" | "bundled" | "none";
+  written: string[];
+  unchanged: string[];
+  failed: { target: string; reason: string }[];
+  /** Why the box copy was not used; empty when the box answered. */
+  boxError?: string;
+  /** Why nothing was installed at all. */
+  error?: string;
+};
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function describeDisciplineOutcome(outcome: DisciplineOutcome): string {
+  if (outcome.error) return `discipline NOT installed: ${outcome.error}`;
+  const touched = outcome.written.length + outcome.unchanged.length;
+  const head = `discipline in ${touched} agent files from the ${outcome.source} copy`;
+  const box = outcome.boxError ? `; box unavailable: ${outcome.boxError}` : "";
+  const failed = outcome.failed.length
+    ? `; ${outcome.failed
+        .map((entry) => `${entry.target}: ${entry.reason}`)
+        .join(", ")}`
+    : "";
+  return `${head}${box}${failed}`;
+}
 
 function parseConnection(
   raw: string | undefined,
@@ -295,6 +326,7 @@ export class CukiiMemoryAccountController {
   private relay?: CukiiMemoryRelay;
   private relayConnection?: string;
   private disciplineRun?: Promise<DisciplineInstallReport>;
+  private disciplineOutcome?: DisciplineOutcome;
 
   constructor(
     private readonly store: ProtectedSecretStore,
@@ -309,10 +341,24 @@ export class CukiiMemoryAccountController {
     private readonly discipline: MemoryDiscipline = {
       fetch: (endpoint, token, httpFetch) =>
         fetchDisciplineBlock(endpoint, token, httpFetch),
+      bundled: (extensionPath) => bundledDisciplineBlock(extensionPath),
       install: (block) => installDisciplineBlock(block),
       remove: () => removeDisciplineBlock(),
     },
+    private readonly log: (line: string) => void = () => {},
   ) {}
+
+  /**
+   * The last thing the discipline actually did on this machine.
+   *
+   * 🔴 2.0.134 returned this information to nobody: the only caller swallowed
+   * the rejection, so a machine with no contract and a machine with a fresh one
+   * looked identical from the outside — including to the agent asked to explain
+   * it. Whatever fails next has to be readable without a debugger.
+   */
+  lastDisciplineOutcome(): DisciplineOutcome | undefined {
+    return this.disciplineOutcome;
+  }
 
   /**
    * Install the discipline once per activation, and retry on the next spawn if
@@ -330,19 +376,72 @@ export class CukiiMemoryAccountController {
       this.disciplineRun = (async () => {
         const connection = await this.connection();
         if (!connection) throw new Error("Cukii Box is not connected.");
-        const block = await this.discipline.fetch(
-          connection.endpoint,
-          connection.token,
-          this.httpFetch,
-        );
-        return this.discipline.install(block);
+
+        // The box is the source of truth so a vault edit reaches every machine,
+        // but it is no longer the only way in: falling back to the shipped copy
+        // is what keeps a blinking network from costing the whole contract.
+        let block: string;
+        let source: DisciplineOutcome["source"] = "box";
+        let boxError: string | undefined;
+        try {
+          block = await this.discipline.fetch(
+            connection.endpoint,
+            connection.token,
+            this.httpFetch,
+          );
+        } catch (error: unknown) {
+          boxError = errorText(error);
+          this.log(`box copy unavailable: ${boxError}`);
+          block = this.discipline.bundled(this.extensionPath);
+          source = "bundled";
+        }
+
+        const report = this.discipline.install(block);
+        this.record({ source, boxError, ...report });
+        return report;
       })().catch((error: unknown) => {
         // A transient outage must not disable discipline for the whole session.
         this.disciplineRun = undefined;
+        this.record({
+          source: "none",
+          written: [],
+          unchanged: [],
+          failed: [],
+          error: errorText(error),
+        });
         throw error;
       });
     }
     return this.disciplineRun;
+  }
+
+  private record(outcome: DisciplineOutcome): void {
+    this.disciplineOutcome = outcome;
+    this.log(describeDisciplineOutcome(outcome));
+  }
+
+  /**
+   * Install the discipline now and say what happened.
+   *
+   * Reached from activation and from the `Cukii: Install Memory Discipline`
+   * command, so an owner whose machine ended up without the contract has a way
+   * to both fix it and see the reason, on a machine nobody can debug remotely.
+   */
+  async installDisciplineNow(): Promise<DisciplineOutcome> {
+    try {
+      await this.ensureDiscipline(true);
+    } catch {
+      // `record` already captured the reason; the outcome below carries it.
+    }
+    return (
+      this.disciplineOutcome ?? {
+        source: "none",
+        written: [],
+        unchanged: [],
+        failed: [],
+        error: "Cukii Box is not connected.",
+      }
+    );
   }
 
   private async connection(): Promise<MemoryConnection | undefined> {
@@ -471,8 +570,12 @@ export class CukiiMemoryAccountController {
     if (!descriptor) return false;
     const vendor = brokerVendorForModel(model);
     const configured = this.vendorMcp.ensure(vendor, descriptor);
-    // Fail-open: a CLI must still start when the discipline cannot be written.
-    await this.ensureDiscipline().catch(() => undefined);
+    // Fail-open: a CLI must still start when the discipline cannot be written —
+    // but the reason is recorded, never discarded. Swallowing it is exactly how
+    // 2.0.134 shipped a silent no-op that read as success.
+    await this.ensureDiscipline().catch((error: unknown) => {
+      this.log(`discipline skipped for this spawn: ${errorText(error)}`);
+    });
     return configured;
   }
 
@@ -494,14 +597,24 @@ export function cukiiMemoryAccountForContext(
     vscode.ExtensionContext,
     "secrets" | "extensionPath" | "subscriptions"
   >,
+  log?: (line: string) => void,
 ): CukiiMemoryAccountController {
   const existing = CONTROLLERS.get(context);
   if (existing) return existing;
   const controller = new CukiiMemoryAccountController(
     context.secrets,
     context.extensionPath,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    log,
   );
   CONTROLLERS.set(context, controller);
   context.subscriptions.push({ dispose: () => controller.dispose() });
+  // 🔴 Install on activation, not only when a vendor CLI is spawned. In 2.0.134
+  // the single trigger sat behind a chat spawn, so any machine where that path
+  // did not reach the installer stayed without the contract and said nothing.
+  void controller.installDisciplineNow().catch(() => undefined);
   return controller;
 }

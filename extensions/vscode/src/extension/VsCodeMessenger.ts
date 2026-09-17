@@ -485,7 +485,13 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     const issueReporter = yougileIssueReporterForContext(context);
-    const memoryAccount = cukiiMemoryAccountForContext(context);
+    // Every discipline attempt lands here, success or failure. Without it the
+    // only way to learn why a machine has no contract was to read the source.
+    const memoryLog = vscode.window.createOutputChannel("Cukii · memory");
+    context.subscriptions.push(memoryLog);
+    const memoryAccount = cukiiMemoryAccountForContext(context, (line) =>
+      memoryLog.appendLine(`[${new Date().toISOString()}] ${line}`),
+    );
     this.webviewProtocol.onDispose((protocol) => {
       const run = this.bridgeRuns.activeFor(protocol);
       // Invalidate candidates already waiting behind this run before their

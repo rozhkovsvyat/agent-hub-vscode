@@ -42,6 +42,9 @@ describe("VSIX package list", () => {
       "out/runtime/ffmpeg.exe",
       "out/runtime/ffmpeg.map",
       "out/cukiiMemoryProxy.js",
+      // The discipline fallback. If `.vscodeignore` ever swallows it, a machine
+      // that cannot reach the box silently loses the contract again.
+      "media/cukii-memory-rules.md",
     ]) {
       const destination = path.join(fixtureRoot, file);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -68,6 +71,7 @@ describe("VSIX package list", () => {
         "out/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime_binding.node",
         "out/runtime/ffmpeg.exe",
         "out/cukiiMemoryProxy.js",
+        "media/cukii-memory-rules.md",
       ]),
     );
     expect(packageList.filter((file) => file.endsWith(".map"))).toEqual([]);

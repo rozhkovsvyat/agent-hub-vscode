@@ -16,6 +16,17 @@ export const CUKII_RULES_END = "<!-- cukii-memory:end -->";
  */
 export const CUKII_RULES_RESOURCE = "client/cukii-memory-rules.md";
 
+/**
+ * The same document, shipped inside the VSIX.
+ *
+ * 🔴 2.0.134 made the box the only source, so one failed request left the
+ * machine with working memory and no contract — and the failure was swallowed,
+ * which is why nobody could say which request failed. The box still wins when
+ * it answers, because editing the vault must keep updating every machine; this
+ * copy only guarantees that a network blink cannot cost the discipline.
+ */
+export const CUKII_BUNDLED_RULES_PATH = ["media", "cukii-memory-rules.md"];
+
 const MAX_RULES_BYTES = 64 * 1024;
 const MIN_RULES_BYTES = 64;
 
@@ -93,6 +104,17 @@ export async function fetchDisciplineBlock(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Read the discipline that shipped with the extension.
+ *
+ * Parsed through the same marker check as the network copy, so a truncated or
+ * mangled asset is refused instead of being appended to the owner's contract.
+ */
+export function bundledDisciplineBlock(extensionPath: string): string {
+  const file = path.join(extensionPath, ...CUKII_BUNDLED_RULES_PATH);
+  return parseDisciplineBlock(fs.readFileSync(file, "utf8"));
 }
 
 /**
