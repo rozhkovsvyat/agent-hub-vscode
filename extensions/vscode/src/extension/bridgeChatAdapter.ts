@@ -452,7 +452,18 @@ function buildPrompt(
     brokerSubagent === "auto" ? "Auto" : displayBridgeModel(brokerSubagent);
   const selectedSubagentGuidance =
     brokerSubagent === "auto"
-      ? "Subagent routing is Auto: choose the strongest appropriate native worker and say which one you chose."
+      ? [
+          "Subagent routing is Auto: choose the strongest appropriate native worker and say which one you chose.",
+          // Auto routing carried no not_routable semantics, so a broker scope
+          // refusal was read as a model/account outage and reported to the
+          // owner as "route gpt-6-astra is unavailable" (board cards
+          // d4c6c6fd/de99bf3d) — the exact misreading the locked branch
+          // already guards against.
+          "When you delegate through mcp__cukii-broker__broker_delegate, pass an EXPLICIT scope argument." +
+            " " +
+            BROKER_NOT_ROUTABLE_GUIDANCE,
+          "If the chosen native worker cannot be launched, report that failure explicitly instead of silently falling back to a built-in subagent.",
+        ].join(" ")
       : [
           `Subagent routing is locked to ${displayBridgeModel(brokerSubagent)}.`,
           "If the user asks you to delegate, you MUST use that selected native worker.",

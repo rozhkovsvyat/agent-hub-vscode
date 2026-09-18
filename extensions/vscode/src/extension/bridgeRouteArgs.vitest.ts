@@ -72,6 +72,26 @@ describe("broker delegation recovery guidance", () => {
       "explicit known vault scope",
     );
   });
+
+  // Board cards d4c6c6fd/de99bf3d: with subagent routing on Auto the broker
+  // refused a scope-less delegation with not_routable, and the model told the
+  // owner "route gpt-6-astra is unavailable" although the subscription was
+  // connected. The locked branch already carries the guidance; Auto must too.
+  it("carries the not_routable semantics into Auto subagent routing as well", () => {
+    const source = fs
+      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
+    const autoAt = source.indexOf('brokerSubagent === "auto"');
+    const lockedAt = source.indexOf(
+      "`Subagent routing is locked to ${displayBridgeModel(brokerSubagent)}.`",
+    );
+    expect(autoAt).toBeGreaterThan(-1);
+    expect(lockedAt).toBeGreaterThan(autoAt);
+    const autoBranch = source.slice(autoAt, lockedAt);
+    expect(autoBranch).toContain("BROKER_NOT_ROUTABLE_GUIDANCE");
+    expect(autoBranch).toContain("EXPLICIT scope");
+    expect(autoBranch).toContain("report that failure explicitly");
+  });
 });
 
 afterEach(() => {
