@@ -19,6 +19,7 @@ import * as path from "path";
 import { promisify } from "util";
 import { listBrokerVendorAccounts, resolveNativeCli } from "./bridgeVendorAuth";
 import { resolveCodexHome } from "./codexModelsCacheHeal";
+import { vendorSpawnEnv } from "./vendorCliInstaller";
 
 const execFileAsync = promisify(execFile);
 
@@ -393,12 +394,39 @@ export function kimiCatalogFromJson(raw: string): BrokerModelCatalogEntry[] {
     );
 }
 
+/**
+ * How one catalog probe reaches the native CLI.
+ *
+ * Windows goes through the command processor because the resolved CLIs are
+ * batch shims (`agent.cmd`) and Node refuses to spawn a .cmd without a shell
+ * since its batch-injection fix. Everywhere else the probe launches the
+ * resolved CLI directly: routing a macOS/Linux probe through `cmd.exe` fails
+ * with ENOENT before the CLI runs, which is how a picker with every vendor
+ * connected ended up showing only the static catalogs (Anthropic, Qwen) and
+ * the Codex file cache while Grok, Kimi and Cursor silently vanished.
+ */
+export function catalogProbeCommand(
+  program: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { program: string; args: string[] } {
+  if (platform !== "win32") return { program, args };
+  return {
+    program: process.env.ComSpec ?? "cmd.exe",
+    args: ["/d", "/c", program, ...args],
+  };
+}
+
 async function run(program: string, args: string[]): Promise<string> {
-  const command = process.env.ComSpec ?? "cmd.exe";
-  const result = await execFileAsync(command, ["/d", "/c", program, ...args], {
+  const command = catalogProbeCommand(program, args);
+  const result = await execFileAsync(command.program, command.args, {
     timeout: 12_000,
     windowsHide: true,
     maxBuffer: 1024 * 1024,
+    // An npm shim resolves `#!/usr/bin/env node` on every launch, and a GUI
+    // extension host on macOS does not inherit the login shell's PATH. Put
+    // Cukii's private Node first, the same rule the account probe follows.
+    env: vendorSpawnEnv(),
   });
   return result.stdout;
 }

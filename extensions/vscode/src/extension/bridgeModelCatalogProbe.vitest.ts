@@ -14,6 +14,7 @@ vi.mock("./bridgeVendorAuth", () => ({
 vi.mock("child_process", () => ({ execFile }));
 
 import {
+  catalogProbeCommand,
   listBrokerModelCatalog,
   resetClaudeCatalogProbeCache,
   staticCatalogForUnavailableDiscovery,
@@ -164,5 +165,28 @@ describe("Claude catalog refresh probe", () => {
       (call[1] as string[]).includes("models"),
     );
     expect(probe?.[1]).toEqual(["/d", "/c", "agent.cmd", "models"]);
+  });
+});
+
+describe("catalog probe command routing", () => {
+  it("spawns the resolved CLI directly off Windows", () => {
+    // cmd.exe does not exist on macOS/Linux; routing the probe through it
+    // failed with ENOENT and the picker silently lost Grok, Kimi and Cursor.
+    expect(catalogProbeCommand("grok", ["models"], "darwin")).toEqual({
+      program: "grok",
+      args: ["models"],
+    });
+    expect(
+      catalogProbeCommand("/home/u/.local/bin/agent", ["models"], "linux"),
+    ).toEqual({ program: "/home/u/.local/bin/agent", args: ["models"] });
+  });
+
+  it("keeps routing Windows probes through the command processor", () => {
+    // Batch shims cannot be spawned without a shell since Node's
+    // batch-injection fix.
+    expect(catalogProbeCommand("agent.cmd", ["models"], "win32")).toEqual({
+      program: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/c", "agent.cmd", "models"],
+    });
   });
 });
