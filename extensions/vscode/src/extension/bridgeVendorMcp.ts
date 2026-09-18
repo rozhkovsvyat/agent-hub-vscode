@@ -276,7 +276,13 @@ function mcpEntry(brokerDir: string, options?: BrokerIntegrationOptions) {
   return {
     command: brokerPythonCommand(options),
     args: [path.join(brokerDir, "mcp_server.py")],
-    env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+    env: {
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+      // The broker is imported as the `broker` package; without its parent
+      // on PYTHONPATH the server dies with ModuleNotFoundError on every run.
+      PYTHONPATH: path.dirname(brokerDir),
+    },
   };
 }
 
@@ -287,6 +293,29 @@ function gateCommand(
 ): string {
   const gate = path.join(brokerDir, "hooks", GATE_MARKER);
   return `${brokerPythonCommand(options)} "${gate}" -Harness ${harness}`;
+}
+
+/**
+ * Qwen's harness splits hook commands on whitespace without shell quoting:
+ * a quoted script path reaches python as a literal filename containing quote
+ * characters, the gate never starts, and every tool call is denied. The
+ * command must therefore stay unquoted, which forbids spaces in the gate
+ * path — fail closed instead of "fixing" a space with quotes, because
+ * quoting is exactly the defect this prevents. Codex/grok/kimi keep the
+ * quoted form: their TOML/JSON parsers consume the quotes.
+ */
+function qwenGateCommand(
+  brokerDir: string,
+  options?: BrokerIntegrationOptions,
+): string {
+  const gate = path.join(brokerDir, "hooks", GATE_MARKER);
+  const command = `${brokerPythonCommand(options)} ${gate} -Harness qwen`;
+  if (gate.includes(" ") || command.includes('"') || command.includes("'")) {
+    throw new Error(
+      `PreToolUse hook command must stay unquoted (offending: ${command})`,
+    );
+  }
+  return command;
 }
 
 /** qwen: settings.json carries both mcpServers and hooks (JSON-safe edit). */
@@ -320,15 +349,29 @@ function ensureQwenBrokerRegistrationUnlocked(
     settings.mcpServers = mcpServers;
     mcpAdded = true;
   }
-  // Older builds left `trust: true` on this entry, letting the broker MCP run
-  // without Qwen's confirmation prompt. The broker is host-owned but not
-  // vendor-trusted, so every registration normalizes it and Qwen's own
-  // deny > ask > allow policy stays in force for bridge runs.
+  // Qwen hides a `trust: false` MCP entirely in non-interactive runs, which
+  // kills the broker channel without any UI signal. The broker is host-owned
+  // infrastructure, so its entry must stay trusted; every registration
+  // normalizes back to `trust: true` instead of silently re-breaking it.
   const brokerEntry = mcpServers[BROKER_MCP_NAME] as Record<string, unknown>;
   let trustNormalized = false;
-  if (brokerEntry.trust !== false) {
-    brokerEntry.trust = false;
+  if (brokerEntry.trust !== true) {
+    brokerEntry.trust = true;
     trustNormalized = true;
+  }
+  // Existing entries from before PYTHONPATH was required must gain it, or the
+  // next broker launch dies with ModuleNotFoundError: No module named
+  // 'broker'. Unknown-at-install values are never written as trust:false.
+  const entryEnv =
+    typeof brokerEntry.env === "object" && brokerEntry.env !== null
+      ? (brokerEntry.env as Record<string, unknown>)
+      : {};
+  const wantedPythonPath = path.dirname(brokerDir);
+  let pythonPathNormalized = false;
+  if (entryEnv.PYTHONPATH !== wantedPythonPath) {
+    entryEnv.PYTHONPATH = wantedPythonPath;
+    brokerEntry.env = entryEnv;
+    pythonPathNormalized = true;
   }
   if (!serialized.includes(GATE_MARKER)) {
     const hooks =
@@ -342,7 +385,7 @@ function ensureQwenBrokerRegistrationUnlocked(
       hooks: [
         {
           type: "command",
-          command: gateCommand(brokerDir, "qwen", options),
+          command: qwenGateCommand(brokerDir, options),
           timeout: 15000,
         },
       ],
@@ -351,7 +394,7 @@ function ensureQwenBrokerRegistrationUnlocked(
     settings.hooks = hooks;
     hookAdded = true;
   }
-  if (mcpAdded || hookAdded || trustNormalized)
+  if (mcpAdded || hookAdded || trustNormalized || pythonPathNormalized)
     writeOwnerFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
   return { mcpAdded, hookAdded };
 }
@@ -365,8 +408,12 @@ export function ensureQwenBrokerRegistration(
     return withOwnerFileLock(settingsPath, () =>
       ensureQwenBrokerRegistrationUnlocked(brokerDir, options),
     );
-  } catch {
-    return { mcpAdded: false, hookAdded: false, skipped: "qwen config busy" };
+  } catch (error) {
+    return {
+      mcpAdded: false,
+      hookAdded: false,
+      skipped: `qwen config busy: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 

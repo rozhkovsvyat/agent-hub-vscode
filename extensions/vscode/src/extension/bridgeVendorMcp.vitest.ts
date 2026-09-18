@@ -174,17 +174,30 @@ describe("bridgeVendorMcp", () => {
       const entry = settings.mcpServers[BROKER_MCP_NAME];
       expect(entry.command).toBe(brokerPythonCommand(options()));
       expect(entry.args[0]).toBe(path.join(brokerDir, "mcp_server.py"));
-      expect(entry.trust).toBe(false);
+      expect(entry.trust).toBe(true);
+      expect(entry.env.PYTHONPATH).toBe(path.dirname(brokerDir));
       const preToolUse = settings.hooks.PreToolUse;
       expect(preToolUse).toHaveLength(1);
-      expect(preToolUse[0].hooks[0].command).toContain("inbox_gate.py");
-      expect(preToolUse[0].hooks[0].command).toContain("-Harness qwen");
+      const hookCommand = preToolUse[0].hooks[0].command as string;
+      expect(hookCommand).toContain("inbox_gate.py");
+      expect(hookCommand).toContain("-Harness qwen");
+      // Qwen splits the command on whitespace without shell quoting: any
+      // quote character reaches python as part of the filename and bricks
+      // every tool call.
+      expect(hookCommand).not.toMatch(/["']/);
 
+      const afterFirst = fs.readFileSync(
+        path.join(home, ".qwen", "settings.json"),
+        "utf8",
+      );
       const second = ensureQwenBrokerRegistration(brokerDir, options());
       expect(second).toMatchObject({ mcpAdded: false, hookAdded: false });
       const again = readSettings();
       expect(again.hooks.PreToolUse).toHaveLength(1);
       expect(Object.keys(again.mcpServers)).toHaveLength(2);
+      expect(
+        fs.readFileSync(path.join(home, ".qwen", "settings.json"), "utf8"),
+      ).toBe(afterFirst);
     });
 
     it("keeps an existing PreToolUse list and only appends", () => {
@@ -204,22 +217,46 @@ describe("bridgeVendorMcp", () => {
       expect(settings.hooks.PreToolUse[0].matcher).toBe("write_file");
     });
 
-    it("normalizes a legacy trust:true entry even when nothing else changes", () => {
+    it("normalizes a legacy trust:false entry even when nothing else changes", () => {
       writeSettings({ mcpServers: { other: { command: "x" } }, hooks: {} });
       ensureQwenBrokerRegistration(brokerDir, options());
-      writeSettings({
-        ...readSettings(),
-        mcpServers: {
-          ...readSettings().mcpServers,
-          [BROKER_MCP_NAME]: {
-            ...readSettings().mcpServers[BROKER_MCP_NAME],
-            trust: true,
-          },
-        },
-      });
+      const seeded = readSettings();
+      delete seeded.mcpServers[BROKER_MCP_NAME].env.PYTHONPATH;
+      seeded.mcpServers[BROKER_MCP_NAME].trust = false;
+      writeSettings(seeded);
       const result = ensureQwenBrokerRegistration(brokerDir, options());
       expect(result).toMatchObject({ mcpAdded: false, hookAdded: false });
-      expect(readSettings().mcpServers[BROKER_MCP_NAME].trust).toBe(false);
+      const upgraded = readSettings().mcpServers[BROKER_MCP_NAME];
+      // trust:false hides the broker MCP entirely in non-interactive runs.
+      expect(upgraded.trust).toBe(true);
+      expect(upgraded.env.PYTHONPATH).toBe(path.dirname(brokerDir));
+      expect(upgraded.env.PYTHONIOENCODING).toBe("utf-8");
+    });
+
+    it("fails closed instead of quoting a gate path that contains a space", () => {
+      writeSettings({ mcpServers: {}, hooks: {} });
+      const spacedBrokerDir = path.join(home, "broker pkg");
+      fs.mkdirSync(path.join(spacedBrokerDir, "hooks"), { recursive: true });
+      fs.writeFileSync(
+        path.join(spacedBrokerDir, "hooks", "inbox_gate.py"),
+        "# gate",
+        "utf8",
+      );
+      fs.writeFileSync(
+        path.join(spacedBrokerDir, "mcp_server.py"),
+        "# server",
+        "utf8",
+      );
+      const before = fs.readFileSync(
+        path.join(home, ".qwen", "settings.json"),
+        "utf8",
+      );
+      const result = ensureQwenBrokerRegistration(spacedBrokerDir, options());
+      expect(result.skipped).toContain("unquoted");
+      expect(result.skipped).toContain("PreToolUse");
+      expect(
+        fs.readFileSync(path.join(home, ".qwen", "settings.json"), "utf8"),
+      ).toBe(before);
     });
 
     it("skips silently when the settings file is torn", () => {
