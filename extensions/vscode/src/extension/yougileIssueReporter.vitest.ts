@@ -494,6 +494,46 @@ describe("YougileIssueReporter", () => {
     ).toHaveLength(1);
   });
 
+  it("probes the credential once and uploads the files concurrently", async () => {
+    let uploadsStarted = 0;
+    let markUploadsStarted!: () => void;
+    const allUploadsStarted = new Promise<void>((resolve) => {
+      markUploadsStarted = resolve;
+    });
+    const fx = fixture({
+      // Every upload awaits the same gate, which opens only once the third
+      // upload has begun. Sequential uploads would deadlock here.
+      uploadGate: allUploadsStarted,
+      onUploadStart: () => {
+        uploadsStarted += 1;
+        if (uploadsStarted === 3) {
+          markUploadsStarted();
+        }
+      },
+    });
+    const [picked] = fx.reporter.registerClipboardImages([
+      { name: "clip.png", mimeType: "image/png", base64: PNG_BASE64 },
+    ]);
+    const report = submission("report-parallel");
+    report.attachmentIds = [picked.id];
+
+    const receipt = await fx.reporter.submit(report);
+
+    expect(receipt.status).toBe("sent");
+    expect(uploadsStarted).toBe(3);
+    expect(
+      fx.calls.filter((call) => call.url.endsWith("/users/me")),
+    ).toHaveLength(1);
+    expect(
+      fx.calls.filter((call) => call.url.includes("/boards?")),
+    ).toHaveLength(1);
+    expect(
+      fx.calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/upload-file"),
+      ),
+    ).toHaveLength(3);
+  });
+
   it("cleans crash orphans before reading the durable outbox", async () => {
     const fx = fixture();
     const staged = path.join(
