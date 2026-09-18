@@ -100,6 +100,7 @@ import {
   clearBrokerVendorAccountCache,
   extractAuthFlowAssist,
   listCukiiAccounts,
+  logoutNativeKimiAccount,
   probeBrokerVendorAccount,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
@@ -334,7 +335,6 @@ export class VsCodeMessenger {
     spec: {
       name: string;
       command: string;
-      followup?: string;
       closesTerminal?: boolean;
     },
     vendor: BrokerVendorId,
@@ -397,16 +397,8 @@ export class VsCodeMessenger {
         })();
       };
       runThroughShell(spec.command);
-      if (spec.followup) {
-        const followup = spec.followup;
-        setTimeout(() => runThroughShell(followup), 1_500);
-      }
     } else {
       terminal.sendText(spec.command, true);
-      if (spec.followup) {
-        const followup = spec.followup;
-        setTimeout(() => terminal.sendText(followup, true), 1_500);
-      }
     }
 
     let capTimer: NodeJS.Timeout | undefined;
@@ -1139,6 +1131,21 @@ export class VsCodeMessenger {
       }
       const spec = vendorAuthTerminalCommand(vendor, action);
       if (!spec) {
+        if (vendor === "kimi" && action === "logout") {
+          // Silent logout: the CLI's only native logout is `/logout` inside
+          // its interactive TUI, which spams the terminal with setup prompts
+          // before the command even runs. Removing the native credentials is
+          // the logout the account probe already trusts.
+          const outcome = logoutNativeKimiAccount();
+          clearBrokerVendorAccountCache();
+          return {
+            opened: true,
+            message:
+              outcome.removed > 0
+                ? "Signed out; the account status was refreshed."
+                : "No Kimi login was found on this machine.",
+          };
+        }
         return {
           opened: false,
           message:

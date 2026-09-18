@@ -379,7 +379,7 @@ export function classifyVendorAuthOutput(
   });
 
   if (
-    /not logged in|not signed in|unauthenticated|authentication required/i.test(
+    /not logged in|not signed in|not authenticated|unauthenticated|authentication required/i.test(
       text,
     )
   ) {
@@ -1239,6 +1239,51 @@ export function kimiCredentialFingerprint(
   }
 }
 
+type KimiLogoutFileSystem = {
+  readdirSync(directory: string): string[];
+  statSync(file: string): { isFile(): boolean };
+  rmSync(file: string, options: { force: true }): void;
+};
+
+/**
+ * Kimi Code's only native logout is the `/logout` command inside its
+ * interactive TUI — reaching it through a terminal greets the owner with the
+ * CLI's own model/session prompts first (owner report 2026-09-16). The
+ * credentials directory is the account authority every Cukii probe already
+ * trusts (`credentialPresent` outranks the managed provider declaration), so
+ * removing its credential files *is* the logout and needs no terminal.
+ */
+export function logoutNativeKimiAccount(
+  options: {
+    userHome?: string;
+    fileSystem?: KimiLogoutFileSystem;
+  } = {},
+): { removed: number } {
+  const fileSystem = options.fileSystem ?? fs;
+  const credentialsDirectory = path.join(
+    options.userHome ?? os.homedir(),
+    ".kimi-code",
+    "credentials",
+  );
+  let removed = 0;
+  try {
+    for (const entry of fileSystem.readdirSync(credentialsDirectory)) {
+      if (!entry.endsWith(".json")) continue;
+      const file = path.join(credentialsDirectory, entry);
+      try {
+        if (!fileSystem.statSync(file).isFile()) continue;
+        fileSystem.rmSync(file, { force: true });
+        removed += 1;
+      } catch {
+        // A credential that vanished mid-logout is already logged out.
+      }
+    }
+  } catch {
+    // No credentials directory means there was never a native login.
+  }
+  return { removed };
+}
+
 /**
  * A Kimi registry is not an authorization boundary: another local process can
  * publish an exact-looking loopback endpoint and capture `server.token`.
@@ -1944,7 +1989,6 @@ export function vendorAuthTerminalCommand(
   | {
       name: string;
       command: string;
-      followup?: string;
       shellPath?: string;
       shellArgs?: string[];
       closesTerminal?: false;
@@ -1974,7 +2018,8 @@ export function vendorAuthTerminalCommand(
     },
     kimi: {
       login: "kimi login --region global",
-      logout: "kimi",
+      // Logout is handled silently by logoutNativeKimiAccount: the CLI's only
+      // native logout lives inside its interactive TUI.
     },
     qwen: {},
   };
@@ -1996,8 +2041,5 @@ export function vendorAuthTerminalCommand(
     // shell, understands `PATH=... cmd`, and is the same interpreter the
     // installer wrapper already uses — so fish cannot break the prefix either.
     ...(platform !== "win32" ? { shellPath: "/bin/sh", shellArgs: [] } : {}),
-    ...(vendor === "kimi" && action === "logout"
-      ? { followup: "/logout" }
-      : {}),
   };
 }

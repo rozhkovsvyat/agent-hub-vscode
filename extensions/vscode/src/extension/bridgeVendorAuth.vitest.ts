@@ -29,6 +29,7 @@ import {
   clearBrokerVendorAccountCache,
   extractAuthFlowAssist,
   launchKimiWeb,
+  logoutNativeKimiAccount,
   stopEphemeralKimiWeb,
   probeVendorExecutable,
   resolveKimiAccountIdentity,
@@ -1698,6 +1699,76 @@ describe("Cukii vendor CLI accounts", () => {
     });
   });
 
+  it("reads the real logged-out xAI wording as Not logged in", () => {
+    // `grok models` on a machine that never logged in prints this verbatim
+    // and exits 0 (verified against grok.exe with an empty HOME). The wording
+    // matches neither "not logged in" nor "unauthenticated", and without a
+    // rule for it the row fell through to "Account status unavailable".
+    const loggedOutGrokOutput = [
+      "You are not authenticated.",
+      "",
+      "Default model: grok-4.6",
+      "",
+      "Available models:",
+      "  * grok-4.6 (default)",
+      "  - grok-4.5",
+    ].join("\n");
+    expect(classifyVendorAuthOutput("grok", loggedOutGrokOutput)).toMatchObject(
+      {
+        state: "disconnected",
+        authenticated: false,
+        accountLabel: "Not logged in",
+        actions: ["login"],
+      },
+    );
+  });
+
+  it("logs Kimi out by removing only the native credential files", () => {
+    const removedFiles: string[] = [];
+    const fileSystem = {
+      readdirSync: () => [
+        "kimi-code-env-0e4f99c69cc27850.json",
+        "notes.txt",
+        "nested",
+      ],
+      statSync: (file: string) => ({ isFile: () => !file.endsWith("nested") }),
+      rmSync: (file: string, _options: { force: true }) => {
+        removedFiles.push(file);
+      },
+    };
+    const outcome = logoutNativeKimiAccount({
+      userHome: "/home/owner",
+      fileSystem,
+    });
+    expect(outcome).toEqual({ removed: 1 });
+    expect(removedFiles).toEqual([
+      path.join(
+        "/home/owner",
+        ".kimi-code",
+        "credentials",
+        "kimi-code-env-0e4f99c69cc27850.json",
+      ),
+    ]);
+  });
+
+  it("treats a missing Kimi credentials directory as already logged out", () => {
+    const outcome = logoutNativeKimiAccount({
+      userHome: "/home/owner",
+      fileSystem: {
+        readdirSync: () => {
+          throw new Error("ENOENT");
+        },
+        statSync: () => {
+          throw new Error("unreachable");
+        },
+        rmSync: () => {
+          throw new Error("unreachable");
+        },
+      },
+    });
+    expect(outcome).toEqual({ removed: 0 });
+  });
+
   it("uses only supported native login/logout flows", () => {
     expect(vendorAuthTerminalCommand("claude", "logout")?.command).toBe(
       "claude auth logout",
@@ -1708,10 +1779,10 @@ describe("Cukii vendor CLI accounts", () => {
     expect(vendorAuthTerminalCommand("cursor", "login")?.command).toContain(
       "agent login",
     );
-    expect(vendorAuthTerminalCommand("kimi", "logout")).toMatchObject({
-      command: "kimi",
-      followup: "/logout",
-    });
+    // Kimi logout never opens a terminal: the CLI's only native logout is
+    // `/logout` inside its interactive TUI, so Cukii removes the native
+    // credentials itself (logoutNativeKimiAccount).
+    expect(vendorAuthTerminalCommand("kimi", "logout")).toBeUndefined();
     expect(vendorAuthTerminalCommand("qwen", "logout")).toBeUndefined();
     expect(vendorAuthTerminalCommand("qwen", "login")).toBeUndefined();
     expect(vendorAuthTerminalCommand("deepseek", "login")).toBeUndefined();
