@@ -258,8 +258,10 @@ export function permissionControlArgs(
   }
   if (vendor === "qwen") {
     // Qwen's noninteractive bridge route is assembled as
-    // `--safe-mode --prompt ... --approval-mode <mode>`. The caller prewarms
-    // the exact live executable snapshot before route construction.
+    // `--model <id> --prompt ... --output-format stream-json --approval-mode
+    // <mode>` (bridgeChatAdapter routeForModel; --safe-mode is gone from the
+    // route). The caller prewarms the exact live executable snapshot before
+    // route construction.
     const capabilities = cachedVendorPermissionCapabilities("qwen");
     if (!capabilities) {
       // Discovery has no verified contract on this host: the probe was

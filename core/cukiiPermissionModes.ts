@@ -429,16 +429,21 @@ function kimiPermissionArgv(_mode: CukiiPermissionMode): PermissionArgvSpec {
 }
 
 function qwenPermissionArgv(mode: CukiiPermissionMode): PermissionArgvSpec {
-  // Qwen bridge runs never get `yolo`: with --safe-mode gone the discipline
-  // layer (hooks, MCP, skills) is live again, so the host-owned broker and
-  // Qwen's own deny > ask > allow policy are the guard rails. Bypass therefore
-  // degrades to the verified interactive-equivalent `default` mode.
+  // Qwen Code 0.22.2 gates the tool *registry* on --approval-mode, not only the
+  // confirmation prompt: in a non-interactive run `default` and `auto` do not
+  // register write_file / edit / notebook_edit / run_shell_command at all, so
+  // mapping Bypass to `default` made the selector a no-op and left every bridge
+  // run read-only. Only `yolo` registers them (measured on 0.22.2, 2026-09-18).
+  // This also restores parity: claude, codex, grok and cursor all map Bypass to
+  // their most permissive native flag. The discipline layer stays live because
+  // --safe-mode is gone from the route: PreToolUse worktree-target-guard +
+  // inbox_gate and the Stop change-gate still run over write/shell.
   const nativeMode: Record<CukiiPermissionMode, string> = {
     manual: "default",
     editAutomatically: "auto-edit",
     plan: "plan",
     auto: "auto",
-    bypass: "default",
+    bypass: "yolo",
   };
   return {
     args: ["--approval-mode", nativeMode[mode]],

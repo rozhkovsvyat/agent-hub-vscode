@@ -949,8 +949,8 @@ describe("native bridge argv", () => {
       [
         "qwen-3-8-max",
         "bypass",
-        "--approval-mode default",
         "--approval-mode yolo",
+        "--approval-mode default",
       ],
     ] as const;
 
@@ -994,7 +994,7 @@ describe("native bridge argv", () => {
     ["editAutomatically", "auto-edit"],
     ["plan", "plan"],
     ["auto", "auto"],
-    ["bypass", "default"],
+    ["bypass", "yolo"],
   ] as const)(
     "carries Qwen %s through the production route as --approval-mode %s",
     (mode, nativeMode) => {
@@ -1012,6 +1012,22 @@ describe("native bridge argv", () => {
       expect(
         route.args.filter((arg) => arg === "--approval-mode"),
       ).toHaveLength(1);
+    },
+  );
+
+  it.each(["manual", "editAutomatically", "plan", "auto"] as const)(
+    "never escalates Qwen %s to --approval-mode yolo",
+    (mode) => {
+      const route = routeForModel(
+        "qwen-3-8-max",
+        "D:/Brain/vault",
+        "prompt",
+        [],
+        resolveBridgeControls("qwen-3-8-max", "high", "standard"),
+        mode,
+      );
+      if (route.promptFile) promptFiles.push(route.promptFile);
+      expect(route.args.join(" ")).not.toContain("--approval-mode yolo");
     },
   );
 
