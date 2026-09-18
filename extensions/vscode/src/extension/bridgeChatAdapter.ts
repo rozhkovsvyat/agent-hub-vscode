@@ -1695,10 +1695,13 @@ async function* streamBridgeChatWithSteer(
       ? []
       : [brokerVendorForModel(args.brokerSubagent)]),
   ]);
-  await Promise.all(
+  const discoveredCapabilities = await Promise.all(
     [...permissionVendors].map((vendor) =>
       vendorPermissionCapabilities(vendor),
     ),
+  );
+  const unverifiedVendors = discoveredCapabilities.filter(
+    (capabilities) => capabilities.supportedModes.length === 0,
   );
   const controls = resolveBridgeControls(
     args.brokerModel,
@@ -1794,6 +1797,14 @@ async function* streamBridgeChatWithSteer(
         `Starting ${route.label} broker bridge.\n` +
         `${bridgeControlSummary(controls)}\n` +
         `Subagent route: ${subagentLabel}.\n` +
+        unverifiedVendors
+          .map(
+            (capabilities) =>
+              `⚠ ${capabilities.vendor} permission capabilities are unverified ` +
+              `(helpSource: ${capabilities.helpSource}); this run degraded to the ` +
+              `strictest native mode and is read-only until the CLI probe succeeds.\n`,
+          )
+          .join("") +
         (args.brokerSubagent === "auto"
           ? "Auto routing may choose the strongest available native worker.\n"
           : `Selected subagent is locked; built-in Agent/Explore fallback is forbidden.\n`),

@@ -190,11 +190,16 @@ describe("Cukii bridge controls", () => {
     },
   );
 
-  it("fails closed before the Qwen executable snapshot is verified", () => {
+  it("degrades Qwen to the strictest mode when the executable snapshot is unverified", () => {
     clearPermissionCapabilityCacheForTests();
-    expect(() => permissionControlArgs("qwen-3-8-max", "manual")).toThrow(
-      "qwen permission capabilities have not been verified",
-    );
+    expect(permissionControlArgs("qwen-3-8-max", "manual")).toEqual([
+      "--approval-mode",
+      "default",
+    ]);
+    expect(permissionControlArgs("qwen-3-8-max", "bypass")).toEqual([
+      "--approval-mode",
+      "default",
+    ]);
   });
 
   it("lets a newer Qwen probe replace stale permission capabilities", () => {

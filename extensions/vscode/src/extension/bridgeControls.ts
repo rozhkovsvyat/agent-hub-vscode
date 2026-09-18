@@ -262,9 +262,15 @@ export function permissionControlArgs(
     // the exact live executable snapshot before route construction.
     const capabilities = cachedVendorPermissionCapabilities("qwen");
     if (!capabilities) {
-      throw new Error(
-        "qwen permission capabilities have not been verified for this bridge route.",
-      );
+      // Discovery has no verified contract on this host: the probe was
+      // unavailable, killed, or its output did not parse. Throwing here ends
+      // every qwen run before a process is spawned, and since 2.0.92 a
+      // zero-mode snapshot is never cached at all — so the failure repeats
+      // forever with a message that does not say why. Degrade downward, the
+      // direction the generic vendor branch already takes through
+      // resolvePermissionModeForVendor. Never degrade upward: an unverified
+      // host must not be handed `yolo`.
+      return permissionArgvForVendor("qwen", "manual").args;
     }
     if (!capabilities.supportedModes.includes(mode)) {
       throw new Error(
