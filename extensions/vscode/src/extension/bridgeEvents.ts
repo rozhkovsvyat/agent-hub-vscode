@@ -40,7 +40,11 @@ export type BridgeEvent =
   | { kind: "complete" }
   /** Explicit native command wait; never inferred from missing output. */
   | { kind: "wait"; condition: string; durationSeconds?: number }
+  /** Native CLI session id from init/thread.started; never rendered. */
+  | { kind: "vendorSession"; id: string }
   | { kind: "error"; text: string };
+
+const VENDOR_SESSION_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 
 export type BridgeFormat =
   | "anthropic-envelope"
@@ -263,6 +267,11 @@ function explicitWaitForToolStart(
 function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   const out: BridgeEvent[] = [];
 
+  if (event.type === "system" && event.subtype === "init") {
+    const id = String(event.session_id ?? "").trim();
+    return VENDOR_SESSION_ID.test(id) ? [{ kind: "vendorSession", id }] : [];
+  }
+
   if (event.type === "thinking" && event.subtype === "delta") {
     const text = asText(event.text);
     return text ? [{ kind: "thinking", text }] : [];
@@ -397,6 +406,10 @@ function isRecognizedSilentAnthropicEnvelope(event: any): boolean {
 
 /** `codex exec --json`: события thread/turn/item. */
 function parseCodexThread(event: any): BridgeEvent[] {
+  if (event.type === "thread.started") {
+    const id = String(event.thread_id ?? "").trim();
+    return VENDOR_SESSION_ID.test(id) ? [{ kind: "vendorSession", id }] : [];
+  }
   if (event.type === "turn.completed") {
     return [{ kind: "complete" }];
   }

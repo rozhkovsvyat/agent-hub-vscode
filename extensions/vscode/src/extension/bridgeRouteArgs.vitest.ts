@@ -41,6 +41,7 @@ import {
   bridgeProcessExitIsFailure,
   bridgeProcessFailureMessage,
   bridgeProcessFailureTerminalEvent,
+  bridgeResumeUserText,
   claudeInitialContent,
   claudeStreamingInput,
   commandCandidates,
@@ -147,6 +148,23 @@ describe("native bridge argv", () => {
     expect(source.slice(closeAt, terminalFailureAt)).toContain(
       "bridgeProcessFailureMessage({",
     );
+    expect(source).toContain("new BridgeSilenceWatchdog()");
+    expect(source).toContain("silenceWatchdog.poll()");
+    expect(source).toContain("settledByWatchdog");
+    expect(source).toContain("rememberVendorSession");
+  });
+
+  it("localizes a Codex safety-policy block instead of pasting the rejected command", () => {
+    const message = bridgeProcessFailureMessage({
+      label: "GPT-5.6 Sol",
+      detail:
+        'ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(`pwsh -Command ...`) blocked by policy" }',
+      code: 1,
+      signal: null,
+    });
+    expect(message).toMatch(/local safety policy blocked a command/);
+    expect(message).not.toContain("pwsh");
+    expect(message).not.toContain("Rejected");
   });
 
   it("turns a stopped native process into one visible terminal error receipt", () => {
@@ -771,6 +789,47 @@ describe("native bridge argv", () => {
     },
   );
 
+  it("does not write the Grok transcript to stdin", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    const grokAt = source.indexOf("function grokRoute(");
+    const nextFn = source.indexOf("\nfunction ", grokAt + 1);
+    expect(grokAt).toBeGreaterThan(-1);
+    expect(source.slice(grokAt, nextFn)).toContain("noStdin: true");
+  });
+
+  it("does not render a captured native session id as chat text", () => {
+    expect(toChatMessages({ kind: "vendorSession", id: "9252c6e5" })).toEqual(
+      [],
+    );
+  });
+
+  it("resumes a captured Claude session instead of rebuilding the transcript", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "old task" },
+      { role: "assistant", content: "working" },
+      { role: "user", content: "continue from the stop" },
+    ];
+    expect(bridgeResumeUserText(messages)).toBe("continue from the stop");
+    const route = routeForModel(
+      "fable-5-1",
+      "D:/Brain/vault",
+      "continue from the stop",
+      messages,
+      resolveBridgeControls("fable-5-1", "medium", "standard"),
+      "bypass",
+      "9252c6e5-aaaa-bbbb-cccc-ddddeeeeffff",
+    );
+    const resumeAt = route.args.indexOf("--resume");
+    expect(resumeAt).toBeGreaterThan(-1);
+    expect(route.args[resumeAt + 1]).toBe(
+      "9252c6e5-aaaa-bbbb-cccc-ddddeeeeffff",
+    );
+    expect(route.args).not.toContain("old task");
+  });
+
   it("wires independent Claude effort and speed into the native CLI", () => {
     const controls = resolveBridgeControls("opus-5", "xhigh", "fast");
     const route = routeForModel(
@@ -986,6 +1045,7 @@ describe("native bridge argv", () => {
       if (route.promptFile) promptFiles.push(route.promptFile);
       expect(route.args.join(" ")).toContain("--permission-mode plan");
       expect(route.args.join(" ")).not.toContain("--always-approve");
+      expect(route.noStdin).toBe(true);
     },
   );
 
