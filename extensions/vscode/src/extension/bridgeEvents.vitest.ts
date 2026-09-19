@@ -121,6 +121,31 @@ describe("BridgeEventParser", () => {
     expect(
       usageWindowsFromEvent({ context_window: { used_percentage: 98 } }),
     ).toEqual([]);
+    expect(
+      usageWindowsFromEvent({
+        rateLimitInfo: {
+          unifiedWindows: {
+            fiveHour: { utilization: 0.1, resetsAt: 1_789_494_600 },
+            sevenDay: { usedPercent: 22, resetAt: 1_789_753_800 },
+            extraUsage: { utilization: 0.41 },
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        id: "five_hour",
+        label: "Session (5hr)",
+        utilization: 0.1,
+        resetsAt: 1_789_494_600,
+      },
+      {
+        id: "seven_day",
+        label: "Weekly (7 day)",
+        utilization: 0.22,
+        resetsAt: 1_789_753_800,
+      },
+      { id: "model_scoped", label: "Fable limit", utilization: 0.41 },
+    ]);
   });
 
   it("emits a private usage event without transcript text", () => {
@@ -327,6 +352,25 @@ describe("BridgeEventParser", () => {
         id: "three",
         name: "Read",
         args: JSON.stringify({ file_path: "wait.md" }),
+      },
+    ]);
+  });
+
+  it("treats a Monitor tool as an explicit wait instead of a hung loader", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"mon_1","name":"Monitor","input":{"timeout":30}}]}}',
+    ]);
+    expect(events).toEqual([
+      {
+        kind: "toolStart",
+        id: "mon_1",
+        name: "Monitor",
+        args: JSON.stringify({ timeout: 30 }),
+      },
+      {
+        kind: "wait",
+        condition: "Waiting for a monitor (30s)",
+        durationSeconds: 30,
       },
     ]);
   });
