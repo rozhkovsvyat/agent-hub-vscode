@@ -14,17 +14,18 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
  * out, account label — under a separate "Testing" group.
  *
  * There is deliberately no Install action. YouGile ships no CLI to install.
- * Authentication uses the official REST v2 credentials exchange: the user
- * signs in with email/password once, while Cukii discovers the company and
- * board and stores only the resulting API key. The machine's existing
- * `yougile-cli.py auth-key` convention
- * (`YOUGILE_TOKEN`, then `~/.claude/yougile-token`) is honoured as-is, so an
- * already-authenticated workstation is not asked to paste a key it has.
+ * YouGile has no OAuth redirect, so Log in opens the same app other vendors
+ * would open and waits for the key the product copies with Ctrl+~. Email and
+ * password stay a fallback for hosts that cannot open a browser. The machine's
+ * existing `yougile-cli.py auth-key` convention (`YOUGILE_TOKEN`, then
+ * `~/.claude/yougile-token`) is honoured as-is, so an already-authenticated
+ * workstation is not asked for a key it already has.
  */
 export const YOUGILE_ACCOUNT_ID = "yougile" as const;
 export const YOUGILE_ACCOUNT_LABEL = "YouGile";
 export const YOUGILE_SECRET_KEY = "cukii.yougile.apiKey";
 export const YOUGILE_API_BASE = "https://ru.yougile.com/api-v2";
+export const YOUGILE_APP_URL = "https://ru.yougile.com";
 /**
  * `/users/me` is both the cheapest authenticated read and the only one that
  * says WHO the key belongs to: it answers `{ id, email, realName, … }`.
@@ -48,6 +49,14 @@ export type YougileAuthHost = {
    * A host that cannot ask simply omits this, and the normal flow runs.
    */
   confirmResume?(account: string | undefined): PromiseLike<boolean>;
+  openExternal?(url: string): PromiseLike<boolean>;
+  readClipboard?(): PromiseLike<string>;
+};
+
+export type YougileAuthPoll = {
+  intervalMs?: number;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 };
 
 /** Only what this module needs from fetch, so tests never touch the network. */
@@ -98,6 +107,34 @@ export function looksLikeYougileKey(value: string): boolean {
   const key = value.trim();
   if (key.length < 16 || key.length > 512) return false;
   return !/[\x00-\x1f\x7f\s]/.test(key);
+}
+
+/**
+ * Clipboard capture is noisier than a dedicated password field. Require the
+ * charset YouGile actually issues so a random copied URL does not get sent as
+ * a Bearer credential.
+ */
+export function extractYougileKey(raw: string | undefined): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "");
+  if (
+    looksLikeYougileKey(trimmed) &&
+    trimmed.length >= 24 &&
+    /^[A-Za-z0-9_-]+$/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  const embedded = trimmed.match(/\b[A-Za-z0-9_-]{24,512}\b/);
+  return embedded && looksLikeYougileKey(embedded[0])
+    ? embedded[0]
+    : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -245,6 +282,84 @@ const defaultHttp: YougileHttp = (url, init) =>
     body: init.body,
     signal: init.signal,
   });
+
+async function yougileBoardAccess(
+  key: string,
+  http: YougileHttp,
+): Promise<"visible" | "hidden" | "rejected" | "unreachable"> {
+  const query = new URLSearchParams({
+    projectId: CUKII_BUGS_PROJECT_ID,
+    limit: "1000",
+  });
+  try {
+    const response = await http(`${YOUGILE_API_BASE}/boards?${query.toString()}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (response.status === 401 || response.status === 403) return "rejected";
+    if (!response.ok) return "unreachable";
+    const body = await response.json();
+    return responseItems(body).some(
+      (board) => (board as { id?: unknown }).id === CUKII_BUGS_BOARD_ID,
+    )
+      ? "visible"
+      : "hidden";
+  } catch {
+    return "unreachable";
+  }
+}
+
+async function persistPluginYougileKey(
+  store: ProtectedSecretStore,
+  key: string,
+  email?: string,
+): Promise<{ opened: boolean; message: string }> {
+  await store.store(
+    YOUGILE_SECRET_KEY,
+    JSON.stringify({
+      key,
+      ...(email ? { accountLabel: email } : {}),
+      source: "plugin",
+    } satisfies StoredYougileAccount),
+  );
+  return {
+    opened: true,
+    message: email
+      ? `Signed in to YouGile as ${email}.`
+      : "Signed in to YouGile.",
+  };
+}
+
+async function adoptYougileKey(
+  key: string,
+  store: ProtectedSecretStore,
+  http: YougileHttp,
+): Promise<{ opened: boolean; message: string } | undefined> {
+  const probe = await probeYougileKey(key, { http });
+  if (probe.verdict === "unreachable") return undefined;
+  if (probe.verdict === "rejected") {
+    return {
+      opened: true,
+      message: "YouGile rejected that key. Nothing was saved.",
+    };
+  }
+  const board = await yougileBoardAccess(key, http);
+  if (board === "unreachable") return undefined;
+  if (board === "rejected") {
+    return {
+      opened: true,
+      message: "YouGile rejected that key. Nothing was saved.",
+    };
+  }
+  if (board === "hidden") {
+    return {
+      opened: true,
+      message:
+        "Signed in, but none of this account's companies can see the Cukii Bugs board. Nothing was saved.",
+    };
+  }
+  return persistPluginYougileKey(store, key, probe.email);
+}
 
 function responseItems(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -526,6 +641,7 @@ export async function loginYougile(options: {
   store?: ProtectedSecretStore;
   http?: YougileHttp;
   environment?: YougileEnvironment;
+  poll?: YougileAuthPoll;
 }): Promise<{ opened: boolean; message: string }> {
   // 🔴 Signing out records a marker that stops the machine's own key from being
   // used. Without a way back, one "Log out" would cost the owner the very
@@ -558,6 +674,33 @@ export async function loginYougile(options: {
       }
     }
   }
+  if (
+    options.store &&
+    options.host.openExternal &&
+    options.host.readClipboard
+  ) {
+    await options.host.openExternal(YOUGILE_APP_URL);
+    const intervalMs = options.poll?.intervalMs ?? 1_000;
+    const timeoutMs = options.poll?.timeoutMs ?? 180_000;
+    const sleep = options.poll?.sleep ?? delay;
+    const http = options.http ?? defaultHttp;
+    const started = Date.now();
+    for (;;) {
+      const key = extractYougileKey(await options.host.readClipboard());
+      if (key) {
+        const adopted = await adoptYougileKey(key, options.store, http);
+        if (adopted) return adopted;
+      }
+      if (Date.now() - started >= timeoutMs) break;
+      await sleep(intervalMs);
+    }
+    return {
+      opened: true,
+      message:
+        "YouGile opened in your browser. Copy the API key (Ctrl+~) and choose Log in again.",
+    };
+  }
+
   const credentials = await options.host.promptCredentials();
   const login = credentials?.login.trim() ?? "";
   const password = credentials?.password ?? "";
@@ -593,20 +736,11 @@ export async function loginYougile(options: {
         "Signed in, but none of this account's companies can see the Cukii Bugs board. Nothing was saved.",
     };
   }
-  await options.store.store(
-    YOUGILE_SECRET_KEY,
-    JSON.stringify({
-      key: exchange.key,
-      ...(exchange.email || login
-        ? { accountLabel: exchange.email ?? login }
-        : {}),
-      source: "plugin",
-    } satisfies StoredYougileAccount),
+  return persistPluginYougileKey(
+    options.store,
+    exchange.key,
+    exchange.email ?? login,
   );
-  return {
-    opened: true,
-    message: `Signed in to YouGile as ${exchange.email ?? login}.`,
-  };
 }
 
 export async function logoutYougile(options: {
@@ -648,6 +782,7 @@ export async function runYougileAuthAction(
     store?: ProtectedSecretStore;
     http?: YougileHttp;
     environment?: YougileEnvironment;
+    poll?: YougileAuthPoll;
   },
 ): Promise<{ opened: boolean; message: string }> {
   if (action === "login")
@@ -656,6 +791,7 @@ export async function runYougileAuthAction(
       ...(options.store ? { store: options.store } : {}),
       ...(options.http ? { http: options.http } : {}),
       ...(options.environment ? { environment: options.environment } : {}),
+      ...(options.poll ? { poll: options.poll } : {}),
     });
   if (action === "logout")
     return logoutYougile({

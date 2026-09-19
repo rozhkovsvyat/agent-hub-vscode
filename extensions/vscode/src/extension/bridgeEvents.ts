@@ -113,17 +113,40 @@ function usageWindow(
   value: any,
 ): CukiiVendorUsageWindow | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const raw = value.utilization ?? value.used_percent ?? value.usedPercentage;
+  const raw =
+    value.utilization ??
+    value.used_percent ??
+    value.usedPercentage ??
+    value.usedPercent;
   if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
   const utilization = raw > 1 ? raw / 100 : raw;
   if (utilization < 0) return undefined;
-  const resetsAt = resetEpochSeconds(value.resetsAt ?? value.resets_at);
+  const resetsAt = resetEpochSeconds(
+    value.resetsAt ?? value.resets_at ?? value.resetAt ?? value.reset_at,
+  );
   return {
     id,
     label,
     utilization: Math.min(1, utilization),
     ...(resetsAt ? { resetsAt } : {}),
   };
+}
+
+function firstDefined(
+  record: Record<string, unknown>,
+  keys: string[],
+): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined) return record[key];
+  }
+  return undefined;
+}
+
+function humanizeUsageKey(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function windowLabel(minutes: number | undefined, fallback: string): string {
@@ -141,23 +164,93 @@ function windowLabel(minutes: number | undefined, fallback: string): string {
  * either as subscription headroom would be a convincing but false number.
  */
 export function usageWindowsFromEvent(event: any): CukiiVendorUsageWindow[] {
-  const unified =
-    event?.rate_limit_info?.unifiedWindows ??
-    event?.rateLimitInfo?.unifiedWindows ??
-    event?.payload?.rate_limit_info?.unifiedWindows;
-  if (unified && typeof unified === "object") {
+  const rateLimitInfo =
+    event?.rate_limit_info ??
+    event?.rateLimitInfo ??
+    event?.payload?.rate_limit_info ??
+    event?.payload?.rateLimitInfo;
+  const unifiedCandidate =
+    rateLimitInfo?.unifiedWindows ??
+    rateLimitInfo?.unified_windows ??
+    (rateLimitInfo &&
+    typeof rateLimitInfo === "object" &&
+    (rateLimitInfo.five_hour ||
+      rateLimitInfo.fiveHour ||
+      rateLimitInfo.seven_day ||
+      rateLimitInfo.sevenDay)
+      ? rateLimitInfo
+      : undefined);
+  if (unifiedCandidate && typeof unifiedCandidate === "object") {
+    const unified = unifiedCandidate as Record<string, unknown>;
+    const known = new Set([
+      "five_hour",
+      "fiveHour",
+      "session",
+      "seven_day",
+      "sevenDay",
+      "weekly",
+      "seven_day_overage_included",
+      "sevenDayOverageIncluded",
+      "seven_day_overage",
+      "sevenDayOverage",
+      "extra",
+      "extra_usage",
+      "extraUsage",
+      "overage",
+      "modelLabel",
+      "model_label",
+      "unifiedWindows",
+      "unified_windows",
+    ]);
+    const extras = Object.entries(unified)
+      .filter(([key, value]) => !known.has(key) && value && typeof value === "object")
+      .map(([key, value]) =>
+        usageWindow(
+          key,
+          String(
+            (value as { label?: unknown; modelLabel?: unknown }).label ??
+              (value as { modelLabel?: unknown }).modelLabel ??
+              humanizeUsageKey(key),
+          ),
+          value,
+        ),
+      );
     return [
-      usageWindow("five_hour", "Session (5hr)", unified.five_hour),
-      usageWindow("seven_day", "Weekly (7 day)", unified.seven_day),
+      usageWindow(
+        "five_hour",
+        "Session (5hr)",
+        firstDefined(unified, ["five_hour", "fiveHour", "session"]),
+      ),
+      usageWindow(
+        "seven_day",
+        "Weekly (7 day)",
+        firstDefined(unified, ["seven_day", "sevenDay", "weekly"]),
+      ),
       usageWindow(
         "model_scoped",
-        String(unified.modelLabel ?? "Fable limit"),
-        unified.seven_day_overage_included,
+        String(
+          unified.modelLabel ?? unified.model_label ?? "Fable limit",
+        ),
+        firstDefined(unified, [
+          "seven_day_overage_included",
+          "sevenDayOverageIncluded",
+          "seven_day_overage",
+          "sevenDayOverage",
+          "extra",
+          "extra_usage",
+          "extraUsage",
+          "overage",
+        ]) ?? rateLimitInfo?.overage,
       ),
+      ...extras,
     ].filter((item): item is CukiiVendorUsageWindow => Boolean(item));
   }
 
-  const rateLimits = event?.rate_limits ?? event?.payload?.rate_limits;
+  const rateLimits =
+    event?.rate_limits ??
+    event?.payload?.rate_limits ??
+    event?.rateLimits ??
+    event?.payload?.rateLimits;
   if (!rateLimits || typeof rateLimits !== "object") return [];
 
   if (rateLimits.five_hour || rateLimits.seven_day || rateLimits.model_scoped) {
@@ -217,6 +310,33 @@ function completedBackgroundAgentStatus(
 function explicitWaitForToolStart(
   event: Extract<BridgeEvent, { kind: "toolStart" }>,
 ): Extract<BridgeEvent, { kind: "wait" }> | undefined {
+  if (/(?:^|[_-])(?:monitor|wait)$/i.test(event.name)) {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(event.args);
+    } catch {
+      decoded = undefined;
+    }
+    const timeout =
+      decoded && typeof decoded === "object"
+        ? ((decoded as { timeout?: unknown; timeout_seconds?: unknown })
+            .timeout ??
+          (decoded as { timeout_seconds?: unknown }).timeout_seconds)
+        : undefined;
+    const durationSeconds =
+      typeof timeout === "number" && Number.isFinite(timeout)
+        ? timeout
+        : undefined;
+    return {
+      kind: "wait",
+      condition:
+        durationSeconds === undefined
+          ? "Waiting for a monitored condition"
+          : `Waiting for a monitor (${durationSeconds}s)`,
+      ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    };
+  }
+
   if (
     !/(?:^|[_ -])(?:shell|bash|powershell|pwsh|terminal)(?:$|[_ -])/i.test(
       event.name,
