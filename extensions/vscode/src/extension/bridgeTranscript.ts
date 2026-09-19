@@ -58,8 +58,8 @@ export function buildBridgeTranscript(
   }
 
   const marker =
-    "[Only older Cukii history was omitted to bound latency. The complete newest retained turns follow and are authoritative continuation context.]";
-  const currentTurnMarker = "\n[Current turn middle omitted.]\n";
+    "[Earlier turns are outside this window. Continue from the retained latest context below.]";
+  const currentTurnMarker = "\n[...]\n";
   const retained: string[] = [];
   let used = marker.length + 2; // separator between marker and retained turns
   for (let index = turns.length - 1; index >= 0; index--) {

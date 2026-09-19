@@ -115,6 +115,17 @@ describe("Cukii vendor CLI accounts", () => {
     });
     expect(
       classifyVendorAuthOutput(
+        "grok",
+        "Available models:\n  * grok-4.6 (default)\n  - grok-4.5",
+      ),
+    ).toMatchObject({
+      state: "disconnected",
+      authenticated: false,
+      accountLabel: "Not logged in",
+      actions: ["login"],
+    });
+    expect(
+      classifyVendorAuthOutput(
         "cursor",
         JSON.stringify({
           isAuthenticated: true,

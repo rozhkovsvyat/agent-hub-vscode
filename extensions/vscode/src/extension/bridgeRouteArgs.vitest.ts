@@ -1047,9 +1047,24 @@ describe("native bridge argv", () => {
       if (route.promptFile) promptFiles.push(route.promptFile);
       expect(route.args.join(" ")).toContain("--permission-mode plan");
       expect(route.args.join(" ")).not.toContain("--always-approve");
+      expect(route.args).toContain("--include-partial-messages");
       expect(route.noStdin).toBe(true);
     },
   );
+
+  it("auto-approves Cursor MCP so cukii-memory is visible in headless -p", () => {
+    const route = routeForModel(
+      "composer-2-5",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("composer-2-5", "high", "standard"),
+      "bypass",
+    );
+    expect(route.args).toContain("--approve-mcps");
+    expect(route.args).toContain("--stream-partial-output");
+    expect(route.args.join(" ")).toContain("--force");
+  });
 
   it.each([
     ["manual", "default"],

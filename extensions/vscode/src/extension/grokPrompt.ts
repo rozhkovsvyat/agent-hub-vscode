@@ -68,12 +68,24 @@ export function grokPromptJson(
   // fresh attachments live in the latest user turn. Earlier turns remain in
   // the transcript file as context, and the user can reattach an image when a
   // follow-up needs another visual inspection.
+  //
+  // Inline argv may only carry the original bytes when they fit. A 384px
+  // transport preview is not the picture the user attached — if the original
+  // cannot fit, omit the vision block and keep the transcript @path as the
+  // source of truth instead of showing Grok a thumbnail.
   if (latestUser && Array.isArray(latestUser.content)) {
     for (const part of latestUser.content) {
-      if (part.type === "imageUrl") {
-        const image = grokImageBlock(part.imageUrl?.url);
-        if (image) {
-          blocks.push(image);
+      if (part.type !== "imageUrl") continue;
+      const original = part.imageUrl?.url;
+      try {
+        const image = grokImageBlock(original);
+        if (image) blocks.push(image);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (
+          !/per-image limit|cannot receive this image attachment/i.test(detail)
+        ) {
+          throw error;
         }
       }
     }
@@ -88,11 +100,9 @@ export function grokPromptJson(
   const latestUserText = latestUser ? contentToText(latestUser.content) : "";
   if (latestUserText.trim()) {
     const preamble =
-      "\n\nThat file is history and context only. The request to answer is the " +
-      "latest user turn, repeated here verbatim so it cannot be missed or " +
-      "confused with an older one:\n\n";
-    const truncationNote =
-      "\n[Latest turn truncated; full text is in the file.]";
+      "\n\nThe file is the complete briefing. The latest user turn is also " +
+      "repeated here so it cannot be missed or confused with an older one:\n\n";
+    const truncationNote = "\n[The rest of this latest turn is in the file.]";
     // Measure the payload that actually reaches argv. A raw byte count of the
     // request underestimates it, because JSON escaping expands newlines and
     // quotes after the budget would have been checked.

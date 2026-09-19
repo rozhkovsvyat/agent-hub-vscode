@@ -25,7 +25,7 @@ describe("buildBridgeTranscript", () => {
     );
 
     expect(transcript).toBe(`USER:\n${body}`);
-    expect(transcript).not.toContain("history was omitted");
+    expect(transcript).not.toContain("outside this window");
   });
   it("keeps a short history byte-for-byte", () => {
     expect(
@@ -45,8 +45,8 @@ describe("buildBridgeTranscript", () => {
     ]);
 
     expect(transcript.length).toBeLessThanOrEqual(MAX_BRIDGE_TRANSCRIPT_CHARS);
-    expect(transcript).toContain("Only older Cukii history was omitted");
-    expect(transcript).toContain("authoritative continuation context");
+    expect(transcript).toContain("Earlier turns are outside this window");
+    expect(transcript).toContain("retained latest context");
     expect(transcript).toContain(latest);
   });
 
@@ -62,6 +62,6 @@ describe("buildBridgeTranscript", () => {
 
     expect(transcript.length).toBe(MAX_BRIDGE_TRANSCRIPT_CHARS);
     expect(transcript).toContain(instruction);
-    expect(transcript).toContain("Current turn middle omitted");
+    expect(transcript).toContain("[...]");
   });
 });

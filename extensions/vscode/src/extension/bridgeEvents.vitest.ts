@@ -222,6 +222,50 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("folds Cursor stream-partial deltas and the repeated whole assistant message", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"text","subtype":"delta","text":"После трёх отказов"}',
+      '{"type":"text","subtype":"delta","text":" замок должен открыться."}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"После трёх отказов замок должен открыться."}]}}',
+      '{"type":"result","subtype":"success","is_error":false,"result":"После трёх отказов замок должен открыться."}',
+    ]);
+
+    expect(events.filter((event) => event.kind === "text")).toEqual([
+      { kind: "text", text: "После трёх отказов" },
+      { kind: "text", text: " замок должен открыться." },
+    ]);
+  });
+
+  it("folds Grok cumulative snapshots and drops thinking that would split the capsule", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"thinking","subtype":"delta","text":"plan"}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"more plan"},{"type":"text","text":"Начинаю"}]}}',
+      '{"type":"thinking","subtype":"delta","text":"still planning"}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Начинаю adversarial-ревью"}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Начинаю adversarial-ревью"}]}}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "thinking", text: "plan" },
+      { kind: "thinking", text: "more plan" },
+      { kind: "text", text: "Начинаю" },
+      { kind: "text", text: " adversarial-ревью" },
+    ]);
+  });
+
+  it("unwraps Grok stream_event deltas without duplicating the final assistant message", () => {
+    const { events } = collect("anthropic-envelope", [
+      '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}',
+    ]);
+
+    expect(events).toEqual([
+      { kind: "text", text: "Hello" },
+      { kind: "text", text: " world" },
+    ]);
+  });
+
   it("routes Qwen background-agent completion to the worker timeline", () => {
     const { events } = collect("anthropic-envelope", [
       '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Background agent \\\"general-purpose: Review PostToolUse dispatch candidate\\\" completed."}]}}',

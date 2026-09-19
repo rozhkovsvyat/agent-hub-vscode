@@ -605,12 +605,15 @@ describe("selectBridgeImageSources", () => {
     expect(messages[0].content[0].imageUrl.url).toContain("original-full-size");
   });
 
-  it("substitutes the bounded alternate only for Grok inline argv", () => {
+  it("keeps the original Grok URL and only preserves the argv preview beside it", () => {
     const selected = selectBridgeImageSources(messages, "grok-4-6");
     expect(selected[0].content).toEqual([
       {
         type: "imageUrl",
-        imageUrl: { url: "data:image/jpeg;base64,grok-384" },
+        imageUrl: {
+          url: "data:image/png;base64,original-full-size",
+          inlineArgvUrl: "data:image/jpeg;base64,grok-384",
+        },
       },
     ]);
   });

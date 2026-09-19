@@ -45,7 +45,7 @@ describe("grokPromptJson", () => {
     expect(serialized).toContain("C:\\\\tmp\\\\transcript.txt");
     // Two bytes per character: a character-wise slice would have overflowed.
     expect(serialized).toContain("Ж");
-    expect(serialized).toContain("Latest turn truncated");
+    expect(serialized).toContain("The rest of this latest turn is in the file.");
   });
 
   it("does not let a long latest text steal the mixed image budget", () => {
@@ -99,24 +99,28 @@ describe("grokPromptJson", () => {
     ).toHaveLength(2);
   });
 
-  it("rejects an attachment that would overflow CreateProcess argv", () => {
-    expect(() =>
-      grokPromptJson(
-        [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "see this" },
-              { type: "imageUrl", imageUrl: { url: jpegDataUrl(40_000) } },
-            ],
-          },
-        ],
-        "C:\\tmp\\transcript.txt",
-      ),
-    ).toThrow(/cannot receive this image attachment.*did not drop/i);
+  it("omits an oversized original from argv instead of sending a thumbnail as the picture", () => {
+    const serialized = grokPromptJson(
+      [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "see this" },
+            { type: "imageUrl", imageUrl: { url: jpegDataUrl(40_000) } },
+          ],
+        },
+      ],
+      "C:\\tmp\\transcript.txt",
+    );
+    const parsed = JSON.parse(serialized) as Array<{ type: string }>;
+    expect(parsed.some((block) => block.type === "image")).toBe(false);
+    expect(serialized).toContain("C:\\\\tmp\\\\transcript.txt");
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
+      MAX_GROK_PROMPT_JSON_BYTES,
+    );
   });
 
-  it("rejects one image above its own cap even when aggregate JSON fits", () => {
+  it("does not inline a 384px preview when the original exceeds the per-image cap", () => {
     const prefix = "data:image/jpeg;base64,";
     const oversizedByOne =
       prefix +
@@ -125,17 +129,28 @@ describe("grokPromptJson", () => {
       MAX_GROK_PROMPT_JSON_BYTES,
     );
 
-    expect(() =>
-      grokPromptJson(
-        [
-          {
-            role: "user",
-            content: [{ type: "imageUrl", imageUrl: { url: oversizedByOne } }],
-          },
-        ],
-        "C:\\tmp\\transcript.txt",
+    const serialized = grokPromptJson(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "imageUrl",
+              imageUrl: {
+                url: oversizedByOne,
+                inlineArgvUrl: jpegDataUrl(800),
+              },
+            },
+          ],
+        },
+      ],
+      "C:\\tmp\\transcript.txt",
+    );
+    expect(
+      JSON.parse(serialized).some(
+        (block: { type: string }) => block.type === "image",
       ),
-    ).toThrow(/per-image limit.*did not drop/i);
+    ).toBe(false);
   });
 
   it("canonicalizes image/jpg and rejects SVG at Grok's final boundary", () => {
