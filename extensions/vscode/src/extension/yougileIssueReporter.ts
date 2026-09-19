@@ -80,9 +80,12 @@ type StoredIssueReport = {
   reportId: string;
   createdAt: string;
   title: string;
-  stepsToReproduce: string;
-  expectedResult: string;
-  actualResult: string;
+  description: string;
+  // Queued by the multi-field form; kept so a pending report written before
+  // the single-description form still renders its sections on delivery.
+  stepsToReproduce?: string;
+  expectedResult?: string;
+  actualResult?: string;
   severity: CukiiIssueSeverity;
   sessionId: string;
   brokerModel: BrokerModel;
@@ -179,6 +182,20 @@ function severityLabel(severity: CukiiIssueSeverity): string {
     minor: "Minor",
     cosmetic: "Cosmetic",
   }[severity];
+}
+
+// The board card keeps a real title even though the form collects only one
+// description: the first non-empty line, bounded by the card title budget.
+export function cukiiIssueReportTitle(description: string): string {
+  const firstLine = description
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  const title = (firstLine ?? "Cukii issue report").slice(
+    0,
+    CUKII_ISSUE_MAX_TITLE,
+  );
+  return title.trim() || "Cukii issue report";
 }
 
 function retryDelay(attempts: number): number {
@@ -604,22 +621,13 @@ export class YougileIssueReporter {
     if (!/^[A-Za-z0-9-]{8,80}$/.test(submission.reportId)) {
       throw new Error("Invalid report id.");
     }
-    if (!submission.title.trim()) throw new Error("Title is required.");
-    if (submission.title.trim().length > CUKII_ISSUE_MAX_TITLE) {
-      throw new Error(
-        `Title must be ${CUKII_ISSUE_MAX_TITLE} characters or fewer.`,
-      );
+    if (!submission.description.trim()) {
+      throw new Error("Description is required.");
     }
-    for (const value of [
-      submission.stepsToReproduce,
-      submission.expectedResult,
-      submission.actualResult,
-    ]) {
-      if (value.length > CUKII_ISSUE_MAX_FIELD) {
-        throw new Error(
-          `Each description field must be ${CUKII_ISSUE_MAX_FIELD} characters or fewer.`,
-        );
-      }
+    if (submission.description.length > CUKII_ISSUE_MAX_FIELD) {
+      throw new Error(
+        `The description must be ${CUKII_ISSUE_MAX_FIELD} characters or fewer.`,
+      );
     }
     if (submission.attachmentIds.length > CUKII_ISSUE_MAX_IMAGES) {
       throw new Error(
@@ -754,16 +762,13 @@ export class YougileIssueReporter {
       });
 
       const createdAt = this.now().toISOString();
+      const description = maskCukiiReportText(submission.description.trim());
       const stored: StoredIssueReport = {
         schemaVersion: 1,
         reportId: submission.reportId,
         createdAt,
-        title: maskCukiiReportText(submission.title.trim()),
-        stepsToReproduce: maskCukiiReportText(
-          submission.stepsToReproduce.trim(),
-        ),
-        expectedResult: maskCukiiReportText(submission.expectedResult.trim()),
-        actualResult: maskCukiiReportText(submission.actualResult.trim()),
+        title: cukiiIssueReportTitle(description),
+        description,
         severity: submission.severity,
         sessionId: submission.sessionId,
         brokerModel: submission.brokerModel,
@@ -1011,11 +1016,16 @@ export class YougileIssueReporter {
       `**Reported:** ${report.createdAt}`,
       `**Cukii report ID:** \`${report.reportId}\``,
       "",
-      section("Steps to reproduce", report.stepsToReproduce),
-      "",
-      section("Expected result", report.expectedResult),
-      "",
-      section("Actual result", report.actualResult),
+      section("Description", report.description ?? ""),
+      ...(
+        [
+          ["Steps to reproduce", report.stepsToReproduce],
+          ["Expected result", report.expectedResult],
+          ["Actual result", report.actualResult],
+        ] as Array<[string, string | undefined]>
+      )
+        .filter((entry): entry is [string, string] => Boolean(entry[1]))
+        .flatMap(([title, body]) => ["", section(title, body)]),
       "",
       "## Attachments and diagnostics",
       ...(links.length ? links : ["_No files_"]),

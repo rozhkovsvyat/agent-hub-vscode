@@ -1269,8 +1269,8 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 }
 
 .cukii-report-field textarea {
-  min-height: 52px;
-  max-height: 140px;
+  min-height: 132px;
+  max-height: 260px;
   padding: 6px 8px;
   resize: vertical;
 }

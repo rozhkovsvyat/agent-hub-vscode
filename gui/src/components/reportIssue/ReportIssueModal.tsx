@@ -37,10 +37,7 @@ type ReportIssueModalProps = {
 };
 
 type IssueDraft = {
-  title: string;
-  stepsToReproduce: string;
-  expectedResult: string;
-  actualResult: string;
+  description: string;
   severity: CukiiIssueSeverity;
 };
 
@@ -68,10 +65,7 @@ export async function withIssueReportTimeout<T>(
 }
 
 const EMPTY_DRAFT: IssueDraft = {
-  title: "",
-  stepsToReproduce: "",
-  expectedResult: "",
-  actualResult: "",
+  description: "",
   severity: "major",
 };
 
@@ -143,7 +137,7 @@ export function ReportIssueModal({
   const attachmentsRef = useRef<CukiiIssuePickedImage[]>([]);
   const mountedRef = useRef(true);
   const pasteQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const titleRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const resultCloseRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -196,7 +190,7 @@ export function ReportIssueModal({
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    titleRef.current?.focus();
+    descriptionRef.current?.focus();
     return () => {
       const target = returnFocusRef?.current ?? previousFocusRef.current;
       if (target?.isConnected) target.focus();
@@ -362,7 +356,7 @@ export function ReportIssueModal({
   };
 
   const submit = async () => {
-    if (!draft.title.trim() || submittingRef.current) return;
+    if (!draft.description.trim() || submittingRef.current) return;
     submittingRef.current = true;
     setPhase("submitting");
     setSubmitError(undefined);
@@ -498,15 +492,18 @@ export function ReportIssueModal({
 
               <label className="cukii-report-field">
                 <span>
-                  Title <strong aria-hidden="true">*</strong>
+                  Description <strong aria-hidden="true">*</strong>
                 </span>
-                <input
-                  ref={titleRef}
-                  value={draft.title}
-                  maxLength={160}
+                <textarea
+                  ref={descriptionRef}
+                  value={draft.description}
+                  maxLength={4000}
+                  rows={8}
                   disabled={phase === "submitting" || submissionLocked}
-                  placeholder="A short description of the problem"
-                  onChange={(event) => updateDraft("title", event.target.value)}
+                  placeholder="What happened? What did you do, and what did you expect instead?"
+                  onChange={(event) =>
+                    updateDraft("description", event.target.value)
+                  }
                 />
               </label>
 
@@ -530,34 +527,6 @@ export function ReportIssueModal({
                   </select>
                 </label>
               </div>
-
-              {(
-                [
-                  [
-                    "stepsToReproduce",
-                    "Steps to reproduce",
-                    "What did you do before the problem appeared?",
-                  ],
-                  [
-                    "expectedResult",
-                    "Expected result",
-                    "What should have happened?",
-                  ],
-                  ["actualResult", "Actual result", "What happened instead?"],
-                ] as const
-              ).map(([key, label, placeholder]) => (
-                <label key={key} className="cukii-report-field">
-                  <span>{label}</span>
-                  <textarea
-                    value={draft[key]}
-                    maxLength={4000}
-                    rows={2}
-                    disabled={phase === "submitting" || submissionLocked}
-                    placeholder={placeholder}
-                    onChange={(event) => updateDraft(key, event.target.value)}
-                  />
-                </label>
-              ))}
 
               <section
                 className="cukii-report-assets"
@@ -710,7 +679,7 @@ export function ReportIssueModal({
                   className="cukii-report-primary"
                   disabled={
                     phase === "submitting" ||
-                    !draft.title.trim() ||
+                    !draft.description.trim() ||
                     snapshotBusy ||
                     !snapshot
                   }
