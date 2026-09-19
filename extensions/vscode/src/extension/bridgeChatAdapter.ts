@@ -488,7 +488,7 @@ function buildPrompt(
     bridgeTranscriptCharLimit(brokerModel),
   );
   const transcriptWasTrimmed = transcript.includes(
-    "Only older Cukii history was omitted",
+    "Earlier turns are outside this window",
   );
 
   return [
@@ -501,9 +501,10 @@ function buildPrompt(
     "Answer in the user's language and keep normal chat continuity from the transcript.",
     ...(transcriptWasTrimmed
       ? [
-          "Older transcript was compacted to fit the selected model. Continue normally from the retained authoritative context; do not complain about truncation unless a missing fact actually blocks the task.",
+          "Work from the retained latest context in the transcript. Earlier turns were dropped only to bound latency.",
         ]
       : []),
+    ...brokerMemoryDirective(brokerModel),
     "While working, write short status lines often — what you are doing now, not a spinner. Long silent stretches between tools read as a freeze.",
     ...brokerFactDisciplineDirective(),
     ...(isClaudeNativeModel(brokerModel)
@@ -520,7 +521,7 @@ function buildPrompt(
       : []),
     ...(hasImages && !isClaudeNativeModel(brokerModel)
       ? [
-          "User-attached images appear in the transcript as @<absolute path> references. If an image did not arrive inline in your view, read the file at that path with your file-reading tool before answering.",
+          "User-attached images appear in the transcript as @<absolute path> references. Those files are the originals. If an image did not arrive inline, or arrived only as a tiny preview, read the file at that path with your file-reading tool before answering.",
         ]
       : []),
     "",
@@ -549,6 +550,18 @@ export function supportsBrokerInbox(model: BrokerModel): boolean {
     vendor === "cursor" ||
     vendor === "kimi"
   );
+}
+
+/**
+ * Cursor exposes cukii-memory only as MCP tools, not as a first-class
+ * memory_search builtin. Say so in the broker prompt so the worker does not
+ * treat the missing name as a harness outage.
+ */
+export function brokerMemoryDirective(model: BrokerModel): string[] {
+  if (brokerVendorForModel(model) !== "cursor") return [];
+  return [
+    "Cukii memory tools live on the cukii-memory MCP server. Cursor has no built-in memory_search tool: discover that server and call memory_search, memory_get and memory_remember through MCP. A missing first-class memory_search name is expected, not a broken harness.",
+  ];
 }
 
 /** Broker-prompt lines for inbox pull-steering; empty where unsupported. */
@@ -881,6 +894,24 @@ function kimiRoute(
   };
 }
 
+function cursorPrintArgs(
+  modelId: string,
+  permissionArgs: string[],
+): string[] {
+  return [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--stream-partial-output",
+    // Headless `-p` never shows the MCP approval prompt, so cukii-memory
+    // stays invisible unless the CLI auto-approves managed servers.
+    "--approve-mcps",
+    "--model",
+    modelId,
+    ...permissionArgs,
+  ];
+}
+
 function grokRoute(
   label: string,
   nativeModel: string,
@@ -905,6 +936,7 @@ function grokRoute(
       promptJson,
       "--output-format",
       "streaming-messages-json",
+      "--include-partial-messages",
     ];
     assertGrokWindowsCommandLine("grok", args);
     return {
@@ -913,6 +945,9 @@ function grokRoute(
       args,
       format: "anthropic-envelope",
       promptFile,
+      // Prompt lives in --prompt-json plus the transcript file. Writing the
+      // same briefing to stdin fills an unread pipe (EPIPE / first-turn hang).
+      noStdin: true,
       logFile,
     };
   } catch (error) {
@@ -1119,15 +1154,7 @@ export function routeForModel(
     return {
       label: displayBridgeModel(model),
       program: process.platform === "win32" ? "agent" : "cursor-agent",
-      args: [
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--stream-partial-output",
-        "--model",
-        nativeCursorModel,
-        ...permissionArgs,
-      ],
+      args: cursorPrintArgs(nativeCursorModel, permissionArgs),
       format: "anthropic-envelope",
       logFile,
     };
@@ -1291,15 +1318,7 @@ export function routeForModel(
       return {
         label: displayBridgeModel(model),
         program: process.platform === "win32" ? "agent" : "cursor-agent",
-        args: [
-          "-p",
-          "--output-format",
-          "stream-json",
-          "--stream-partial-output",
-          "--model",
-          cursorModel,
-          ...permissionArgs,
-        ],
+        args: cursorPrintArgs(cursorModel, permissionArgs),
         format: "anthropic-envelope",
         logFile,
       };

@@ -402,10 +402,18 @@ export function classifyVendorAuthOutput(
       : unknown();
   }
   if (vendor === "grok") {
-    return /logged in with/i.test(text) ||
+    if (
+      /logged in with/i.test(text) ||
       nativeCliJsonIndicatesAuthenticated("grok", text)
-      ? connected(accountLabel, ["logout"])
-      : unknown();
+    ) {
+      return connected(accountLabel, ["logout"]);
+    }
+    // `grok models` prints the catalog even when signed out. That is not a
+    // probe failure — report Not logged in instead of Account status unavailable.
+    if (/available models:/i.test(text)) {
+      return disconnected();
+    }
+    return unknown();
   }
   if (vendor === "cursor") {
     try {

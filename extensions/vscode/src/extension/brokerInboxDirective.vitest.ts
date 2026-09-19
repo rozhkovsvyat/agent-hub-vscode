@@ -4,6 +4,7 @@ vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
 
 import {
   brokerInboxDirective,
+  brokerMemoryDirective,
   brokerUserQuestionDirective,
   supportsBrokerInbox,
 } from "./bridgeChatAdapter";
@@ -60,6 +61,16 @@ describe("broker inbox steering gate", () => {
 
   it("stays silent for claude", () => {
     expect(brokerInboxDirective("fable-5")).toEqual([]);
+  });
+
+  it("tells Cursor that memory tools are MCP, not a missing builtin", () => {
+    const lines = brokerMemoryDirective("cursor:grok-4.6");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("cukii-memory MCP");
+    expect(lines[0]).toContain("no built-in memory_search");
+    expect(lines[0]).toContain("expected, not a broken harness");
+    expect(brokerMemoryDirective("grok-4-6")).toEqual([]);
+    expect(brokerMemoryDirective("composer-2-5")).toHaveLength(1);
   });
 
   it("offers the same request_user_input contract to every connected vendor", () => {
