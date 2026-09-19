@@ -399,11 +399,20 @@ describe("bridgeVendorMcp", () => {
       });
       // Second call is memoized; the first must have returned a result, not thrown.
       expect(result).toBeUndefined();
-      const hookCommand = readSettings().hooks.PreToolUse[0].hooks[0]
-        .command as string;
-      expect(hookCommand).toContain("inbox_gate.py");
-      expect(hookCommand).not.toMatch(/["']/);
-      expect(hookCommand).not.toContain("broker pkg");
+      const settings = readSettings();
+      if (process.platform === "win32") {
+        const hookCommand = settings.hooks.PreToolUse[0].hooks[0]
+          .command as string;
+        expect(hookCommand).toContain("inbox_gate.py");
+        expect(hookCommand).not.toMatch(/["']/);
+        expect(hookCommand).not.toContain("broker pkg");
+      } else {
+        // Off Windows a spaced gate degrades to MCP-only: no hook is written
+        // at all, and certainly no quoted one (covered above).
+        expect(JSON.stringify(settings.hooks ?? {})).not.toContain(
+          "inbox_gate.py",
+        );
+      }
     });
 
     it("skips silently when the settings file is torn", () => {
