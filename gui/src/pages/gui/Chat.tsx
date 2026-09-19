@@ -72,6 +72,7 @@ import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
 import { userMetaFitsOnLastLine, userMetaWidth } from "./userMetaMode";
+import { isTimelineServiceMessage } from "./timelineServiceMessage";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -804,6 +805,20 @@ export function Chat() {
         const rows: JSX.Element[] = [];
 
         if (assistantHasVisibleText(item)) {
+          const visibleText = renderChatMessage(message).trim();
+          if (isTimelineServiceMessage(visibleText)) {
+            rows.push(
+              <div
+                key={`${message.id}-text`}
+                className={`cukii-timeline-item cukii-timeline-event cukii-timeline-service shrink-0 ${
+                  isBeforeLatestSummary ? "opacity-50" : ""
+                }`}
+                data-testid="cukii-timeline-service"
+              >
+                {visibleText}
+              </div>,
+            );
+          } else {
           rows.push(
             <div
               key={`${message.id}-text`}
@@ -831,6 +846,7 @@ export function Chat() {
               )}
             </div>,
           );
+          }
         }
 
         toolCallStates?.forEach((toolCallState) => {
