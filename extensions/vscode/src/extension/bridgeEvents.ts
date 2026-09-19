@@ -389,11 +389,11 @@ function explicitWaitForToolStart(
 function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   const out: BridgeEvent[] = [];
 
-<<<<<<< HEAD
   if (event.type === "system" && event.subtype === "init") {
     const id = String(event.session_id ?? "").trim();
     return VENDOR_SESSION_ID.test(id) ? [{ kind: "vendorSession", id }] : [];
-=======
+  }
+
   // Grok `--include-partial-messages` wraps Anthropic deltas in stream_event.
   // Unwrap one level so the same block parser sees the inner payload.
   if (event.type === "stream_event") {
@@ -419,7 +419,6 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   if (event.type === "text" && event.subtype === "delta") {
     const text = asText(event.text);
     return text ? [{ kind: "text", text }] : [];
->>>>>>> fix/2.0.137-vendor
   }
 
   if (event.type === "thinking" && event.subtype === "delta") {
