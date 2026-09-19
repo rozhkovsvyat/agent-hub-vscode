@@ -98,6 +98,11 @@ export function hasValidEditorContent(json: JSONContent): boolean {
   return hasNonWhitespaceText || hasStandaloneContent || false;
 }
 
+/** Sent transcript capsules are prose, never a second editor (ID-267). */
+export function isComposerEditable(isMainInput: boolean | undefined): boolean {
+  return Boolean(isMainInput);
+}
+
 /** Clear the live composer immediately after its captured JSON is submitted. */
 export function clearSubmittedMainComposer(
   editor: Editor,
@@ -514,7 +519,7 @@ export function createEditorConfig(options: {
       },
     },
     content: props.editorState,
-    editable: !isStreaming || props.isMainInput,
+    editable: isComposerEditable(props.isMainInput),
   });
 
   const onEnter = (modifiers: InputModifiers) => {
