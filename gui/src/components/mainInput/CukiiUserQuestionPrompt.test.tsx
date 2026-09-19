@@ -121,6 +121,61 @@ describe("CukiiUserQuestionPrompt", () => {
     );
   });
 
+  it("numbers every question of a multi-question sheet and gates submit on all answers", async () => {
+    const messenger = new MockIdeMessenger();
+    const post = vi.spyOn(messenger, "post");
+    const { store, user } = await renderWithProviders(
+      <CukiiUserQuestionPrompt />,
+      { mockIdeMessenger: messenger },
+    );
+    const base = request(store.getState().session.id);
+    await act(async () => {
+      messenger.mockMessageToWebview("cukii/userQuestionRequested", {
+        ...base,
+        questions: [
+          base.questions[0],
+          {
+            id: "region",
+            header: "Region",
+            question: "Which region?",
+            options: [
+              { label: "EU", description: "European Union." },
+              { label: "US", description: "United States." },
+            ],
+          },
+          {
+            id: "window",
+            header: "Window",
+            question: "Which maintenance window?",
+            options: [
+              { label: "Night", description: "Overnight." },
+              { label: "Weekend", description: "Saturday morning." },
+            ],
+          },
+        ],
+      });
+    });
+    await screen.findByRole("dialog", { name: "User question" });
+    expect(screen.getByText("3 questions")).toBeDefined();
+    expect(screen.getByText("1 of 3")).toBeDefined();
+    expect(screen.getByText("2 of 3")).toBeDefined();
+    expect(screen.getByText("3 of 3")).toBeDefined();
+    const submit = screen.getByRole("button", { name: "Submit" });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByLabelText(/Production/));
+    await user.click(screen.getByLabelText(/EU/));
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByLabelText(/Night/));
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(post).toHaveBeenCalledWith(
+      "cukii/respondUserQuestion",
+      expect.objectContaining({
+        answers: { deploy: "Production", region: "EU", window: "Night" },
+      }),
+    );
+  });
+
   it("drops the sheet when the broker withdraws the question", async () => {
     const messenger = new MockIdeMessenger();
     const { store } = await renderWithProviders(<CukiiUserQuestionPrompt />, {

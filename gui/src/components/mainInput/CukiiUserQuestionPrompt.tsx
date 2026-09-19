@@ -136,12 +136,26 @@ export function CukiiUserQuestionPrompt() {
       onSubmit={submit}
       role="dialog"
     >
-      <div className="cukii-user-question-title">Cukii needs your input</div>
+      <div className="cukii-user-question-title">
+        Cukii needs your input
+        {request.questions.length > 1 && (
+          <span className="cukii-user-question-count">
+            {request.questions.length} questions
+          </span>
+        )}
+      </div>
       <div className="cukii-user-question-list">
         {request.questions.map((question, questionIndex) => (
           <fieldset key={question.id}>
             <legend>
-              <span>{question.header}</span>
+              <span>
+                {request.questions.length > 1 && (
+                  <strong className="cukii-user-question-step">
+                    {questionIndex + 1} of {request.questions.length}
+                  </strong>
+                )}
+                {question.header}
+              </span>
               <strong>{question.question}</strong>
             </legend>
             {question.options.map((option, optionIndex) => (
