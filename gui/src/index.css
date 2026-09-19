@@ -621,7 +621,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   min-height: 26px !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 5px !important;
+  border-radius: 16px !important;
   background: transparent !important;
   color: var(--vscode-foreground, #cccccc) !important;
   box-shadow: none !important;
@@ -631,15 +631,23 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-user-question {
+  position: fixed;
+  right: 16px;
+  bottom: 108px;
+  left: 16px;
+  z-index: 2001;
   box-sizing: border-box;
-  max-height: calc(100vh - 2.5rem);
+  width: auto;
+  max-width: 680px;
+  max-height: min(60vh, calc(100vh - 140px));
+  margin-inline: auto;
   overflow: auto;
   border: 1px solid var(--vscode-widget-border, #454545);
-  border-radius: 10px;
-  background: var(--vscode-menu-background, #252526);
+  border-radius: 16px;
+  background: var(--cukii-surface, var(--vscode-menu-background, #252526));
   color: var(--vscode-menu-foreground, #cccccc);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
-  padding: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
 }
 
 .cukii-user-question-title {
@@ -683,9 +691,9 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  border: 1px solid var(--vscode-widget-border, #454545);
-  border-radius: 6px;
-  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 10px;
   cursor: pointer;
 }
 
@@ -713,7 +721,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-user-question-actions button {
   min-width: 78px;
-  border-radius: 4px;
+  border-radius: 16px;
   padding: 5px 12px;
 }
 
@@ -2310,12 +2318,12 @@ button.cukii-submit-button--stop:active {
    the live transcript. */
 .cukii-user-row--group-start,
 .cukii-user-row--group-middle {
-  --cukii-user-row-padding-bottom: 1px;
+  --cukii-user-row-padding-bottom: 0px;
 }
 
 .cukii-user-row--group-middle,
 .cukii-user-row--group-end {
-  --cukii-user-row-padding-top: 1px;
+  --cukii-user-row-padding-top: 0px;
 }
 
 /* MAX-style message bubble: user turns own the right lane while the timeline
@@ -2765,14 +2773,27 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-composer-attachment-strip {
+  position: relative;
+  z-index: 0;
   width: auto;
   margin: 0;
   padding: 6px 4px 4px 8px;
-  /* The footer is stacking level 3 and owns every popover. Keeping the strip
-     above it made a still-attached image pill paint over the command menu even
-     though the panel itself has z-index 1000 inside that lower context. */
-  z-index: 1;
+  /* Static positioning ignored z-index, so the pill painted over the command
+     menu in document order. Stay below the footer (z-index 3) and hide while
+     any composer overlay is open. */
   color: var(--vscode-input-foreground, #cccccc);
+}
+
+.cukii-main-input-shell:has(.cukii-command-menu):has(
+    [data-headlessui-state~="open"]
+  )
+  .cukii-composer-attachment-strip,
+.cukii-main-input-shell:has(.cukii-model-picker)
+  .cukii-composer-attachment-strip,
+.cukii-main-input-shell:has([data-cukii-suggestion-open="true"])
+  .cukii-composer-attachment-strip {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .cukii-composer-attachment-card {
@@ -3143,6 +3164,31 @@ button.cukii-submit-button--stop:active {
 
 .cukii-timeline-event::before {
   background: var(--vscode-descriptionForeground, #55524c);
+}
+
+.cukii-timeline-service {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.cukii-md-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 16px;
+}
+
+.cukii-md-table-scroll table {
+  display: table;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.cukii-md-table-scroll th,
+.cukii-md-table-scroll td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Claude's reasoning is a collapsed timeline checkpoint, not a tool card.

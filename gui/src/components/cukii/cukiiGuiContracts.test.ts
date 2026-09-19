@@ -124,6 +124,9 @@ describe("Cukii GUI contracts", () => {
     expect(assistantRule).toContain("border-radius: 16px;");
     expect(composerRule).toContain("border-radius: 16px !important;");
     expect(submitRule).toContain("border-radius: 16px !important;");
+    expect(css).toMatch(
+      /\.cukii-icon-button,\s*\.cukii-submit-button\s*\{[^}]*border-radius:\s*16px !important/s,
+    );
   });
 
   it("declares cookie-orange focus and semantic invalid-state precedence", () => {
@@ -354,8 +357,8 @@ describe("Cukii GUI contracts", () => {
     expect(groupEnd).toContain("border-top-right-radius: 6px;");
     expect(css).toContain(".cukii-user-row--group-start,");
     expect(css).toContain(".cukii-user-row--group-middle {");
-    expect(css).toContain("--cukii-user-row-padding-bottom: 1px");
-    expect(css).toContain("--cukii-user-row-padding-top: 1px");
+    expect(css).toContain("--cukii-user-row-padding-bottom: 0px");
+    expect(css).toContain("--cukii-user-row-padding-top: 0px");
     expect(css).not.toContain(".cukii-user-row--grouped {");
 
     // Receipt flow stays stylesheet-driven: Chat only flags which receipts
@@ -414,6 +417,7 @@ describe("Cukii GUI contracts", () => {
     expect(toolbar).toContain("onClick={() => setModelPickerOpen(true)}");
     expect(toolbar).toContain("primaryActionsRef");
     expect(toolbar).toContain("modelPillOnOwnRow");
+    expect(toolbar).toContain("shouldPlaceModelPillOnOwnRow");
     expect(toolbar).toContain("cukii-input-footer--model-row");
 
     // Scope toggle: the single Milky (-0) knob switch pinned to the right

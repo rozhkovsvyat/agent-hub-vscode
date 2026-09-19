@@ -79,10 +79,10 @@ test("groups every user prompt with its response so the next sticky turn displac
     /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
   );
   expect(css).toMatch(
-    /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*1px/s,
+    /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*0px/s,
   );
   expect(css).toMatch(
-    /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*1px/s,
+    /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*0px/s,
   );
   // The mask moved to ::before and now paints the measured canvas rather than
   // re-declaring a surface token: `--cukii-chat-background` describes
@@ -960,7 +960,7 @@ test("keeps attachments in one horizontally scrolling micro-preview row", () => 
     /\.cukii-user-attachment-strip\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*4px;[^}]*overflow-x:\s*auto;[^}]*padding:\s*0 0 6px;[^}]*scrollbar-width:\s*thin/s,
   );
   expect(css).toMatch(
-    /\.cukii-composer-attachment-strip\s*\{[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px;[^}]*z-index:\s*1/s,
+    /\.cukii-composer-attachment-strip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*0;[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px/s,
   );
   expect(css).toMatch(/\.cukii-input-footer\s*\{[^}]*z-index:\s*3/s);
   expect(css).toMatch(

@@ -1,5 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { act, render, screen } from "@testing-library/react";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
 
 import { clearSubmittedMainComposer } from "../mainInput/TipTapEditor/utils/editorConfig";
@@ -58,6 +60,19 @@ describe("CukiiComposerImageStrip submit lifecycle", () => {
     act(() => clearSubmittedMainComposer(editor, true, false));
 
     expect(screen.queryByLabelText("Attached images")).not.toBeInTheDocument();
+  });
+
+  it("stays below composer overlays so a leftover pill cannot cover the menu (ID-199)", () => {
+    const css = readFileSync(
+      join(process.cwd(), "src", "index.css"),
+      "utf8",
+    );
+    expect(css).toMatch(
+      /\.cukii-composer-attachment-strip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-main-input-shell:has\(\.cukii-command-menu\)[\s\S]*?\.cukii-composer-attachment-strip/s,
+    );
   });
 
   it("keeps the first preview on the left and appends newer images to the right", () => {
