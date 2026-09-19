@@ -991,9 +991,6 @@ function grokRoute(
       args,
       format: "anthropic-envelope",
       promptFile,
-      // Prompt lives in --prompt-json plus the transcript file. Writing the
-      // same briefing to stdin fills an unread pipe (EPIPE / first-turn hang).
-      noStdin: true,
       logFile,
       // `--prompt-json` already carries the turn. Writing the transcript to
       // stdin as well fills the pipe (Grok never reads it) and hangs the child

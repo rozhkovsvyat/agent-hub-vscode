@@ -362,7 +362,7 @@ const StyledMarkdownPreview = memo(function StyledMarkdownPreview(
           }
           return <code {...codeProps}>{codeProps.children}</code>;
         },
-        table: ({ node: _tableNode, ...tableProps }) => {
+        table: ({ node: _tableNode, ...tableProps }: any) => {
           return (
             <div className="cukii-md-table-scroll">
               <table {...tableProps} />
