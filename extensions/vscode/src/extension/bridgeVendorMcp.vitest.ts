@@ -174,17 +174,30 @@ describe("bridgeVendorMcp", () => {
       const entry = settings.mcpServers[BROKER_MCP_NAME];
       expect(entry.command).toBe(brokerPythonCommand(options()));
       expect(entry.args[0]).toBe(path.join(brokerDir, "mcp_server.py"));
-      expect(entry.trust).toBe(false);
+      expect(entry.trust).toBe(true);
+      expect(entry.env.PYTHONPATH).toBe(path.dirname(brokerDir));
       const preToolUse = settings.hooks.PreToolUse;
       expect(preToolUse).toHaveLength(1);
-      expect(preToolUse[0].hooks[0].command).toContain("inbox_gate.py");
-      expect(preToolUse[0].hooks[0].command).toContain("-Harness qwen");
+      const hookCommand = preToolUse[0].hooks[0].command as string;
+      expect(hookCommand).toContain("inbox_gate.py");
+      expect(hookCommand).toContain("-Harness qwen");
+      // Qwen splits the command on whitespace without shell quoting: any
+      // quote character reaches python as part of the filename and bricks
+      // every tool call.
+      expect(hookCommand).not.toMatch(/["']/);
 
+      const afterFirst = fs.readFileSync(
+        path.join(home, ".qwen", "settings.json"),
+        "utf8",
+      );
       const second = ensureQwenBrokerRegistration(brokerDir, options());
       expect(second).toMatchObject({ mcpAdded: false, hookAdded: false });
       const again = readSettings();
       expect(again.hooks.PreToolUse).toHaveLength(1);
       expect(Object.keys(again.mcpServers)).toHaveLength(2);
+      expect(
+        fs.readFileSync(path.join(home, ".qwen", "settings.json"), "utf8"),
+      ).toBe(afterFirst);
     });
 
     it("keeps an existing PreToolUse list and only appends", () => {
@@ -204,22 +217,193 @@ describe("bridgeVendorMcp", () => {
       expect(settings.hooks.PreToolUse[0].matcher).toBe("write_file");
     });
 
-    it("normalizes a legacy trust:true entry even when nothing else changes", () => {
+    it("normalizes a legacy trust:false entry even when nothing else changes", () => {
       writeSettings({ mcpServers: { other: { command: "x" } }, hooks: {} });
       ensureQwenBrokerRegistration(brokerDir, options());
-      writeSettings({
-        ...readSettings(),
-        mcpServers: {
-          ...readSettings().mcpServers,
-          [BROKER_MCP_NAME]: {
-            ...readSettings().mcpServers[BROKER_MCP_NAME],
-            trust: true,
-          },
-        },
-      });
+      const seeded = readSettings();
+      delete seeded.mcpServers[BROKER_MCP_NAME].env.PYTHONPATH;
+      seeded.mcpServers[BROKER_MCP_NAME].trust = false;
+      writeSettings(seeded);
       const result = ensureQwenBrokerRegistration(brokerDir, options());
       expect(result).toMatchObject({ mcpAdded: false, hookAdded: false });
-      expect(readSettings().mcpServers[BROKER_MCP_NAME].trust).toBe(false);
+      const upgraded = readSettings().mcpServers[BROKER_MCP_NAME];
+      // trust:false hides the broker MCP entirely in non-interactive runs.
+      expect(upgraded.trust).toBe(true);
+      expect(upgraded.env.PYTHONPATH).toBe(path.dirname(brokerDir));
+      expect(upgraded.env.PYTHONIOENCODING).toBe("utf-8");
+    });
+
+    const spacedBrokerDir = () => {
+      const dir = path.join(home, "broker pkg");
+      fs.mkdirSync(path.join(dir, "hooks"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "hooks", "inbox_gate.py"), "# gate", "utf8");
+      fs.writeFileSync(path.join(dir, "mcp_server.py"), "# server", "utf8");
+      return dir;
+    };
+
+    it.runIf(process.platform === "win32")(
+      "serves a spaced gate path through the space-free ProgramData shim",
+      () => {
+        writeSettings({ mcpServers: {}, hooks: {} });
+        const dir = spacedBrokerDir();
+        const programData = path.join(home, "ProgramData");
+        const env = { ProgramData: programData };
+        const result = ensureQwenBrokerRegistration(dir, {
+          userHome: home,
+          env,
+        });
+        expect(result).toMatchObject({ mcpAdded: true, hookAdded: true });
+
+        const settings = readSettings();
+        const hookCommand = settings.hooks.PreToolUse[0].hooks[0]
+          .command as string;
+        const shimPath = path.join(
+          programData,
+          "cukii",
+          "qwen-gate",
+          "inbox_gate.py",
+        );
+        // Qwen splits the command on whitespace without shell quoting: any
+        // quote or space reaches python as part of the filename and bricks
+        // every tool call, so the hook names the shim, never the real gate.
+        expect(hookCommand).toBe(
+          `${brokerPythonCommand({ userHome: home, env })} ${shimPath} -Harness qwen`,
+        );
+        expect(hookCommand).not.toMatch(/["']/);
+        expect(shimPath).not.toContain(" ");
+        expect(hookCommand).not.toContain("broker pkg");
+        // The shim delegates to the real gate, baking in its spaced path.
+        const shim = fs.readFileSync(shimPath, "utf8");
+        expect(shim).toContain(
+          JSON.stringify(path.join(dir, "hooks", "inbox_gate.py")),
+        );
+        expect(shim).toContain("subprocess.call");
+
+        // Idempotent: the shim path keeps the gate marker, so a second pass
+        // adds nothing and rewrites neither settings nor the shim.
+        const before = fs.readFileSync(
+          path.join(home, ".qwen", "settings.json"),
+          "utf8",
+        );
+        const second = ensureQwenBrokerRegistration(dir, {
+          userHome: home,
+          env,
+        });
+        expect(second).toMatchObject({ mcpAdded: false, hookAdded: false });
+        expect(
+          fs.readFileSync(path.join(home, ".qwen", "settings.json"), "utf8"),
+        ).toBe(before);
+      },
+    );
+
+    it.runIf(process.platform === "win32")(
+      "degrades the hook with an actionable message when even ProgramData is spaced, without rolling back MCP",
+      () => {
+        writeSettings({ mcpServers: {}, hooks: {} });
+        const dir = spacedBrokerDir();
+        const result = ensureQwenBrokerRegistration(dir, {
+          userHome: home,
+          env: { ProgramData: path.join(home, "spaced ProgramData") },
+        });
+        // MCP args are a JSON array, so a space in the broker path is fine.
+        // Only the PreToolUse command is fail-closed; the message must not
+        // be mislabeled as a lock conflict, and activation must continue.
+        expect(result.mcpAdded).toBe(true);
+        expect(result.hookAdded).toBe(false);
+        expect(result.skipped).toContain("PreToolUse gate for qwen");
+        expect(result.skipped).toContain("CUKII_BROKER_DIR");
+        expect(result.skipped).toContain(dir);
+        expect(result.skipped).not.toContain("config busy");
+        const settings = readSettings();
+        expect(settings.mcpServers[BROKER_MCP_NAME]).toBeDefined();
+        expect(JSON.stringify(settings.hooks ?? {})).not.toContain(
+          "inbox_gate.py",
+        );
+      },
+    );
+
+    it.runIf(process.platform === "win32")(
+      "rewrites an already-registered spaced gate command onto the shim",
+      () => {
+        const dir = spacedBrokerDir();
+        const spacedCommand = `${brokerPythonCommand({ userHome: home, env: {} })} ${path.join(dir, "hooks", "inbox_gate.py")} -Harness qwen`;
+        writeSettings({
+          mcpServers: {},
+          hooks: {
+            PreToolUse: [
+              {
+                hooks: [
+                  { type: "command", command: spacedCommand, timeout: 15000 },
+                ],
+              },
+            ],
+          },
+        });
+        const programData = path.join(home, "ProgramData");
+        const env = { ProgramData: programData };
+        const result = ensureQwenBrokerRegistration(dir, {
+          userHome: home,
+          env,
+        });
+        expect(result.hookAdded).toBe(false);
+        const hookCommand = readSettings().hooks.PreToolUse[0].hooks[0]
+          .command as string;
+        const shimPath = path.join(
+          programData,
+          "cukii",
+          "qwen-gate",
+          "inbox_gate.py",
+        );
+        expect(hookCommand).toBe(
+          `${brokerPythonCommand({ userHome: home, env })} ${shimPath} -Harness qwen`,
+        );
+        expect(hookCommand).not.toMatch(/["']/);
+        expect(hookCommand).not.toContain("broker pkg");
+      },
+    );
+
+    it.runIf(process.platform !== "win32")(
+      "degrades the hook with an actionable message for a spaced gate path off Windows, without rolling back MCP",
+      () => {
+        writeSettings({ mcpServers: {}, hooks: {} });
+        const dir = spacedBrokerDir();
+        const result = ensureQwenBrokerRegistration(dir, options());
+        expect(result.mcpAdded).toBe(true);
+        expect(result.hookAdded).toBe(false);
+        expect(result.skipped).toContain("CUKII_BROKER_DIR");
+        expect(result.skipped).not.toContain("config busy");
+        const settings = readSettings();
+        expect(settings.mcpServers[BROKER_MCP_NAME]).toBeDefined();
+        expect(JSON.stringify(settings.hooks ?? {})).not.toContain(
+          "inbox_gate.py",
+        );
+      },
+    );
+
+    it("does not throw into ensureBrokerVendorIntegration when the gate path contains a space", () => {
+      writeSettings({ mcpServers: {}, hooks: {} });
+      const dir = spacedBrokerDir();
+      const env = {
+        CUKII_BROKER_DIR: dir,
+        ProgramData: path.join(home, "ProgramData"),
+      };
+      expect(() =>
+        ensureBrokerVendorIntegration("qwen3.8-max", {
+          userHome: home,
+          env,
+        }),
+      ).not.toThrow();
+      const result = ensureBrokerVendorIntegration("qwen3.8-max", {
+        userHome: home,
+        env,
+      });
+      // Second call is memoized; the first must have returned a result, not thrown.
+      expect(result).toBeUndefined();
+      const hookCommand = readSettings().hooks.PreToolUse[0].hooks[0]
+        .command as string;
+      expect(hookCommand).toContain("inbox_gate.py");
+      expect(hookCommand).not.toMatch(/["']/);
+      expect(hookCommand).not.toContain("broker pkg");
     });
 
     it("skips silently when the settings file is torn", () => {
