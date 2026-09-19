@@ -120,4 +120,28 @@ describe("CukiiUserQuestionPrompt", () => {
       expect.objectContaining({ requestId: "question-a", cancelled: true }),
     );
   });
+
+  it("drops the sheet when the broker withdraws the question", async () => {
+    const messenger = new MockIdeMessenger();
+    const { store } = await renderWithProviders(<CukiiUserQuestionPrompt />, {
+      mockIdeMessenger: messenger,
+    });
+    await act(async () => {
+      messenger.mockMessageToWebview(
+        "cukii/userQuestionRequested",
+        request(store.getState().session.id),
+      );
+    });
+    await screen.findByRole("dialog", { name: "User question" });
+    await act(async () => {
+      messenger.mockMessageToWebview("cukii/userQuestionWithdrawn", {
+        runId: "run-a",
+        requestId: "question-a",
+        sessionId: store.getState().session.id,
+      });
+    });
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "User question" })).toBeNull(),
+    );
+  });
 });

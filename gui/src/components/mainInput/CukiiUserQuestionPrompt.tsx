@@ -89,6 +89,21 @@ export function CukiiUserQuestionPrompt() {
     [dispatch, ideMessenger, sessionId],
   );
 
+  // The broker withdrew the question (timeout receipt, run stopped): the
+  // agent already moved on, so the sheet must not linger unanswered.
+  useWebviewListener(
+    "cukii/userQuestionWithdrawn",
+    async (item) => {
+      dispatch(
+        removeUserQuestion({
+          runId: item.runId,
+          requestId: item.requestId,
+        }),
+      );
+    },
+    [dispatch],
+  );
+
   useEffect(() => {
     return () => {
       for (const item of Object.values(pendingRef.current)) {

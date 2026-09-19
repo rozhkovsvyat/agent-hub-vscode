@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BridgeQuestionBroker, bridgeQuestionsRoot } from "./bridgeQuestions";
+import { BridgeQuestionBroker, bridgeQuestionsRoot, RENOTIFY_INTERVAL_MS } from "./bridgeQuestions";
 import type { CukiiRunBinding } from "./bridgeRunBinding";
 
 let root = "";
@@ -247,5 +247,60 @@ describe("BridgeQuestionBroker", () => {
     expect(broker.bindVendorProcess(4242, binding)).toBe(true);
     expect(reader).not.toHaveBeenCalled();
     expect(broker.bindVendorProcess(99, binding)).toBe(false);
+  });
+
+  it("re-publishes an unanswered request after the renotify interval", () => {
+    vi.useFakeTimers();
+    try {
+      writeRequest();
+      const seen: any[] = [];
+      const broker = new BridgeQuestionBroker(
+        "session-a",
+        "run-a",
+        (item) => seen.push(item),
+        bindingReader,
+      );
+      expect(broker.bindVendorProcess(4242)).toBe(true);
+      broker.tick();
+      broker.tick();
+      expect(seen).toHaveLength(1);
+      vi.setSystemTime(Date.now() + RENOTIFY_INTERVAL_MS);
+      broker.tick();
+      expect(seen).toHaveLength(2);
+      expect(seen[1].requestId).toBe("question-a");
+      expect(seen[1].requestFingerprint).toBe(seen[0].requestFingerprint);
+      broker.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("withdraws a request finalized outside the broker exactly once", () => {
+    const file = writeRequest();
+    const seen: any[] = [];
+    const withdrawn: any[] = [];
+    const broker = new BridgeQuestionBroker(
+      "session-a",
+      "run-a",
+      (item) => seen.push(item),
+      bindingReader,
+      (item) => withdrawn.push(item),
+    );
+    expect(broker.bindVendorProcess(4242)).toBe(true);
+    broker.tick();
+    expect(seen).toHaveLength(1);
+    // MCP-side timeout receipt: the record converges to cancelled on disk.
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ ...record, status: "cancelled", reason: "timeout" }),
+    );
+    broker.tick();
+    expect(withdrawn).toEqual([
+      { runId: "run-a", requestId: "question-a", sessionId: "session-a" },
+    ]);
+    broker.tick();
+    expect(withdrawn).toHaveLength(1);
+    broker.dispose();
   });
 });

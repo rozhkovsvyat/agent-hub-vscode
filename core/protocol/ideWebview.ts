@@ -535,6 +535,11 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
     CukiiUserQuestionRequest,
     { accepted: boolean },
   ];
+  /** A pending MCP question was finalized outside the panel (timeout/shutdown). */
+  "cukii/userQuestionWithdrawn": [
+    { runId: string; requestId: string; sessionId: string },
+    void,
+  ];
   "cukii/sessionTitleChanged": [
     {
       sessionId: string;
