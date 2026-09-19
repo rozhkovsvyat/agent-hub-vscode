@@ -69,7 +69,7 @@ describe("ThinkingBlockPeek", () => {
     );
   });
 
-  it("shows a Thinking label while in progress, not the live loader", async () => {
+  it("does not paint a Thinking label while in progress", async () => {
     await renderWithProviders(
       <ThinkingBlockPeek
         content="Reasoning in progress"
@@ -80,7 +80,8 @@ describe("ThinkingBlockPeek", () => {
     );
 
     const peek = screen.getByTestId("thinking-block-peek");
-    expect(peek.textContent).toMatch(/Thinking/);
+    expect(peek.textContent).not.toMatch(/Thinking/);
+    expect(peek).toHaveAttribute("aria-label", "Reasoning in progress");
     expect(peek.querySelector(".cukii-thinking-status-dot")).not.toBeNull();
     expect(peek.querySelector(".cukii-thinking-glyph")).toBeNull();
     expect(peek.querySelector(".cukii-thinking-inline")).toBeNull();

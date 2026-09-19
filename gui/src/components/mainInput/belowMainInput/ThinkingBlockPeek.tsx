@@ -89,6 +89,9 @@ function ThinkingBlockPeek({
                 : "cukii-thinking-summary-completed"
             } flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 transition-colors duration-200 ease-in-out hover:brightness-125`}
             data-testid="thinking-block-peek"
+            aria-label={
+              inProgress ? "Reasoning in progress" : "Toggle reasoning"
+            }
             aria-expanded={open}
             aria-controls={`thinking-block-content-${index}`}
             onClick={() => setOpen(!open)}
@@ -98,10 +101,10 @@ function ThinkingBlockPeek({
             )}
             {inProgress
               ? redactedThinking
-                ? "Redacted thinking"
-                : "Thinking"
+                ? "Redacted reasoning"
+                : ""
               : redactedThinking
-                ? "Redacted Thinking"
+                ? "Redacted reasoning"
                 : "Thought" +
                   (durationLabel ? ` for ${durationLabel}` : "") +
                   (tokens ? ` (${tokens} tokens)` : "")}

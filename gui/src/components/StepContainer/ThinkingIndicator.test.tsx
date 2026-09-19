@@ -20,14 +20,17 @@ describe("ThinkingIndicator", () => {
     });
 
     const label = screen.getByTestId("cukii-thinking-label");
-    expect(label.textContent).toBe("Thinking");
+    expect(label.textContent).not.toMatch(/Thinking/);
+    expect(label).toHaveAttribute("aria-label", "Reasoning in progress");
     expect(label).toHaveAttribute("aria-expanded", "false");
     expect(label.querySelector(".cukii-thinking-status-dot")).not.toBeNull();
     expect(label.querySelector(".cukii-thinking-glyph")).toBeNull();
     expect(label.querySelector(".cukii-thinking-row")).toBeNull();
     await user.click(label);
     expect(label).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Thinking in progress")).toBeInTheDocument();
+    expect(
+      document.getElementById("cukii-thinking-indicator-details")?.textContent,
+    ).toBe("Reasoning in progress");
     await user.keyboard("{Enter}");
     expect(label).toHaveAttribute("aria-expanded", "false");
   });
