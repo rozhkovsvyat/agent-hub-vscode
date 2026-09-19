@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -172,6 +173,19 @@ async function cleanupTree(rootPid: number | undefined, pids?: TreePids) {
 }
 
 describe("terminateBridgeChild", () => {
+  it("looks up Windows descendants by parent pid instead of dumping Win32_Process", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChildLifecycle.ts"),
+      "utf8",
+    );
+    expect(source).toContain(
+      'Get-CimInstance Win32_Process -Filter "ParentProcessId=',
+    );
+    expect(source).not.toContain(
+      "Get-CimInstance Win32_Process | ForEach-Object",
+    );
+  });
+
   it("escalates with graceful-then-force on non-Windows", async () => {
     const child = new UncooperativeChild();
     const forceKill = vi.fn(() => {

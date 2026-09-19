@@ -30,12 +30,20 @@ function hasExited(child: BridgeChild): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-function windowsProcessRows(
+/** Parent-filtered CIM query. A full Win32_Process dump times out under load
+ * and then Stop cannot reap descendants of an already-exited launcher. */
+function windowsDirectChildren(
+  parentPid: number,
   budgetMs: number,
 ): Promise<WindowsProcessRow[] | undefined> {
+  if (!Number.isSafeInteger(parentPid) || parentPid <= 0) {
+    return Promise.resolve([]);
+  }
   return new Promise((resolve) => {
     const script =
-      "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | ForEach-Object { '{0},{1}' -f $_.ProcessId,$_.ParentProcessId }";
+      "$ErrorActionPreference='Stop'; " +
+      `Get-CimInstance Win32_Process -Filter "ParentProcessId=${parentPid}" | ` +
+      "ForEach-Object { '{0},{1}' -f $_.ProcessId,$_.ParentProcessId }";
     const probe = spawn(
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -82,20 +90,27 @@ function windowsProcessRows(
   });
 }
 
-function descendantsOf(
+async function windowsDescendantRows(
   rootPid: number,
-  rows: WindowsProcessRow[],
-): WindowsProcessRow[] {
+  budgetMs: number,
+): Promise<WindowsProcessRow[] | undefined> {
+  const deadline = Date.now() + budgetMs;
   const descendants: WindowsProcessRow[] = [];
-  const parents = [rootPid];
-  const seen = new Set<number>(parents);
-  while (parents.length > 0) {
-    const parent = parents.shift()!;
-    for (const row of rows) {
-      if (row.parentPid !== parent || seen.has(row.pid)) continue;
-      seen.add(row.pid);
-      descendants.push(row);
-      parents.push(row.pid);
+  const queue = [rootPid];
+  const seen = new Set<number>(queue);
+  while (queue.length > 0) {
+    if (remainingBudget(deadline) <= 0) return undefined;
+    const parent = queue.shift()!;
+    const children = await windowsDirectChildren(
+      parent,
+      remainingBudget(deadline),
+    );
+    if (children === undefined) return undefined;
+    for (const child of children) {
+      if (seen.has(child.pid)) continue;
+      seen.add(child.pid);
+      descendants.push(child);
+      queue.push(child.pid);
     }
   }
   return descendants;
@@ -106,9 +121,9 @@ async function windowsTreeIsAlive(
   budgetMs = 2_000,
 ): Promise<boolean> {
   if (await windowsTasklistHasPid(rootPid)) return true;
-  const rows = await windowsProcessRows(budgetMs);
+  const descendants = await windowsDescendantRows(rootPid, budgetMs);
   // An unavailable process table is unknown, not proof of death.
-  return rows === undefined || descendantsOf(rootPid, rows).length > 0;
+  return descendants === undefined || descendants.length > 0;
 }
 
 function posixGroupIsAlive(pid: number): boolean {
@@ -164,11 +179,11 @@ async function windowsKillDescendantsAfterRootExit(
   budgetMs: number,
 ): Promise<boolean> {
   const deadline = Date.now() + budgetMs;
-  const rows = await windowsProcessRows(
+  const descendants = await windowsDescendantRows(
+    rootPid,
     Math.min(2_000, remainingBudget(deadline)),
   );
-  if (rows === undefined) return false;
-  const descendants = descendantsOf(rootPid, rows);
+  if (descendants === undefined) return false;
   if (descendants.length === 0) return true;
   const descendantIds = new Set(descendants.map((row) => row.pid));
   const topLevel = descendants.filter(
@@ -283,13 +298,16 @@ export async function terminateBridgeChild(
   if (platform === "win32") {
     if (hasExited(child)) return true;
     const deadline = Date.now() + forceMs;
-    const rows =
+    const descendants =
       !options.forceKill && child.pid && process.platform === "win32"
-        ? await windowsProcessRows(Math.min(2_000, remainingBudget(deadline)))
+        ? await windowsDescendantRows(
+            child.pid,
+            Math.min(2_000, remainingBudget(deadline)),
+          )
         : undefined;
     const knownPids =
-      rows && child.pid
-        ? [child.pid, ...descendantsOf(child.pid, rows).map((row) => row.pid)]
+      descendants && child.pid
+        ? [child.pid, ...descendants.map((row) => row.pid)]
         : child.pid
           ? [child.pid]
           : [];
