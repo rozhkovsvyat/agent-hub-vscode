@@ -37,9 +37,10 @@ describe("CukiiUserQuestionPrompt", () => {
         request(store.getState().session.id),
       );
     });
-    expect(
-      await screen.findByRole("dialog", { name: "User question" }),
-    ).toBeDefined();
+    const dialog = await screen.findByRole("dialog", { name: "User question" });
+    expect(dialog).toBeDefined();
+    expect(dialog.className).toContain("cukii-user-question");
+    expect(dialog.className).not.toMatch(/fixed|bottom-5|right-5/);
     expect(screen.getByText("Where should this be deployed?")).toBeDefined();
     await user.click(screen.getByLabelText(/Production/));
     await user.click(screen.getByRole("button", { name: "Submit" }));

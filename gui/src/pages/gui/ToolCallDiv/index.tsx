@@ -16,6 +16,7 @@ import {
 } from "./CursorBridgeProgress";
 import { getIconByName } from "./utils";
 import { CukiiCommandCard } from "./CukiiCommandCard";
+import { isShellToolName, shellCommandFromArgs } from "./shellTool";
 
 interface SingleToolCallDivProps {
   toolCallState: ToolCallState;
@@ -77,6 +78,17 @@ export function SingleToolCallDiv({
     );
   }
 
+  // Shell execution is a transcript of its own. Route it before the generic
+  // icon path so vendor Bash/Shell tools keep an IN/OUT preview (ID-273).
+  if (isShellToolName(functionName)) {
+    return (
+      <CukiiCommandCard
+        command={shellCommandFromArgs(toolCallState.parsedArgs)}
+        toolCallState={toolCallState}
+      />
+    );
+  }
+
   if (icon) {
     return (
       <SimpleToolCallUI
@@ -85,17 +97,6 @@ export function SingleToolCallDiv({
         icon={toolCallState.status === "generated" ? ArrowRightIcon : icon}
         historyIndex={historyIndex}
         showLeadingIcon={false}
-      />
-    );
-  }
-
-  // Shell execution is a transcript of its own: retain a compact timeline
-  // footprint, but expose an accessible IN/OUT card rather than a naked path.
-  if (functionName === BuiltInToolNames.RunTerminalCommand) {
-    return (
-      <CukiiCommandCard
-        command={toolCallState.parsedArgs?.command ?? ""}
-        toolCallState={toolCallState}
       />
     );
   }

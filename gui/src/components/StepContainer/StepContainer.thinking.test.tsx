@@ -20,7 +20,8 @@ describe("StepContainer thinking lifecycle", () => {
     });
 
     const thought = screen.getByTestId("thinking-block-peek");
-    expect(thought.textContent).toContain("Thinking");
+    expect(thought.textContent).not.toContain("Thinking");
+    expect(thought).toHaveAttribute("aria-label", "Reasoning in progress");
     expect(thought.querySelector(".cukii-thinking-status-dot")).not.toBeNull();
     expect(screen.queryByTestId("cukii-thinking-label")).toBeNull();
   });

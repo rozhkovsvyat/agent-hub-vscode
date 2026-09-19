@@ -31,12 +31,13 @@ const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
         type="button"
         className="cukii-thinking-summary cukii-thinking-summary-active flex min-w-0 items-center gap-1.5 rounded-full px-2"
         data-testid="cukii-thinking-label"
+        aria-label="Reasoning in progress"
         aria-expanded={open}
         aria-controls="cukii-thinking-indicator-details"
         onClick={() => setOpen((value) => !value)}
       >
         <span className="cukii-thinking-status-dot" aria-hidden="true" />
-        <span>Thinking</span>
+        <span className="sr-only">Reasoning in progress</span>
         {open ? (
           <ChevronUpIcon className="h-3 w-3" aria-hidden="true" />
         ) : (
@@ -48,7 +49,7 @@ const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
           id="cukii-thinking-indicator-details"
           className="text-description-muted pl-2 pt-1"
         >
-          Thinking in progress
+          Reasoning in progress
         </div>
       )}
     </div>

@@ -1,9 +1,11 @@
 import { act, render, waitFor } from "@testing-library/react";
-import { readFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import type { CSSProperties } from "react";
 import { renderWithProviders } from "../../../util/test/render";
 import {
   CukiiStickyUserMessage,
+  isStickyCollapseActive,
   resolveStickyCollapseGeometry,
 } from "../../../components/cukii/CukiiStickyUserMessage";
 import { Chat } from "../Chat";
@@ -77,10 +79,10 @@ test("groups every user prompt with its response so the next sticky turn displac
     /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
   );
   expect(css).toMatch(
-    /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*1px/s,
+    /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*0px/s,
   );
   expect(css).toMatch(
-    /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*1px/s,
+    /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*0px/s,
   );
   // The mask moved to ::before and now paints the measured canvas rather than
   // re-declaring a surface token: `--cukii-chat-background` describes
@@ -107,14 +109,24 @@ test("collapses a long prompt immediately at or above the sticky edge", () => {
       fullHeight,
       hasReachedStickyEdge: true,
     }),
-  ).toEqual({ phase: "collapsed", progress: 1, visibleHeight: 20 });
+  ).toEqual({
+    phase: "collapsed",
+    progress: 1,
+    visibleHeight: 20,
+    flowHeight: 20,
+  });
 
   expect(
     resolveStickyCollapseGeometry({
       fullHeight,
       hasReachedStickyEdge: false,
     }),
-  ).toEqual({ phase: "flow", progress: 0, visibleHeight: 140 });
+  ).toEqual({
+    phase: "flow",
+    progress: 0,
+    visibleHeight: 140,
+    flowHeight: 140,
+  });
 
   // A one-line message keeps its ordinary geometry even at the sticky edge.
   expect(
@@ -122,7 +134,12 @@ test("collapses a long prompt immediately at or above the sticky edge", () => {
       fullHeight: 20,
       hasReachedStickyEdge: true,
     }),
-  ).toEqual({ phase: "flow", progress: 0, visibleHeight: 20 });
+  ).toEqual({
+    phase: "flow",
+    progress: 0,
+    visibleHeight: 20,
+    flowHeight: 20,
+  });
 
   // Attachment strips are content height, not a special exception: once the
   // combined capsule is taller than one line it follows the same fold rule.
@@ -131,7 +148,47 @@ test("collapses a long prompt immediately at or above the sticky edge", () => {
       fullHeight: 60,
       hasReachedStickyEdge: true,
     }),
-  ).toEqual({ phase: "collapsed", progress: 1, visibleHeight: 20 });
+  ).toEqual({
+    phase: "collapsed",
+    progress: 1,
+    visibleHeight: 20,
+    flowHeight: 20,
+  });
+});
+
+test("folds a viewport-filling prompt at scrollTop 0 before the spacer leaves (ID-234)", () => {
+  expect(
+    isStickyCollapseActive({
+      rowTopFromScrollport: 20,
+      fullHeight: 420,
+      transcriptClientHeight: 500,
+      scrollTop: 0,
+    }),
+  ).toBe(true);
+  expect(
+    isStickyCollapseActive({
+      rowTopFromScrollport: 80,
+      fullHeight: 420,
+      transcriptClientHeight: 500,
+      scrollTop: 0,
+    }),
+  ).toBe(false);
+  expect(
+    isStickyCollapseActive({
+      rowTopFromScrollport: 20,
+      fullHeight: 40,
+      transcriptClientHeight: 500,
+      scrollTop: 0,
+    }),
+  ).toBe(false);
+  expect(
+    isStickyCollapseActive({
+      rowTopFromScrollport: 0,
+      fullHeight: 140,
+      transcriptClientHeight: 0,
+      scrollTop: 0,
+    }),
+  ).toBe(false);
 });
 
 test("collapses when streamed markdown becomes long after the row sticks", async () => {
@@ -582,6 +639,7 @@ test("collapses a long prompt immediately at the sticky edge and keeps it collap
     const stableFlowHeight = row.style.getPropertyValue(
       "--cukii-sticky-flow-height",
     );
+    expect(Number.parseFloat(stableFlowHeight)).toBeLessThanOrEqual(48);
     const clippedContent = bubble?.querySelector(
       ".cukii-user-message-content--collapsed",
     );
@@ -712,6 +770,12 @@ test("collapses a long prompt immediately at the sticky edge and keeps it collap
     );
     expect(css).toMatch(
       /\.cukii-user-message-content--collapsed\s+\.ProseMirror\s*\{[^}]*height:\s*20px;[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-row--sticky\[data-cukii-collapse-progress="1\.0000"\]:not\(\s*:has\(\[aria-expanded="true"\]\)\s*\)\s*\{[^}]*max-height:\s*var\(--cukii-sticky-flow-height\)/s,
     );
     expect(css).not.toMatch(
       /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*static/s,
@@ -896,7 +960,7 @@ test("keeps attachments in one horizontally scrolling micro-preview row", () => 
     /\.cukii-user-attachment-strip\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*4px;[^}]*overflow-x:\s*auto;[^}]*padding:\s*0 0 6px;[^}]*scrollbar-width:\s*thin/s,
   );
   expect(css).toMatch(
-    /\.cukii-composer-attachment-strip\s*\{[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px;[^}]*z-index:\s*1/s,
+    /\.cukii-composer-attachment-strip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*0;[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px/s,
   );
   expect(css).toMatch(/\.cukii-input-footer\s*\{[^}]*z-index:\s*3/s);
   expect(css).toMatch(
@@ -946,4 +1010,70 @@ test("does not render fold controls for a short prompt", async () => {
   expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
   expect(bubble?.querySelector('[aria-label="Show more"]')).toBeNull();
   expect(bubble?.querySelector('[aria-label="Show less"]')).toBeNull();
+});
+
+test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-249)", () => {
+  const css = canonicalCss();
+  const { container } = render(
+    <div className="cukii-transcript">
+      <div
+        className="cukii-user-row cukii-user-row--sticky"
+        data-cukii-collapse-progress="1.0000"
+        data-testid="sticky-collapsed-row"
+        style={
+          {
+            "--cukii-sticky-flow-height": "46px",
+            "--cukii-sticky-mask-height": "46px",
+          } as CSSProperties
+        }
+      >
+        <div className="cukii-user-message">
+          <div className="cukii-user-message-bubble cukii-user-bubble--collapsed">
+            <div className="cukii-user-content-shell">
+              <div className="cukii-user-message-content cukii-user-message-content--collapsed">
+                <div className="ProseMirror">
+                  <p>https://getbb.app/</p>
+                  <p>
+                    посмотри, что это такое
+                    <br />
+                    extra wrap
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="cukii-assistant-row" data-testid="sticky-next-row">
+        Next turn
+      </div>
+    </div>,
+  );
+
+  const collapsed = container.querySelector(
+    ".cukii-user-message-content--collapsed",
+  );
+  expect(collapsed).not.toBeNull();
+  expect(css).toMatch(
+    /\.cukii-user-message-content--collapsed\s*\{[^}]*white-space:\s*nowrap/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky\[data-cukii-collapse-progress="1\.0000"\]/s,
+  );
+
+  const artifactDir = join(
+    "D:",
+    "Scratch",
+    "cukii-2.0.137-results",
+    "gui-artifacts",
+  );
+  mkdirSync(artifactDir, { recursive: true });
+  writeFileSync(
+    join(artifactDir, "id249-270-275-sticky-collapse.html"),
+    `<!doctype html><meta charset="utf-8"><title>ID-249/270/275 sticky collapse</title><style>${css}</style>${container.innerHTML}`,
+    "utf8",
+  );
 });

@@ -801,12 +801,47 @@ test("thinking label sits above the streaming loader", async () => {
     '[data-testid="cukii-streaming-toolbar"]',
   );
 
-  expect(thinking.textContent).toMatch(/Thinking/);
+  expect(thinking.textContent).not.toMatch(/Thinking/);
+  expect(thinking).toHaveAttribute("aria-label", "Reasoning in progress");
   expect(thinking.querySelector(".cukii-thinking-glyph")).toBeNull();
   expect(toolbar).not.toBeNull();
   expect(toolbar?.compareDocumentPosition(thinking) ?? 0).toBe(
     Node.DOCUMENT_POSITION_PRECEDING,
   );
+});
+
+test("renders vendor service status on the timeline instead of a chat bubble (ID-218)", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "service-status",
+        title: "Service status",
+        history: [
+          {
+            message: { id: "u1", role: "user", content: "go" },
+            contextItems: [],
+          },
+          {
+            message: {
+              id: "svc",
+              role: "assistant",
+              content:
+                'Background agent "general-purpose: Review PostToolUse dispatch candidate" completed.',
+            },
+            contextItems: [],
+          },
+        ],
+      },
+    });
+  });
+
+  expect(
+    container.querySelector('[data-testid="cukii-timeline-service"]')
+      ?.textContent,
+  ).toContain("Background agent");
+  expect(container.querySelector(".cukii-assistant-row")).toBeNull();
 });
 
 test("shell tool calls render compact IN/OUT command cards without legacy terminals", async () => {

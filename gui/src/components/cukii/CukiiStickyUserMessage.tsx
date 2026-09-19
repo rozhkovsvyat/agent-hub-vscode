@@ -8,12 +8,37 @@ import {
 } from "react";
 
 export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 20;
+/** The transcript's leading spacer is 20px. A viewport-filling prompt is
+ * already pinned in practice before that spacer has scrolled away. */
+export const STICKY_EDGE_SLACK_PX = 32;
 
 type StickyCollapsePhase = "flow" | "collapsed";
 
 interface StickyCollapseGeometryArgs {
   fullHeight: number;
   hasReachedStickyEdge: boolean;
+}
+
+export function isStickyCollapseActive({
+  rowTopFromScrollport,
+  fullHeight,
+  transcriptClientHeight,
+  scrollTop,
+}: {
+  rowTopFromScrollport: number;
+  fullHeight: number;
+  transcriptClientHeight: number;
+  scrollTop: number;
+}): boolean {
+  if (rowTopFromScrollport <= 1 && scrollTop > 0) return true;
+  if (transcriptClientHeight <= 0) return false;
+  const dominatesViewport =
+    fullHeight >=
+    Math.max(
+      CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX * 4,
+      transcriptClientHeight * 0.4,
+    );
+  return dominatesViewport && rowTopFromScrollport < STICKY_EDGE_SLACK_PX;
 }
 
 export function resolveStickyCollapseGeometry({
@@ -23,6 +48,7 @@ export function resolveStickyCollapseGeometry({
   phase: StickyCollapsePhase;
   progress: number;
   visibleHeight: number;
+  flowHeight: number;
 } {
   const naturalHeight = Math.max(
     CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
@@ -31,12 +57,18 @@ export function resolveStickyCollapseGeometry({
   const collapseDistance =
     naturalHeight - CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
   if (!hasReachedStickyEdge || collapseDistance <= 0) {
-    return { phase: "flow", progress: 0, visibleHeight: naturalHeight };
+    return {
+      phase: "flow",
+      progress: 0,
+      visibleHeight: naturalHeight,
+      flowHeight: naturalHeight,
+    };
   }
   return {
     phase: "collapsed",
     progress: 1,
     visibleHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
+    flowHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
   };
 }
 
@@ -175,11 +207,17 @@ export function CukiiStickyUserMessage({
         return;
       }
 
-      // Collapse as soon as the row reaches the sticky edge. A previous row
-      // pushed above it by the next sticky prompt stays collapsed while it
-      // leaves the viewport instead of expanding into a large orange block.
-      const hasReachedStickyEdge =
-        transcript.scrollTop > 0 && rowTopFromScrollport <= 1;
+      // Collapse as soon as the row reaches the sticky edge, including the
+      // 20px leading spacer band. A previous row pushed above it by the next
+      // sticky prompt stays collapsed while it leaves the viewport instead of
+      // expanding into a large orange block. A viewport-filling prompt also
+      // folds at scrollTop 0 — otherwise it covers the rest of the turn.
+      const hasReachedStickyEdge = isStickyCollapseActive({
+        rowTopFromScrollport,
+        fullHeight,
+        transcriptClientHeight: transcript.clientHeight,
+        scrollTop: transcript.scrollTop,
+      });
       const geometry = resolveStickyCollapseGeometry({
         fullHeight,
         hasReachedStickyEdge,
@@ -189,9 +227,6 @@ export function CukiiStickyUserMessage({
           ? fullHeight
           : geometry.visibleHeight;
 
-      // The scrollport's layout height stays equal to the fully expanded row.
-      // Only the painted/clipped bubble changes height, so Chromium never has
-      // to compensate scrollTop while the sticky header folds.
       const contentHeight = content.getBoundingClientRect().height;
       const bubbleOverhead = Math.max(
         0,
@@ -203,14 +238,18 @@ export function CukiiStickyUserMessage({
       const measuredFlowHeight =
         rowPaddingTop + rowPaddingBottom + bubbleOverhead + fullHeight;
       // Receipt layout can still change when the inline-fit observer runs.
-      // Never let that state edge shrink the document-flow box: a changing
-      // scrollHeight is exactly what made the wheel feel stuck.
+      // Never let that state edge shrink the uncollapsed document-flow box.
       stableFlowHeight = Math.max(stableFlowHeight, measuredFlowHeight);
       const paintedRowHeight =
         rowPaddingTop + rowPaddingBottom + bubbleOverhead + visibleHeight;
+      // Collapsed layout height must match the painted capsule. Keeping the
+      // expanded min-height after the fold is what left the huge empty gap
+      // between the sticky header and the next message.
+      const useCollapsedFlow =
+        geometry.phase === "collapsed" && !isExpandedRef.current;
       row.style.setProperty(
         "--cukii-sticky-flow-height",
-        `${Math.ceil(stableFlowHeight)}px`,
+        `${Math.ceil(useCollapsedFlow ? paintedRowHeight : stableFlowHeight)}px`,
       );
       row.style.setProperty(
         "--cukii-sticky-mask-height",

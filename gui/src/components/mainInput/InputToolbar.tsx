@@ -57,6 +57,7 @@ import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
 import { saveCurrentSession } from "../../redux/thunks/session";
 import { isMetaEquivalentKeyPressed } from "../../util";
+import { shouldPlaceModelPillOnOwnRow } from "./composerFooterLayout";
 import { ToolTip } from "../gui/Tooltip";
 import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
 import { ReportIssueModal } from "../reportIssue/ReportIssueModal";
@@ -524,7 +525,12 @@ function InputToolbar(props: InputToolbarProps) {
       return;
     }
     const update = () => {
-      setModelPillOnOwnRow(actions.getBoundingClientRect().height > 30);
+      setModelPillOnOwnRow((currentlyWrapped) =>
+        shouldPlaceModelPillOnOwnRow(
+          actions.getBoundingClientRect().height,
+          currentlyWrapped,
+        ),
+      );
     };
     update();
     if (typeof ResizeObserver === "undefined") return;

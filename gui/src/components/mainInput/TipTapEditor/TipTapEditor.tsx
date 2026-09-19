@@ -146,22 +146,12 @@ function TipTapEditorInner(props: TipTapEditorProps) {
     }
   }, [props.isMainInput, isStreaming, editor]);
 
-  // Recovery mechanism: ensure historical inputs regain editability when streaming ends
+  // Historical capsules stay read-only. Re-enabling them after a stream
+  // made a click on a sent prompt open an editor (ID-267).
   useEffect(() => {
-    if (!isStreaming && !props.isMainInput && editor) {
-      // Small delay to ensure editor state has settled after streaming transition
-      const timeoutId = setTimeout(() => {
-        if (editor && !editor.isDestroyed) {
-          // Force re-enable the editor
-          editor.setOptions({ editable: true });
-          // Trigger view update to refresh editor state
-          editor.view.dispatch(editor.state.tr);
-        }
-      }, 100);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [isStreaming, props.isMainInput]);
+    if (!editor || editor.isDestroyed) return;
+    editor.setOptions({ editable: Boolean(props.isMainInput) });
+  }, [editor, isStreaming, props.isMainInput]);
 
   const [showDragOverMsg, setShowDragOverMsg] = useState(false);
 

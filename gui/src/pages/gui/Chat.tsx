@@ -72,6 +72,7 @@ import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
 import { userMetaFitsOnLastLine, userMetaWidth } from "./userMetaMode";
+import { isTimelineServiceMessage } from "./timelineServiceMessage";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -108,6 +109,30 @@ const StepsDiv = styled.div`
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
 export const INITIAL_TRANSCRIPT_WINDOW = 160;
+
+/** Keep the user prompt that starts the first visible turn in the window so
+ * its sticky header cannot disappear behind a pagination cut (ID-274). */
+export function stickySafeTranscriptStart(
+  history: ChatHistoryItemWithMessageId[],
+  visibleCount: number,
+): number {
+  const start = Math.max(0, history.length - visibleCount);
+  if (start === 0) return 0;
+  const firstVisible = history[start];
+  if (
+    firstVisible?.message.role === "user" &&
+    !firstVisible.modelSwitch
+  ) {
+    return start;
+  }
+  for (let index = start - 1; index >= 0; index--) {
+    const item = history[index];
+    if (item?.message.role === "user" && !item.modelSwitch) {
+      return index;
+    }
+  }
+  return start;
+}
 export const CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX = 40;
 export const CLAUDE_COMPOSER_BOTTOM_INSET_PX = 16;
 export const CUKII_STREAMING_LOADER_GAP_PX = 16;
@@ -171,8 +196,8 @@ export function Chat() {
   const mainInputShellRef = useRef<HTMLDivElement>(null);
   const measuredComposerHeightRef = useRef(78);
   const [composerHeight, setComposerHeight] = useState(78);
-  /** Distance-from-bottom snapshot taken before "Load earlier messages"
-   * prepends older rows, so the viewport can be re-pinned afterwards. */
+  /** Distance-from-bottom snapshot taken before older rows are prepended,
+   * so the viewport can be re-pinned afterwards. */
   const loadEarlierAnchorRef = useRef<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   // Sticky masks and the composer fade paint `--cukii-canvas`; it is measured
@@ -191,7 +216,10 @@ export function Chat() {
     transcriptWindow.sessionId === sessionId
       ? transcriptWindow.visibleCount
       : INITIAL_TRANSCRIPT_WINDOW;
-  const transcriptStart = Math.max(0, history.length - visibleTranscriptCount);
+  const transcriptStart = stickySafeTranscriptStart(
+    history,
+    visibleTranscriptCount,
+  );
   const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
   const focusView = useAppSelector((state) => state.ui.focusView);
   const showChatScrollbar = useAppSelector(
@@ -293,6 +321,42 @@ export function Chat() {
     loadEarlierAnchorRef.current = null;
     element.scrollTop = element.scrollHeight - anchor;
   }, [transcriptStart]);
+
+  // Seamless history: approaching the top expands the window automatically.
+  // A dedicated pagination control used to occupy the sticky slot and hide
+  // user headers. jsdom reports 0×0 boxes; require a real layout box so unit
+  // tests do not drain the whole saved session on mount.
+  useEffect(() => {
+    const transcript = stepsDivRef.current;
+    if (!transcript || isSessionLoading) return;
+    const hiddenCount = Math.max(0, history.length - visibleTranscriptCount);
+    if (hiddenCount <= 0) return;
+
+    const expandIfAtTop = () => {
+      const element = stepsDivRef.current;
+      if (!element) return;
+      if (element.clientHeight <= 0 || element.scrollHeight <= 0) return;
+      if (element.scrollTop > 64) return;
+      loadEarlierAnchorRef.current =
+        element.scrollHeight - element.scrollTop;
+      setTranscriptWindow((current) => ({
+        sessionId,
+        visibleCount:
+          (current.sessionId === sessionId
+            ? current.visibleCount
+            : INITIAL_TRANSCRIPT_WINDOW) + INITIAL_TRANSCRIPT_WINDOW,
+      }));
+    };
+
+    transcript.addEventListener("scroll", expandIfAtTop, { passive: true });
+    return () =>
+      transcript.removeEventListener("scroll", expandIfAtTop);
+  }, [
+    history.length,
+    isSessionLoading,
+    sessionId,
+    visibleTranscriptCount,
+  ]);
 
   // Claude parity: wheeling over the composer's own chrome — the padding
   // left/right of the editor, the toolbar backing zone below it — scrolls
@@ -741,6 +805,20 @@ export function Chat() {
         const rows: JSX.Element[] = [];
 
         if (assistantHasVisibleText(item)) {
+          const visibleText = renderChatMessage(message).trim();
+          if (isTimelineServiceMessage(visibleText)) {
+            rows.push(
+              <div
+                key={`${message.id}-text`}
+                className={`cukii-timeline-item cukii-timeline-event cukii-timeline-service shrink-0 ${
+                  isBeforeLatestSummary ? "opacity-50" : ""
+                }`}
+                data-testid="cukii-timeline-service"
+              >
+                {visibleText}
+              </div>,
+            );
+          } else {
           rows.push(
             <div
               key={`${message.id}-text`}
@@ -768,6 +846,7 @@ export function Chat() {
               )}
             </div>,
           );
+          }
         }
 
         toolCallStates?.forEach((toolCallState) => {
@@ -888,24 +967,11 @@ export function Chat() {
           <>
             {history.length === 0 && <EmptyChatBody sessionId={sessionId} />}
             {transcriptStart > 0 && (
-              <button
-                type="button"
-                className="cukii-load-earlier mx-auto my-3"
-                onClick={() => {
-                  const element = stepsDivRef.current;
-                  if (element) {
-                    loadEarlierAnchorRef.current =
-                      element.scrollHeight - element.scrollTop;
-                  }
-                  setTranscriptWindow({
-                    sessionId,
-                    visibleCount:
-                      visibleTranscriptCount + INITIAL_TRANSCRIPT_WINDOW,
-                  });
-                }}
-              >
-                Load earlier messages
-              </button>
+              <div
+                aria-hidden="true"
+                className="cukii-history-sentinel"
+                data-testid="cukii-history-sentinel"
+              />
             )}
             {renderTranscriptRows()}
           </>

@@ -7,6 +7,7 @@ import {
   CUKII_EDITOR_IMMEDIATELY_RENDER,
   clearSubmittedMainComposer,
   hasValidEditorContent,
+  isComposerEditable,
   shouldDeferEnterToSuggestion,
 } from "./editorConfig";
 
@@ -39,6 +40,14 @@ describe("hasValidEditorContent", () => {
         ],
       }),
     ).toBe(false);
+  });
+});
+
+describe("isComposerEditable", () => {
+  it("keeps sent transcript capsules read-only even after the stream ends", () => {
+    expect(isComposerEditable(true)).toBe(true);
+    expect(isComposerEditable(false)).toBe(false);
+    expect(isComposerEditable(undefined)).toBe(false);
   });
 });
 
