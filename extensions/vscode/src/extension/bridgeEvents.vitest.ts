@@ -154,6 +154,7 @@ describe("BridgeEventParser", () => {
     const { events, parser } = collect("anthropic-envelope", CLAUDE_LINES);
     expect(parser.sawStructuredOutput).toBe(true);
     expect(events).toEqual([
+      { kind: "vendorSession", id: "9252c6e5" },
       { kind: "thinking", text: "Надо прочитать файл." },
       { kind: "text", text: "Читаю файл." },
       {
@@ -250,6 +251,7 @@ describe("BridgeEventParser", () => {
   it("разбирает событийную модель codex exec --json", () => {
     const { events } = collect("codex-thread", CODEX_LINES);
     expect(events).toEqual([
+      { kind: "vendorSession", id: "01a0359c" },
       {
         kind: "toolStart",
         id: "item_1",
@@ -391,6 +393,18 @@ describe("BridgeEventParser", () => {
     ];
 
     expect(parser.push(`${lines.join("\n")}\n`)).toEqual([]);
+    expect(parser.sawStructuredOutput).toBe(true);
+  });
+
+  it("captures a Claude init session id without rendering the envelope", () => {
+    const parser = new BridgeEventParser("anthropic-envelope");
+    expect(
+      parser.push(
+        '{"type":"system","subtype":"init","session_id":"9252c6e5-aaaa-bbbb-cccc-ddddeeeeffff"}\n',
+      ),
+    ).toEqual([
+      { kind: "vendorSession", id: "9252c6e5-aaaa-bbbb-cccc-ddddeeeeffff" },
+    ]);
     expect(parser.sawStructuredOutput).toBe(true);
   });
 

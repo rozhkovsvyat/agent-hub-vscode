@@ -24,6 +24,12 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
+import { BridgeSilenceWatchdog } from "./bridgeSilenceWatchdog";
+import {
+  forgetVendorSession,
+  rememberVendorSession,
+  rememberedVendorSession,
+} from "./bridgeVendorSession";
 import { brokerFactDisciplineDirective } from "./bridgeFactDiscipline";
 import {
   bridgeInboxMessageStatus,
@@ -438,6 +444,19 @@ function windowsCmdPath(): string {
 export const BROKER_NOT_ROUTABLE_GUIDANCE =
   "A not_routable result is a task/scope routing error, never evidence that the requested model, account, or agent is unavailable. Read route_reason and retry broker_delegate once with an explicit known vault scope.";
 
+export function bridgeResumeUserText(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== "user") continue;
+    if (typeof message.content === "string") return message.content;
+    return message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+  }
+  return "";
+}
+
 function buildPrompt(
   messages: ChatMessage[],
   brokerModel: BrokerModel,
@@ -447,7 +466,20 @@ function buildPrompt(
   permissionMode: CukiiPermissionMode,
   hasImages: boolean,
   steerInterrupt?: boolean,
+  resume?: boolean,
 ): string {
+  if (resume) {
+    return [
+      `Continue this native CLI session. ${bridgeControlSummary(controls)}`,
+      ...(steerInterrupt
+        ? [
+            "The latest user message was injected while you were mid-task; the previous turn was interrupted so you would see it promptly. Address this newest message first, then resume the task you were working on, taking it into account. Do not discard your prior work unless the new message changes the task.",
+          ]
+        : []),
+      "",
+      bridgeResumeUserText(messages),
+    ].join("\n");
+  }
   const subagent =
     brokerSubagent === "auto" ? "Auto" : displayBridgeModel(brokerSubagent);
   const selectedSubagentGuidance =
@@ -914,6 +946,10 @@ function grokRoute(
       format: "anthropic-envelope",
       promptFile,
       logFile,
+      // `--prompt-json` already carries the turn. Writing the transcript to
+      // stdin as well fills the pipe (Grok never reads it) and hangs the child
+      // the way a long Kimi `-p` argv used to.
+      noStdin: true,
     };
   } catch (error) {
     removeBridgeScratchFile(promptFile);
@@ -1035,6 +1071,7 @@ export function routeForModel(
   messages: ChatMessage[],
   controls: BridgeControlResolution,
   permissionMode: CukiiPermissionMode = "bypass",
+  vendorResumeId?: string,
 ): BridgeRoute {
   const logFile = bridgeLogFile(model);
   // There is no executable DeepSeek route yet.  Do this before resolving a
@@ -1061,6 +1098,7 @@ export function routeForModel(
       args: [
         "--model",
         claudeModel,
+        ...(vendorResumeId ? ["--resume", vendorResumeId] : []),
         ...nativePromptCacheArgs(model),
         ...claudeControlArgs(controls),
         ...permissionArgs,
@@ -1631,6 +1669,8 @@ export function toChatMessages(event: BridgeEvent): CukiiBridgeChatMessage[] {
       return [
         { role: "assistant", content: "", cukiiTerminal: true },
       ] as CukiiBridgeChatMessage[];
+    case "vendorSession":
+      return [];
   }
 }
 
@@ -1714,6 +1754,9 @@ async function* streamBridgeChatWithSteer(
     args.messages,
     args.brokerModel,
   );
+  const vendorResumeId = isClaudeNativeModel(args.brokerModel)
+    ? rememberedVendorSession(args.sessionId, args.brokerModel)
+    : undefined;
   const prompt = buildPrompt(
     imageScope.materializeMessages(transportMessages),
     args.brokerModel,
@@ -1723,6 +1766,7 @@ async function* streamBridgeChatWithSteer(
     args.brokerPermissionMode,
     hasImageAttachment(transportMessages),
     args.steerInterrupt,
+    Boolean(vendorResumeId),
   );
   const route = routeForModel(
     args.brokerModel,
@@ -1731,6 +1775,7 @@ async function* streamBridgeChatWithSteer(
     transportMessages,
     controls,
     args.brokerPermissionMode,
+    vendorResumeId,
   );
   let permissionBroker: ClaudePermissionBroker | undefined;
   let resourcesReleased = false;
@@ -1975,6 +2020,8 @@ async function* launchBridgeChild(options: {
     return terminationPromise;
   };
   const queuedFollowUpRead = new Set<string>();
+  const silenceWatchdog = new BridgeSilenceWatchdog();
+  let settledByWatchdog = false;
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "complete") {
@@ -2009,10 +2056,18 @@ async function* launchBridgeChild(options: {
         }
         continue;
       }
+      if (event.kind === "vendorSession") {
+        if (sessionId) {
+          rememberVendorSession(sessionId, brokerModel, event.id);
+        }
+        continue;
+      }
       if (event.kind === "toolStart") {
+        silenceWatchdog.noteToolStart();
         permissionTransport?.onToolActivity?.({ kind: "start", id: event.id });
       }
       if (event.kind === "toolResult") {
+        silenceWatchdog.noteToolFinish();
         permissionTransport?.onToolActivity?.({ kind: "finish", id: event.id });
       }
       if (event.kind === "usage") {
@@ -2100,6 +2155,7 @@ async function* launchBridgeChild(options: {
       });
     }
     const text = chunk.toString("utf8");
+    silenceWatchdog.noteActivity();
     stdoutTail = (stdoutTail + text).slice(-4000);
     // Сырой stdout нужен только как страховка: если вендор сменит формат и не
     // разберётся ни одно событие, пользователь обязан увидеть ответ, а не пустоту.
@@ -2144,6 +2200,7 @@ async function* launchBridgeChild(options: {
   });
   child.stderr.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf8");
+    silenceWatchdog.noteActivity();
     stderr += text;
     if (route.logFile) fs.appendFileSync(route.logFile, text, "utf8");
   });
@@ -2186,6 +2243,13 @@ async function* launchBridgeChild(options: {
           logFile: route.logFile,
         }),
       );
+      if (
+        sessionId &&
+        command.args.includes("--resume") &&
+        /unknown session|session not found|no conversation found/i.test(detail)
+      ) {
+        forgetVendorSession(sessionId, brokerModel);
+      }
     }
     if (!cancelled) {
       canary?.record("vendor_completed", {
@@ -2229,6 +2293,18 @@ async function* launchBridgeChild(options: {
             yield message;
           }
         } else {
+          const silence = silenceWatchdog.poll();
+          if (silence.kind === "warn") {
+            yield { role: "thinking", content: silence.text };
+          } else if (silence.kind === "fail") {
+            settledByWatchdog = true;
+            protocolTerminalReceived = true;
+            error = new Error(silence.text);
+            queue.push({ kind: "terminalError", text: silence.text });
+            void terminateOnce();
+            done = true;
+            continue;
+          }
           await new Promise((resolve) => setTimeout(resolve, 40));
         }
       }
@@ -2240,6 +2316,7 @@ async function* launchBridgeChild(options: {
     }
     if (
       !terminalReceived &&
+      !settledByWatchdog &&
       route.format !== "text" &&
       !parser.sawStructuredOutput &&
       rawStdout.trim()
