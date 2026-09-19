@@ -392,8 +392,8 @@ export function hasImageAttachment(messages: ChatMessage[]): boolean {
 /**
  * Bind image bytes to the route that will actually carry them. Session
  * history keeps the exact original in `url` so switching vendors cannot
- * destroy detail retroactively; only Grok's one-shot `--prompt-json` route
- * substitutes the bounded alternate immediately before process launch.
+ * destroy detail retroactively. Grok's `--prompt-json` route may keep a
+ * bounded `inlineArgvUrl` beside that original; it must not replace it.
  */
 export function selectBridgeImageSources(
   messages: ChatMessage[],
@@ -413,13 +413,16 @@ export function selectBridgeImageSources(
     const content: MessagePart[] = message.content.map((part) => {
       if (part.type !== "imageUrl") return part;
       changed = true;
+      // Grok's argv carrier may keep a bounded preview alongside the
+      // original, but the original URL stays authoritative: materialize
+      // writes that file, and grokPromptJson inlines it only when it fits.
       return {
         type: "imageUrl",
         imageUrl: {
-          url:
-            carrier === "inline-argv"
-              ? (part.imageUrl.inlineArgvUrl ?? part.imageUrl.url)
-              : part.imageUrl.url,
+          url: part.imageUrl.url,
+          ...(carrier === "inline-argv" && part.imageUrl.inlineArgvUrl
+            ? { inlineArgvUrl: part.imageUrl.inlineArgvUrl }
+            : {}),
         },
       };
     });
