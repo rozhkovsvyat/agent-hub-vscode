@@ -37,19 +37,33 @@ function relayEnvironment(descriptor: CukiiMemoryRelayDescriptor) {
   };
 }
 
+function stringParts(entry: { command?: unknown; args?: unknown }): string[] {
+  const command = typeof entry.command === "string" ? [entry.command] : [];
+  const args = Array.isArray(entry.args) ? entry.args : [];
+  return [...command, ...args].filter(
+    (item): item is string => typeof item === "string",
+  );
+}
+
+function isCukiiMemoryProxyPath(file: string): boolean {
+  const base = path.basename(file).toLowerCase();
+  return base === "cukiiMemoryProxy.js".toLowerCase() || base === "mcp_proxy.py";
+}
+
 function isManagedJsonEntry(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
-  const entry = value as { args?: unknown; env?: Record<string, unknown> };
-  return (
-    Array.isArray(entry.args) &&
-    entry.args.some(
-      (item) =>
-        typeof item === "string" &&
-        path.basename(item) === "cukiiMemoryProxy.js",
-    ) &&
-    (entry.env?.CUKII_MEMORY_MANAGED === "1" ||
-      typeof entry.env?.CUKII_MEMORY_RELAY_URL === "string")
-  );
+  const entry = value as {
+    command?: unknown;
+    args?: unknown;
+    env?: Record<string, unknown>;
+  };
+  const env = entry.env ?? {};
+  const hasProxy = stringParts(entry).some(isCukiiMemoryProxyPath);
+  const hasManagedEnv =
+    env.CUKII_MEMORY_MANAGED === "1" ||
+    typeof env.CUKII_MEMORY_RELAY_URL === "string" ||
+    typeof env.AGENT_HUB_MEMORY_URL === "string";
+  return hasProxy && hasManagedEnv;
 }
 
 function readJsonOwnerConfig(configPath: string): {

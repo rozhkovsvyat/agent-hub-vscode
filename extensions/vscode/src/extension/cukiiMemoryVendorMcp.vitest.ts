@@ -107,6 +107,45 @@ describe("Cukii memory vendor MCP registration", () => {
     expect(fs.readFileSync(target, "utf8")).toBe('{"mcpServers":');
   });
 
+  it("replaces a previous Cukii Box python memory proxy so Kimi sees the live relay", () => {
+    const { root, descriptor } = fixture();
+    const target = path.join(root, ".kimi-code", "mcp.json");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      JSON.stringify({
+        mcpServers: {
+          owner: { command: "owner-command" },
+          "cukii-memory": {
+            command: path.join(root, "pythonw.exe"),
+            args: [path.join(root, "cukii-box", "memory", "mcp_proxy.py")],
+            env: {
+              AGENT_HUB_MEMORY_URL: "http://127.0.0.1:8780/mcp",
+              AGENT_HUB_FALLBACK: "0",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(
+      ensureCukiiMemoryVendorMcp("kimi", descriptor, { userHome: root }),
+    ).toBe(true);
+    const config = JSON.parse(fs.readFileSync(target, "utf8"));
+    expect(config.mcpServers.owner).toEqual({ command: "owner-command" });
+    expect(config.mcpServers["cukii-memory"]).toMatchObject({
+      command: descriptor.nodePath,
+      args: [descriptor.proxyPath],
+      env: {
+        CUKII_MEMORY_MANAGED: "1",
+        CUKII_MEMORY_RELAY_URL: descriptor.url,
+      },
+    });
+    expect(JSON.stringify(config.mcpServers["cukii-memory"])).not.toContain(
+      "AGENT_HUB_MEMORY_URL",
+    );
+  });
+
   it("does not replace or remove an owner-defined cukii-memory server", () => {
     const { root, descriptor } = fixture();
     const target = path.join(root, ".qwen", "settings.json");
