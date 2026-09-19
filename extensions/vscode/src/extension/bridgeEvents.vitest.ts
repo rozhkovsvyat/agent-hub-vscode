@@ -271,6 +271,23 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  it("treats Codex compaction as a turn-complete receipt (ID-240)", () => {
+    const parser = new BridgeEventParser("codex-thread");
+    expect(
+      parser.push(
+        '{"type":"item.completed","item":{"id":"item_c","type":"compaction","status":"completed"}}\n',
+      ),
+    ).toEqual([{ kind: "complete" }]);
+    expect(parser.push('{"type":"compaction.completed"}\n')).toEqual([
+      { kind: "complete" },
+    ]);
+    expect(
+      parser.push(
+        '{"type":"item.completed","item":{"id":"item_c2","type":"context_compaction"}}\n',
+      ),
+    ).toEqual([{ kind: "complete" }]);
+  });
+
   it("emits a complete Codex receipt without waiting for newline or process exit", () => {
     const parser = new BridgeEventParser("codex-thread");
 

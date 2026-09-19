@@ -854,6 +854,7 @@ describe("native bridge argv", () => {
       "--output-format",
       "stream-json",
       "--verbose",
+      "--replay-user-messages",
     ]);
   });
 
@@ -885,6 +886,7 @@ describe("native bridge argv", () => {
       "--output-format",
       "stream-json",
       "--verbose",
+      "--replay-user-messages",
     ]);
   });
 
@@ -1521,6 +1523,24 @@ describe("native bridge argv", () => {
     expect(resolveAt).toBeGreaterThan(-1);
     expect(assertAt).toBeGreaterThan(resolveAt);
     expect(launchAt).toBeGreaterThan(assertAt);
+  });
+
+  it("does not paint a live-steer read receipt on stdin write success (ID-238)", () => {
+    const source = fs
+      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
+    const writerAt = source.indexOf(
+      "permissionTransport?.steering?.attachWriter(async (message) => {",
+    );
+    const writerEnd = source.indexOf("});", writerAt);
+    const writer = source.slice(writerAt, writerEnd);
+    expect(writerAt).toBeGreaterThan(-1);
+    expect(writer).toContain("resolve(!error)");
+    expect(writer).not.toContain("acknowledgeWritten");
+    expect(writer).not.toContain('kind: "steerRead"');
+    expect(source).toContain("shouldHoldBridgeTerminal(permissionTransport?.steering)");
+    expect(source).toContain('CUKII_INBOX_GRACE_MS: "0"');
+    expect(source).toContain("--replay-user-messages");
   });
 });
 

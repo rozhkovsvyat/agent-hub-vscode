@@ -59,7 +59,10 @@ import {
   registerNestedWorkerFollower,
   type NestedWorkerFollower,
 } from "./nestedWorkerFollow";
-import { BridgeSteeringController } from "./bridgeSteer";
+import {
+  BridgeSteeringController,
+  shouldHoldBridgeTerminal,
+} from "./bridgeSteer";
 import {
   bridgeControlPrompt,
   bridgeControlSummary,
@@ -1108,6 +1111,9 @@ export function routeForModel(
         "--output-format",
         "stream-json",
         "--verbose",
+        // Re-emit consumed stdin user envelopes so live-steer read receipts
+        // wait on vendor consumption, not on the OS accepting the write.
+        "--replay-user-messages",
       ],
       format: "anthropic-envelope",
       stdinFormat: "claude-stream-json",
@@ -1989,6 +1995,11 @@ async function* launchBridgeChild(options: {
       // Kept for vendors that preserve inherited env. The authoritative MCP
       // binding is the pid + process-start-token record registered below.
       ...(sessionId ? { CUKII_SESSION_ID: sessionId } : {}),
+      // Unread inbox follow-ups must interrupt the next tool, not wait 45s.
+      // Compact is not a protocol turn-end for Codex; the gate is the live path.
+      ...(supportsBrokerInbox(brokerModel)
+        ? { CUKII_INBOX_GRACE_MS: "0" }
+        : {}),
     },
     shell: false,
     // POSIX Stop targets the whole process group (CLI + shells/tools/MCP
@@ -2025,6 +2036,13 @@ async function* launchBridgeChild(options: {
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {
       if (event.kind === "complete") {
+        if (shouldHoldBridgeTerminal(permissionTransport?.steering)) {
+          // Claude stream-json keeps stdin open across `result` so a live
+          // follow-up can start the next native turn. Settling here killed
+          // the process and painted delivered on a write the vendor never
+          // consumed, so the GUI outbox would not redeliver (ID-228/231/239).
+          continue;
+        }
         // The child can close before the generator drains this queue. Record
         // the receipt at parse time so teardown cannot overwrite the turn.
         protocolTerminalReceived = true;
@@ -2122,18 +2140,10 @@ async function* launchBridgeChild(options: {
         }
         return new Promise<boolean>((resolve) => {
           child.stdin.write(claudeStreamingInput(message.content), (error) => {
-            const written = !error;
-            if (
-              written &&
-              permissionTransport?.steering?.acknowledgeWritten(
-                message.messageId,
-              )
-            ) {
-              // Claude accepts the envelope but never echoes it, so the
-              // echo-based receipt would never fire for this vendor.
-              queue.push({ kind: "steerRead", messageId: message.messageId });
-            }
-            resolve(written);
+            // Write success is not a read receipt. `--replay-user-messages`
+            // re-emits the consumed envelope; consumeVendorEcho paints ✓✓.
+            // If the process exits first, close() defers so the outbox drains.
+            resolve(!error);
           });
         });
       });
@@ -2223,6 +2233,15 @@ async function* launchBridgeChild(options: {
       return;
     }
     enqueueVisibleEvents(parser.flush());
+    if (shouldHoldBridgeTerminal(permissionTransport?.steering)) {
+      // Native session ended before consuming stdin follow-ups. Defer them
+      // so the GUI outbox redelivers on a fresh spawn instead of leaving
+      // one checkmark on a write the dead process will never read.
+      permissionTransport?.steering?.close();
+      if (!protocolTerminalReceived) {
+        enqueueVisibleEvents([{ kind: "complete" }]);
+      }
+    }
     if (
       !cancelled &&
       bridgeProcessExitIsFailure(

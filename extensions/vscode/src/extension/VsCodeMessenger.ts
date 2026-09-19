@@ -329,6 +329,26 @@ export class VsCodeMessenger {
     return this.bridgeRuns.activeFor(protocol);
   }
 
+  /**
+   * Live-steer must bind to the run that will own stdin, including a candidate
+   * still acquiring the slot. Routing only through `activeFor` deferred the
+   * first follow-up of a new turn (one checkmark) while a later one landed
+   * on the attached writer (two checkmarks) — ID-238.
+   */
+  private bridgeRunForSteer(
+    protocol: VsCodeWebviewProtocol,
+    request: { sessionId: string; brokerModel?: BrokerModel },
+  ): ActiveBridgeRun | undefined {
+    const active = this.bridgeRuns.activeFor(protocol);
+    if (bridgeRunAcceptsSteer(active, request)) return active;
+    const candidates = this.bridgeRunCandidates.get(protocol);
+    if (!candidates) return undefined;
+    for (const candidate of [...candidates.values()].reverse()) {
+      if (bridgeRunAcceptsSteer(candidate, request)) return candidate;
+    }
+    return undefined;
+  }
+
   private async runAuthTerminalFlow(
     terminal: vscode.Terminal,
     spec: {
@@ -1521,8 +1541,8 @@ export class VsCodeMessenger {
       "cukii/steerDuringStream",
       async (msg): Promise<CukiiSteerReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
-        const run = this.bridgeRuns.activeFor(protocol);
-        if (!bridgeRunAcceptsSteer(run, msg.data)) {
+        const run = this.bridgeRunForSteer(protocol, msg.data);
+        if (!run) {
           return {
             messageId: msg.data.messageId,
             sessionId: msg.data.sessionId,
