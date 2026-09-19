@@ -372,6 +372,13 @@ export class YougileIssueReporter {
   private async probeCapability(): Promise<CukiiIssueReportCapability> {
     const credential = await this.credential();
     if (!("key" in credential)) return credential;
+    const board = await this.probeBoard(credential.key);
+    return board.available && credential.accountLabel
+      ? { ...board, accountLabel: credential.accountLabel }
+      : board;
+  }
+
+  private async probeBoard(key: string): Promise<CukiiIssueReportCapability> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8_000);
     try {
@@ -383,7 +390,7 @@ export class YougileIssueReporter {
         `${YOUGILE_API_BASE}/boards?${query.toString()}`,
         {
           method: "GET",
-          headers: { Authorization: `Bearer ${credential.key}` },
+          headers: { Authorization: `Bearer ${key}` },
           signal: controller.signal,
         },
       );
@@ -396,19 +403,64 @@ export class YougileIssueReporter {
         (board) => (board as { id?: unknown }).id === CUKII_BUGS_BOARD_ID,
       );
       return boardVisible
-        ? {
-            available: true,
-            reason: "available",
-            ...(credential.accountLabel
-              ? { accountLabel: credential.accountLabel }
-              : {}),
-          }
+        ? { available: true, reason: "available" }
         : { available: false, reason: "board_unavailable" };
     } catch {
       return { available: false, reason: "unreachable" };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Everything delivery needs to know about the credential, asked in one
+   * parallel batch: /users/me proves the key while the board probe proves
+   * access. Back-to-back probes used to add two extra round trips to every
+   * report on top of the uploads.
+   */
+  private async deliveryKey(): Promise<string> {
+    const account = await readYougileAccount(
+      this.host.store,
+      this.host.environment ?? {},
+    );
+    if (!account) {
+      throw new DeliveryError(
+        "Sign in to YouGile before the queued report can be delivered.",
+        300_000,
+      );
+    }
+    const [probe, board] = await Promise.all([
+      probeYougileKey(account.key, {
+        http: (url, init) =>
+          this.http(url, {
+            method: "GET",
+            headers: init.headers,
+            signal: init.signal,
+          }),
+      }),
+      this.probeBoard(account.key),
+    ]);
+    if (probe.verdict === "rejected" || board.reason === "not_authenticated") {
+      throw new DeliveryError(
+        "Sign in to YouGile before the queued report can be delivered.",
+        300_000,
+      );
+    }
+    if (probe.verdict === "unreachable") {
+      throw new DeliveryError(
+        "YouGile account status is temporarily unavailable.",
+        300_000,
+      );
+    }
+    if (!board.available) {
+      throw new DeliveryError(
+        board.reason === "board_unavailable"
+          ? "The YouGile account has no access to the Cukii Bugs board."
+          : "The Cukii Bugs board is temporarily unavailable.",
+        300_000,
+      );
+    }
+    return account.key;
   }
 
   async registerPickedImages(
@@ -580,13 +632,42 @@ export class YougileIssueReporter {
     submission: CukiiIssueReportSubmission,
   ): Promise<CukiiIssueReportReceipt> {
     this.validateSubmission(submission);
-    return this.withReportAttemptLock(submission.reportId, async () => {
-      const existingReceipt = await this.readReceipt(submission.reportId);
-      if (existingReceipt) return existingReceipt;
-      let stored = await this.readReport(submission.reportId);
-      if (!stored) stored = await this.persistSubmission(submission);
-      this.releasePickedImages(submission.attachmentIds);
-      return this.attempt(stored);
+    const existingReceipt = await this.readReceipt(submission.reportId);
+    if (existingReceipt) return existingReceipt;
+    let stored = await this.readReport(submission.reportId);
+    if (!stored) stored = await this.persistSubmission(submission);
+    this.releasePickedImages(submission.attachmentIds);
+    // Persist is the only thing the webview must wait for. YouGile probes,
+    // uploads and task creation used to run inside this RPC, so a slow board
+    // froze the form on "Sending…" (and a retry joined the same hung promise).
+    this.enqueueDelivery(stored);
+    return this.queuedReceipt(stored);
+  }
+
+  private queuedReceipt(report: StoredIssueReport): CukiiIssueReportReceipt {
+    return {
+      reportId: report.reportId,
+      status: "queued",
+      ...(report.taskId ? { taskId: report.taskId } : {}),
+      message:
+        "Saved locally. Cukii will retry delivery to YouGile automatically.",
+    };
+  }
+
+  private enqueueDelivery(report: StoredIssueReport): void {
+    if (this.reportAttempts.has(report.reportId)) return;
+    void this.withReportAttemptLock(report.reportId, async () => {
+      const receipt = await this.readReceipt(report.reportId);
+      if (receipt) return receipt;
+      const current = await this.readReport(report.reportId);
+      return this.attempt(current ?? report);
+    }).catch((error) => {
+      recordCukiiDiagnostic("yougile.report.delivery_failed", {
+        reportId: report.reportId,
+        message: maskCukiiReportText(
+          error instanceof Error ? error.message : String(error),
+        ).slice(0, 200),
+      });
     });
   }
 
@@ -809,13 +890,7 @@ export class YougileIssueReporter {
       ).slice(0, 500);
       await this.writeReport(report);
       this.schedule(delay);
-      return {
-        reportId: report.reportId,
-        status: "queued",
-        ...(report.taskId ? { taskId: report.taskId } : {}),
-        message:
-          "Saved locally. Cukii will retry delivery to YouGile automatically.",
-      };
+      return this.queuedReceipt(report);
     }
   }
 
@@ -971,34 +1046,26 @@ export class YougileIssueReporter {
   private async deliver(
     report: StoredIssueReport,
   ): Promise<CukiiIssueReportReceipt> {
-    const credential = await this.credential();
-    if (!("key" in credential)) {
-      throw new DeliveryError(
-        credential.reason === "unreachable"
-          ? "YouGile account status is temporarily unavailable."
-          : "Sign in to YouGile before the queued report can be delivered.",
-        300_000,
-      );
-    }
-    const capability = await this.probeCapability();
-    if (!capability.available) {
-      throw new DeliveryError(
-        capability.reason === "board_unavailable"
-          ? "The YouGile account has no access to the Cukii Bugs board."
-          : "The Cukii Bugs board is temporarily unavailable.",
-        300_000,
-      );
-    }
+    const key = await this.deliveryKey();
 
-    for (const file of report.files) {
-      if (file.remoteUrl) continue;
-      file.remoteUrl = await this.uploadFile(credential.key, report, file);
+    const pendingUploads = report.files.filter((file) => !file.remoteUrl);
+    if (pendingUploads.length > 0) {
+      // Independent multipart uploads dominate delivery time; send them
+      // together and persist the batch once. A crash mid-batch re-uploads on
+      // the next attempt — task creation stays keyed by the report id, so no
+      // duplicate card can result.
+      const urls = await Promise.all(
+        pendingUploads.map((file) => this.uploadFile(key, report, file)),
+      );
+      pendingUploads.forEach((file, index) => {
+        file.remoteUrl = urls[index];
+      });
       await this.writeReport(report);
     }
 
     if (!report.taskId) {
       const created = (await this.requestJson(
-        credential.key,
+        key,
         "/tasks",
         "POST",
         {
@@ -1017,7 +1084,7 @@ export class YougileIssueReporter {
 
     if (!report.chatPosted) {
       const exists = await this.attachmentMessageExists(
-        credential.key,
+        key,
         report.taskId,
         report.reportId,
       );
@@ -1050,7 +1117,7 @@ export class YougileIssueReporter {
             : []),
         ].join("");
         await this.requestJson(
-          credential.key,
+          key,
           `/chats/${encodeURIComponent(report.taskId)}/messages`,
           "POST",
           { text, textHtml, label: "Cukii diagnostics" },
@@ -1064,11 +1131,11 @@ export class YougileIssueReporter {
       try {
         const [task, companies] = await Promise.all([
           this.requestJson(
-            credential.key,
+            key,
             `/tasks/${encodeURIComponent(report.taskId)}`,
             "GET",
           ),
-          this.requestJson(credential.key, "/companies", "GET"),
+          this.requestJson(key, "/companies", "GET"),
         ]);
         const commonId = (task as { idTaskCommon?: unknown }).idTaskCommon;
         const companyId = (companies as { id?: unknown }).id;
