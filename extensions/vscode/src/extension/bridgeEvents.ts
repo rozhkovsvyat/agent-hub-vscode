@@ -396,8 +396,27 @@ function isRecognizedSilentAnthropicEnvelope(event: any): boolean {
 }
 
 /** `codex exec --json`: события thread/turn/item. */
+function isCodexCompactionEvent(event: any): boolean {
+  const type = String(event?.type ?? "");
+  if (
+    type === "compaction.completed" ||
+    type === "thread.compacted" ||
+    type === "turn.compacted"
+  ) {
+    return true;
+  }
+  const itemType = String(event?.item?.type ?? "");
+  return (
+    event?.type === "item.completed" &&
+    (itemType === "compaction" || itemType === "context_compaction")
+  );
+}
+
 function parseCodexThread(event: any): BridgeEvent[] {
-  if (event.type === "turn.completed") {
+  if (event.type === "turn.completed" || isCodexCompactionEvent(event)) {
+    // Compact is a turn boundary for queued follow-ups: the native thread
+    // has dropped recent user text, so the GUI outbox must redeliver it
+    // as the next spawn instead of letting the agent continue old work.
     return [{ kind: "complete" }];
   }
   const item = event?.item;
