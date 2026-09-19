@@ -632,13 +632,42 @@ export class YougileIssueReporter {
     submission: CukiiIssueReportSubmission,
   ): Promise<CukiiIssueReportReceipt> {
     this.validateSubmission(submission);
-    return this.withReportAttemptLock(submission.reportId, async () => {
-      const existingReceipt = await this.readReceipt(submission.reportId);
-      if (existingReceipt) return existingReceipt;
-      let stored = await this.readReport(submission.reportId);
-      if (!stored) stored = await this.persistSubmission(submission);
-      this.releasePickedImages(submission.attachmentIds);
-      return this.attempt(stored);
+    const existingReceipt = await this.readReceipt(submission.reportId);
+    if (existingReceipt) return existingReceipt;
+    let stored = await this.readReport(submission.reportId);
+    if (!stored) stored = await this.persistSubmission(submission);
+    this.releasePickedImages(submission.attachmentIds);
+    // Persist is the only thing the webview must wait for. YouGile probes,
+    // uploads and task creation used to run inside this RPC, so a slow board
+    // froze the form on "Sending…" (and a retry joined the same hung promise).
+    this.enqueueDelivery(stored);
+    return this.queuedReceipt(stored);
+  }
+
+  private queuedReceipt(report: StoredIssueReport): CukiiIssueReportReceipt {
+    return {
+      reportId: report.reportId,
+      status: "queued",
+      ...(report.taskId ? { taskId: report.taskId } : {}),
+      message:
+        "Saved locally. Cukii will retry delivery to YouGile automatically.",
+    };
+  }
+
+  private enqueueDelivery(report: StoredIssueReport): void {
+    if (this.reportAttempts.has(report.reportId)) return;
+    void this.withReportAttemptLock(report.reportId, async () => {
+      const receipt = await this.readReceipt(report.reportId);
+      if (receipt) return receipt;
+      const current = await this.readReport(report.reportId);
+      return this.attempt(current ?? report);
+    }).catch((error) => {
+      recordCukiiDiagnostic("yougile.report.delivery_failed", {
+        reportId: report.reportId,
+        message: maskCukiiReportText(
+          error instanceof Error ? error.message : String(error),
+        ).slice(0, 200),
+      });
     });
   }
 
@@ -861,13 +890,7 @@ export class YougileIssueReporter {
       ).slice(0, 500);
       await this.writeReport(report);
       this.schedule(delay);
-      return {
-        reportId: report.reportId,
-        status: "queued",
-        ...(report.taskId ? { taskId: report.taskId } : {}),
-        message:
-          "Saved locally. Cukii will retry delivery to YouGile automatically.",
-      };
+      return this.queuedReceipt(report);
     }
   }
 

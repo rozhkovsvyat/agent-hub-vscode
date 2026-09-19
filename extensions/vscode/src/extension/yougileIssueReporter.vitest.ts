@@ -433,6 +433,19 @@ describe("YougileIssueReporter", () => {
     for (const id of ["report-1001", "report-1002", "report-1003"]) {
       expect((await fx.reporter.submit(submission(id))).status).toBe("queued");
     }
+    // Each submit now kicks delivery in the background, so wait until every
+    // first attempt has recorded its 502 before opening the retry window.
+    await vi.waitFor(() => {
+      for (const id of ["report-1001", "report-1002", "report-1003"]) {
+        const stored = JSON.parse(
+          fs.readFileSync(
+            path.join(fx.root, "pending", id, "report.json"),
+            "utf8",
+          ),
+        ) as { attempts: number };
+        expect(stored.attempts).toBeGreaterThan(0);
+      }
+    });
 
     fx.setFailUploads(false);
     fx.advance(61_000);
@@ -469,13 +482,15 @@ describe("YougileIssueReporter", () => {
       onUploadStart: markUploadStarted,
     });
 
-    const direct = fx.reporter.submit(submission("report-race-0001"));
+    const queued = await fx.reporter.submit(submission("report-race-0001"));
+    expect(queued.status).toBe("queued");
     await uploadStarted;
     const background = fx.reporter.flush();
     releaseUpload();
+    await background;
 
-    const [receipt] = await Promise.all([direct, background]);
-    expect(receipt).toMatchObject({ status: "sent", taskId: "task-1" });
+    const sent = await fx.reporter.submit(submission("report-race-0001"));
+    expect(sent).toMatchObject({ status: "sent", taskId: "task-1" });
     expect(
       fx.calls.filter(
         (call) => call.method === "POST" && call.url.endsWith("/upload-file"),
@@ -517,6 +532,9 @@ describe("YougileIssueReporter", () => {
     const report = submission("report-parallel");
     report.attachmentIds = [picked.id];
 
+    const queued = await fx.reporter.submit(report);
+    expect(queued.status).toBe("queued");
+    await fx.reporter.flush();
     const receipt = await fx.reporter.submit(report);
 
     expect(receipt.status).toBe("sent");
@@ -532,6 +550,65 @@ describe("YougileIssueReporter", () => {
         (call) => call.method === "POST" && call.url.endsWith("/upload-file"),
       ),
     ).toHaveLength(3);
+  });
+
+  it("returns a queued receipt before YouGile uploads finish", async () => {
+    let releaseUpload!: () => void;
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    const fx = fixture({ uploadGate });
+
+    const receipt = await fx.reporter.submit(submission("report-background"));
+    expect(receipt.status).toBe("queued");
+    expect(
+      fs.existsSync(
+        path.join(fx.root, "pending", "report-background", "report.json"),
+      ),
+    ).toBe(true);
+    expect(
+      fx.calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/tasks"),
+      ),
+    ).toHaveLength(0);
+
+    releaseUpload();
+    await fx.reporter.flush();
+    await expect(
+      fx.reporter.submit(submission("report-background")),
+    ).resolves.toMatchObject({ status: "sent", taskId: "task-1" });
+  });
+
+  it("does not block a retry behind a hung in-flight delivery", async () => {
+    let releaseUpload!: () => void;
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    let markUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      markUploadStarted = resolve;
+    });
+    const fx = fixture({
+      uploadGate,
+      onUploadStart: markUploadStarted,
+    });
+
+    await expect(
+      fx.reporter.submit(submission("report-hung")),
+    ).resolves.toMatchObject({ status: "queued" });
+    await uploadStarted;
+
+    const retryStarted = Date.now();
+    await expect(
+      fx.reporter.submit(submission("report-hung")),
+    ).resolves.toMatchObject({ status: "queued" });
+    expect(Date.now() - retryStarted).toBeLessThan(250);
+
+    releaseUpload();
+    await fx.reporter.flush();
+    await expect(
+      fx.reporter.submit(submission("report-hung")),
+    ).resolves.toMatchObject({ status: "sent" });
   });
 
   it("cleans crash orphans before reading the durable outbox", async () => {
