@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 import { vi } from "vitest";
 import { renderWithProviders } from "../../../util/test/render";
-import { Chat, INITIAL_TRANSCRIPT_WINDOW } from "../Chat";
+import { Chat, INITIAL_TRANSCRIPT_WINDOW, stickySafeTranscriptStart } from "../Chat";
 import {
   newSession,
   setActive,
@@ -82,7 +82,7 @@ describe("Cukii saved-session loading", () => {
   });
 
   it("never invokes old transcript rows on first render and loads one earlier batch", async () => {
-    const { store, container, user } = await renderWithProviders(<Chat />);
+    const { store, container } = await renderWithProviders(<Chat />);
     const history = Array.from(
       { length: INITIAL_TRANSCRIPT_WINDOW * 2 + 1 },
       (_, index) => ({
@@ -106,7 +106,11 @@ describe("Cukii saved-session loading", () => {
       );
     });
 
-    expect(container.textContent).toContain("Load earlier messages");
+    expect(container.textContent).not.toContain("Load earlier messages");
+    expect(container.querySelector(".cukii-load-earlier")).toBeNull();
+    expect(
+      container.querySelector('[data-testid="cukii-history-sentinel"]'),
+    ).not.toBeNull();
     expect(store.getState().session.history).toHaveLength(
       INITIAL_TRANSCRIPT_WINDOW * 2 + 1,
     );
@@ -119,7 +123,23 @@ describe("Cukii saved-session loading", () => {
       `assistant-${INITIAL_TRANSCRIPT_WINDOW * 2}`,
     );
     markdownRenderSpy.mockClear();
-    await user.click(container.querySelector(".cukii-load-earlier")!);
+    const transcript = container.querySelector<HTMLElement>(".cukii-transcript")!;
+    Object.defineProperty(transcript, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(transcript, "scrollHeight", {
+      configurable: true,
+      value: 2400,
+    });
+    Object.defineProperty(transcript, "scrollTop", {
+      configurable: true,
+      value: 0,
+      writable: true,
+    });
+    await act(async () => {
+      transcript.dispatchEvent(new Event("scroll"));
+    });
     // Existing rows are real React.memo instances, so only the newly inserted
     // earlier batch reaches the markdown leaf during window expansion.
     expectOnlyWindowRows(1, INITIAL_TRANSCRIPT_WINDOW + 1);
@@ -131,8 +151,33 @@ describe("Cukii saved-session loading", () => {
     );
   });
 
-  it("exposes dark pagination as a native keyboard-operable secondary button", async () => {
-    const { store, container, user } = await renderWithProviders(<Chat />);
+  it("keeps the user prompt that starts a cut turn so the sticky header never vanishes", () => {
+    const history = [
+      {
+        message: { id: "u0", role: "user" as const, content: "first" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a0", role: "assistant" as const, content: "answer" },
+        contextItems: [],
+      },
+      {
+        message: { id: "u1", role: "user" as const, content: "second" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a1", role: "assistant" as const, content: "later" },
+        contextItems: [],
+      },
+    ];
+    expect(stickySafeTranscriptStart(history, 1)).toBe(2);
+    expect(stickySafeTranscriptStart(history, 2)).toBe(2);
+    expect(stickySafeTranscriptStart(history, 3)).toBe(0);
+    expect(stickySafeTranscriptStart(history, 4)).toBe(0);
+  });
+
+  it("loads earlier history automatically when the transcript reaches the top", async () => {
+    const { store, container } = await renderWithProviders(<Chat />);
     const history = Array.from(
       { length: INITIAL_TRANSCRIPT_WINDOW + 1 },
       (_, index) => ({
@@ -147,24 +192,37 @@ describe("Cukii saved-session loading", () => {
     await act(async () => {
       store.dispatch(
         newSession({
-          sessionId: "keyboard-pagination",
-          title: "Keyboard pagination",
+          sessionId: "auto-pagination",
+          title: "Auto pagination",
           workspaceDirectory: "D:/Brain/vault",
           history,
         }),
       );
     });
 
-    const button = container.querySelector<HTMLButtonElement>(
-      "button.cukii-load-earlier",
-    );
-    expect(button).not.toBeNull();
-    expect(button).toHaveAttribute("type", "button");
-    button!.focus();
-    expect(button).toHaveFocus();
-    await user.keyboard("{Enter}");
     expect(container.querySelector(".cukii-load-earlier")).toBeNull();
+    expect(container.textContent).not.toContain("assistant-0");
+    const transcript = container.querySelector<HTMLElement>(".cukii-transcript")!;
+    Object.defineProperty(transcript, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(transcript, "scrollHeight", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(transcript, "scrollTop", {
+      configurable: true,
+      value: 0,
+      writable: true,
+    });
+    await act(async () => {
+      transcript.dispatchEvent(new Event("scroll"));
+    });
     expect(container.textContent).toContain("assistant-0");
+    expect(
+      container.querySelector('[data-testid="cukii-history-sentinel"]'),
+    ).toBeNull();
   });
 
   it("keeps saved rows memoized for parent updates but reacts to live row inputs", async () => {
