@@ -300,22 +300,95 @@ function gateCommand(
  * a quoted script path reaches python as a literal filename containing quote
  * characters, the gate never starts, and every tool call is denied. The
  * command must therefore stay unquoted, which forbids spaces in the gate
- * path — fail closed instead of "fixing" a space with quotes, because
- * quoting is exactly the defect this prevents. Codex/grok/kimi keep the
- * quoted form: their TOML/JSON parsers consume the quotes.
+ * path. A spaced gate (a profile like `C:\Users\Иван Петров`) is served
+ * through a shim at a space-free path — never by "fixing" the space with
+ * quotes, because quoting is exactly the defect this prevents. When even the
+ * shim root carries a space the registration fails closed with an actionable
+ * message. Codex/grok/kimi keep the quoted form: their TOML/JSON parsers
+ * consume the quotes.
  */
 function qwenGateCommand(
   brokerDir: string,
   options?: BrokerIntegrationOptions,
 ): string {
   const gate = path.join(brokerDir, "hooks", GATE_MARKER);
-  const command = `${brokerPythonCommand(options)} ${gate} -Harness qwen`;
-  if (gate.includes(" ") || command.includes('"') || command.includes("'")) {
-    throw new Error(
-      `PreToolUse hook command must stay unquoted (offending: ${command})`,
+  let target = gate;
+  if (gate.includes(" ")) {
+    if (process.platform !== "win32") {
+      throw qwenGateRegistrationError(
+        gate,
+        "no persistent space-free shim location exists on this platform",
+      );
+    }
+    target = qwenGateShimPath(options);
+    if (target.includes(" ")) {
+      throw qwenGateRegistrationError(
+        gate,
+        `even the shim root (${envOf(options).ProgramData ?? "C:\\ProgramData"}) contains a space`,
+      );
+    }
+    // Write (or refresh) the shim as part of computing the command so a
+    // relocated broker package cannot leave a stale exec path behind.
+    writeQwenGateShim(gate, options);
+  }
+  const command = `${brokerPythonCommand(options)} ${target} -Harness qwen`;
+  if (command.includes('"') || command.includes("'")) {
+    throw qwenGateRegistrationError(
+      gate,
+      `the command picks up a quote character: ${command}`,
     );
   }
   return command;
+}
+
+function qwenGateRegistrationError(gate: string, detail: string): Error {
+  return new Error(
+    `cannot register the Cukii PreToolUse gate for qwen on host ${os.hostname()}: ` +
+      `the gate path "${gate}" contains a space, and qwen splits hook commands on whitespace without shell quoting, so the path cannot be quoted either (${detail}). ` +
+      `Fix: copy the broker package to a path without spaces, point CUKII_BROKER_DIR at it, and restart the bridge. ` +
+      `Until then the broker inbox channel degrades to turn-end drain; tool calls are not blocked.`,
+  );
+}
+
+/**
+ * Space-free shim root for spaced gate paths. %ProgramData% survives reboots
+ * (a temp-dir shim would vanish and every tool call would deny) and is
+ * writable by the installing user. The shim file keeps the gate marker name
+ * so the settings idempotency check still matches.
+ */
+function qwenGateShimPath(options?: BrokerIntegrationOptions): string {
+  const base = envOf(options).ProgramData ?? "C:\\ProgramData";
+  return path.join(base, "cukii", "qwen-gate", GATE_MARKER);
+}
+
+function qwenGateShimBody(gate: string): string {
+  return [
+    MANAGED_MARKER,
+    "# Qwen splits hook commands on whitespace without shell quoting, so the",
+    "# real gate below (its path contains a space) cannot be named in the hook",
+    "# command. This shim lives at a space-free path and re-invokes the real",
+    "# gate with argv and stdio passed through untouched.",
+    "import subprocess",
+    "import sys",
+    "",
+    `raise SystemExit(subprocess.call([sys.executable, ${JSON.stringify(gate)}, *sys.argv[1:]]))`,
+    "",
+  ].join("\n");
+}
+
+function writeQwenGateShim(
+  gate: string,
+  options?: BrokerIntegrationOptions,
+): void {
+  const shimPath = qwenGateShimPath(options);
+  let current: string | undefined;
+  try {
+    current = fs.readFileSync(shimPath, "utf8");
+  } catch {
+    current = undefined;
+  }
+  if (current === qwenGateShimBody(gate)) return;
+  writeOwnerFileAtomic(shimPath, qwenGateShimBody(gate));
 }
 
 /** qwen: settings.json carries both mcpServers and hooks (JSON-safe edit). */
@@ -373,30 +446,84 @@ function ensureQwenBrokerRegistrationUnlocked(
     brokerEntry.env = entryEnv;
     pythonPathNormalized = true;
   }
-  if (!serialized.includes(GATE_MARKER)) {
-    const hooks =
-      typeof settings.hooks === "object" && settings.hooks !== null
-        ? (settings.hooks as Record<string, unknown>)
-        : {};
-    const preToolUse = Array.isArray(hooks.PreToolUse)
-      ? (hooks.PreToolUse as unknown[])
-      : [];
-    preToolUse.push({
-      hooks: [
-        {
-          type: "command",
-          command: qwenGateCommand(brokerDir, options),
-          timeout: 15000,
-        },
-      ],
-    });
-    hooks.PreToolUse = preToolUse;
-    settings.hooks = hooks;
-    hookAdded = true;
+  // MCP registration is JSON-safe and does not care about spaces in the
+  // broker path. The PreToolUse command is the one qwen splits on
+  // whitespace, so a spaced gate degrades the hook (shim, or skip with a
+  // human message) without rolling back the MCP entry.
+  let desiredCommand: string | undefined;
+  let hookSkipped: string | undefined;
+  try {
+    desiredCommand = qwenGateCommand(brokerDir, options);
+  } catch (error) {
+    hookSkipped =
+      error instanceof Error ? error.message : String(error);
   }
-  if (mcpAdded || hookAdded || trustNormalized || pythonPathNormalized)
+
+  const hooks =
+    typeof settings.hooks === "object" && settings.hooks !== null
+      ? (settings.hooks as Record<string, unknown>)
+      : {};
+  const preToolUse = Array.isArray(hooks.PreToolUse)
+    ? (hooks.PreToolUse as unknown[])
+    : [];
+  let hookNormalized = false;
+  if (desiredCommand) {
+    if (!serialized.includes(GATE_MARKER)) {
+      preToolUse.push({
+        hooks: [
+          {
+            type: "command",
+            command: desiredCommand,
+            timeout: 15000,
+          },
+        ],
+      });
+      hooks.PreToolUse = preToolUse;
+      settings.hooks = hooks;
+      hookAdded = true;
+    } else if (rewriteQwenGateCommands(preToolUse, desiredCommand)) {
+      hooks.PreToolUse = preToolUse;
+      settings.hooks = hooks;
+      hookNormalized = true;
+    }
+  }
+  if (
+    mcpAdded ||
+    hookAdded ||
+    hookNormalized ||
+    trustNormalized ||
+    pythonPathNormalized
+  ) {
     writeOwnerFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
-  return { mcpAdded, hookAdded };
+  }
+  return { mcpAdded, hookAdded, skipped: hookSkipped };
+}
+
+/**
+ * Rewrite an already-registered qwen gate command (quoted, spaced, or
+ * pointing at a stale shim) onto `desired`. Returns true when a command
+ * string actually changed.
+ */
+function rewriteQwenGateCommands(
+  preToolUse: unknown[],
+  desired: string,
+): boolean {
+  let changed = false;
+  for (const group of preToolUse) {
+    if (!group || typeof group !== "object") continue;
+    const hooks = (group as { hooks?: unknown }).hooks;
+    if (!Array.isArray(hooks)) continue;
+    for (const hook of hooks) {
+      if (!hook || typeof hook !== "object") continue;
+      const rec = hook as { command?: unknown };
+      const current = typeof rec.command === "string" ? rec.command : "";
+      if (current.includes(GATE_MARKER) && current !== desired) {
+        rec.command = desired;
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 export function ensureQwenBrokerRegistration(
