@@ -69,6 +69,25 @@ export function looksLikeAlibabaTokenPlanKey(value: string): boolean {
   return /^sk-(?:sp-)?[A-Za-z0-9._~+/-]+$/.test(key);
 }
 
+export function extractAlibabaTokenPlanKey(
+  raw: string | undefined,
+): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "");
+  if (looksLikeAlibabaTokenPlanKey(trimmed)) return trimmed;
+  const match = trimmed.match(/sk-(?:sp-)?[A-Za-z0-9._~+/-]{8,}/);
+  return match && looksLikeAlibabaTokenPlanKey(match[0])
+    ? match[0]
+    : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function safeEmail(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const email = value.trim();
@@ -385,23 +404,34 @@ export function alibabaQwenArgv(model: string): string[] {
   return ["--model", native];
 }
 
-function collectCredential(raw: string | undefined): string | undefined {
-  if (typeof raw !== "string") return undefined;
-  const key = raw.trim();
-  return looksLikeAlibabaTokenPlanKey(key) ? key : undefined;
-}
+export type AlibabaAuthPoll = {
+  intervalMs?: number;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
 
 export async function loginAlibabaTokenPlan(options: {
   host: AlibabaAuthHost;
   userHome?: string;
   fileSystem?: SettingsFileSystem;
   store?: ProtectedSecretStore;
+  poll?: AlibabaAuthPoll;
 }): Promise<{ opened: boolean; message: string }> {
   const store = options.store ?? secretStore;
   await options.host.openExternal(ALIBABA_CONSOLE_URL);
-  const fromClipboard = collectCredential(await options.host.readClipboard());
-  const credential =
-    fromClipboard ?? collectCredential(await options.host.promptSecret());
+  const intervalMs = options.poll?.intervalMs ?? 1_000;
+  const timeoutMs = options.poll?.timeoutMs ?? 180_000;
+  const sleep = options.poll?.sleep ?? delay;
+  const started = Date.now();
+  let credential: string | undefined;
+  for (;;) {
+    credential = extractAlibabaTokenPlanKey(await options.host.readClipboard());
+    if (credential) break;
+    if (Date.now() - started >= timeoutMs) break;
+    await sleep(intervalMs);
+  }
+  credential =
+    credential ?? extractAlibabaTokenPlanKey(await options.host.promptSecret());
   if (!credential) {
     return {
       opened: true,
@@ -456,6 +486,7 @@ export async function runAlibabaAuthAction(
     userHome?: string;
     fileSystem?: SettingsFileSystem;
     store?: ProtectedSecretStore;
+    poll?: AlibabaAuthPoll;
   },
 ): Promise<{ opened: boolean; message: string } | undefined> {
   if (action === "login") return loginAlibabaTokenPlan(options);

@@ -22,6 +22,7 @@ import {
   clearAlibabaCredential,
   loginAlibabaTokenPlan,
   logoutAlibabaTokenPlan,
+  extractAlibabaTokenPlanKey,
   looksLikeAlibabaTokenPlanKey,
   migratePlaintextAlibabaSettings,
   redactAlibabaSecrets,
@@ -282,6 +283,39 @@ describe("Alibaba Token Plan credentials", () => {
       accountLabel: VENDOR_ACCOUNT_COPY.disconnected,
     });
     expect(await store.get(ALIBABA_SECRET_KEY)).toBeUndefined();
+  });
+
+  it("waits for the console key to land on the clipboard instead of prompting", async () => {
+    const home = tempHome();
+    const store = memoryStore();
+    let reads = 0;
+    await loginAlibabaTokenPlan({
+      host: {
+        async openExternal() {
+          return true;
+        },
+        async readClipboard() {
+          reads += 1;
+          return reads === 1
+            ? "copied-the-docs-page"
+            : 'apiKey: "sk-sp-imported-after-browser-login"';
+        },
+        async promptSecret() {
+          throw new Error("Manage Accounts must not collect a key field");
+        },
+      },
+      userHome: home,
+      store,
+      poll: { intervalMs: 1, timeoutMs: 1_000, sleep: async () => undefined },
+    });
+    expect(extractAlibabaTokenPlanKey('Bearer sk-sp-pasted-from-docs')).toBe(
+      "sk-sp-pasted-from-docs",
+    );
+    expect(await alibabaIdentity({ userHome: home, store })).toEqual({
+      authenticated: true,
+      accountLabel: "Connected",
+    });
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it("builds the compatible-mode spawn env and refuses fake chat routes", async () => {
