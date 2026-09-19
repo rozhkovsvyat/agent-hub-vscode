@@ -34,7 +34,9 @@ describe("VsCodeMessenger native bridge run contract", () => {
 
   it("routes steering through the model-bound active-run identity", () => {
     expect(source).toContain("brokerModel: msg.data.brokerModel");
-    expect(source).toContain("bridgeRunAcceptsSteer(run, msg.data)");
+    expect(source).toContain("this.bridgeRunForSteer(protocol, msg.data)");
+    expect(source).toContain("bridgeRunAcceptsSteer(active, request)");
+    expect(source).toContain("bridgeRunAcceptsSteer(candidate, request)");
   });
 
   it("invalidates pending replacements when their webview is disposed", () => {

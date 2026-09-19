@@ -15,14 +15,22 @@ type PendingSteer = {
   resolve: (receipt: CukiiSteerReceipt) => void;
 };
 
+type AwaitingEcho = PendingSteer;
+
 /** Per-run steering ledger. Message ids make transport retries idempotent. */
 export class BridgeSteeringController {
   private readonly receipts = new Map<string, Promise<CukiiSteerReceipt>>();
   private readonly pending: PendingSteer[] = [];
   private writer: SteerWriter | undefined;
   private inFlight: PendingSteer | undefined;
-  /** Inputs accepted by stdin but not yet explicitly echoed by the vendor. */
-  private readonly awaitingVendorEcho: SteerMessage[] = [];
+  /**
+   * Stdin accepted the envelope, but the vendor has not echoed it yet.
+   * A successful write is not delivery: Claude `-p --input-format stream-json`
+   * can still emit `result` and exit without consuming that next user turn.
+   * Resolving "delivered" here stranded the GUI outbox (it only drains
+   * queued/deferred bubbles) and killed the native session on `result`.
+   */
+  private readonly awaitingVendorEcho: AwaitingEcho[] = [];
   /**
    * Echo-less transports acknowledge inside their async writer callback,
    * before `flush()` receives the successful writer result. Remember that
@@ -69,14 +77,32 @@ export class BridgeSteeringController {
     if (this.closed) return;
     this.closed = true;
     this.writer = undefined;
-    this.awaitingVendorEcho.length = 0;
     this.acknowledgedInFlightWrites.clear();
     if (this.inFlight) {
       this.inFlight.resolve(this.deferred(this.inFlight.message));
+      this.inFlight = undefined;
+    }
+    for (const awaiting of this.awaitingVendorEcho.splice(0)) {
+      awaiting.resolve(this.deferred(awaiting.message));
     }
     for (const pending of this.pending.splice(0)) {
       pending.resolve(this.deferred(pending.message));
     }
+  }
+
+  /**
+   * Stdin follow-ups the vendor has not echoed (or even accepted) yet.
+   * A Claude `result` must not settle the GUI run while this is true:
+   * stream-json keeps stdin open specifically so the next user turn can
+   * start in the same native process.
+   */
+  hasUnconsumedLiveSteers(): boolean {
+    return (
+      !this.closed &&
+      (this.pending.length > 0 ||
+        this.inFlight !== undefined ||
+        this.awaitingVendorEcho.length > 0)
+    );
   }
 
   /**
@@ -87,15 +113,16 @@ export class BridgeSteeringController {
    */
   consumeVendorEcho(text: string): string | undefined {
     const index = this.awaitingVendorEcho.findIndex(
-      (message) => stripImages(message.content) === text,
+      (awaiting) => stripImages(awaiting.message.content) === text,
     );
     if (index < 0) return undefined;
-    const messageId = this.awaitingVendorEcho.splice(index, 1)[0].messageId;
+    const awaiting = this.awaitingVendorEcho.splice(index, 1)[0];
     // A duplicate text is held in FIFO until this exact echo retires the
     // earlier message. Without that gate, two equal strings have no vendor
     // identifier and an out-of-order echo could paint ✓✓ on the wrong bubble.
+    awaiting.resolve(this.accepted(awaiting.message));
     void this.flush();
-    return messageId;
+    return awaiting.message.messageId;
   }
 
   /**
@@ -108,10 +135,11 @@ export class BridgeSteeringController {
   acknowledgeWritten(messageId: string): boolean {
     if (this.closed) return false;
     const index = this.awaitingVendorEcho.findIndex(
-      (message) => message.messageId === messageId,
+      (awaiting) => awaiting.message.messageId === messageId,
     );
     if (index >= 0) {
-      this.awaitingVendorEcho.splice(index, 1);
+      const awaiting = this.awaitingVendorEcho.splice(index, 1)[0];
+      awaiting.resolve(this.accepted(awaiting.message));
     } else if (
       this.inFlight?.message.messageId === messageId &&
       !this.acknowledgedInFlightWrites.has(messageId)
@@ -137,7 +165,7 @@ export class BridgeSteeringController {
         if (
           this.awaitingVendorEcho.some(
             (awaiting) =>
-              stripImages(awaiting.content) ===
+              stripImages(awaiting.message.content) ===
               stripImages(next.message.content),
           )
         ) {
@@ -153,15 +181,14 @@ export class BridgeSteeringController {
         }
         if (delivered && !this.closed) {
           if (
-            !this.acknowledgedInFlightWrites.delete(pending.message.messageId)
+            this.acknowledgedInFlightWrites.delete(pending.message.messageId)
           ) {
-            this.awaitingVendorEcho.push(pending.message);
+            pending.resolve(this.accepted(pending.message));
+          } else {
+            // Bytes reached stdin. Delivery waits for the vendor echo (or
+            // close(), which honestly defers so the GUI outbox can redeliver).
+            this.awaitingVendorEcho.push(pending);
           }
-          pending.resolve({
-            messageId: pending.message.messageId,
-            sessionId: this.sessionId,
-            status: "delivered",
-          });
         } else {
           this.acknowledgedInFlightWrites.delete(pending.message.messageId);
           pending.resolve(this.deferred(pending.message));
@@ -177,12 +204,21 @@ export class BridgeSteeringController {
         !this.closed &&
         !this.awaitingVendorEcho.some(
           (awaiting) =>
-            stripImages(awaiting.content) === stripImages(next.message.content),
+            stripImages(awaiting.message.content) ===
+            stripImages(next.message.content),
         )
       ) {
         void this.flush();
       }
     }
+  }
+
+  private accepted(message: SteerMessage): CukiiSteerReceipt {
+    return {
+      messageId: message.messageId,
+      sessionId: this.sessionId,
+      status: "delivered",
+    };
   }
 
   private deferred(message: SteerMessage): CukiiSteerReceipt {
@@ -192,4 +228,11 @@ export class BridgeSteeringController {
       status: "deferred",
     };
   }
+}
+
+/** Claude `result` is not the end of a stream-json session while stdin follow-ups are in flight. */
+export function shouldHoldBridgeTerminal(steering?: {
+  hasUnconsumedLiveSteers(): boolean;
+}): boolean {
+  return Boolean(steering?.hasUnconsumedLiveSteers());
 }
