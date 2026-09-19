@@ -2,8 +2,10 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  extractYougileKey,
   runYougileAuthAction,
   YOUGILE_API_BASE,
+  YOUGILE_APP_URL,
   YOUGILE_PROBE_PATH,
   YOUGILE_SECRET_KEY,
   yougileAccountStatus,
@@ -451,16 +453,57 @@ describe("YouGile account row", () => {
     ]);
   });
 
-  it("never asks for an API token or opens a token-management page", async () => {
-    const host = authHost({ login: OWNER, password: "password" });
-    await runYougileAuthAction("login", {
+  it("signs in from the YouGile app clipboard without asking for email or password", async () => {
+    const secrets = store();
+    const reads: string[] = [];
+    const host = {
+      promptCredentials: vi.fn(async () => {
+        throw new Error("Manage Accounts must not collect YouGile credentials");
+      }),
+      openExternal: vi.fn(async () => true),
+      readClipboard: vi.fn(async () => {
+        reads.push("clipboard");
+        return reads.length === 1 ? "not-a-key-yet" : KEY;
+      }),
+    };
+    const result = await runYougileAuthAction("login", {
+      host,
+      store: secrets,
+      http: loginHttp(),
+      poll: { intervalMs: 1, timeoutMs: 1_000, sleep: async () => undefined },
+    });
+    expect(host.openExternal).toHaveBeenCalledWith(YOUGILE_APP_URL);
+    expect(host.promptCredentials).not.toHaveBeenCalled();
+    expect(JSON.parse(secrets.values.get(YOUGILE_SECRET_KEY) ?? "{}")).toEqual({
+      key: KEY,
+      accountLabel: OWNER,
+      source: "plugin",
+    });
+    expect(result.message).toContain(OWNER);
+  });
+
+  it("extracts a YouGile key from quoted clipboard text", () => {
+    expect(extractYougileKey(`Bearer ${KEY}`)).toBe(KEY);
+    expect(extractYougileKey(`"${KEY}"`)).toBe(KEY);
+    expect(extractYougileKey("https://ru.yougile.com/team/abc")).toBeUndefined();
+  });
+
+  it("does not fall back to a password prompt when the browser key never arrives", async () => {
+    const host = {
+      promptCredentials: vi.fn(async () => {
+        throw new Error("Manage Accounts must not collect YouGile credentials");
+      }),
+      openExternal: vi.fn(async () => true),
+      readClipboard: vi.fn(async () => ""),
+    };
+    const result = await runYougileAuthAction("login", {
       host,
       store: store(),
       http: loginHttp(),
+      poll: { intervalMs: 1, timeoutMs: 0, sleep: async () => undefined },
     });
-    expect(Object.keys(host)).toEqual(["promptCredentials"]);
-    expect(host).not.toHaveProperty("promptSecret");
-    expect(host).not.toHaveProperty("openExternal");
+    expect(host.promptCredentials).not.toHaveBeenCalled();
+    expect(result.message).toMatch(/Ctrl\+~/);
   });
 
   it("uses the login identity while storing only the generated key", async () => {

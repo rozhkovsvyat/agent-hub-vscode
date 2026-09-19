@@ -1074,6 +1074,9 @@ export class VsCodeMessenger {
         return runYougileAuthAction(action, {
           store: this.context.secrets,
           host: {
+            openExternal: (url) =>
+              vscode.env.openExternal(vscode.Uri.parse(url)),
+            readClipboard: () => vscode.env.clipboard.readText(),
             promptCredentials: async () => {
               const login = await vscode.window.showInputBox({
                 ignoreFocusOut: true,
