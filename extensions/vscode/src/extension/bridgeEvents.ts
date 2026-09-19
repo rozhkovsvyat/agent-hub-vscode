@@ -5,10 +5,12 @@ import type { CukiiVendorUsageWindow } from "core/protocol/ideWebview";
  *
  * Схемы сняты живыми прогонами, а не взяты из документации:
  *  - `claude -p --output-format stream-json --verbose`,
- *    `grok -p --output-format streaming-messages-json` и Cursor
- *    `--output-format stream-json --stream-partial-output` дают совместимый конверт
- *    (`assistant` / `user` / `system` / `result` с блоками
- *    `thinking` | `text` | `tool_use` | `tool_result`), поэтому парсер общий;
+ *    `grok -p --output-format streaming-messages-json --include-partial-messages`
+ *    и Cursor `--output-format stream-json --stream-partial-output` дают
+ *    совместимый конверт (`assistant` / `user` / `system` / `result` /
+ *    `stream_event` с блоками `thinking` | `text` | `tool_use` | `tool_result`),
+ *    поэтому парсер общий. Partials are folded so a later whole message cannot
+ *    duplicate the live answer;
  *  - `codex exec --json` использует другую модель — `thread.started`,
  *    `turn.*`, `item.started` / `item.completed` с типами item'ов
  *    (`command_execution`, `agent_message`, `error`, …).
@@ -263,6 +265,33 @@ function explicitWaitForToolStart(
 function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   const out: BridgeEvent[] = [];
 
+  // Grok `--include-partial-messages` wraps Anthropic deltas in stream_event.
+  // Unwrap one level so the same block parser sees the inner payload.
+  if (event.type === "stream_event") {
+    const inner = event.event ?? event.message ?? event.data;
+    if (inner && typeof inner === "object") {
+      return parseAnthropicEnvelope(inner);
+    }
+  }
+
+  if (event.type === "content_block_delta") {
+    const delta = event.delta;
+    if (delta && typeof delta === "object") {
+      if (delta.type === "thinking_delta" || delta.type === "thinking") {
+        const text = asText(delta.thinking ?? delta.text);
+        return text ? [{ kind: "thinking", text }] : [];
+      }
+      const text = asText(delta.text);
+      if (text) return [{ kind: "text", text }];
+    }
+    return [];
+  }
+
+  if (event.type === "text" && event.subtype === "delta") {
+    const text = asText(event.text);
+    return text ? [{ kind: "text", text }] : [];
+  }
+
   if (event.type === "thinking" && event.subtype === "delta") {
     const text = asText(event.text);
     return text ? [{ kind: "thinking", text }] : [];
@@ -303,12 +332,18 @@ function parseAnthropicEnvelope(event: any): BridgeEvent[] {
   }
 
   if (event.type === "assistant" || event.type === "user") {
-    const content = event?.message?.content;
+    const content = event?.message?.content ?? event.content;
+    const topLevelDelta =
+      event.subtype === "delta" && typeof event.text === "string"
+        ? event.text
+        : undefined;
     const blocks = Array.isArray(content)
       ? content
       : typeof content === "string"
         ? [{ type: "text", text: content }]
-        : [];
+        : topLevelDelta
+          ? [{ type: "text", text: topLevelDelta }]
+          : [];
     if (
       event.type === "user" &&
       event.isMeta !== true &&
@@ -544,6 +579,15 @@ export class BridgeEventParser {
   private readonly seenStopHookFeedback = new Set<string>();
   /** FIFO companion to the set: retries are finite without retaining a run. */
   private readonly stopHookFeedbackOrder: string[] = [];
+  /**
+   * Cursor `--stream-partial-output` and Grok `--include-partial-messages`
+   * emit text deltas (or cumulative snapshots) and then repeat the whole
+   * assistant message. Concatenating both doubles every capsule. Thinking
+   * deltas between those chunks also flip the GUI role and split one answer
+   * into many bubbles. Fold inside one native process, reset on tools/turns.
+   */
+  private segmentText = "";
+  private textOpen = false;
 
   constructor(private readonly format: BridgeFormat) {}
 
@@ -635,6 +679,52 @@ export class BridgeEventParser {
     ) {
       this.structured = true;
     }
-    return events;
+    return this.format === "anthropic-envelope"
+      ? this.foldAssistantSegment(events)
+      : events;
+  }
+
+  /**
+   * Keep one live assistant segment: skip duplicate wholes, emit only the
+   * new suffix of a cumulative snapshot, and ignore thinking that would
+   * split the current answer into extra capsules.
+   */
+  private foldAssistantSegment(events: BridgeEvent[]): BridgeEvent[] {
+    const out: BridgeEvent[] = [];
+    for (const event of events) {
+      if (event.kind === "thinking") {
+        if (!this.textOpen) out.push(event);
+        continue;
+      }
+      if (event.kind === "text") {
+        const incoming = event.text;
+        if (!incoming) continue;
+        if (incoming === this.segmentText) continue;
+        if (this.segmentText && incoming.startsWith(this.segmentText)) {
+          const suffix = incoming.slice(this.segmentText.length);
+          this.segmentText = incoming;
+          this.textOpen = true;
+          if (suffix) out.push({ kind: "text", text: suffix });
+          continue;
+        }
+        this.segmentText += incoming;
+        this.textOpen = true;
+        out.push({ kind: "text", text: incoming });
+        continue;
+      }
+      if (
+        event.kind === "toolStart" ||
+        event.kind === "toolResult" ||
+        event.kind === "complete" ||
+        event.kind === "userEcho" ||
+        event.kind === "error" ||
+        event.kind === "terminalError"
+      ) {
+        this.segmentText = "";
+        this.textOpen = false;
+      }
+      out.push(event);
+    }
+    return out;
   }
 }
