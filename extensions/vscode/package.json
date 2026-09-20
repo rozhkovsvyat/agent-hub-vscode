@@ -141,6 +141,11 @@
           "type": "number",
           "default": 60,
           "description": "The period of time in minutes between automatic syncs."
+        },
+        "cukii.voiceLanguage": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Language for microphone dictation. `auto` uses the VS Code display language (Russian UI → Russian transcript). `detect` lets Whisper guess the spoken language. Or set a Whisper language such as `ru` / `russian` or `en` / `english`."
         }
       }
     },

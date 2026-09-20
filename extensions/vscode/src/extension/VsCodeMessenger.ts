@@ -74,6 +74,7 @@ import { cukiiSessionAttention } from "./cukiiSessionAttention";
 import { listBrokerModelCatalog } from "./bridgeModelCatalog";
 import {
   cancelVoiceRecording,
+  resolveWhisperTranscribeLanguage,
   startVoiceRecording,
   stopVoiceRecording,
   voiceRecordingStatus,
@@ -1051,7 +1052,15 @@ export class VsCodeMessenger {
       return await startVoiceRecording(msg.data.recordingId);
     });
     this.onWebview("cukii/stopVoiceRecording", async (msg) => {
-      return { text: await stopVoiceRecording(msg.data.recordingId) };
+      const language = resolveWhisperTranscribeLanguage({
+        configured: vscode.workspace
+          .getConfiguration("cukii")
+          .get<string>("voiceLanguage"),
+        vscodeLanguage: vscode.env.language,
+      });
+      return {
+        text: await stopVoiceRecording(msg.data.recordingId, { language }),
+      };
     });
     this.onWebview("cukii/cancelVoiceRecording", async (msg) => {
       await cancelVoiceRecording(msg.data.recordingId);

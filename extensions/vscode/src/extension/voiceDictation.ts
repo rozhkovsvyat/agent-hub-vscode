@@ -470,16 +470,167 @@ export function assertVoiceTranscriptIsUsable(
   }
 }
 
+export type WhisperLanguageSource = {
+  configured?: string | null;
+  vscodeLanguage?: string | null;
+};
+
+/**
+ * Whisper-base is multilingual, but with no language token it strongly prefers
+ * English and will decode Russian speech as English text. `auto` follows the
+ * VS Code display language; `detect` leaves language prediction to the model.
+ */
+const WHISPER_LANGUAGE_BY_CODE: Readonly<Record<string, string>> = {
+  af: "afrikaans",
+  am: "amharic",
+  ar: "arabic",
+  as: "assamese",
+  az: "azerbaijani",
+  ba: "bashkir",
+  be: "belarusian",
+  bg: "bulgarian",
+  bn: "bengali",
+  bo: "tibetan",
+  br: "breton",
+  bs: "bosnian",
+  ca: "catalan",
+  cs: "czech",
+  cy: "welsh",
+  da: "danish",
+  de: "german",
+  el: "greek",
+  en: "english",
+  es: "spanish",
+  et: "estonian",
+  eu: "basque",
+  fa: "persian",
+  fi: "finnish",
+  fo: "faroese",
+  fr: "french",
+  gl: "galician",
+  gu: "gujarati",
+  ha: "hausa",
+  haw: "hawaiian",
+  he: "hebrew",
+  hi: "hindi",
+  hr: "croatian",
+  ht: "haitian creole",
+  hu: "hungarian",
+  hy: "armenian",
+  id: "indonesian",
+  is: "icelandic",
+  it: "italian",
+  ja: "japanese",
+  jw: "javanese",
+  ka: "georgian",
+  kk: "kazakh",
+  km: "khmer",
+  kn: "kannada",
+  ko: "korean",
+  la: "latin",
+  lb: "luxembourgish",
+  ln: "lingala",
+  lo: "lao",
+  lt: "lithuanian",
+  lv: "latvian",
+  mg: "malagasy",
+  mi: "maori",
+  mk: "macedonian",
+  ml: "malayalam",
+  mn: "mongolian",
+  mr: "marathi",
+  ms: "malay",
+  mt: "maltese",
+  my: "myanmar",
+  ne: "nepali",
+  nl: "dutch",
+  nn: "nynorsk",
+  no: "norwegian",
+  oc: "occitan",
+  pa: "punjabi",
+  pl: "polish",
+  ps: "pashto",
+  pt: "portuguese",
+  ro: "romanian",
+  ru: "russian",
+  sa: "sanskrit",
+  sd: "sindhi",
+  si: "sinhala",
+  sk: "slovak",
+  sl: "slovenian",
+  sn: "shona",
+  so: "somali",
+  sq: "albanian",
+  sr: "serbian",
+  su: "sundanese",
+  sv: "swedish",
+  sw: "swahili",
+  ta: "tamil",
+  te: "telugu",
+  tg: "tajik",
+  th: "thai",
+  tk: "turkmen",
+  tl: "tagalog",
+  tr: "turkish",
+  tt: "tatar",
+  uk: "ukrainian",
+  ur: "urdu",
+  uz: "uzbek",
+  vi: "vietnamese",
+  yi: "yiddish",
+  yo: "yoruba",
+  zh: "chinese",
+};
+
+const WHISPER_LANGUAGE_BY_NAME: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    Object.values(WHISPER_LANGUAGE_BY_CODE).map((name) => [name, name]),
+  );
+
+export function resolveWhisperTranscribeLanguage(
+  source: WhisperLanguageSource = {},
+): string | undefined {
+  const configured = source.configured?.trim().toLowerCase();
+  if (configured && configured !== "auto") {
+    if (configured === "detect" || configured === "none") return undefined;
+    return canonicalWhisperLanguage(configured);
+  }
+  return canonicalWhisperLanguage(source.vscodeLanguage);
+}
+
+function canonicalWhisperLanguage(
+  raw?: string | null,
+): string | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase().replace(/_/g, "-");
+  if (
+    !normalized ||
+    normalized === "auto" ||
+    normalized === "detect" ||
+    normalized === "none"
+  ) {
+    return undefined;
+  }
+  if (WHISPER_LANGUAGE_BY_NAME[normalized]) {
+    return WHISPER_LANGUAGE_BY_NAME[normalized];
+  }
+  const code = normalized.split("-")[0] ?? "";
+  return WHISPER_LANGUAGE_BY_CODE[code];
+}
+
 export async function transcribeDecodedVoiceAudio(
   audio: Float32Array,
   getRecognizer: () => Promise<any> = transcriber,
+  options: { language?: string } = {},
 ): Promise<string> {
   assertVoiceAudioHasSpeech(audio);
   const recognize = await getRecognizer();
+  const language = options.language;
   const result = await recognize(audio, {
     chunk_length_s: 30,
     stride_length_s: 5,
     task: "transcribe",
+    ...(language ? { language } : {}),
   });
   const rawText = Array.isArray(result) ? result[0]?.text : result?.text;
   const text = typeof rawText === "string" ? rawText.trim() : "";
@@ -488,11 +639,18 @@ export async function transcribeDecodedVoiceAudio(
   return text;
 }
 
-export async function transcribeVoiceFile(inputPath: string): Promise<string> {
+export async function transcribeVoiceFile(
+  inputPath: string,
+  options: { language?: string } = {},
+): Promise<string> {
   if (!fs.existsSync(inputPath)) {
     throw new Error("The voice recording file is no longer available.");
   }
-  return transcribeDecodedVoiceAudio(await decodeVoiceAudio(inputPath));
+  return transcribeDecodedVoiceAudio(
+    await decodeVoiceAudio(inputPath),
+    transcriber,
+    options,
+  );
 }
 
 function rememberTerminal(
@@ -513,6 +671,7 @@ function rememberTerminal(
 async function finalizeRecording(
   recordingId: string,
   mode: "stop" | "cancel" | "expire",
+  options: { language?: string } = {},
 ): Promise<string | void> {
   const existing = finalizations.get(recordingId);
   if (existing) return existing;
@@ -542,7 +701,7 @@ async function finalizeRecording(
       const stats = fs.statSync(recording.outputPath);
       if (stats.size <= 44)
         throw new Error("No microphone audio was captured.");
-      return await transcribeVoiceFile(recording.outputPath);
+      return await transcribeVoiceFile(recording.outputPath, options);
     } finally {
       if (recording.durationTimer) clearTimeout(recording.durationTimer);
       recording.cleanupOwnedDir();
@@ -557,8 +716,11 @@ async function finalizeRecording(
   }
 }
 
-export async function stopVoiceRecording(recordingId: string): Promise<string> {
-  const transcript = await finalizeRecording(recordingId, "stop");
+export async function stopVoiceRecording(
+  recordingId: string,
+  options: { language?: string } = {},
+): Promise<string> {
+  const transcript = await finalizeRecording(recordingId, "stop", options);
   if (typeof transcript !== "string") {
     const terminal = terminalRecordings.get(recordingId);
     throw new Error(

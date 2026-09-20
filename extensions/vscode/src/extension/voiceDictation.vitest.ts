@@ -19,6 +19,7 @@ import {
   stopVoiceRecording,
   transcribeVoiceFile,
   transcribeDecodedVoiceAudio,
+  resolveWhisperTranscribeLanguage,
   verifyPackagedWhisperModel,
   voiceFfmpegExecutable,
   voiceRecordingStatus,
@@ -82,6 +83,59 @@ describe("voice dictation runtime", () => {
         text: "да, да, да — всё правильно",
       })),
     ).resolves.toBe("да, да, да — всё правильно");
+  });
+
+  it.each([
+    [{ vscodeLanguage: "ru" }, "russian"],
+    [{ vscodeLanguage: "ru-RU" }, "russian"],
+    [{ vscodeLanguage: "en-US" }, "english"],
+    [{ configured: "auto", vscodeLanguage: "uk" }, "ukrainian"],
+    [{ configured: "ru", vscodeLanguage: "en" }, "russian"],
+    [{ configured: "russian" }, "russian"],
+    [{ configured: "detect", vscodeLanguage: "ru" }, undefined],
+  ])("resolves Whisper language from %j", (input, expected) => {
+    expect(resolveWhisperTranscribeLanguage(input)).toBe(expected);
+  });
+
+  it("passes the resolved language so Russian speech is transcribed, not forced into English", async () => {
+    const audio = Float32Array.from(
+      { length: 16_000 },
+      (_, index) => 0.001 * Math.sin((2 * Math.PI * 220 * index) / 16_000),
+    );
+    let seen: Record<string, unknown> | undefined;
+    await expect(
+      transcribeDecodedVoiceAudio(
+        audio,
+        async () => async (_chunk: Float32Array, options: unknown) => {
+          seen = options as Record<string, unknown>;
+          return { text: "проверка микрофона" };
+        },
+        { language: "russian" },
+      ),
+    ).resolves.toBe("проверка микрофона");
+    expect(seen).toMatchObject({
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      task: "transcribe",
+      language: "russian",
+    });
+  });
+
+  it("omits language when the caller asked for model auto-detect", async () => {
+    const audio = Float32Array.from(
+      { length: 16_000 },
+      (_, index) => 0.001 * Math.sin((2 * Math.PI * 220 * index) / 16_000),
+    );
+    let seen: Record<string, unknown> | undefined;
+    await transcribeDecodedVoiceAudio(
+      audio,
+      async () => async (_chunk: Float32Array, options: unknown) => {
+        seen = options as Record<string, unknown>;
+        return { text: "hello there" };
+      },
+    );
+    expect(seen).toMatchObject({ task: "transcribe" });
+    expect(seen).not.toHaveProperty("language");
   });
 
   it.each([
