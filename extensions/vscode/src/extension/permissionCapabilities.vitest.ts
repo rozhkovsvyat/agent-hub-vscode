@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 import { parseVendorPermissionCapabilities } from "core/cukiiPermissionModes";
 
 import { probeCliRoute, probeCommandForRoute } from "./permissionCapabilities";
+import {
+  commandCandidates,
+  resolveProbeCommand,
+} from "./permissionCapabilities";
 
 describe("native permission capability probing", () => {
   // win32 only: `probeCommandForRoute` short-circuits to the bare route unless
@@ -198,4 +202,67 @@ describe("native permission capability probing", () => {
       }
     },
   );
+});
+
+// On macOS/Linux the probe used to resolve the CLI by bare name only, while
+// the bridge route tried the Cukii install directories first. A GUI VS Code
+// whose PATH comes from the launcher then reported every installed vendor as
+// "no verified permission mode" (the Grok card's screenshot) even though the
+// route could launch the same binary.
+describe("unix vendor CLI probe resolution", () => {
+  it("tries the Cukii install directories before PATH on macOS/Linux", () => {
+    expect(commandCandidates("grok", "/Users/owner", "darwin")).toEqual([
+      "/Users/owner/.local/share/cukii/node/bin/grok",
+      "/Users/owner/.local/bin/grok",
+      "grok",
+    ]);
+    expect(commandCandidates("qwen", "/home/owner", "linux")).toEqual([
+      "/home/owner/.local/share/cukii/node/bin/qwen",
+      "/home/owner/.local/bin/qwen",
+      "qwen",
+    ]);
+  });
+
+  it("keeps the bare name as the last Windows candidate", () => {
+    const candidates = commandCandidates(
+      "grok",
+      "C:\\Users\\owner",
+      "win32",
+    );
+    expect(candidates.at(-1)).toBe("grok");
+    expect(candidates).toContain(
+      "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\grok.cmd",
+    );
+  });
+
+  it("selects an installed absolute candidate a launcher PATH cannot see", async () => {
+    const fixtureDir = await fs.mkdtemp(
+      path.join("D:\\Scratch", "cukii probe home "),
+    );
+    const home = path.join(fixtureDir, "owner");
+    const bin = path.join(home, ".local", "bin");
+    try {
+      await fs.mkdir(bin, { recursive: true });
+      const executable = path.join(bin, "grok");
+      await fs.writeFile(executable, "#!/bin/sh\nexit 0\n");
+
+      const probe = resolveProbeCommand("grok", home, "darwin");
+      expect(probe?.route).toBe(`${home}/.local/bin/grok`);
+    } finally {
+      await fs.rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the bare name when no Cukii install exists", async () => {
+    const fixtureDir = await fs.mkdtemp(
+      path.join("D:\\Scratch", "cukii probe home "),
+    );
+    const emptyHome = path.join(fixtureDir, "nobody");
+    try {
+      const probe = resolveProbeCommand("grok", emptyHome, "darwin");
+      expect(probe?.route).toBe("grok");
+    } finally {
+      await fs.rm(fixtureDir, { recursive: true, force: true });
+    }
+  });
 });

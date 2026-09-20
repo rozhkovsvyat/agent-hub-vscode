@@ -10,6 +10,7 @@ import {
 } from "core/cukiiPermissionModes";
 
 import { windowsVendorCliCandidates } from "./vendorCliCandidates";
+import { cukiiVendorPathSegments, vendorSpawnEnv } from "./vendorCliInstaller";
 
 const VENDOR_PROGRAMS: Record<BrokerVendorId, string | undefined> = {
   claude: "claude",
@@ -113,13 +114,30 @@ export function selfTestClaudePermissionWorker(): Promise<boolean> {
   return claudePermissionWorkerReady;
 }
 
-function commandCandidates(program: string): string[] {
-  if (process.platform !== "win32") return [program];
-  const home = os.homedir();
+export function commandCandidates(
+  program: string,
+  userHome: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (platform !== "win32") {
+    // The bridge route tries these absolute candidates before PATH
+    // (bridgeChatAdapter.commandCandidates). A GUI VS Code on macOS/Linux gets
+    // PATH from the launcher, not the login shell, so a Cukii-installed CLI in
+    // ~/.local/bin is invisible to a bare-name probe: the probe reported
+    // "unavailable-route" while the route could launch the same binary, and
+    // every grok/qwen bridge run failed closed with "no verified permission
+    // mode". The probe must see the same binaries the route sees.
+    return [
+      ...cukiiVendorPathSegments(userHome, platform).map((segment) =>
+        path.posix.join(segment, program),
+      ),
+      program,
+    ];
+  }
   return [
-    ...windowsVendorCliCandidates(program, home),
+    ...windowsVendorCliCandidates(program, userHome),
     path.join(
-      home,
+      userHome,
       "scoop",
       "apps",
       "nodejs",
@@ -127,9 +145,9 @@ function commandCandidates(program: string): string[] {
       "bin",
       `${program}.cmd`,
     ),
-    path.join(home, "scoop", "persist", "nodejs", "bin", `${program}.cmd`),
-    path.join(home, "AppData", "Roaming", "npm", `${program}.cmd`),
-    path.join(home, ".local", "bin", `${program}.exe`),
+    path.join(userHome, "scoop", "persist", "nodejs", "bin", `${program}.cmd`),
+    path.join(userHome, "AppData", "Roaming", "npm", `${program}.cmd`),
+    path.join(userHome, ".local", "bin", `${program}.exe`),
     program,
   ];
 }
@@ -163,9 +181,14 @@ export function probeCommandForRoute(route: string): ProbeCommand {
   };
 }
 
-function resolveProbeCommand(program: string): ProbeCommand | undefined {
-  const candidate = commandCandidates(program).find((entry) =>
-    entry.includes("\\") || entry.includes("/") ? fs.existsSync(entry) : true,
+export function resolveProbeCommand(
+  program: string,
+  userHome: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): ProbeCommand | undefined {
+  const candidate = commandCandidates(program, userHome, platform).find(
+    (entry) =>
+      entry.includes("\\") || entry.includes("/") ? fs.existsSync(entry) : true,
   );
   return candidate ? probeCommandForRoute(candidate) : undefined;
 }
@@ -209,6 +232,11 @@ function runProbe(command: ProbeCommand, flag: string): Promise<ProbeOutput> {
     const child = spawn(command.program, args, {
       shell: false,
       windowsHide: true,
+      // The bridge launches vendor CLIs with the private Cukii runtime on PATH
+      // (vendorSpawnEnv); the probe must see the same environment, or an npm
+      // shim whose `#!/usr/bin/env node` shebang only resolves under that PATH
+      // spawns fine here but dies on the real route — and vice versa.
+      env: vendorSpawnEnv(),
       // Node quotes each argument for CreateProcess by default. For the fixed
       // `cmd.exe /c call "<trusted .cmd route>" --help` form that changes the
       // route quotes into literal backslashes, so cmd cannot find the script.

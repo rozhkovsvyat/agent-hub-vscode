@@ -14,6 +14,10 @@ const bridgeSource = fs.readFileSync(
   path.join(__dirname, "bridgeChatAdapter.ts"),
   "utf8",
 );
+const capabilitiesSource = fs.readFileSync(
+  path.join(__dirname, "permissionCapabilities.ts"),
+  "utf8",
+);
 
 describe("vendor installer host wiring", () => {
   it("subscribes to a fast terminal close before sending the install command", () => {
@@ -121,5 +125,16 @@ describe("vendor CLI launch environment", () => {
       "if (probe.status === 126 || probe.status === 127)",
     );
     expect(bridgeSource).toContain("could not be executed");
+  });
+
+  // The capability probe launches the same vendor CLIs the bridge launches.
+  // Probing with the bare host PATH reported an installed CLI as
+  // "unavailable-route" on the owner's Mac (GUI PATH has no ~/.local/bin),
+  // which then surfaced as "grok has no verified permission mode for this
+  // noninteractive bridge route." Probe and route share one env rule.
+  it("runs permission capability probes with the shared vendor PATH", () => {
+    expect(capabilitiesSource).toContain("env: vendorSpawnEnv()");
+    expect(capabilitiesSource).toContain("cukiiVendorPathSegments(");
+    expect(capabilitiesSource).not.toContain("return [program];");
   });
 });
