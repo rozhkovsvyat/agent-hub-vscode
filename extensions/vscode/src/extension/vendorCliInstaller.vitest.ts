@@ -282,6 +282,36 @@ describe("vendorInstallTerminalSpec", () => {
     },
   );
 
+  // 🔴 Card CUK-113. `kimiRoute` spawns `.kimi-code\bin\kimi.exe` directly and
+  // refuses shims, but this installer ran `npm install -g @moonshot-ai/kimi-code`,
+  // which writes `%APPDATA%\npm\kimi.ps1` and no `.kimi-code\bin` at all. Cukii
+  // installed exactly what Cukii then refused to run, and the user saw a
+  // successful install, a successful login, and "Kimi native executable is
+  // required at ...". The installer and the route must name the same file.
+  it("installs the native Kimi executable the Windows route actually spawns", () => {
+    const command = vendorInstallTerminalSpec("kimi", "win32")!.command;
+    expect(command).toContain("https://code.kimi.com/kimi-code/install.ps1");
+    expect(command).not.toContain("@moonshot-ai/kimi-code@latest");
+    expect(command).not.toContain("npm");
+    // Pinned, not left to the installer's default, so the two cannot drift.
+    expect(command).toContain("$env:KIMI_INSTALL_DIR = $root");
+    expect(command).toContain("Join-Path $env:USERPROFILE '.kimi-code'");
+    // And the install may not report success without the file being there.
+    expect(command).toContain("Join-Path $root 'bin\\kimi.exe'");
+    const verifyAt = command.indexOf("Test-Path -LiteralPath $native");
+    expect(verifyAt).toBeGreaterThan(command.indexOf("install.ps1"));
+    expect(command.indexOf("exit 0")).toBeGreaterThan(verifyAt);
+
+    // The other npm-only vendors keep the npm path: their routes accept the
+    // shim, so changing them would be an unprovoked change, not a fix.
+    expect(vendorInstallTerminalSpec("grok", "win32")!.command).toContain(
+      "@xai-official/grok@latest",
+    );
+    expect(vendorInstallTerminalSpec("kimi", "linux")!.command).toContain(
+      "@moonshot-ai/kimi-code@latest",
+    );
+  });
+
   it("uses Cursor's official platform-specific installers", () => {
     expect(vendorInstallTerminalSpec("cursor", "win32")!.command).toContain(
       "https://cursor.com/install?win32=true",

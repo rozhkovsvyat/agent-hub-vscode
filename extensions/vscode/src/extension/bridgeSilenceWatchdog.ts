@@ -1,3 +1,5 @@
+import type { BrokerVendorId } from "core/protocol/ideWebview";
+
 /**
  * Bounds a native bridge run that is alive but silent. Tool-backed waits are
  * allowed to run long; a child that never speaks, or that goes quiet after
@@ -12,6 +14,72 @@ export const BRIDGE_SILENCE_LIMITS = {
   toolIdleWarnMs: 20 * 60_000,
   toolIdleFailMs: 45 * 60_000,
 } as const;
+
+/**
+ * 🔴 Grok prints nothing — not one byte — until its entire session setup has
+ * finished, because its first stdout line is the `system/init` envelope that
+ * must already carry every MCP server's status. That setup is not bounded by
+ * the vendor's own `timeout_sec = 30`: a handshake round that misses its mark
+ * is retried up to a hard 70 s ceiling (`MCP background handshakes completed
+ * in 70.01s`), session hooks run before it, and the context snapshot makes
+ * network calls that time out on a machine with restricted egress.
+ *
+ * Measured with the exact argv this adapter builds (board card CUK-111,
+ * 2026-09-20): the same CLI, same model and same prompt answered in 9-11 s
+ * from a small directory and in **300.4 s** from the owner's loaded workspace.
+ * The model itself was never slow — its debug log shows `ttft_ms=3467` and a
+ * finished `stop_reason="stop"` in both runs. So a single 180 s budget killed
+ * a healthy run that already held its answer, then told the owner to "pick
+ * another model", which cannot help: the next launch pays the same setup.
+ *
+ * Only the pre-first-output phase is widened. Once the vendor has spoken, the
+ * ordinary idle limits apply again, so a genuinely wedged Grok is still
+ * failed closed.
+ */
+export const BRIDGE_VENDOR_STARTUP_LIMITS: Partial<
+  Record<
+    BrokerVendorId,
+    { firstOutputWarnMs: number; firstOutputFailMs: number }
+  >
+> = {
+  grok: { firstOutputWarnMs: 60_000, firstOutputFailMs: 600_000 },
+};
+
+export function bridgeSilenceLimits(
+  vendor: BrokerVendorId,
+): SilenceWatchdogLimits {
+  const startup = BRIDGE_VENDOR_STARTUP_LIMITS[vendor];
+  return startup
+    ? { ...BRIDGE_SILENCE_LIMITS, ...startup }
+    : BRIDGE_SILENCE_LIMITS;
+}
+
+/**
+ * What the owner should actually do, per vendor. The generic advice ("send it
+ * again, or pick another model") is wrong for a vendor whose silence is its
+ * own startup: repeating the prompt repeats the wait, and the model was never
+ * the problem. `grok mcp doctor` names the server that did not come up.
+ */
+export function bridgeStartupAdvice(vendor: BrokerVendorId): {
+  waiting: string;
+  failed: string;
+} {
+  if (vendor === "grok") {
+    return {
+      waiting:
+        "Grok stays silent until its whole session is set up — MCP handshakes alone " +
+        "have a 70 s ceiling of their own. The run is alive; Cukii keeps waiting.",
+      failed:
+        "Grok never finished starting its session, so it never printed anything — " +
+        "this is its MCP/hook startup, not the model. Run `grok mcp doctor` to see " +
+        "which server does not come up.",
+    };
+  }
+  return {
+    waiting: "Waiting a bit longer, then this turn will be failed closed.",
+    failed: "Send the message again, or pick another model.",
+  };
+}
 
 export type SilenceWatchdogLimits = {
   firstOutputWarnMs: number;
@@ -46,6 +114,10 @@ export class BridgeSilenceWatchdog {
   constructor(
     private readonly limits: SilenceWatchdogLimits = BRIDGE_SILENCE_LIMITS,
     private readonly clock: SilenceWatchdogClock = { now: Date.now },
+    private readonly advice: { waiting: string; failed: string } = {
+      waiting: "Waiting a bit longer, then this turn will be failed closed.",
+      failed: "Send the message again, or pick another model.",
+    },
   ) {
     const now = this.clock.now();
     this.startedAt = now;
@@ -79,7 +151,7 @@ export class BridgeSilenceWatchdog {
           kind: "fail",
           text:
             `Native vendor produced no output for ${seconds(quietMs)} after launch. ` +
-            "Cukii stopped waiting so the chat can continue. Send the message again, or pick another model.",
+            `Cukii stopped waiting so the chat can continue. ${this.advice.failed}`,
         };
       }
       if (quietMs >= this.limits.firstOutputWarnMs && !this.warned) {
@@ -88,7 +160,7 @@ export class BridgeSilenceWatchdog {
           kind: "warn",
           text:
             `Native vendor is still silent ${seconds(now - this.startedAt)} after launch. ` +
-            "Waiting a bit longer, then this turn will be failed closed.\n",
+            `${this.advice.waiting}\n`,
         };
       }
       return { kind: "ok" };

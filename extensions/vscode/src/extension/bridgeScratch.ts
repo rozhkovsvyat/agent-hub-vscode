@@ -2,18 +2,34 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveWindowsScratchRoot } from "./bridgeStorageEnv";
+
 /**
  * Cukii bridge IPC/transcripts/logs are machine-local scratch artefacts.
- * They must never land in a vault, the repository, or the shared OS temp
- * directory where they become visible as unrelated timeline receipts.
- * Windows keeps the owner's rotation-managed D: volume; every other platform
- * gets a private directory under the user home, created 0700, because a
- * literal Windows volume on POSIX resolves relative to the working directory
- * and would litter the checkout with `D:` folders before failing.
+ * They must never land in a vault or in the repository. On Windows they prefer
+ * the owner's rotation-managed `D:\Scratch`, but that volume is a property of
+ * one machine, not of the product: card CUK-112 is a colleague whose every
+ * vendor died with `ENOENT: mkdir 'D:\Scratch'` because the root was a literal.
+ * So the root goes through the same ladder the vendor runtime already uses and
+ * ends at the system temporary directory. Every other platform gets a private
+ * directory under the user home, created 0700, because a literal Windows
+ * volume on POSIX resolves relative to the working directory and would litter
+ * the checkout with `D:` folders before failing.
  */
+export function windowsScratchBase(): string {
+  try {
+    // A `D:\Scratch` that exists but is a junction makes the ladder throw.
+    // At module scope that would take activation down on a machine that has a
+    // perfectly good temporary directory, so the throw degrades like a miss.
+    return resolveWindowsScratchRoot() ?? os.tmpdir();
+  } catch {
+    return os.tmpdir();
+  }
+}
+
 function scratchRootFor(name: string): string {
   return process.platform === "win32"
-    ? `D:\\Scratch\\cukii-${name}`
+    ? path.win32.join(windowsScratchBase(), `cukii-${name}`)
     : path.join(os.homedir(), ".cukii", "scratch", name);
 }
 

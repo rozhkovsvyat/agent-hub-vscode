@@ -5,6 +5,7 @@ import {
   bridgeStorageProcessEnv,
   removeCaseInsensitiveEnvKeys,
   resolveBridgeStorageLayout,
+  resolveWindowsScratchRoot,
 } from "./bridgeStorageEnv";
 
 const identityWindowsFs = {
@@ -122,6 +123,48 @@ describe("resolveBridgeStorageLayout", () => {
     });
 
     expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
+  });
+
+  // Card CUK-112: Cukii's own bridge/permission/voice scratch had a second,
+  // literal copy of this root and every vendor died with
+  // `ENOENT: mkdir 'D:\Scratch'` on a machine with no D: volume. One ladder,
+  // one answer — so the two cannot disagree again.
+  it("hands the same ladder to Cukii's own scratch roots", () => {
+    const onKomputer = resolveWindowsScratchRoot({
+      env: {},
+      pathExists: (candidate) => candidate === "D:\\Scratch",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Users\\owner\\AppData\\Local\\Temp",
+    });
+    expect(onKomputer).toBe("D:\\Scratch");
+
+    // The colleague's machine: no D: at all.
+    const withoutDVolume = resolveWindowsScratchRoot({
+      env: {},
+      pathExists: (candidate) =>
+        candidate === "C:\\Users\\STARK\\AppData\\Local\\Temp",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Users\\STARK\\AppData\\Local\\Temp",
+    });
+    expect(withoutDVolume).toBe("C:\\Users\\STARK\\AppData\\Local\\Temp");
+
+    const configured = resolveWindowsScratchRoot({
+      env: { cukii_scratch_dir: "E:\\AgentScratch" },
+      pathExists: (candidate) =>
+        candidate === "E:\\AgentScratch" || candidate === "C:\\Temp",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Temp",
+    });
+    expect(configured).toBe("E:\\AgentScratch");
+
+    expect(
+      resolveWindowsScratchRoot({
+        env: {},
+        pathExists: () => false,
+        ...identityWindowsFs,
+        systemTempDir: "C:\\Temp",
+      }),
+    ).toBeUndefined();
   });
 
   it.each([

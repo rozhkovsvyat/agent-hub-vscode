@@ -1812,9 +1812,17 @@ describe("Cukii vendor CLI accounts", () => {
     expect(vendorAuthTerminalCommand("grok", "install")?.command).toContain(
       "@xai-official/grok@latest",
     );
-    expect(vendorAuthTerminalCommand("kimi", "install")?.command).toContain(
-      "@moonshot-ai/kimi-code@latest",
-    );
+    // Kimi is the exception: its Windows route spawns
+    // `.kimi-code\bin\kimi.exe` and refuses the npm shim, so Windows installs
+    // Moonshot's own native installer instead (card CUK-113).
+    expect(
+      vendorAuthTerminalCommand("kimi", "install", { platform: "win32" })
+        ?.command,
+    ).toContain("https://code.kimi.com/kimi-code/install.ps1");
+    expect(
+      vendorAuthTerminalCommand("kimi", "install", { platform: "linux" })
+        ?.command,
+    ).toContain("@moonshot-ai/kimi-code@latest");
     expect(vendorAuthTerminalCommand("qwen", "install")?.command).toContain(
       "@qwen-code/qwen-code@latest",
     );

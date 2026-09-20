@@ -99,6 +99,40 @@ function canonicalWindowsRoot(
   return safe;
 }
 
+/**
+ * The one degradation ladder for a Windows scratch root, shared by the vendor
+ * runtime and by Cukii's own bridge/permission/voice scratch directories: the
+ * owner's rotation-managed `D:\Scratch` when that volume is actually there,
+ * then an explicitly configured `CUKII_SCRATCH_DIR`, then the system temporary
+ * directory. A machine without a D: volume is an ordinary machine, not a
+ * broken one — `mkdir D:\Scratch` there is ENOENT and takes the whole bridge
+ * down with it.
+ */
+export function resolveWindowsScratchRoot(
+  options: Pick<
+    BridgeStorageOptions,
+    "env" | "pathExists" | "pathIsDirectory" | "realPath" | "systemTempDir"
+  > = {},
+): string | undefined {
+  const env = options.env ?? process.env;
+  const systemTempDir = options.systemTempDir ?? os.tmpdir();
+  const rootOptions = {
+    pathExists: options.pathExists ?? fs.existsSync,
+    pathIsDirectory:
+      options.pathIsDirectory ??
+      ((candidate: string) => fs.statSync(candidate).isDirectory()),
+    realPath: options.realPath ?? fs.realpathSync.native,
+  };
+  return (
+    canonicalWindowsRoot("D:\\Scratch", "scratch", rootOptions) ??
+    safeExistingWindowsRoot(
+      caseInsensitiveEnvValue(env, "CUKII_SCRATCH_DIR"),
+      rootOptions,
+    ) ??
+    safeExistingWindowsRoot(systemTempDir, rootOptions)
+  );
+}
+
 export function removeCaseInsensitiveEnvKeys(
   env: NodeJS.ProcessEnv,
   keys: string[],
@@ -129,13 +163,11 @@ export function resolveBridgeStorageLayout(
     ((candidate) => fs.statSync(candidate).isDirectory());
   const realPath = options.realPath ?? fs.realpathSync.native;
   const rootOptions = { pathExists, pathIsDirectory, realPath };
-  const scratchRoot =
-    canonicalWindowsRoot("D:\\Scratch", "scratch", rootOptions) ??
-    safeExistingWindowsRoot(
-      caseInsensitiveEnvValue(env, "CUKII_SCRATCH_DIR"),
-      rootOptions,
-    ) ??
-    safeExistingWindowsRoot(systemTempDir, rootOptions);
+  const scratchRoot = resolveWindowsScratchRoot({
+    env,
+    systemTempDir,
+    ...rootOptions,
+  });
   if (!scratchRoot) {
     throw new Error("No safe existing Windows temporary root is available");
   }
