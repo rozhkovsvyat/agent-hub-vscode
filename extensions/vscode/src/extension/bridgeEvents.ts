@@ -650,8 +650,9 @@ function parseCodexThread(event: any): BridgeEvent[] {
 /**
  * `kimi -p --output-format stream-json`: NDJSON в стиле OpenAI chat.
  * Схема снята живым прогоном (kimi-code 0.38):
- *  - `{role:"meta", type:"system.version"|"session.resume_hint"}` — служебное,
- *    в ленту не идёт (но type c "error" всплываем как ошибку, не глотаем);
+ *  - `{role:"meta", type:"system.version"}` — служебное, в ленту не идёт;
+ *  - `{role:"meta", type:"session.resume_hint"}` — native session id для
+ *    следующего `kimi --session` (в ленту не идёт, type с "error" всплываем);
  *  - `{role:"assistant", tool_calls:[{id, function:{name, arguments}}]}` —
  *    вызов инструмента (arguments уже строка JSON, как у OpenAI);
  *  - `{role:"tool", tool_call_id, content}` — результат инструмента;
@@ -659,7 +660,33 @@ function parseCodexThread(event: any): BridgeEvent[] {
  *  - reasoning (если модель его отдаёт) — в `reasoning_content`/`thinking`.
  * Живой Bash-тул печатает свой вывод и сырыми строками мимо JSON — их отсекает
  * общий фильтр `line[0] !== "{"`, поэтому здесь они не всплывают дважды.
+ *
+ * Kimi UserPromptSubmit stdout is injected into the model and, on stream-json,
+ * can also land as the first assistant frame — glued to the real answer
+ * (cards c2584a34 / 1c9dd37d). Strip the dump; keep any remainder.
  */
+export function visibleKimiAssistantText(text: string): string {
+  let out = text.replace(
+    /<hook_result\b[^>]*>[\s\S]*?<\/hook_result>/gi,
+    "",
+  );
+  const footer =
+    "Мало или мимо — спроси память сама: memory_search с формулировкой по сути задачи.";
+  const footerAt = out.indexOf(footer);
+  if (footerAt !== -1) {
+    out = out.slice(footerAt + footer.length);
+  }
+  out = out.replace(/^\s+/u, "");
+  if (
+    /^(?:ПАМЯТЬ ВОЛТОВ — подобрано автоматически|СПОСОБНОСТИ, КОТОРЫЕ АГЕНТЫ ЗАБЫВАЮТ)/u.test(
+      out,
+    )
+  ) {
+    return "";
+  }
+  return out;
+}
+
 function parseKimiNdjson(event: any): BridgeEvent[] {
   const role = event?.role;
 
@@ -671,6 +698,10 @@ function parseKimiNdjson(event: any): BridgeEvent[] {
           text: asText(event.content ?? event.message ?? event.error),
         },
       ];
+    }
+    if (event.type === "session.resume_hint") {
+      const id = String(event.session_id ?? "").trim();
+      return VENDOR_SESSION_ID.test(id) ? [{ kind: "vendorSession", id }] : [];
     }
     return [];
   }
@@ -694,7 +725,7 @@ function parseKimiNdjson(event: any): BridgeEvent[] {
             : JSON.stringify(fn.arguments ?? {}),
       });
     }
-    const text = asText(event.content);
+    const text = visibleKimiAssistantText(asText(event.content));
     if (text) {
       out.push({ kind: "text", text });
     }

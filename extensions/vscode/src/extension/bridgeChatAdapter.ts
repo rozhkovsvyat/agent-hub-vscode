@@ -26,6 +26,7 @@ import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
 import { BridgeSilenceWatchdog } from "./bridgeSilenceWatchdog";
 import {
+  argvRequestsVendorResume,
   forgetVendorSession,
   isVendorSessionLossError,
   rememberVendorSession,
@@ -277,9 +278,11 @@ function grokNativeModel(model: BrokerModel): string | undefined {
 // kimi.ai/global — flat-fee + квота), а НЕ платным per-token API и НЕ через
 // claude CLI: у аккаунта обычно только consumer-подписка, ключ Kimi Code Console
 // недоступен, а подписочный CLI работает как Grok/Cursor — свой агент-луп на
-// подписке. Токен кладёт `kimi login` (managed, в лог/UI не попадает). Паритет
-// памяти/хуков claude здесь НЕ наследуется — это отдельная работа «свои хуки для
-// Kimi» (config.toml MCP + --skills-dir), см. follow-up.
+// подписке. Токен кладёт `kimi login` (managed, в лог/UI не попадает).
+// Память — MCP `cukii-memory` в ~/.kimi-code/mcp.json, не `--skills-dir` на
+// деревья Claude/Codex (карточка 7ffde5c2). Следующий ход той же Cukii-сессии
+// идёт через `kimi --session <id>` с коротким resume-промптом, а не новым
+// cold-start `-p` с полным транскриптом (511c222a / 1c9dd37d).
 //
 // Kimi CLI documents -p/--prompt, but not an stdin input mode. Check the
 // complete quoted CreateProcess command line below before anything launches.
@@ -289,12 +292,24 @@ const WINDOWS_CMD_SAFE_UTF16 = 8_190;
 export const KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16 =
   WINDOWS_CREATEPROCESS_SAFE_UTF16;
 
-function isKimiModel(model: BrokerModel): boolean {
+export function isKimiModel(model: BrokerModel): boolean {
   return (
     model === "kimi-k2" ||
     model.startsWith("kimi-") ||
     model.startsWith("kimi:")
   );
+}
+
+/**
+ * Claude `--resume` and Kimi `--session` both reuse the native conversation
+ * instead of re-paying the full Cukii transcript on every spawn.
+ */
+export function nativeResumeIdForModel(
+  sessionId: string,
+  model: BrokerModel,
+): string | undefined {
+  if (!isClaudeNativeModel(model) && !isKimiModel(model)) return undefined;
+  return rememberedVendorSession(sessionId, model);
 }
 
 function quoteWindowsCommandLineArgument(argument: string): string {
@@ -384,51 +399,6 @@ function kimiSpillLoaderPrompt(promptFile: string): string {
     "Then follow those instructions precisely and answer the latest user request in them. " +
     "Do not mention the file path to the user."
   );
-}
-
-/**
- * Skills для Kimi CLI (`--skills-dir`). Паритет с Claude/Codex: те же каталоги,
- * что подключаются через `.claude/skills` и `.codex/skills`. Разрешаем симлинки
- * сами и возвращаем только директории, содержащие `SKILL.md`/`skill.md` — так
- * битые symlink'и внутри skill-рута не ломают запуск Kimi.
- */
-function getKimiSkillDirs(): string[] {
-  const home = os.homedir();
-  const roots = [
-    path.join(home, ".claude", "skills"),
-    path.join(home, ".codex", "skills"),
-    "D:\\Brain\\repo\\personal\\agent-hub-vscode\\skills",
-    "D:\\Brain\\vault\\fm-reboot\\.claude\\skills",
-  ];
-  const seen = new Set<string>();
-  const dirs: string[] = [];
-  for (const root of roots) {
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(root);
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      try {
-        const candidate = path.join(root, entry);
-        const real = fs.realpathSync(candidate);
-        if (seen.has(real.toLowerCase())) continue;
-        if (!fs.statSync(real).isDirectory()) continue;
-        if (
-          !fs.existsSync(path.join(real, "SKILL.md")) &&
-          !fs.existsSync(path.join(real, "skill.md"))
-        ) {
-          continue;
-        }
-        seen.add(real.toLowerCase());
-        dirs.push(real);
-      } catch {
-        // skip broken symlinks or unreadable entries
-      }
-    }
-  }
-  return dirs;
 }
 
 function windowsCmdPath(): string {
@@ -600,15 +570,24 @@ export function supportsBrokerInbox(model: BrokerModel): boolean {
 }
 
 /**
- * Cursor exposes cukii-memory only as MCP tools, not as a first-class
+ * Cursor and Kimi expose cukii-memory only as MCP tools, not as a first-class
  * memory_search builtin. Say so in the broker prompt so the worker does not
- * treat the missing name as a harness outage.
+ * treat the missing name as a harness outage, and so Kimi does not grep
+ * skill folders instead (card 7ffde5c2).
  */
 export function brokerMemoryDirective(model: BrokerModel): string[] {
-  if (brokerVendorForModel(model) !== "cursor") return [];
-  return [
-    "Cukii memory tools live on the cukii-memory MCP server. Cursor has no built-in memory_search tool: discover that server and call memory_search, memory_get and memory_remember through MCP. A missing first-class memory_search name is expected, not a broken harness.",
-  ];
+  const vendor = brokerVendorForModel(model);
+  if (vendor === "cursor") {
+    return [
+      "Cukii memory tools live on the cukii-memory MCP server. Cursor has no built-in memory_search tool: discover that server and call memory_search, memory_get and memory_remember through MCP. A missing first-class memory_search name is expected, not a broken harness.",
+    ];
+  }
+  if (vendor === "kimi") {
+    return [
+      "Cukii memory tools live on the cukii-memory MCP server. Call memory_search, memory_get and memory_remember through MCP. Do not grep skill folders, AGENTS.md or SKILL.md to recover memory — a filesystem grep of ~/.claude/skills or any --skills-dir tree is not a memory lookup.",
+    ];
+  }
+  return [];
 }
 
 /** Broker-prompt lines for inbox pull-steering; empty where unsupported. */
@@ -903,17 +882,27 @@ function kimiRoute(
   label: string,
   prompt: string,
   tailArgs: string[],
+  vendorResumeId?: string,
 ): BridgeRoute {
   // Resolve the official native executable, then account for the executable,
   // every final argument, and libuv-style Windows escaping before any broker,
   // child process, or filesystem artefact can be created.
+  // `--session` is Kimi 2.0's native resume (live `--help`; 0.38 resume_hint
+  // still spells it `kimi -r <id>`, and the binary accepts both).
+  const resumeArgs = vendorResumeId ? ["--session", vendorResumeId] : [];
+  const withPrompt = (value: string) => [
+    ...resumeArgs,
+    "-p",
+    value,
+    ...tailArgs,
+  ];
   const command =
     process.platform === "win32"
       ? {
           program: kimiWindowsNativeProgram(),
-          args: ["-p", prompt, ...tailArgs],
+          args: withPrompt(prompt),
         }
-      : resolveCommand(kimiCliProgram(), ["-p", prompt, ...tailArgs]);
+      : resolveCommand(kimiCliProgram(), withPrompt(prompt));
   let promptFile: string | undefined;
   if (
     process.platform === "win32" &&
@@ -923,7 +912,7 @@ function kimiRoute(
     // Большой транскрипт не проходит в argv; содержимое уходит в эксклюзивный
     // файл под защищённым Scratch-рутом, а в `-p` остаётся короткий загрузчик.
     promptFile = writeBridgeScratchFile("kimi-transcript", prompt);
-    command.args = ["-p", kimiSpillLoaderPrompt(promptFile), ...tailArgs];
+    command.args = withPrompt(kimiSpillLoaderPrompt(promptFile));
   }
   try {
     assertKimiWindowsCommandLine(command.program, command.args);
@@ -1219,15 +1208,18 @@ export function routeForModel(
     ? kimiNativeModel(model)
     : undefined;
   if (liveKimiModel) {
-    const skillDirs = getKimiSkillDirs();
-    return kimiRoute(displayBridgeModel(model), prompt, [
-      "--output-format",
-      "stream-json",
-      "-m",
-      liveKimiModel,
-      ...permissionArgs,
-      ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
-    ]);
+    return kimiRoute(
+      displayBridgeModel(model),
+      prompt,
+      [
+        "--output-format",
+        "stream-json",
+        "-m",
+        liveKimiModel,
+        ...permissionArgs,
+      ],
+      vendorResumeId,
+    );
   }
   switch (model) {
     // `--verbose` обязателен: без него `claude -p` не отдаёт stream-json.
@@ -1304,20 +1296,25 @@ export function routeForModel(
     // `-m`; иначе пользовательский K2 мог молча превратиться в default K3.
     // `-p` берёт промпт аргументом и stdin не читает; транскрипт, не проходящий
     // в Windows command-line лимит, уходит в эксклюзивный Scratch-файл, который
-    // агент читает первым действием (см. kimiRoute).
+    // агент читает первым действием (см. kimiRoute). Повторный ход той же
+    // Cukii-сессии передаёт `--session <id>` из resume_hint и короткий
+    // resume-промпт вместо полного транскрипта.
     case "kimi-k2":
     case "kimi-k2-highspeed":
     case "kimi-k3":
     case "kimi-k3-256k": {
       const modelArg = kimiNativeModel(model);
-      const skillDirs = getKimiSkillDirs();
-      return kimiRoute(displayBridgeModel(model), prompt, [
-        "--output-format",
-        "stream-json",
-        ...(modelArg ? ["-m", modelArg] : []),
-        ...permissionArgs,
-        ...skillDirs.flatMap((dir) => ["--skills-dir", dir]),
-      ]);
+      return kimiRoute(
+        displayBridgeModel(model),
+        prompt,
+        [
+          "--output-format",
+          "stream-json",
+          ...(modelArg ? ["-m", modelArg] : []),
+          ...permissionArgs,
+        ],
+        vendorResumeId,
+      );
     }
     case "codex-5-6-terra":
       return {
@@ -1413,6 +1410,7 @@ export function routeForModel(
           messages,
           controls,
           permissionMode,
+          vendorResumeId,
         );
       }
       throw new Error(
@@ -1788,9 +1786,10 @@ async function* streamBridgeChatWithSteer(
     args.messages,
     args.brokerModel,
   );
-  const vendorResumeId = isClaudeNativeModel(args.brokerModel)
-    ? rememberedVendorSession(args.sessionId, args.brokerModel)
-    : undefined;
+  const vendorResumeId = nativeResumeIdForModel(
+    args.sessionId,
+    args.brokerModel,
+  );
   const prompt = buildPrompt(
     imageScope.materializeMessages(transportMessages),
     args.brokerModel,
@@ -2292,7 +2291,7 @@ async function* launchBridgeChild(options: {
       );
       if (
         sessionId &&
-        command.args.includes("--resume") &&
+        argvRequestsVendorResume(command.args) &&
         isVendorSessionLossError(detail)
       ) {
         forgetVendorSession(sessionId, brokerModel);

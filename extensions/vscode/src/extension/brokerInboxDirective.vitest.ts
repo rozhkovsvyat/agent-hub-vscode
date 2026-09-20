@@ -71,6 +71,9 @@ describe("broker inbox steering gate", () => {
     expect(lines[0]).toContain("expected, not a broken harness");
     expect(brokerMemoryDirective("grok-4-6")).toEqual([]);
     expect(brokerMemoryDirective("composer-2-5")).toHaveLength(1);
+    expect(brokerMemoryDirective("kimi-k3")).toHaveLength(1);
+    expect(brokerMemoryDirective("kimi-k3")[0]).toContain("cukii-memory");
+    expect(brokerMemoryDirective("kimi-k3")[0]).toMatch(/grep/i);
   });
 
   it("offers the same request_user_input contract to every connected vendor", () => {

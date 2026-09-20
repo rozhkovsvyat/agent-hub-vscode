@@ -453,7 +453,8 @@ describe("BridgeEventParser", () => {
   it("разбирает живой kimi stream-json (NDJSON в стиле OpenAI)", () => {
     const { events, parser } = collect("kimi-ndjson", KIMI_LINES);
     expect(parser.sawStructuredOutput).toBe(true);
-    // meta-строки (version/resume_hint) в ленту не идут.
+    // version остаётся служебным; resume_hint становится vendorSession и в
+    // ленту не рендерится (toChatMessages отдаёт []).
     expect(events).toEqual([
       {
         kind: "toolStart",
@@ -468,6 +469,7 @@ describe("BridgeEventParser", () => {
         isError: false,
       },
       { kind: "text", text: "There is one file: hello.txt" },
+      { kind: "vendorSession", id: "session_x" },
     ]);
   });
 

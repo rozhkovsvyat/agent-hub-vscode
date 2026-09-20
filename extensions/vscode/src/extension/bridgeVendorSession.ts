@@ -17,6 +17,22 @@ export function isVendorSessionId(value: string): boolean {
   return VENDOR_SESSION_ID.test(value);
 }
 
+/**
+ * True when this argv is a native resume rather than a cold start.
+ * Claude uses `--resume`; Kimi 2.0 uses `--session`/`-S` (and still accepts
+ * the 0.38 resume_hint spelling `-r`).
+ */
+export function argvRequestsVendorResume(args: readonly string[]): boolean {
+  return args.some(
+    (arg) =>
+      arg === "--resume" ||
+      arg === "--session" ||
+      arg === "-S" ||
+      arg === "-r" ||
+      arg.startsWith("--session="),
+  );
+}
+
 export function rememberVendorSession(
   sessionId: string,
   model: BrokerModel,
@@ -48,7 +64,7 @@ export function forgetVendorSession(
  * turn cold-starting). Any other failure text must not drop the resume id.
  */
 export function isVendorSessionLossError(detail: string): boolean {
-  return /unknown session|session not found|no conversation found|thread\s+[\w-]{8,}\s+not found/i.test(
+  return /unknown session|session not found|session\s+"[^"]+"\s+not found|no conversation found|thread\s+[\w-]{8,}\s+not found/i.test(
     detail,
   );
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  argvRequestsVendorResume,
   forgetVendorSession,
   isVendorSessionId,
   isVendorSessionLossError,
@@ -57,5 +58,20 @@ describe("bridgeVendorSession", () => {
     expect(isVendorSessionLossError("apply_patch verification failed")).toBe(
       false,
     );
+    // Kimi 2.0 (live `kimi --session missing -p ping`, 2026-09-20):
+    // `Session "<id>" not found.` — the quoted id sits between the words.
+    expect(
+      isVendorSessionLossError(
+        'error: failed to run prompt: Session "session_does-not-exist-zzzzzzzz" not found.',
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes Claude --resume and Kimi --session argv as native resume", () => {
+    expect(argvRequestsVendorResume(["--resume", "9252c6e5"])).toBe(true);
+    expect(
+      argvRequestsVendorResume(["--session", "session_5eca6961-61ef-4a5a-8a64-a5dea84df021"]),
+    ).toBe(true);
+    expect(argvRequestsVendorResume(["-p", "go"])).toBe(false);
   });
 });
