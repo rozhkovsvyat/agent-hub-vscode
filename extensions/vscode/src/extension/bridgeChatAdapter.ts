@@ -24,7 +24,11 @@ import { alibabaQwenArgv, alibabaSpawnEnv } from "./alibabaTokenPlan";
 
 import { terminateBridgeChild } from "./bridgeChildLifecycle";
 import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
-import { BridgeSilenceWatchdog } from "./bridgeSilenceWatchdog";
+import {
+  bridgeSilenceLimits,
+  BridgeSilenceWatchdog,
+  bridgeStartupAdvice,
+} from "./bridgeSilenceWatchdog";
 import {
   argvRequestsVendorResume,
   forgetVendorSession,
@@ -930,10 +934,7 @@ function kimiRoute(
   };
 }
 
-function cursorPrintArgs(
-  modelId: string,
-  permissionArgs: string[],
-): string[] {
+function cursorPrintArgs(modelId: string, permissionArgs: string[]): string[] {
   return [
     "-p",
     "--output-format",
@@ -1006,6 +1007,29 @@ function appendPathSegment(
   }
 }
 
+/**
+ * 🔴 Grok's own cross-session memory must stay out of a bridge run.
+ *
+ * With `[memory] enabled` and `initial_injection` on — the default once a
+ * directory has accumulated memory — Grok performs a model call against
+ * `cli-chat-proxy.grok.com` while setting the session up, and prints nothing
+ * at all until it returns. On a host where that endpoint is unreachable the
+ * call burns its full 300 s timeout first. Measured with this adapter's exact
+ * argv in the owner's workspace (board card CUK-111, 2026-09-20): first stdout
+ * byte at 300.7 s, versus **14.5 s** for the same command with `GROK_MEMORY=0`
+ * — and 9 s in a directory Grok had no memory for. That silence is what the
+ * watchdog reported as "vendor produced no output".
+ *
+ * Nothing is lost by switching it off here. A bridge turn carries its own
+ * history in the transcript file the route writes, and durable memory reaches
+ * the vendor through the `cukii-memory` MCP server Cukii registers itself.
+ * Grok's private store would only duplicate both — at the price of a network
+ * round trip on every single launch.
+ */
+export function grokBridgeEnv(model: BrokerModel): Record<string, string> {
+  return brokerVendorForModel(model) === "grok" ? { GROK_MEMORY: "0" } : {};
+}
+
 function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
   const home = os.homedir();
   const pathKey =
@@ -1055,6 +1079,7 @@ function bridgeEnv(model: BrokerModel, subagent: BrokerSubagent): BridgeEnv {
     ...inheritedEnv,
     [pathKey]: resolvedPath,
     ...(process.platform === "win32" ? { ComSpec: windowsCmdPath() } : {}),
+    ...grokBridgeEnv(model),
     CUKII_BRIDGE_MODE: "broker",
     CUKII_BROKER_MODEL: model,
     CUKII_SUBAGENT_MODEL: subagent,
@@ -2058,7 +2083,14 @@ async function* launchBridgeChild(options: {
     return terminationPromise;
   };
   const queuedFollowUpRead = new Set<string>();
-  const silenceWatchdog = new BridgeSilenceWatchdog();
+  // The startup budget belongs to the vendor, not to the bridge: Grok cannot
+  // print anything before its MCP/hook setup completes (see the watchdog).
+  const silenceVendor = brokerVendorForModel(brokerModel);
+  const silenceWatchdog = new BridgeSilenceWatchdog(
+    bridgeSilenceLimits(silenceVendor),
+    { now: Date.now },
+    bridgeStartupAdvice(silenceVendor),
+  );
   let settledByWatchdog = false;
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {
     for (const event of events) {

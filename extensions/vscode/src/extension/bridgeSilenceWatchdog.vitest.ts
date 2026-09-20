@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   BRIDGE_SILENCE_LIMITS,
+  bridgeSilenceLimits,
   BridgeSilenceWatchdog,
+  bridgeStartupAdvice,
 } from "./bridgeSilenceWatchdog";
 
 function clock(start = 1_000) {
@@ -69,5 +71,73 @@ describe("BridgeSilenceWatchdog", () => {
     expect(watchdog.poll()).toEqual({ kind: "ok" });
     time.advance(BRIDGE_SILENCE_LIMITS.idleWarnMs - 1);
     expect(watchdog.poll()).toEqual({ kind: "ok" });
+  });
+
+  // Card CUK-111: the measured first stdout byte was 300.4 s from the owner's
+  // workspace, against a 180 s budget. A Grok launch must survive it.
+  it("keeps a starting Grok alive past the generic first-output budget", () => {
+    const time = clock();
+    const limits = bridgeSilenceLimits("grok");
+    const watchdog = new BridgeSilenceWatchdog(
+      limits,
+      time,
+      bridgeStartupAdvice("grok"),
+    );
+    time.advance(BRIDGE_SILENCE_LIMITS.firstOutputFailMs + 1);
+    // Warning is fine — killing the run is not.
+    expect(watchdog.poll().kind).not.toBe("fail");
+    time.advance(300_000 - BRIDGE_SILENCE_LIMITS.firstOutputFailMs);
+    expect(watchdog.poll().kind).not.toBe("fail");
+    watchdog.noteActivity();
+    expect(watchdog.poll()).toEqual({ kind: "ok" });
+  });
+
+  it("still fails closed on a Grok that never starts, and says why", () => {
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("grok"),
+      time,
+      bridgeStartupAdvice("grok"),
+    );
+    time.advance(bridgeSilenceLimits("grok").firstOutputWarnMs);
+    const warn = watchdog.poll();
+    expect(warn.kind === "warn" && warn.text).toMatch(/MCP handshakes/i);
+    time.advance(bridgeSilenceLimits("grok").firstOutputFailMs);
+    const fail = watchdog.poll();
+    expect(fail.kind).toBe("fail");
+    expect(fail.kind === "fail" && fail.text).toMatch(/grok mcp doctor/);
+    // The generic advice is wrong here: another model does not shorten this
+    // vendor's own startup, and a resend pays it again.
+    expect(fail.kind === "fail" && fail.text).not.toMatch(/pick another model/);
+  });
+
+  it("leaves every other vendor on the generic budget and advice", () => {
+    expect(bridgeSilenceLimits("claude")).toEqual(BRIDGE_SILENCE_LIMITS);
+    expect(bridgeSilenceLimits("kimi").firstOutputFailMs).toBe(
+      BRIDGE_SILENCE_LIMITS.firstOutputFailMs,
+    );
+    expect(bridgeStartupAdvice("codex").failed).toMatch(/pick another model/);
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("claude"),
+      time,
+      bridgeStartupAdvice("claude"),
+    );
+    time.advance(BRIDGE_SILENCE_LIMITS.firstOutputFailMs);
+    expect(watchdog.poll().kind).toBe("fail");
+  });
+
+  // Once the vendor has spoken, its startup grace is over: a Grok that goes
+  // quiet mid-turn is still failed closed on the ordinary idle bound.
+  it("drops Grok back to the ordinary idle bound after first output", () => {
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("grok"),
+      time,
+      bridgeStartupAdvice("grok"),
+    );
+    watchdog.noteActivity();
+    time.advance(BRIDGE_SILENCE_LIMITS.idleFailMs);
+    expect(watchdog.poll().kind).toBe("fail");
   });
 });

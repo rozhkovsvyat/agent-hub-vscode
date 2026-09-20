@@ -45,6 +45,7 @@ import {
   claudeInitialContent,
   claudeStreamingInput,
   commandCandidates,
+  grokBridgeEnv,
   KIMI_WINDOWS_CREATEPROCESS_SAFE_UTF16,
   nativeDelegateHint,
   nativePromptCacheArgs,
@@ -168,10 +169,33 @@ describe("native bridge argv", () => {
     expect(source.slice(closeAt, terminalFailureAt)).toContain(
       "bridgeProcessFailureMessage({",
     );
-    expect(source).toContain("new BridgeSilenceWatchdog()");
+    // The watchdog is built from the vendor's own startup budget; a bare
+    // `new BridgeSilenceWatchdog()` would put Grok back under the 180 s
+    // first-output limit its MCP handshakes cannot meet (card CUK-111).
+    expect(source).toContain("bridgeSilenceLimits(silenceVendor)");
+    expect(source).toContain("bridgeStartupAdvice(silenceVendor)");
     expect(source).toContain("silenceWatchdog.poll()");
     expect(source).toContain("settledByWatchdog");
     expect(source).toContain("rememberVendorSession");
+  });
+
+  // Card CUK-111: Grok's own memory store makes a network call during session
+  // setup and prints nothing until it returns — 300.7 s against an endpoint
+  // this host cannot reach, versus 14.5 s for the identical run without it.
+  it("keeps Grok's private memory store out of a bridge launch", () => {
+    expect(grokBridgeEnv("grok-4-6")).toEqual({ GROK_MEMORY: "0" });
+    expect(grokBridgeEnv("grok-4-5")).toEqual({ GROK_MEMORY: "0" });
+    // The transcript file and the cukii-memory MCP server already carry both
+    // the turn's history and the durable memory, so nothing is lost.
+    expect(grokBridgeEnv("opus-5")).toEqual({});
+    expect(grokBridgeEnv("kimi-k3")).toEqual({});
+    expect(grokBridgeEnv("composer-2-5")).toEqual({});
+    // The launch must actually carry it, not just compute it.
+    const source = fs.readFileSync(
+      path.join(__dirname, "bridgeChatAdapter.ts"),
+      "utf8",
+    );
+    expect(source).toContain("...grokBridgeEnv(model)");
   });
 
   it("localizes a Codex safety-policy block instead of pasting the rejected command", () => {
@@ -1573,7 +1597,9 @@ describe("native bridge argv", () => {
     expect(writer).toContain("resolve(!error)");
     expect(writer).not.toContain("acknowledgeWritten");
     expect(writer).not.toContain('kind: "steerRead"');
-    expect(source).toContain("shouldHoldBridgeTerminal(permissionTransport?.steering)");
+    expect(source).toContain(
+      "shouldHoldBridgeTerminal(permissionTransport?.steering)",
+    );
     expect(source).toContain('CUKII_INBOX_GRACE_MS: "0"');
     expect(source).toContain("--replay-user-messages");
   });
