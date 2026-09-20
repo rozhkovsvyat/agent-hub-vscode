@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -223,21 +224,26 @@ describe("unix vendor CLI probe resolution", () => {
     ]);
   });
 
-  it("keeps the bare name as the last Windows candidate", () => {
-    const candidates = commandCandidates(
-      "grok",
-      "C:\\Users\\owner",
-      "win32",
-    );
-    expect(candidates.at(-1)).toBe("grok");
-    expect(candidates).toContain(
-      "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\grok.cmd",
-    );
-  });
+  // win32 only: the Windows branch builds with the host's path.join, so the
+  // exact backslash expectation is only reproducible on a Windows host.
+  it.runIf(process.platform === "win32")(
+    "keeps the bare name as the last Windows candidate",
+    () => {
+      const candidates = commandCandidates(
+        "grok",
+        "C:\\Users\\owner",
+        "win32",
+      );
+      expect(candidates.at(-1)).toBe("grok");
+      expect(candidates).toContain(
+        "C:\\Users\\owner\\scoop\\apps\\nodejs\\current\\bin\\grok.cmd",
+      );
+    },
+  );
 
   it("selects an installed absolute candidate a launcher PATH cannot see", async () => {
     const fixtureDir = await fs.mkdtemp(
-      path.join("D:\\Scratch", "cukii probe home "),
+      path.join(os.tmpdir(), "cukii probe home "),
     );
     const home = path.join(fixtureDir, "owner");
     const bin = path.join(home, ".local", "bin");
@@ -255,7 +261,7 @@ describe("unix vendor CLI probe resolution", () => {
 
   it("falls back to the bare name when no Cukii install exists", async () => {
     const fixtureDir = await fs.mkdtemp(
-      path.join("D:\\Scratch", "cukii probe home "),
+      path.join(os.tmpdir(), "cukii probe home "),
     );
     const emptyHome = path.join(fixtureDir, "nobody");
     try {
