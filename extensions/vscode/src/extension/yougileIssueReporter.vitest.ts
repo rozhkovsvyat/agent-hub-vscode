@@ -10,6 +10,7 @@ import {
 } from "./cukiiDiagnosticBuffer";
 import {
   CUKII_BUGS_BOARD_ID,
+  CUKII_ISSUE_MAX_TITLE,
   YougileIssueReporter,
   type YougileIssueHttp,
   type YougileIssueReporterHost,
@@ -65,10 +66,9 @@ function response(status: number, payload: unknown) {
 function submission(reportId: string): CukiiIssueReportSubmission {
   return {
     reportId,
-    title: "Composer overlaps the transcript",
-    stepsToReproduce: "Open Cukii and resize the panel.",
-    expectedResult: "The composer stays within the panel.",
-    actualResult: "The composer overlaps messages.",
+    description:
+      "Composer overlaps the transcript\n\nOpen Cukii and resize the panel. " +
+      "The composer should stay within the panel, but it overlaps messages.",
     severity: "major",
     sessionId: "session-test",
     brokerModel: "codex-5-6-terra",
@@ -238,6 +238,106 @@ describe("YougileIssueReporter", () => {
     });
   });
 
+  it("derives the card title from the first description line", async () => {
+    const fx = fixture({ failUploads: true });
+    const report = submission("report-title");
+    report.description =
+      "Picker overlaps the composer on narrow panels\n\nSteps: open Cukii, resize the panel, watch the composer.";
+    await fx.reporter.submit(report);
+
+    const stored = JSON.parse(
+      fs.readFileSync(
+        path.join(fx.root, "pending", "report-title", "report.json"),
+        "utf8",
+      ),
+    ) as { title: string; description: string };
+    expect(stored.title).toBe("Picker overlaps the composer on narrow panels");
+    expect(stored.description).toContain("Steps: open Cukii");
+
+    fx.setFailUploads(false);
+    fx.advance(61_000);
+    await fx.reporter.flush();
+
+    const taskCall = fx.calls.find(
+      (call) => call.method === "POST" && call.url.endsWith("/tasks"),
+    );
+    const taskBody = JSON.parse(String(taskCall?.body)) as {
+      title: string;
+      description: string;
+    };
+    expect(taskBody.title).toBe(
+      "Picker overlaps the composer on narrow panels",
+    );
+    expect(taskBody.description).toContain("## Description\n");
+    expect(taskBody.description).toContain("Steps: open Cukii");
+  });
+
+  it("bounds the derived title and rejects an empty description", async () => {
+    const fx = fixture({ failUploads: true });
+    const report = submission("report-long-title");
+    report.description = `${"x".repeat(CUKII_ISSUE_MAX_TITLE + 60)}\nbody`;
+    await fx.reporter.submit(report);
+
+    const stored = JSON.parse(
+      fs.readFileSync(
+        path.join(fx.root, "pending", "report-long-title", "report.json"),
+        "utf8",
+      ),
+    ) as { title: string };
+    expect(stored.title).toHaveLength(CUKII_ISSUE_MAX_TITLE);
+
+    await expect(
+      fx.reporter.submit({ ...submission("report-empty"), description: "   " }),
+    ).rejects.toThrow(/Description is required/);
+  });
+
+  it("still delivers a report queued by the retired multi-field form", async () => {
+    const fx = fixture();
+    const pending = path.join(fx.root, "pending", "report-legacy-fields");
+    fs.mkdirSync(pending, { recursive: true });
+    fs.writeFileSync(path.join(pending, "cukii-diagnostics.txt"), "diag");
+    fs.writeFileSync(
+      path.join(pending, "report.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        reportId: "report-legacy-fields",
+        createdAt: "2026-09-07T12:00:00.000Z",
+        title: "Legacy title",
+        stepsToReproduce: "Legacy steps",
+        expectedResult: "Legacy expected",
+        actualResult: "Legacy actual",
+        severity: "minor",
+        sessionId: "session-test",
+        brokerModel: "codex-5-6-terra",
+        files: [
+          {
+            kind: "diagnostics",
+            name: "cukii-diagnostics.txt",
+            mimeType: "text/plain",
+            localName: "cukii-diagnostics.txt",
+          },
+        ],
+        attempts: 0,
+        nextAttemptAt: "2026-09-07T12:00:00.000Z",
+      }),
+    );
+
+    await fx.reporter.flush();
+
+    const taskCall = fx.calls.find(
+      (call) => call.method === "POST" && call.url.endsWith("/tasks"),
+    );
+    const taskBody = JSON.parse(String(taskCall?.body)) as {
+      title: string;
+      description: string;
+    };
+    expect(taskBody.title).toBe("Legacy title");
+    expect(taskBody.description).toContain(
+      "## Steps to reproduce\nLegacy steps",
+    );
+    expect(taskBody.description).toContain("## Actual result\nLegacy actual");
+  });
+
   it("persists a 502, retries it, and creates exactly one idempotent task", async () => {
     const fx = fixture({ failUploads: true });
     recordCukiiDiagnostic("bridge.run.failed", {
@@ -252,7 +352,7 @@ describe("YougileIssueReporter", () => {
     fs.writeFileSync(manualPath, Buffer.from(PNG_BASE64, "base64"));
     const [manual] = await fx.reporter.registerPickedImages([manualPath]);
     const sensitiveSubmission = submission("report-0001");
-    sensitiveSubmission.actualResult =
+    sensitiveSubmission.description =
       "token=typed-secret-value, contact qa@example.com";
     sensitiveSubmission.attachmentIds = [manual.id];
 

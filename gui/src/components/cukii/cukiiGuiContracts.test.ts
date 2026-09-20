@@ -59,7 +59,7 @@ describe("Cukii GUI contracts", () => {
     expect(body).toContain("overflow-x: hidden;");
     expect(body).toContain("overflow-y: auto;");
     expect(body).toContain("scrollbar-gutter: stable;");
-    expect(modal).toContain("rows={2}");
+    expect(modal).toContain("rows={8}");
     expect(modal).not.toContain("overflow-y-auto");
     expect(modal).not.toContain("w-[520px]");
   });

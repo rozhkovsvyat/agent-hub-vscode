@@ -259,10 +259,7 @@ export type CukiiIssueDiagnosticsPreview = {
 
 export type CukiiIssueReportSubmission = {
   reportId: string;
-  title: string;
-  stepsToReproduce: string;
-  expectedResult: string;
-  actualResult: string;
+  description: string;
   severity: CukiiIssueSeverity;
   sessionId: string;
   brokerModel: BrokerModel;

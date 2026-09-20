@@ -58,7 +58,7 @@ describe("ReportIssueModal", () => {
     const { onClose } = renderForm();
     const dialog = screen.getByRole("dialog");
     const title = screen.getByPlaceholderText(
-      "A short description of the problem",
+      "What happened? What did you do, and what did you expect instead?",
     );
 
     await screen.findByAltText("Sanitized Cukii chat preview");
@@ -137,7 +137,9 @@ describe("ReportIssueModal", () => {
     const { user } = renderForm(messenger);
 
     await user.type(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       "Picker overlaps the composer",
     );
     expect(sessionStorage.length).toBe(0);
@@ -148,7 +150,7 @@ describe("ReportIssueModal", () => {
     expect(captureSnapshot).toHaveBeenCalledTimes(2);
     expect(submissions).toHaveLength(1);
     expect(submissions[0]).toMatchObject({
-      title: "Picker overlaps the composer",
+      description: "Picker overlaps the composer",
       sessionId: "session-1",
       brokerModel: "codex-5-6-terra",
       snapshot: {
@@ -158,6 +160,99 @@ describe("ReportIssueModal", () => {
         sanitizer: "cukii-report-v1",
       },
     });
+    expect(submissions[0]).not.toHaveProperty("title");
+    expect(submissions[0]).not.toHaveProperty("stepsToReproduce");
+    expect(submissions[0]).not.toHaveProperty("expectedResult");
+    expect(submissions[0]).not.toHaveProperty("actualResult");
+  });
+
+  it("lets the user remove the automatic snapshot from the report", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const submissions: CukiiIssueReportSubmission[] = [];
+    messenger.responseHandlers["cukii/submitIssueReport"] = async (input) => {
+      submissions.push(input);
+      return {
+        reportId: input.reportId,
+        status: "sent",
+        taskId: "task-1",
+        message: "Report sent to the Cukii Bugs board.",
+      };
+    };
+    const { user } = renderForm(messenger);
+
+    await user.type(
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
+      "The snapshot shows a private window",
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove chat snapshot" }),
+    );
+    expect(screen.getByText("Snapshot excluded")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Report" }));
+    await screen.findByText("Report sent");
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).not.toHaveProperty("snapshot");
+  });
+
+  it("restores the automatic snapshot when the user re-includes it", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const submissions: CukiiIssueReportSubmission[] = [];
+    messenger.responseHandlers["cukii/submitIssueReport"] = async (input) => {
+      submissions.push(input);
+      return {
+        reportId: input.reportId,
+        status: "sent",
+        taskId: "task-1",
+        message: "Report sent to the Cukii Bugs board.",
+      };
+    };
+    const { user } = renderForm(messenger);
+
+    await user.type(
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
+      "Include the snapshot after all",
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove chat snapshot" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Include chat snapshot" }),
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "Report" }));
+    await screen.findByText("Report sent");
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+      snapshot: { pngBase64: SNAPSHOT.pngBase64, width: 640, height: 480 },
+    });
+  });
+
+  it("collects a single description field plus severity, no section fields", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    renderForm();
+
+    expect(
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Severity")).toBeInTheDocument();
+    expect(screen.queryByText("Steps to reproduce")).not.toBeInTheDocument();
+    expect(screen.queryByText("Expected result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Actual result")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/short description/i)).toBeNull();
   });
 
   it("accepts screenshots pasted from the clipboard without opening Explorer", async () => {
@@ -262,7 +357,9 @@ describe("ReportIssueModal", () => {
     } as (typeof messenger.responses)["cukii/submitIssueReport"];
     const { user } = renderForm(messenger);
     await user.type(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       "Clickable result",
     );
     await waitFor(() =>
@@ -290,7 +387,9 @@ describe("ReportIssueModal", () => {
     const { user } = renderForm(messenger);
 
     await user.type(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       "YouGile returned 502",
     );
     await waitFor(() =>
@@ -322,7 +421,9 @@ describe("ReportIssueModal", () => {
     );
 
     fireEvent.change(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       { target: { value: "Extension host stopped replying" } },
     );
     await waitFor(() =>
@@ -344,7 +445,9 @@ describe("ReportIssueModal", () => {
       expect(screen.getByText(/submission timed out/i)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Report" })).toBeEnabled();
       expect(
-        screen.getByPlaceholderText("A short description of the problem"),
+        screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       ).toBeDisabled();
       expect(
         screen.getByRole("button", { name: "Close issue report" }),
@@ -401,7 +504,9 @@ describe("ReportIssueModal", () => {
     renderForm();
     await screen.findByAltText("Sanitized Cukii chat preview");
     fireEvent.change(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       { target: { value: "Snapshot refresh stopped replying" } },
     );
     captureSnapshot.mockImplementationOnce(() => new Promise(() => undefined));
@@ -436,7 +541,9 @@ describe("ReportIssueModal", () => {
     const { user } = renderForm(messenger);
 
     await user.type(
-      screen.getByPlaceholderText("A short description of the problem"),
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
       "Snapshot failed",
     );
     await screen.findByText("Canvas unavailable");
