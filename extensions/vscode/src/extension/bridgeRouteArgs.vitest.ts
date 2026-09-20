@@ -538,7 +538,24 @@ describe("native bridge argv", () => {
           [],
           resolveBridgeControls("kimi-k3", "high", "standard"),
         ),
-      ).toThrow(/native executable is required/);
+      ).toThrow(/is not installed where Cukii launches it/);
+      // Card CUK-113: refusing is right, but the old wording ("PATH and shell
+      // shims are refused") left a user who installed through npm and logged
+      // in successfully with nothing to act on. The refusal has to name both
+      // the file this route spawns and the installer that produces it.
+      expect(() =>
+        routeForModel(
+          "kimi-k3",
+          "D:/Brain/vault",
+          "&|<>^%!",
+          [],
+          resolveBridgeControls("kimi-k3", "high", "standard"),
+        ),
+      ).toThrow(
+        new RegExp(
+          `${nativeProgram.replace(/[\\.]/g, "\\$&")}[\\s\\S]*code\\.kimi\\.com/kimi-code/install\\.ps1`,
+        ),
+      );
       expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
       expect(existsSync).not.toHaveBeenCalledWith(shim);
       expect(writeFileSync).not.toHaveBeenCalled();
@@ -575,7 +592,7 @@ describe("native bridge argv", () => {
           [],
           resolveBridgeControls("kimi-k3", "high", "standard"),
         ),
-      ).toThrow(/native executable is required/);
+      ).toThrow(/Refusing to launch Kimi through/);
       expect(lstatSync).toHaveBeenCalledWith(paths.root);
       expect(lstatSync).not.toHaveBeenCalledWith(paths.bin);
       expect(writeFileSync).not.toHaveBeenCalled();
@@ -617,7 +634,7 @@ describe("native bridge argv", () => {
           [],
           resolveBridgeControls("kimi-k3", "high", "standard"),
         ),
-      ).toThrow(/native executable is required/);
+      ).toThrow(/Refusing to launch Kimi through/);
       expect(lstatSync).toHaveBeenCalledWith(paths.root);
       expect(lstatSync).toHaveBeenCalledWith(paths.bin);
       expect(lstatSync).toHaveBeenCalledWith(paths.executable);

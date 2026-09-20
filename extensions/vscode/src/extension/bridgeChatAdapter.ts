@@ -865,19 +865,32 @@ function kimiWindowsNativeProgram(): string {
     { path: binDirectory, type: "directory" },
     { path: nativeProgram, type: "file" },
   ];
-  try {
-    for (const component of components) {
-      const stats = fs.lstatSync(component.path);
-      const typeMatches =
-        component.type === "directory" ? stats.isDirectory() : stats.isFile();
-      if (stats.isSymbolicLink() || !typeMatches) {
-        throw new Error("unsafe Kimi native path component");
-      }
+  for (const component of components) {
+    let stats: fs.Stats;
+    try {
+      stats = fs.lstatSync(component.path);
+    } catch {
+      // Card CUK-113: an npm install of @moonshot-ai/kimi-code writes
+      // `%APPDATA%\npm\kimi.ps1` and no `.kimi-code\bin` at all, so a user who
+      // installed and logged in successfully still landed here. Saying only
+      // "shims are refused" left them with nothing to do about it.
+      throw new Error(
+        `Kimi is not installed where Cukii launches it: ${nativeProgram} is missing. ` +
+          "A shim on PATH cannot be used — a Kimi turn carries its whole transcript " +
+          "on the command line, which is longer than a shell shim can pass along. " +
+          "Install the native CLI with `irm https://code.kimi.com/kimi-code/install.ps1 | iex`, " +
+          `then restart VS Code; the login in ${path.join(kimiRoot, "credentials")} is kept.`,
+      );
     }
-  } catch {
-    throw new Error(
-      `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused.`,
-    );
+    const typeMatches =
+      component.type === "directory" ? stats.isDirectory() : stats.isFile();
+    if (stats.isSymbolicLink() || !typeMatches) {
+      throw new Error(
+        `Refusing to launch Kimi through ${component.path}: it is a link or the ` +
+          "wrong kind of file, and Cukii will not follow it. Reinstall with " +
+          "`irm https://code.kimi.com/kimi-code/install.ps1 | iex`.",
+      );
+    }
   }
   return nativeProgram;
 }

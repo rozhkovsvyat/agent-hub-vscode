@@ -352,6 +352,40 @@ function nativeUnixInstallScript(vendor: BrokerVendorId): string | undefined {
   return undefined;
 }
 
+/**
+ * Kimi on Windows comes from Moonshot's own installer, never from npm.
+ *
+ * 🔴 `kimiRoute` spawns `%USERPROFILE%\.kimi-code\bin\kimi.exe` directly and
+ * refuses shims on purpose: a Kimi turn carries its whole transcript in `-p`,
+ * and a `.cmd`/`.ps1` shim has to go through cmd.exe, whose command line is far
+ * shorter than CreateProcess's. Installing `@moonshot-ai/kimi-code` from npm
+ * writes `%APPDATA%\npm\kimi.ps1` and no `.kimi-code\bin` at all — so Cukii
+ * installed precisely what Cukii then refused to run, and a colleague of the
+ * owner got "Kimi native executable is required at ...\.kimi-code\bin\kimi.exe"
+ * after an install and a login that both reported success (board card CUK-113,
+ * 2026-09-20). `KIMI_INSTALL_DIR` is pinned rather than left to its default so
+ * the installer and the route cannot drift apart again, and the binary is
+ * verified where the route will look for it before this reports success.
+ */
+function windowsKimiInstallScript(): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "  $root = Join-Path $env:USERPROFILE '.kimi-code'",
+    "  $env:KIMI_INSTALL_DIR = $root",
+    "  irm 'https://code.kimi.com/kimi-code/install.ps1' | iex",
+    "  $native = Join-Path $root 'bin\\kimi.exe'",
+    "  if (-not (Test-Path -LiteralPath $native)) {",
+    '    throw "the installer finished but $native is missing. Cukii launches that executable directly and cannot use a PATH shim."',
+    "  }",
+    "  exit 0",
+    "} catch {",
+    "  [Console]::Error.WriteLine('Cukii: ' + $_.Exception.Message)",
+    "  exit 1",
+    "}",
+  ].join("\r\n");
+}
+
 function windowsCursorInstallScript(): string {
   return [
     "$ErrorActionPreference = 'Stop'",
@@ -371,12 +405,15 @@ export function vendorInstallTerminalSpec(
 
   if (platform === "win32") {
     const systemRoot = env.SystemRoot ?? "C:\\Windows";
+    const windowsNativeScript =
+      vendor === "cursor"
+        ? windowsCursorInstallScript()
+        : vendor === "kimi"
+          ? windowsKimiInstallScript()
+          : undefined;
     return {
       name: `Cukii · ${vendor} install`,
-      command:
-        vendor === "cursor"
-          ? windowsCursorInstallScript()
-          : windowsNpmInstallScript(packageName!),
+      command: windowsNativeScript ?? windowsNpmInstallScript(packageName!),
       shellPath: path.win32.join(
         systemRoot,
         "System32",

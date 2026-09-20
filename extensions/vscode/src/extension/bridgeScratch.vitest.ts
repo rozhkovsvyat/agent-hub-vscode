@@ -6,12 +6,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   CUKII_BRIDGE_SCRATCH_ROOT,
+  CUKII_PERMISSION_SCRATCH_ROOT,
   CUKII_VOICE_SCRATCH_ROOT,
   bridgeScratchRoot,
   createCukiiScratchDirectory,
+  createDirectoryWithoutReparse,
   removeBridgeScratchFile,
   removeCukiiScratchDirectory,
   voiceScratchRoot,
+  windowsScratchBase,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
 
@@ -33,6 +36,38 @@ describe.runIf(process.platform === "win32")("Cukii Scratch roots", () => {
     expect(() =>
       removeCukiiScratchDirectory("D:\\Scratch", CUKII_VOICE_SCRATCH_ROOT),
     ).toThrow("outside Cukii Scratch");
+  });
+
+  // Card CUK-112: the Windows root was the literal `D:\Scratch\cukii-*`, so on
+  // a machine with no D: volume every vendor — not only Grok — died before it
+  // started with `ENOENT: no such file or directory, mkdir 'D:\Scratch'`.
+  it("derives the Windows root from the shared ladder, not a fixed volume", () => {
+    const base = windowsScratchBase();
+    expect(path.win32.isAbsolute(base)).toBe(true);
+    for (const [root, name] of [
+      [CUKII_BRIDGE_SCRATCH_ROOT, "bridge"],
+      [CUKII_PERMISSION_SCRATCH_ROOT, "permission"],
+      [CUKII_VOICE_SCRATCH_ROOT, "voice"],
+    ] as const) {
+      expect(root).toBe(path.win32.join(base, `cukii-${name}`));
+    }
+
+    // The volume the owner actually has still wins, or this "fix" would move
+    // his bridge artefacts into %TEMP% on the machine that was never broken.
+    if (fs.existsSync("D:\\Scratch")) {
+      expect(base).toBe("D:\\Scratch");
+    }
+
+    // The fallback rung has to be creatable by the very function that failed:
+    // a root under the system temporary directory, made without following a
+    // reparse point.
+    const fallback = path.join(os.tmpdir(), "cukii-scratch-ladder-probe");
+    try {
+      const created = createDirectoryWithoutReparse(fallback);
+      expect(fs.lstatSync(created).isDirectory()).toBe(true);
+    } finally {
+      fs.rmSync(fallback, { recursive: true, force: true });
+    }
   });
 
   it("uses a dedicated voice root rather than the OS temporary directory", () => {
