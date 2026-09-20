@@ -166,6 +166,79 @@ describe("ReportIssueModal", () => {
     expect(submissions[0]).not.toHaveProperty("actualResult");
   });
 
+  it("lets the user remove the automatic snapshot from the report", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const submissions: CukiiIssueReportSubmission[] = [];
+    messenger.responseHandlers["cukii/submitIssueReport"] = async (input) => {
+      submissions.push(input);
+      return {
+        reportId: input.reportId,
+        status: "sent",
+        taskId: "task-1",
+        message: "Report sent to the Cukii Bugs board.",
+      };
+    };
+    const { user } = renderForm(messenger);
+
+    await user.type(
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
+      "The snapshot shows a private window",
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove chat snapshot" }),
+    );
+    expect(screen.getByText("Snapshot excluded")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Report" }));
+    await screen.findByText("Report sent");
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).not.toHaveProperty("snapshot");
+  });
+
+  it("restores the automatic snapshot when the user re-includes it", async () => {
+    captureSnapshot.mockResolvedValue(SNAPSHOT);
+    const messenger = new MockIdeMessenger();
+    const submissions: CukiiIssueReportSubmission[] = [];
+    messenger.responseHandlers["cukii/submitIssueReport"] = async (input) => {
+      submissions.push(input);
+      return {
+        reportId: input.reportId,
+        status: "sent",
+        taskId: "task-1",
+        message: "Report sent to the Cukii Bugs board.",
+      };
+    };
+    const { user } = renderForm(messenger);
+
+    await user.type(
+      screen.getByPlaceholderText(
+        "What happened? What did you do, and what did you expect instead?",
+      ),
+      "Include the snapshot after all",
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove chat snapshot" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Include chat snapshot" }),
+    );
+    await waitFor(() => expect(captureSnapshot).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "Report" }));
+    await screen.findByText("Report sent");
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+      snapshot: { pngBase64: SNAPSHOT.pngBase64, width: 640, height: 480 },
+    });
+  });
+
   it("collects a single description field plus severity, no section fields", async () => {
     captureSnapshot.mockResolvedValue(SNAPSHOT);
     renderForm();
