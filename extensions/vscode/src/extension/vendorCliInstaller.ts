@@ -360,6 +360,28 @@ function windowsCursorInstallScript(): string {
   ].join("; ");
 }
 
+/**
+ * Kimi on Windows is native-only: the bridge route refuses PATH and shell
+ * shims and launches `%USERPROFILE%\.kimi-code\bin\kimi.exe` directly, so an
+ * npm install would succeed and still leave the vendor unusable (board card
+ * fb3a5175). The official installer places exactly that executable; verify it
+ * instead of trusting the script's exit code.
+ */
+function windowsKimiNativeInstallScript(): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "  irm 'https://code.kimi.com/kimi-code/install.ps1' | iex",
+    "  $kimiExe = Join-Path $env:USERPROFILE '.kimi-code\\bin\\kimi.exe'",
+    "  if (-not (Test-Path -LiteralPath $kimiExe)) { throw \"Kimi installer finished, but the native executable is not at $kimiExe.\" }",
+    "  exit 0",
+    "} catch {",
+    "  [Console]::Error.WriteLine('Cukii: ' + $_.Exception.Message)",
+    "  exit 1",
+    "}",
+  ].join("\r\n");
+}
+
 export function vendorInstallTerminalSpec(
   vendor: BrokerVendorId,
   platform: NodeJS.Platform = process.platform,
@@ -376,7 +398,9 @@ export function vendorInstallTerminalSpec(
       command:
         vendor === "cursor"
           ? windowsCursorInstallScript()
-          : windowsNpmInstallScript(packageName!),
+          : vendor === "kimi"
+            ? windowsKimiNativeInstallScript()
+            : windowsNpmInstallScript(packageName!),
       shellPath: path.win32.join(
         systemRoot,
         "System32",
