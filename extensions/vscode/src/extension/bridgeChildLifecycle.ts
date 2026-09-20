@@ -96,22 +96,29 @@ async function windowsDescendantRows(
 ): Promise<WindowsProcessRow[] | undefined> {
   const deadline = Date.now() + budgetMs;
   const descendants: WindowsProcessRow[] = [];
-  const queue = [rootPid];
-  const seen = new Set<number>(queue);
-  while (queue.length > 0) {
+  let frontier = [rootPid];
+  const seen = new Set<number>(frontier);
+  while (frontier.length > 0) {
     if (remainingBudget(deadline) <= 0) return undefined;
-    const parent = queue.shift()!;
-    const children = await windowsDirectChildren(
-      parent,
-      remainingBudget(deadline),
+    // Probe one tree level in parallel: each CIM query spawns PowerShell
+    // (~0.5 s), so a sequential walk over a wide tree exceeded the shared
+    // budget and orphans of an exited launcher survived Stop.
+    const levels = await Promise.all(
+      frontier.map((parent) =>
+        windowsDirectChildren(parent, remainingBudget(deadline)),
+      ),
     );
-    if (children === undefined) return undefined;
-    for (const child of children) {
-      if (seen.has(child.pid)) continue;
-      seen.add(child.pid);
-      descendants.push(child);
-      queue.push(child.pid);
+    if (levels.some((children) => children === undefined)) return undefined;
+    const next: number[] = [];
+    for (const children of levels) {
+      for (const child of children!) {
+        if (seen.has(child.pid)) continue;
+        seen.add(child.pid);
+        descendants.push(child);
+        next.push(child.pid);
+      }
     }
+    frontier = next;
   }
   return descendants;
 }
@@ -146,7 +153,7 @@ async function waitForTreeExit(
       platform === "win32"
         ? await windowsTreeIsAlive(
             pid,
-            Math.min(2_000, remainingBudget(deadline)),
+            Math.min(6_000, remainingBudget(deadline)),
           )
         : posixGroupIsAlive(pid);
     if (!alive) return true;
@@ -181,7 +188,7 @@ async function windowsKillDescendantsAfterRootExit(
   const deadline = Date.now() + budgetMs;
   const descendants = await windowsDescendantRows(
     rootPid,
-    Math.min(2_000, remainingBudget(deadline)),
+    Math.min(6_000, remainingBudget(deadline)),
   );
   if (descendants === undefined) return false;
   if (descendants.length === 0) return true;
@@ -302,7 +309,7 @@ export async function terminateBridgeChild(
       !options.forceKill && child.pid && process.platform === "win32"
         ? await windowsDescendantRows(
             child.pid,
-            Math.min(2_000, remainingBudget(deadline)),
+            Math.min(6_000, remainingBudget(deadline)),
           )
         : undefined;
     const knownPids =
