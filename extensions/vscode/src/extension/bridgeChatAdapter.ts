@@ -27,6 +27,7 @@ import { BridgeEvent, BridgeEventParser, BridgeFormat } from "./bridgeEvents";
 import { BridgeSilenceWatchdog } from "./bridgeSilenceWatchdog";
 import {
   forgetVendorSession,
+  isVendorSessionLossError,
   rememberVendorSession,
   rememberedVendorSession,
 } from "./bridgeVendorSession";
@@ -2292,7 +2293,7 @@ async function* launchBridgeChild(options: {
       if (
         sessionId &&
         command.args.includes("--resume") &&
-        /unknown session|session not found|no conversation found/i.test(detail)
+        isVendorSessionLossError(detail)
       ) {
         forgetVendorSession(sessionId, brokerModel);
       }

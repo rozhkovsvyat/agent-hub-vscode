@@ -40,6 +40,19 @@ export function forgetVendorSession(
   remembered.delete(key(sessionId, model));
 }
 
+/**
+ * True when the vendor reports that the remembered native session is gone and
+ * `--resume` can never succeed: Claude prints "unknown session"/"no
+ * conversation found", while Codex 0.4x rollout errors say
+ * `thread <uuid> not found` (card 7864160e: the run died instead of the next
+ * turn cold-starting). Any other failure text must not drop the resume id.
+ */
+export function isVendorSessionLossError(detail: string): boolean {
+  return /unknown session|session not found|no conversation found|thread\s+[\w-]{8,}\s+not found/i.test(
+    detail,
+  );
+}
+
 /** Test-only: drop in-memory resume ids between cases. */
 export function resetVendorSessionsForTests(): void {
   remembered.clear();
