@@ -1307,7 +1307,12 @@ html[data-cukii-panel-tone="light"] .cukii-permission-popover {
 
 .cukii-report-field input:focus,
 .cukii-report-field textarea:focus,
-.cukii-report-field select:focus {
+.cukii-report-field select:focus,
+.cukii-report-field input:focus-visible,
+.cukii-report-field textarea:focus-visible,
+.cukii-report-field select:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
   border-color: var(--vscode-focusBorder, #007fd4);
   box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007fd4);
 }
