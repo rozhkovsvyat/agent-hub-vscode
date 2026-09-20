@@ -1394,6 +1394,9 @@ export class VsCodeMessenger {
           msg.data.sessionId,
           runId,
           (request) => protocol.send("cukii/userQuestionRequested", request),
+          undefined,
+          (withdrawn) =>
+            protocol.send("cukii/userQuestionWithdrawn", withdrawn),
         ),
       };
       const permissionTransport: ClaudePermissionTransport = {

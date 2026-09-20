@@ -13,6 +13,8 @@ import {
 } from "./bridgeRunBinding";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
+/** How often a still-unanswered request is re-published to the panel. */
+export const RENOTIFY_INTERVAL_MS = 10_000;
 
 type QuestionRecord = {
   id: string;
@@ -186,6 +188,7 @@ function answerIdsMatch(
 export class BridgeQuestionBroker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly pending = new Map<string, string>();
+  private readonly notifiedMs = new Map<string, number>();
   private binding: CukiiRunBinding | undefined;
 
   constructor(
@@ -194,6 +197,11 @@ export class BridgeQuestionBroker {
     private readonly onRequest: (request: CukiiUserQuestionRequest) => void,
     private readonly bindingReader: typeof readRunBindingForPid =
       readRunBindingForPid,
+    private readonly onWithdraw?: (withdrawn: {
+      runId: string;
+      requestId: string;
+      sessionId: string;
+    }) => void,
   ) {}
 
   start(intervalMs = 250): void {
@@ -224,6 +232,7 @@ export class BridgeQuestionBroker {
   tick(): void {
     if (!this.binding) return;
     const now = Date.now();
+    const live = new Set<string>();
     for (const { record } of listRecords(this.sessionId)) {
       if (
         record.status !== "pending" ||
@@ -231,12 +240,22 @@ export class BridgeQuestionBroker {
         record.producerNonce !== this.binding.nonce ||
         record.createdMs < this.binding.createdMs ||
         record.createdMs > now + 5_000 ||
-        now - record.createdMs > 30 * 60_000 ||
-        this.pending.has(record.id)
+        now - record.createdMs > 30 * 60_000
       )
         continue;
+      live.add(record.id);
+      const notified = this.notifiedMs.get(record.id);
+      if (
+        this.pending.has(record.id) &&
+        notified !== undefined &&
+        now - notified < RENOTIFY_INTERVAL_MS
+      )
+        continue;
+      // Re-emitting is idempotent for the panel (keyed by run/request) and is
+      // what restores the sheet after a webview reload or renderer crash.
       const fingerprint = questionFingerprint(record);
       this.pending.set(record.id, fingerprint);
+      this.notifiedMs.set(record.id, now);
       this.onRequest({
         runId: this.runId,
         requestId: record.id,
@@ -244,6 +263,15 @@ export class BridgeQuestionBroker {
         requestFingerprint: fingerprint,
         questions: record.questions,
       });
+    }
+    // A tracked request that is no longer pending on disk was finalized by
+    // someone else (MCP timeout receipt, external cancel): drop the sheet so
+    // the panel never shows a question whose agent already moved on.
+    for (const id of [...this.pending.keys()]) {
+      if (live.has(id)) continue;
+      this.pending.delete(id);
+      this.notifiedMs.delete(id);
+      this.onWithdraw?.({ runId: this.runId, requestId: id, sessionId: this.sessionId });
     }
   }
 
@@ -286,6 +314,7 @@ export class BridgeQuestionBroker {
         : item.record;
     if (next === item.record || !replaceRecord(item.file, next)) return false;
     this.pending.delete(response.requestId);
+    this.notifiedMs.delete(response.requestId);
     return true;
   }
 
@@ -302,5 +331,6 @@ export class BridgeQuestionBroker {
       }
     }
     this.pending.clear();
+    this.notifiedMs.clear();
   }
 }

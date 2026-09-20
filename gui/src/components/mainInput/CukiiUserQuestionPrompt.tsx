@@ -89,6 +89,21 @@ export function CukiiUserQuestionPrompt() {
     [dispatch, ideMessenger, sessionId],
   );
 
+  // The broker withdrew the question (timeout receipt, run stopped): the
+  // agent already moved on, so the sheet must not linger unanswered.
+  useWebviewListener(
+    "cukii/userQuestionWithdrawn",
+    async (item) => {
+      dispatch(
+        removeUserQuestion({
+          runId: item.runId,
+          requestId: item.requestId,
+        }),
+      );
+    },
+    [dispatch],
+  );
+
   useEffect(() => {
     return () => {
       for (const item of Object.values(pendingRef.current)) {
@@ -121,12 +136,26 @@ export function CukiiUserQuestionPrompt() {
       onSubmit={submit}
       role="dialog"
     >
-      <div className="cukii-user-question-title">Cukii needs your input</div>
+      <div className="cukii-user-question-title">
+        Cukii needs your input
+        {request.questions.length > 1 && (
+          <span className="cukii-user-question-count">
+            {request.questions.length} questions
+          </span>
+        )}
+      </div>
       <div className="cukii-user-question-list">
         {request.questions.map((question, questionIndex) => (
           <fieldset key={question.id}>
             <legend>
-              <span>{question.header}</span>
+              <span>
+                {request.questions.length > 1 && (
+                  <strong className="cukii-user-question-step">
+                    {questionIndex + 1} of {request.questions.length}
+                  </strong>
+                )}
+                {question.header}
+              </span>
               <strong>{question.question}</strong>
             </legend>
             {question.options.map((option, optionIndex) => (

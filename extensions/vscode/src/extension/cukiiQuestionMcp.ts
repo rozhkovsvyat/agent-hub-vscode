@@ -11,7 +11,10 @@ import {
 import { resolveWithBoundedRetry } from "./bindingRetry";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
-const WAIT_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60_000;
+const MIN_WAIT_TIMEOUT_MS = 60_000;
+const MAX_WAIT_TIMEOUT_MS = 2 * 60 * 60_000;
+const POLL_INTERVAL_MS = 100;
 
 type Question = {
   id: string;
@@ -19,6 +22,20 @@ type Question = {
   question: string;
   options: { label: string; description: string }[];
 };
+
+/**
+ * How long one tools/call waits for the user. Bounded so an agent never
+ * hangs forever on a dead panel, long enough that a human can read and
+ * answer; CUKII_QUESTION_TIMEOUT_MS tunes it within sane clamps.
+ */
+export function waitTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.CUKII_QUESTION_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_WAIT_TIMEOUT_MS;
+  return Math.min(
+    Math.max(Math.floor(raw), MIN_WAIT_TIMEOUT_MS),
+    MAX_WAIT_TIMEOUT_MS,
+  );
+}
 
 function bounded(value: unknown, bytes: number): value is string {
   return (
@@ -93,9 +110,74 @@ function writeExclusive(file: string, body: string): void {
   }
 }
 
-async function waitForAnswer(file: string): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + WAIT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+/** Atomic rewrite mirroring the extension-side writer: tmp + rename. */
+function replaceRecord(file: string, body: string): boolean {
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, body, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    try {
+      fs.chmodSync(temporary, 0o600);
+    } catch {
+      // Windows ACLs are authoritative.
+    }
+    fs.renameSync(temporary, file);
+    return true;
+  } catch {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+      // Best-effort cleanup only.
+    }
+    return false;
+  }
+}
+
+/**
+ * Converge a wait that ended without an answer: the record stops being
+ * pending, so the broker withdraws the panel sheet and a late click is
+ * rejected instead of writing an answer nobody will ever read.
+ */
+export function finalizeCancelled(
+  file: string,
+  requestId: string,
+  reason: string,
+): boolean {
+  try {
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    if (record?.id !== requestId || record?.status !== "pending") return false;
+    return replaceRecord(
+      file,
+      JSON.stringify({ ...record, status: "cancelled", reason }),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function waitForAnswer(
+  file: string,
+  requestId: string,
+  deps: {
+    timeoutMs?: number;
+    now?: () => number;
+    sleep?: (milliseconds: number) => Promise<void>;
+  } = {},
+): Promise<Record<string, unknown>> {
+  const timeoutMs = deps.timeoutMs ?? waitTimeoutMs();
+  const now = deps.now ?? Date.now;
+  const sleep =
+    deps.sleep ??
+    ((milliseconds: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
     try {
       const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<
         string,
@@ -106,9 +188,24 @@ async function waitForAnswer(file: string): Promise<Record<string, unknown>> {
     } catch {
       // Atomic writer may be between rename boundaries; retry.
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await sleep(POLL_INTERVAL_MS);
   }
+  finalizeCancelled(file, requestId, "timeout");
   return { status: "cancelled", reason: "timeout" };
+}
+
+/** requestId → record file for every tools/call still waiting on the user. */
+export const outstandingRequests = new Map<string, string>();
+
+/**
+ * The vendor went away (stdin closed). Converge every outstanding wait so no
+ * panel sheet or broker slot hangs behind a dead agent.
+ */
+export function dropOutstandingRequests(reason: string): void {
+  for (const [requestId, file] of outstandingRequests) {
+    finalizeCancelled(file, requestId, reason);
+  }
+  outstandingRequests.clear();
 }
 
 async function requestUserInput(argumentsValue: unknown) {
@@ -142,14 +239,19 @@ async function requestUserInput(argumentsValue: unknown) {
     `${requestId}.json`,
   );
   writeExclusive(file, JSON.stringify(record));
-  const response = await waitForAnswer(file);
-  return response.status === "answered"
-    ? { requestId, answers: response.answers || {} }
-    : {
-        requestId,
-        cancelled: true,
-        reason: response.reason || "cancelled",
-      };
+  outstandingRequests.set(requestId, file);
+  try {
+    const response = await waitForAnswer(file, requestId);
+    return response.status === "answered"
+      ? { requestId, answers: response.answers || {} }
+      : {
+          requestId,
+          cancelled: true,
+          reason: response.reason || "cancelled",
+        };
+  } finally {
+    outstandingRequests.delete(requestId);
+  }
 }
 
 const TOOL = {
@@ -194,24 +296,19 @@ const TOOL = {
   },
 };
 
-function send(frame: unknown): void {
-  process.stdout.write(`${JSON.stringify(frame)}\n`);
-}
-
-const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-input.on("line", async (line) => {
-  let message: Record<string, unknown>;
-  try {
-    message = JSON.parse(line) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  const id = message.id;
-  const method = message.method;
-  const params = (message.params || {}) as Record<string, unknown>;
-  if (method === "notifications/initialized" || method === "notifications/cancelled") return;
+export async function mcpResponseForMessage(
+  message: unknown,
+  callTool: (argumentsValue: unknown) => Promise<unknown> = requestUserInput,
+): Promise<Record<string, unknown> | undefined> {
+  if (typeof message !== "object" || message === null) return undefined;
+  const frame = message as Record<string, unknown>;
+  const id = frame.id;
+  const method = frame.method;
+  const params = (frame.params || {}) as Record<string, unknown>;
+  if (method === "notifications/initialized" || method === "notifications/cancelled")
+    return undefined;
   if (method === "initialize") {
-    send({
+    return {
       jsonrpc: "2.0",
       id,
       result: {
@@ -220,45 +317,71 @@ input.on("line", async (line) => {
         capabilities: { tools: {} },
         serverInfo: { name: "cukii-question", version: "1.0.0" },
       },
-    });
-    return;
+    };
   }
   if (method === "ping") {
-    send({ jsonrpc: "2.0", id, result: {} });
-    return;
+    return { jsonrpc: "2.0", id, result: {} };
   }
   if (method === "tools/list") {
-    send({ jsonrpc: "2.0", id, result: { tools: [TOOL] } });
-    return;
+    return { jsonrpc: "2.0", id, result: { tools: [TOOL] } };
   }
   if (method === "tools/call" && params.name === "request_user_input") {
     try {
-      const result = await requestUserInput(params.arguments);
-      send({
+      const result = await callTool(params.arguments);
+      return {
         jsonrpc: "2.0",
         id,
         result: {
           content: [{ type: "text", text: JSON.stringify(result) }],
           isError: false,
         },
-      });
+      };
     } catch {
-      send({
+      return {
         jsonrpc: "2.0",
         id,
         result: {
           content: [{ type: "text", text: "Cukii question request rejected" }],
           isError: true,
         },
-      });
+      };
     }
-    return;
   }
   if (id !== undefined) {
-    send({
+    return {
       jsonrpc: "2.0",
       id,
       error: { code: -32601, message: `Unknown method ${String(method)}` },
-    });
+    };
   }
-});
+  return undefined;
+}
+
+function send(frame: unknown): void {
+  process.stdout.write(`${JSON.stringify(frame)}\n`);
+}
+
+export function startMcpStdio(): void {
+  const input = readline.createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+  input.on("line", (line) => {
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    void mcpResponseForMessage(message).then((frame) => {
+      if (frame) send(frame);
+    });
+  });
+  input.on("close", () => {
+    // The vendor side of stdio is gone; nothing will consume a late answer.
+    dropOutstandingRequests("vendor disconnected");
+    process.exit(0);
+  });
+}
+
+if (require.main === module) startMcpStdio();
