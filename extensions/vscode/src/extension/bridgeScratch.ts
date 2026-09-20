@@ -6,15 +6,58 @@ import path from "node:path";
  * Cukii bridge IPC/transcripts/logs are machine-local scratch artefacts.
  * They must never land in a vault, the repository, or the shared OS temp
  * directory where they become visible as unrelated timeline receipts.
- * Windows keeps the owner's rotation-managed D: volume; every other platform
- * gets a private directory under the user home, created 0700, because a
- * literal Windows volume on POSIX resolves relative to the working directory
- * and would litter the checkout with `D:` folders before failing.
+ * Windows prefers the owner's rotation-managed D: volume; when the machine
+ * has no `D:\Scratch` (most Marketplace users), the same ladder as
+ * `bridgeStorageEnv.resolveBridgeStorageLayout` applies: canonical D: root
+ * if it exists, then `CUKII_SCRATCH_DIR`, then the per-user system temp.
+ * POSIX gets a private directory under the user home, created 0700, because
+ * a literal Windows volume on POSIX resolves relative to the working
+ * directory and would litter the checkout with `D:` folders before failing.
  */
-function scratchRootFor(name: string): string {
-  return process.platform === "win32"
-    ? `D:\\Scratch\\cukii-${name}`
-    : path.join(os.homedir(), ".cukii", "scratch", name);
+export interface ScratchRootOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  pathExists?: (candidate: string) => boolean;
+  homedir?: string;
+  tmpdir?: string;
+}
+
+function scratchEnvValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
+  const match = Object.entries(env).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  );
+  return match?.[1];
+}
+
+export function scratchRootFor(
+  name: string,
+  options: ScratchRootOptions = {},
+): string {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") {
+    return path.join(
+      options.homedir ?? os.homedir(),
+      ".cukii",
+      "scratch",
+      name,
+    );
+  }
+  const exists = options.pathExists ?? fs.existsSync;
+  const canonical = "D:\\Scratch";
+  if (exists(canonical)) {
+    return `${canonical}\\cukii-${name}`;
+  }
+  const override = scratchEnvValue(
+    options.env ?? process.env,
+    "CUKII_SCRATCH_DIR",
+  )?.trim();
+  if (override && exists(override)) {
+    return path.win32.join(override, `cukii-${name}`);
+  }
+  return path.win32.join(options.tmpdir ?? os.tmpdir(), `cukii-${name}`);
 }
 
 export const CUKII_BRIDGE_SCRATCH_ROOT = scratchRootFor("bridge");

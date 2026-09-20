@@ -11,6 +11,7 @@ import {
   createCukiiScratchDirectory,
   removeBridgeScratchFile,
   removeCukiiScratchDirectory,
+  scratchRootFor,
   voiceScratchRoot,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
@@ -97,3 +98,54 @@ describe.skipIf(process.platform === "win32")(
     });
   },
 );
+
+describe("scratchRootFor Windows ladder", () => {
+  const win = "win32" as const;
+
+  it("prefers the canonical D:\\Scratch volume when it exists", () => {
+    expect(
+      scratchRootFor("bridge", {
+        platform: win,
+        pathExists: (candidate) => candidate === "D:\\Scratch",
+      }),
+    ).toBe("D:\\Scratch\\cukii-bridge");
+  });
+
+  it("falls back to CUKII_SCRATCH_DIR when the machine has no D: volume", () => {
+    expect(
+      scratchRootFor("voice", {
+        platform: win,
+        env: { cukii_scratch_dir: "E:\\cukii-tmp" },
+        pathExists: (candidate) => candidate === "E:\\cukii-tmp",
+      }),
+    ).toBe("E:\\cukii-tmp\\cukii-voice");
+  });
+
+  it("falls back to the per-user system temp without D: or an override", () => {
+    expect(
+      scratchRootFor("permission", {
+        platform: win,
+        env: {},
+        pathExists: () => false,
+        tmpdir: "C:\\Users\\stark\\AppData\\Local\\Temp",
+      }),
+    ).toBe("C:\\Users\\stark\\AppData\\Local\\Temp\\cukii-permission");
+  });
+
+  it("ignores a CUKII_SCRATCH_DIR override that does not exist", () => {
+    expect(
+      scratchRootFor("bridge", {
+        platform: win,
+        env: { CUKII_SCRATCH_DIR: "E:\\missing" },
+        pathExists: () => false,
+        tmpdir: "C:\\Temp",
+      }),
+    ).toBe("C:\\Temp\\cukii-bridge");
+  });
+
+  it("keeps POSIX roots private under the user home", () => {
+    expect(
+      scratchRootFor("bridge", { platform: "linux", homedir: "/home/stark" }),
+    ).toBe(path.join("/home/stark", ".cukii", "scratch", "bridge"));
+  });
+});
