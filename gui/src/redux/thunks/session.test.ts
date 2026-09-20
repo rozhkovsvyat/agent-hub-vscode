@@ -117,6 +117,82 @@ describe("saveCurrentSession title lifecycle", () => {
     );
   });
 
+  it("names a fresh session from the first prompt before the vendor turn finishes", async () => {
+    const state = getEmptyRootState();
+    state.session.id = "first-prompt";
+    state.session.title = NEW_SESSION_TITLE;
+    state.session.history = [
+      {
+        message: {
+          id: "user-1",
+          role: "user",
+          content: "",
+        },
+        contextItems: [],
+        editorState: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "почини фокус формы репорта" }],
+            },
+          ],
+        },
+      },
+    ] as any;
+    const store = createMockStore(state);
+    const saveSpy = vi.spyOn(store.mockIdeMessenger, "request");
+
+    await (store.dispatch as any)(
+      saveCurrentSession({
+        openNewSession: false,
+        generateTitle: false,
+        provisionalTitle: true,
+      }),
+    );
+
+    expect((store.getState() as any).session.title).toBe(
+      "почини фокус формы репорта",
+    );
+    expect(saveSpy).toHaveBeenCalledWith(
+      "history/save",
+      expect.objectContaining({
+        sessionId: "first-prompt",
+        title: "почини фокус формы репорта",
+      }),
+    );
+  });
+
+  it("keeps the first-prompt title in the live header instead of restoring New Session", async () => {
+    const state = getEmptyRootState();
+    state.session.id = "live-header";
+    state.session.title = NEW_SESSION_TITLE;
+    state.session.history = [
+      {
+        message: {
+          id: "user-1",
+          role: "user",
+          content: "Fix the Windows session lifecycle",
+        },
+        contextItems: [],
+      },
+    ];
+    const store = createMockStore(state);
+
+    await (store.dispatch as any)(
+      saveCurrentSession({
+        openNewSession: false,
+        generateTitle: false,
+        provisionalTitle: true,
+      }),
+    );
+
+    expect((store.getState() as any).session.title).toBe(
+      "Fix the Windows session lifecycle",
+    );
+    expect((store.getState() as any).session.title).not.toBe(NEW_SESSION_TITLE);
+  });
+
   it("never auto-overwrites a title manually restored from disk", async () => {
     const state = getEmptyRootState();
     state.session.id = "manual-title";

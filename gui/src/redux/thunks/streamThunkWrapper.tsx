@@ -50,9 +50,9 @@ export const streamThunkWrapper = createAsyncThunk<
         // must appear in the journal immediately after the chat starts, and
         // the conversation must survive a window reload that lands mid-turn;
         // waiting for the full turn to finish leaves long broker runs
-        // invisible and unrecoverable. provisionalTitle keeps the fallback
-        // title out of the live header so a later end-of-turn save can still
-        // upgrade a fresh session to its semantic title.
+        // invisible and unrecoverable. The first-prompt title is shown in the
+        // live header immediately; a later end-of-turn save can still upgrade
+        // a fresh session to a semantic title.
         await dispatch(
           saveCurrentSession({
             openNewSession: false,

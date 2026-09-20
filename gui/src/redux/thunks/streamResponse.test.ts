@@ -311,11 +311,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: expect.objectContaining({
           arg: {
@@ -421,11 +416,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: expect.objectContaining({
           arg: {
@@ -518,11 +508,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // The semantic title replaces the restored placeholder in the header.
-        type: "session/updateSessionTitle",
-        payload: "Session summary",
-      },
-      {
         type: "session/update/pending",
         meta: expect.objectContaining({
           requestStatus: "pending",
@@ -533,7 +518,7 @@ describe("streamResponseThunk", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Hello",
         },
       },
       {
@@ -691,7 +676,7 @@ describe("streamResponseThunk", () => {
         bridgeWait: undefined,
         submissionEpoch: 1,
         streamAborter: expect.any(AbortController),
-        title: "Session summary",
+        title: "Hello",
         isPruned: false,
         inlineErrorMessage: undefined,
         contextPercentage: 0.8,
@@ -874,7 +859,6 @@ describe("streamResponseThunk", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
@@ -889,7 +873,6 @@ describe("streamResponseThunk", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "chat/streamNormalInput/pending",
       "session/setAppliedRulesAtIndex",
@@ -917,7 +900,6 @@ describe("streamResponseThunk", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "session/resetNextCodeBlockToApplyIndex",
       "session/streamUpdate",
@@ -932,7 +914,6 @@ describe("streamResponseThunk", () => {
       "session/setInactive",
       "chat/streamNormalInput/fulfilled",
       "session/saveCurrent/pending",
-      "session/updateSessionTitle",
       "session/update/pending",
       "session/updateSessionMetadata",
       "session/setSessionRevision",
@@ -1189,7 +1170,7 @@ describe("streamResponseThunk", () => {
             ],
           },
         ],
-        title: "Session summary",
+        title: "Please search the codebase",
         id: "session-123",
         streamAborter: expect.any(AbortController),
         contextPercentage: 0.9,
@@ -1388,11 +1369,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1518,11 +1494,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1611,17 +1582,12 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // The semantic title replaces the restored placeholder in the header.
-        type: "session/updateSessionTitle",
-        payload: "Session summary",
-      },
-      {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Hello",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1633,7 +1599,7 @@ describe("streamResponseThunk", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Hello",
         },
       },
       {
@@ -1675,7 +1641,7 @@ describe("streamResponseThunk", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Hello",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1844,7 +1810,7 @@ describe("streamResponseThunk", () => {
         contextPercentage: 0.8,
         inlineErrorMessage: undefined,
         isPruned: false,
-        title: "Session summary",
+        title: "Hello",
       },
     });
   });

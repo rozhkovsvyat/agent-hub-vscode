@@ -210,11 +210,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -239,10 +234,6 @@ describe("streamResponseThunk", () => {
           requestStatus: "pending",
         },
         payload: undefined,
-      },
-      {
-        type: "session/updateSessionTitle",
-        payload: "Hello",
       },
       {
         type: "session/update/pending",
@@ -606,11 +597,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -738,11 +724,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -813,11 +794,8 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // No assistant reply yet, so the fallback title reaches the header.
-        type: "session/updateSessionTitle",
-        payload: "Hello",
-      },
-      {
+        // No assistant reply yet; the provisional save already mirrored the
+        // first-prompt title into the header, so no separate dispatch.
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
@@ -1205,11 +1183,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1337,11 +1310,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1411,10 +1379,6 @@ describe("streamResponseThunk", () => {
           requestStatus: "pending",
         },
         payload: undefined,
-      },
-      {
-        type: "session/updateSessionTitle",
-        payload: "Hello",
       },
       {
         type: "session/update/pending",

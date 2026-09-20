@@ -202,7 +202,8 @@ export const loadLastSession = createAsyncThunk<void, void, ThunkApiType>(
   },
 );
 
-function getChatTitleFromMessage(message: ChatMessage) {
+function getChatTitleFromMessage(message?: ChatMessage) {
+  if (!message) return "";
   const text =
     renderChatMessage(message)
       .split("\n")
@@ -216,13 +217,63 @@ function getChatTitleFromMessage(message: ChatMessage) {
   return text;
 }
 
+function firstNonEmptyLine(text: string): string {
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) || ""
+  );
+}
+
+function textFromEditorState(editorState: unknown): string {
+  const parts: string[] = [];
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const record = node as { text?: unknown; content?: unknown };
+    if (typeof record.text === "string") parts.push(record.text);
+    if (Array.isArray(record.content)) {
+      for (const child of record.content) walk(child);
+    }
+  };
+  walk(editorState);
+  return parts.join("");
+}
+
+function truncateTitle(text: string): string {
+  if (text.length > MAX_TITLE_LENGTH) {
+    return text.slice(0, MAX_TITLE_LENGTH - 3) + "...";
+  }
+  return text;
+}
+
+/** Short session name from the first real user prompt, including the
+ * optimistic bubble whose `content` is still empty and only `editorState`
+ * is populated. */
+export function titleFromFirstUserTurn(
+  history: Array<{
+    message: ChatMessage;
+    editorState?: unknown;
+    isSteer?: boolean;
+  }>,
+): string {
+  for (const item of history) {
+    if (item.isSteer || item.message.role !== "user") continue;
+    const fromMessage = firstNonEmptyLine(renderChatMessage(item.message));
+    if (fromMessage) return truncateTitle(fromMessage);
+    const fromEditor = firstNonEmptyLine(textFromEditorState(item.editorState));
+    if (fromEditor) return truncateTitle(fromEditor);
+  }
+  return "";
+}
+
 export const saveCurrentSession = createAsyncThunk<
   void,
   {
     openNewSession: boolean;
     generateTitle: boolean;
-    /** Persist a fallback title without touching the live header, so a later
-     * end-of-turn save can still upgrade it to a semantic title. */
+    /** Persist before the vendor round-trip. The first-prompt title is shown
+     * immediately; a later end-of-turn save can still upgrade it semantically. */
     provisionalTitle?: boolean;
   },
   ThunkApiType
@@ -250,35 +301,45 @@ export const saveCurrentSession = createAsyncThunk<
     let waitedForAutoTitle = false;
     if (!titleManuallySet) {
       if (title === NEW_SESSION_TITLE) {
-        if (
-          !getState().config.config?.disableSessionTitles &&
-          selectedChatModel
-        ) {
-          let assistantResponse = session.history
-            ?.filter((h) => h.message.role === "assistant")[0]
-            ?.message?.content?.toString();
+        const fromPrompt = titleFromFirstUserTurn(session.history);
+        if (fromPrompt) title = fromPrompt;
+      }
 
-          if (assistantResponse && generateTitle) {
-            try {
-              waitedForAutoTitle = true;
-              const result = await extra.ideMessenger.request(
-                "chatDescriber/describe",
-                {
-                  text: assistantResponse,
-                },
-              );
-              if (result.status === "success" && result.content) {
-                title = result.content;
-              }
-            } catch (e) {
-              console.error("Error generating chat title", e);
-            }
+      const userTurns = session.history.filter(
+        (item) => item.message.role === "user" && !item.isSteer,
+      ).length;
+      const assistantResponse = session.history.find(
+        (item) => item.message.role === "assistant",
+      )?.message?.content?.toString();
+
+      if (
+        generateTitle &&
+        userTurns === 1 &&
+        assistantResponse &&
+        !getState().config.config?.disableSessionTitles &&
+        selectedChatModel
+      ) {
+        try {
+          waitedForAutoTitle = true;
+          const result = await extra.ideMessenger.request(
+            "chatDescriber/describe",
+            {
+              text: assistantResponse,
+            },
+          );
+          if (result.status === "success" && result.content) {
+            title = result.content;
           }
+        } catch (e) {
+          console.error("Error generating chat title", e);
         }
-        // Fallbacks if above doesn't work out or session titles disabled
-        if (title === NEW_SESSION_TITLE) {
-          title = getChatTitleFromMessage(session.history[0].message);
-        }
+      }
+
+      // Fallbacks if above doesn't work out or session titles disabled
+      if (title === NEW_SESSION_TITLE) {
+        title =
+          titleFromFirstUserTurn(session.history) ||
+          getChatTitleFromMessage(session.history[0]?.message);
       }
       // More fallbacks in case of no title
       if (!title.length) {
@@ -360,15 +421,8 @@ export const saveCurrentSession = createAsyncThunk<
 
     const result = await dispatch(updateSession(updatedSession));
     unwrapResult(result);
-    // updateSessionMetadata's optimistic reducer mirrors the persisted title
-    // into the live header. For a provisional title that would replace the
-    // fresh-session placeholder with the fallback and suppress the semantic
-    // title at end of turn, so restore the pre-save header title.
-    if (provisionalTitle) {
-      const after = getState().session;
-      if (after.id === session.id && after.title !== session.title) {
-        dispatch(updateSessionTitle(session.title));
-      }
-    }
+    // Keep the first-prompt title in the live header and session list.
+    // Restoring NEW_SESSION_TITLE hid auto-titles until the vendor turn
+    // finished, which for broker models can take minutes.
   },
 );

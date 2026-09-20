@@ -266,7 +266,6 @@ describe("streamResponseThunk - tool calls", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
@@ -281,7 +280,6 @@ describe("streamResponseThunk - tool calls", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "chat/streamNormalInput/pending",
       "session/setAppliedRulesAtIndex",
@@ -309,7 +307,6 @@ describe("streamResponseThunk - tool calls", () => {
       "session/setAllSessionMetadata",
       "session/refreshMetadata/fulfilled",
       "session/update/fulfilled",
-      "session/updateSessionTitle",
       "session/saveCurrent/fulfilled",
       "session/resetNextCodeBlockToApplyIndex",
       "session/streamUpdate",
@@ -324,7 +321,6 @@ describe("streamResponseThunk - tool calls", () => {
       "session/setInactive",
       "chat/streamNormalInput/fulfilled",
       "session/saveCurrent/pending",
-      "session/updateSessionTitle",
       "session/update/pending",
       "session/updateSessionMetadata",
       "session/setSessionRevision",
@@ -595,7 +591,7 @@ describe("streamResponseThunk - tool calls", () => {
         streamAborter: expect.any(AbortController),
         contextPercentage: 0.9,
         isPruned: false,
-        title: "Session summary",
+        title: "Please search the codebase",
         inlineErrorMessage: undefined,
       },
     });
@@ -823,11 +819,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -955,11 +946,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1079,18 +1065,14 @@ describe("streamResponseThunk - tool calls", () => {
         },
         payload: undefined,
       },
-      {
-        // The semantic title replaces the restored placeholder in the header.
-        type: "session/updateSessionTitle",
-        payload: "Session summary",
-      },
+
       {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1102,7 +1084,7 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase",
         },
       },
       {
@@ -1144,7 +1126,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1351,7 +1333,7 @@ describe("streamResponseThunk - tool calls", () => {
         streamAborter: expect.any(AbortController),
         contextPercentage: 0.9,
         isPruned: false,
-        title: "Session summary",
+        title: "Please search the codebase",
         inlineErrorMessage: undefined,
       },
       ui: {
@@ -1633,11 +1615,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1765,11 +1742,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        // Provisional save restores the live header title.
-        type: "session/updateSessionTitle",
-        payload: "New Session",
-      },
-      {
         type: "session/saveCurrent/fulfilled",
         meta: {
           arg: {
@@ -1889,18 +1861,14 @@ describe("streamResponseThunk - tool calls", () => {
         },
         payload: undefined,
       },
-      {
-        // The semantic title replaces the restored placeholder in the header.
-        type: "session/updateSessionTitle",
-        payload: "Session summary",
-      },
+
       {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1912,7 +1880,7 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase for test functions",
         },
       },
       {
@@ -1954,7 +1922,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -2112,7 +2080,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -2124,7 +2092,7 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase for test functions",
         },
       },
       {
@@ -2166,7 +2134,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -2287,7 +2255,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -2299,7 +2267,7 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase for test functions",
         },
       },
       {
@@ -2341,7 +2309,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -2418,7 +2386,7 @@ describe("streamResponseThunk - tool calls", () => {
         activeBridgeRunId: undefined,
         bridgeWait: undefined,
         submissionEpoch: 1,
-        title: "Session summary",
+        title: "Please search the codebase for test functions",
         history: [
           {
             contextItems: [],
