@@ -93,7 +93,9 @@ describe("account-scoped model discovery", () => {
     ).rejects.toThrow(/no longer exposes/);
   });
 
-  it("allows a connected native Cursor account to use restored variants", async () => {
+  it.runIf(process.platform === "win32")(
+    "allows a connected native Cursor account to use restored variants",
+    async () => {
     listAccounts.mockResolvedValue([{ id: "cursor", state: "connected" }]);
     execFile.mockImplementation(
       (
@@ -117,5 +119,6 @@ describe("account-scoped model discovery", () => {
       expect.objectContaining({ windowsHide: true }),
       expect.any(Function),
     );
-  });
+    },
+  );
 });

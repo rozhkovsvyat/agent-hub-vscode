@@ -123,7 +123,9 @@ describe("Claude catalog refresh probe", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("runs the Cursor CLI through the command processor, not as a bare program", async () => {
+  it.runIf(process.platform === "win32")(
+    "runs the Cursor CLI through the command processor, not as a bare program",
+    async () => {
     // The resolved Cursor CLI on Windows is `agent.cmd`, and since Node's
     // batch-injection fix a .cmd cannot be spawned without a shell: execFile
     // throws `spawn EINVAL`, the probe's catch turns that into an empty
@@ -165,7 +167,8 @@ describe("Claude catalog refresh probe", () => {
       (call[1] as string[]).includes("models"),
     );
     expect(probe?.[1]).toEqual(["/d", "/c", "agent.cmd", "models"]);
-  });
+    },
+  );
 });
 
 describe("catalog probe command routing", () => {
