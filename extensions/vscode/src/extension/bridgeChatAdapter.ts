@@ -861,22 +861,19 @@ function kimiWindowsNativeProgram(): string {
     { path: binDirectory, type: "directory" },
     { path: nativeProgram, type: "file" },
   ];
-  for (const component of components) {
-    let stats: fs.Stats;
-    try {
-      stats = fs.lstatSync(component.path);
-    } catch {
-      throw new Error(
-        `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused. Missing ${component.type}: ${component.path}`,
-      );
+  try {
+    for (const component of components) {
+      const stats = fs.lstatSync(component.path);
+      const typeMatches =
+        component.type === "directory" ? stats.isDirectory() : stats.isFile();
+      if (stats.isSymbolicLink() || !typeMatches) {
+        throw new Error("unsafe Kimi native path component");
+      }
     }
-    const typeMatches =
-      component.type === "directory" ? stats.isDirectory() : stats.isFile();
-    if (stats.isSymbolicLink() || !typeMatches) {
-      throw new Error(
-        `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused. Unsafe ${component.type} (link or wrong type): ${component.path}`,
-      );
-    }
+  } catch {
+    throw new Error(
+      `Kimi native executable is required at ${nativeProgram}; PATH and shell shims are refused.`,
+    );
   }
   return nativeProgram;
 }

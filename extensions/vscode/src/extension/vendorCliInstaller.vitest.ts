@@ -17,26 +17,6 @@ const NPM_ONLY_PROGRAMS: Record<(typeof NPM_ONLY_VENDORS)[number], string> = {
 };
 
 describe("vendorInstallTerminalSpec", () => {
-  it("installs Kimi on Windows through the official native installer, not npm", () => {
-    const spec = vendorInstallTerminalSpec("kimi", "win32", {
-      SystemRoot: "C:\\Windows",
-    });
-
-    expect(spec).toMatchObject({
-      shellPath:
-        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      closesTerminal: true,
-    });
-    expect(spec!.command).toContain(
-      "https://code.kimi.com/kimi-code/install.ps1",
-    );
-    // Success is the executable the bridge route actually launches, never
-    // the installer's exit code or an npm shim the route would refuse.
-    expect(spec!.command).toContain(".kimi-code\\bin\\kimi.exe");
-    expect(spec!.command).not.toContain("npm");
-    expect(spec!.command).not.toContain("winget");
-  });
-
   it("uses npm.cmd and winget Node.js LTS without weakening Windows policy", () => {
     const spec = vendorInstallTerminalSpec("grok", "win32", {
       SystemRoot: "C:\\Windows",

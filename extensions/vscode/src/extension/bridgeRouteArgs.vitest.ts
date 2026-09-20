@@ -514,7 +514,7 @@ describe("native bridge argv", () => {
           [],
           resolveBridgeControls("kimi-k3", "high", "standard"),
         ),
-      ).toThrow(/native executable is required.*Missing file: .*kimi\.exe/s);
+      ).toThrow(/native executable is required/);
       expect(lstatSync).toHaveBeenCalledWith(nativeProgram);
       expect(existsSync).not.toHaveBeenCalledWith(shim);
       expect(writeFileSync).not.toHaveBeenCalled();
