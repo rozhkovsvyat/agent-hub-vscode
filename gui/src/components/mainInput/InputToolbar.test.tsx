@@ -861,21 +861,21 @@ describe("Cukii Claude-parity input toolbar", () => {
     // Closing the Headless UI popover must finish before the report dialog
     // claims focus. Otherwise the popover's deferred focus restoration steals
     // focus from every field (and closes a native select as soon as it opens).
-    const title = document.querySelector<HTMLInputElement>(
-      'input[placeholder="A short description of the problem"]',
+    const description = document.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="What happened? What did you do, and what did you expect instead?"]',
     );
     const severity = document.querySelector<HTMLSelectElement>(
       ".cukii-report-field select",
     );
-    expect(title).not.toBeNull();
+    expect(description).not.toBeNull();
     expect(severity).not.toBeNull();
-    await waitFor(() => expect(title).toHaveFocus());
+    await waitFor(() => expect(description).toHaveFocus());
     await user.click(severity!);
     expect(severity).toHaveFocus();
     expect(composerClick).not.toHaveBeenCalled();
     expect(document.querySelector(".cukii-report-overlay")).not.toBeNull();
-    await user.click(title!);
-    expect(title).toHaveFocus();
+    await user.click(description!);
+    expect(description).toHaveFocus();
     expect(composerClick).not.toHaveBeenCalled();
   });
 
