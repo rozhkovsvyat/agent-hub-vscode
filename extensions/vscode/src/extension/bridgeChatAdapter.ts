@@ -128,6 +128,40 @@ export type BridgeRoute = {
   stdinFormat?: "claude-stream-json";
 };
 
+/**
+ * First line of every broker prompt. It is ours, never user-authored, so an
+ * echo that opens with it is the vendor replaying what we just sent.
+ */
+export const BROKER_PROMPT_PREAMBLE =
+  "You are Cukii Broker running through a native bridge, not through the Continue chat model.";
+
+/**
+ * A native CLI with no vendor session to resume gets the whole broker prompt —
+ * preamble, directives and the carried transcript. Claude echoes that prompt
+ * back as a non-meta `user` frame, and the chat used to render the echo as a
+ * user capsule: on every vendor switch the window filled with the entire prior
+ * conversation, bare `ASSISTANT:` lines and all (card 53b13ded).
+ *
+ * The echo is transport, never a turn. It is recognised by identity with what
+ * this very run sent, not by content shape: a user who pastes the preamble by
+ * hand still sees their own message, because the guard only fires when the
+ * outbound prompt of this run opens with the preamble too.
+ */
+export function isOwnPromptEcho(echo: string, prompt: string): boolean {
+  const seen = echo.trim();
+  const sent = prompt.trim();
+  if (!seen || !sent) return false;
+  if (seen === sent) return true;
+  // Vendors may re-wrap or clip a long prompt before echoing it.
+  if (sent.startsWith(seen) && seen.length >= BROKER_PROMPT_PREAMBLE.length) {
+    return true;
+  }
+  return (
+    sent.startsWith(BROKER_PROMPT_PREAMBLE) &&
+    seen.startsWith(BROKER_PROMPT_PREAMBLE)
+  );
+}
+
 export function queuedFollowUpEchoMessageId(
   messages: ChatMessage[],
   queuedFollowUpMessageIds: string[],
@@ -2138,6 +2172,11 @@ async function* launchBridgeChild(options: {
         if (messageId) {
           if (queuedMessageId) queuedFollowUpRead.add(queuedMessageId);
           queue.push({ kind: "steerRead", messageId });
+        } else if (isOwnPromptEcho(event.text, prompt)) {
+          // The vendor replayed the prompt this run just sent. Rendering it
+          // dumped the whole carried transcript into the chat on every vendor
+          // switch (card 53b13ded).
+          continue;
         } else {
           // Existing non-meta `user` frames (for example human hook text)
           // stay visible exactly as before; only an exact pending follow-up

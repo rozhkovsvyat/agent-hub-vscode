@@ -41,6 +41,16 @@ function render(message: ChatMessage): string {
 }
 
 /**
+ * Assistant turns that carried only tool calls arrive with empty content and
+ * used to render as a bare `ASSISTANT:` line. A long session produced dozens of
+ * them in a row, which spent the carrier budget on nothing and made the handed
+ * transcript read as a broken conversation (card 53b13ded).
+ */
+function hasRenderableContent(message: ChatMessage): boolean {
+  return contentToText(message.content).trim().length > 0;
+}
+
+/**
  * Retain complete newest turns first. A single oversized latest turn is tail
  * trimmed as the only way to honour the hard bound; the marker makes that loss
  * explicit rather than presenting it as a full conversation.
@@ -51,6 +61,7 @@ export function buildBridgeTranscript(
 ): string {
   const turns = messages
     .filter((message) => message.role !== "tool")
+    .filter(hasRenderableContent)
     .map(render);
   const full = turns.join("\n\n");
   if (full.length <= maxChars) {

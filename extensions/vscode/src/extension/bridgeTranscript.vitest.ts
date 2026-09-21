@@ -36,6 +36,21 @@ describe("buildBridgeTranscript", () => {
     ).toBe("USER:\nfirst\n\nASSISTANT:\nsecond");
   });
 
+  it("drops turns that carry no text instead of emitting bare role lines", () => {
+    const transcript = buildBridgeTranscript([
+      { role: "user", content: "first" },
+      // Assistant turns holding only tool calls arrive empty; a long session
+      // produced dozens of bare `ASSISTANT:` lines in a row (card 53b13ded).
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "   \n  " },
+      { role: "assistant", content: [] },
+      { role: "assistant", content: "second" },
+    ]);
+
+    expect(transcript).toBe("USER:\nfirst\n\nASSISTANT:\nsecond");
+    expect(transcript).not.toMatch(/ASSISTANT:\n\nASSISTANT:/);
+  });
+
   it("bounds an oversized history and retains the latest request", () => {
     const latest = "LATEST REQUEST MUST SURVIVE";
     const transcript = buildBridgeTranscript([

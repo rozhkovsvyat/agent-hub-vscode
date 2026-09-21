@@ -50,6 +50,8 @@ import {
   nativeDelegateHint,
   nativePromptCacheArgs,
   queuedFollowUpEchoMessageId,
+  BROKER_PROMPT_PREAMBLE,
+  isOwnPromptEcho,
   routeForModel,
   settleBridgeChildError,
   toChatMessages,
@@ -356,6 +358,54 @@ describe("native bridge argv", () => {
       ),
     ).toBe("follow-up-2");
   });
+  it("recognises the vendor replaying this run's own prompt", () => {
+    const prompt = [
+      BROKER_PROMPT_PREAMBLE,
+      "Broker model: Opus 5.",
+      "",
+      "USER:\nпривет",
+      "",
+      "ASSISTANT:\nготово",
+    ].join("\n");
+
+    // Exact replay, and the clipped/re-wrapped replay a long prompt produces.
+    expect(isOwnPromptEcho(prompt, prompt)).toBe(true);
+    expect(isOwnPromptEcho(`  ${prompt}\n`, prompt)).toBe(true);
+    expect(isOwnPromptEcho(prompt.slice(0, 400), prompt)).toBe(true);
+    expect(
+      isOwnPromptEcho(`${BROKER_PROMPT_PREAMBLE}\nBroker model: other.`, prompt),
+    ).toBe(true);
+
+    // A real user turn keeps its capsule, including one that quotes the
+    // preamble while this run sent an ordinary resumed prompt.
+    expect(isOwnPromptEcho("привет", prompt)).toBe(false);
+    expect(isOwnPromptEcho("Stop hook feedback: missing receipt", prompt)).toBe(
+      false,
+    );
+    expect(isOwnPromptEcho(BROKER_PROMPT_PREAMBLE, "продолжи")).toBe(false);
+    expect(isOwnPromptEcho("", prompt)).toBe(false);
+    expect(isOwnPromptEcho(prompt, "")).toBe(false);
+  });
+
+  it("drops the own-prompt echo instead of rendering it as a user capsule", () => {
+    const source = fs
+      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .replace(/\r\n/g, "\n");
+    const branchAt = source.indexOf("const messageId = queuedMessageId");
+    expect(branchAt).toBeGreaterThan(-1);
+    const branch = source.slice(
+      branchAt,
+      source.indexOf('if (event.kind === "vendorSession")', branchAt),
+    );
+    // The guard must sit between the steering receipt and the visible push,
+    // and it must swallow rather than render.
+    const guardAt = branch.indexOf("isOwnPromptEcho(event.text, prompt)");
+    const pushAt = branch.indexOf('queue.push({ kind: "text"');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(pushAt).toBeGreaterThan(guardAt);
+    expect(branch.slice(guardAt, pushAt)).toContain("continue;");
+  });
+
   it("marks only factual vendor stdout as receipt activity", () => {
     expect(
       toChatMessages({
