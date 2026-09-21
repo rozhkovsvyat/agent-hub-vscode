@@ -28,6 +28,28 @@ export const CUKII_MEMORY_ACCOUNT_ID = "memory" as const;
 export const CUKII_MEMORY_SECRET_KEY = "cukii.memory.connection";
 export const CUKII_MEMORY_DEFAULT_ENDPOINT = "https://box.cukii.ru/mcp";
 
+/**
+ * Коробка, стоящая на этой же машине.
+ *
+ * 🔴 ЗАЧЕМ ВООБЩЕ ВЫБОР. Настроенный адрес — внешний, и на машине-коробке это значит, что
+ * запрос к памяти уходит наружу: через корпоративный VPN, через VPS, через frp-туннель и
+ * обратно в тот же компьютер. Туннель рвётся при смене адреса выхода AnyConnect, и в момент
+ * разрыва внешний адрес отдаёт ничего за 10 с, тогда как локальный порт в ту же секунду
+ * отвечает за доли секунды. Замер 22.09.2026: три подряд запроса `healthz` наружу — 000 за
+ * 10,2 с, 000 за 10,2 с, 200 за 0,5 с; локально в это же время 200 за 0,03 с. Пользователь
+ * видит это как «память отвалилась», хотя она стоит рядом и здорова.
+ *
+ * 🔴 ПОЧЕМУ ПРОВЕРКА ТОКЕНОМ, А НЕ `healthz`. `healthz` отвечает кому угодно, поэтому по нему
+ * нельзя отличить СВОЮ коробку от чужого сервиса, случайно занявшего тот же порт, — а цена
+ * ошибки здесь не «медленно», а «агент читает и пишет чужую память». Пробуем `initialize` с
+ * тем же bearer: успех означает, что на локальном порту стоит коробка, принимающая наш токен.
+ */
+const CUKII_MEMORY_LOCAL_ENDPOINT = "http://127.0.0.1:8780/mcp";
+/** Проба короткая намеренно: она стоит перед каждым запросом, пока решение не закэшировано. */
+const LOCAL_PROBE_TIMEOUT_MS = 500;
+/** Решение живёт минуту: коробку поднимают и гасят руками, но не чаще. */
+const LOCAL_PROBE_TTL_MS = 60_000;
+
 const MAX_MCP_BODY_BYTES = 2 * 1024 * 1024;
 const ALL_MEMORY_VENDORS: BrokerVendorId[] = [
   "claude",
@@ -158,6 +180,66 @@ export function validateMemoryToken(value: string): string {
   return token;
 }
 
+/**
+ * Выбирает, куда реле отправит запрос: в локальную коробку, если она отвечает на наш токен,
+ * иначе — в настроенный адрес. Решение кэшируется, чтобы проба не стояла перед каждым вызовом.
+ */
+export class CukiiMemoryUpstream {
+  private decided: string | undefined;
+  private decidedAt = 0;
+
+  constructor(
+    private readonly connection: MemoryConnection,
+    private readonly httpFetch: MemoryFetch,
+    private readonly now: () => number = () => Date.now(),
+    private readonly localEndpoint: string = CUKII_MEMORY_LOCAL_ENDPOINT,
+  ) {}
+
+  async choose(): Promise<string> {
+    // Настроен уже локальный адрес — пробовать нечего.
+    if (this.connection.endpoint === this.localEndpoint)
+      return this.localEndpoint;
+    if (this.decided && this.now() - this.decidedAt < LOCAL_PROBE_TTL_MS) {
+      return this.decided;
+    }
+    const local = await this.localAnswersOurToken();
+    this.decided = local ? this.localEndpoint : this.connection.endpoint;
+    this.decidedAt = this.now();
+    return this.decided;
+  }
+
+  private async localAnswersOurToken(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LOCAL_PROBE_TIMEOUT_MS);
+    try {
+      const response = await this.httpFetch(this.localEndpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.connection.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "cukii-vscode-local-probe", version: "1" },
+          },
+        }),
+        signal: controller.signal,
+      });
+      // 401 — на порту КАКАЯ-ТО коробка, но не наша: идём наружу, а не в чужую память.
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function healthUrl(endpoint: string): string {
   const url = new URL(endpoint);
   url.pathname = url.pathname.replace(/\/mcp$/, "/healthz");
@@ -247,13 +329,16 @@ function safeCapabilityMatch(expected: string, actual: string): boolean {
 class CukiiMemoryRelay {
   private server?: http.Server;
   private descriptorValue?: CukiiMemoryRelayDescriptor;
+  private readonly upstream: CukiiMemoryUpstream;
 
   constructor(
     private readonly connection: MemoryConnection,
     private readonly proxyPath: string,
     private readonly nodePath: string,
     private readonly httpFetch: MemoryFetch,
-  ) {}
+  ) {
+    this.upstream = new CukiiMemoryUpstream(connection, httpFetch);
+  }
 
   async start(): Promise<CukiiMemoryRelayDescriptor> {
     if (this.descriptorValue) return this.descriptorValue;
@@ -274,7 +359,8 @@ class CukiiMemoryRelay {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 125_000);
         try {
-          const upstream = await this.httpFetch(this.connection.endpoint, {
+          const upstreamEndpoint = await this.upstream.choose();
+          const upstream = await this.httpFetch(upstreamEndpoint, {
             method: "POST",
             headers: {
               authorization: `Bearer ${this.connection.token}`,
