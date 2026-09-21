@@ -45,13 +45,43 @@ export const BRIDGE_VENDOR_STARTUP_LIMITS: Partial<
   grok: { firstOutputWarnMs: 60_000, firstOutputFailMs: 600_000 },
 };
 
+/**
+ * 🔴 Kimi reports a tool call and its result in the same instant: its NDJSON
+ * carries `{role:"assistant",tool_calls}` immediately followed by
+ * `{role:"tool"}`, because the CLI runs the tool itself and only then narrates
+ * it. Every `bridge.tool.start`/`bridge.tool.finish` pair in a live kimi-k3
+ * session shares a millisecond, while the same pairs from opus-5 and
+ * cursor:kimi-k3 stand seconds apart (card 0d7dfdd6, diagnostics 2026-09-21).
+ *
+ * So on this route `activeTools` is never above zero, no matter what the
+ * vendor is doing. The idle budget therefore always applied, a turn running a
+ * long internal tool chain was failed closed at 15 minutes, and the receipt
+ * blamed "no in-flight tool" — a condition that is true of the route itself,
+ * not an observation about that run.
+ *
+ * Until the vendor streams a tool start of its own, silence here is not
+ * evidence of being stuck, so it gets the tool-backed budget.
+ */
+export const VENDORS_REPORTING_TOOLS_AFTER_THE_FACT: readonly BrokerVendorId[] =
+  ["kimi"];
+
+export function reportsToolsAfterTheFact(vendor: BrokerVendorId): boolean {
+  return VENDORS_REPORTING_TOOLS_AFTER_THE_FACT.includes(vendor);
+}
+
 export function bridgeSilenceLimits(
   vendor: BrokerVendorId,
 ): SilenceWatchdogLimits {
   const startup = BRIDGE_VENDOR_STARTUP_LIMITS[vendor];
-  return startup
+  const base = startup
     ? { ...BRIDGE_SILENCE_LIMITS, ...startup }
     : BRIDGE_SILENCE_LIMITS;
+  if (!reportsToolsAfterTheFact(vendor)) return base;
+  return {
+    ...base,
+    idleWarnMs: base.toolIdleWarnMs,
+    idleFailMs: base.toolIdleFailMs,
+  };
 }
 
 /**
@@ -118,6 +148,11 @@ export class BridgeSilenceWatchdog {
       waiting: "Waiting a bit longer, then this turn will be failed closed.",
       failed: "Send the message again, or pick another model.",
     },
+    /**
+     * True where the vendor narrates tools only after running them, so this
+     * watchdog can never observe one in flight and must not claim it did.
+     */
+    private readonly toolsReportedAfterTheFact = false,
   ) {
     const now = this.clock.now();
     this.startedAt = now;
@@ -181,7 +216,11 @@ export class BridgeSilenceWatchdog {
         text:
           this.activeTools > 0
             ? `Native vendor has been silent for ${seconds(quietMs)} while a tool is still running. Cukii stopped waiting so the chat can continue.`
-            : `Native vendor has been silent for ${seconds(quietMs)} with no in-flight tool. Cukii stopped waiting so the chat can continue.`,
+            : this.toolsReportedAfterTheFact
+              ? // This vendor narrates a tool only once it has run, so silence
+                // cannot be told apart from a long tool. Say what was seen.
+                `Native vendor has been silent for ${seconds(quietMs)}. This CLI reports tools only after running them, so Cukii cannot tell a long tool from a stuck turn. Cukii stopped waiting so the chat can continue.`
+              : `Native vendor has been silent for ${seconds(quietMs)} with no in-flight tool. Cukii stopped waiting so the chat can continue.`,
       };
     }
     if (quietMs >= warnMs && !this.warned) {

@@ -52,6 +52,7 @@ import {
   queuedFollowUpEchoMessageId,
   BROKER_PROMPT_PREAMBLE,
   isOwnPromptEcho,
+  readableFailureReason,
   routeForModel,
   settleBridgeChildError,
   toChatMessages,
@@ -284,6 +285,60 @@ describe("native bridge argv", () => {
     expect(message).toContain("D:/logs/bridge.log");
     expect(message).not.toContain("aggregated_output");
     expect(message).not.toContain("private raw output");
+  });
+
+  // Card 8011ef2f: Kimi died with a bare `exited with code 1` while its own
+  // stderr held the whole explanation, so the user had nothing to act on.
+  it("names an exhausted vendor plan as a usage limit and keeps the reset time", () => {
+    const message = bridgeProcessFailureMessage({
+      label: "Kimi K3",
+      detail:
+        "Quota exhausted: Your token-plan 1-week quota has been exhausted.\n" +
+        "The quota will reset at 09-25 13:28:00 UTC.\n" +
+        "(cause: insufficient_quota: 429 Your token-plan 1-week quota has been exhausted.)",
+      code: 1,
+      signal: null,
+    });
+
+    expect(message).toMatch(/usage limit, not a Cukii defect/);
+    expect(message).toContain("09-25 13:28:00 UTC");
+    expect(message).not.toMatch(/Native CLI stopped before returning/);
+  });
+
+  it("carries the last readable native line into the generic receipt", () => {
+    const message = bridgeProcessFailureMessage({
+      label: "Kimi K3",
+      detail:
+        '{"type":"item.completed","aggregated_output":"private raw output"}\n' +
+        "    at Object.<anonymous> (D:/kimi/index.js:12:9)\n" +
+        "Error: MCP server cukii-memory failed to start",
+      code: 1,
+      signal: null,
+    });
+
+    expect(message).toContain(
+      "It last said: Error: MCP server cukii-memory failed to start",
+    );
+    // The transport itself still never reaches the conversation.
+    expect(message).not.toContain("aggregated_output");
+    expect(message).not.toContain("private raw output");
+    expect(message).not.toContain("at Object.");
+  });
+
+  it("keeps the generic receipt bare when the native tail is pure transport", () => {
+    expect(
+      readableFailureReason(
+        '{"type":"item.completed","aggregated_output":"x"}\n[1,2,3]\n----\n',
+      ),
+    ).toBeUndefined();
+    // An overlong single line is a payload dump, never a sentence.
+    expect(readableFailureReason("word ".repeat(200))).toBeUndefined();
+    expect(readableFailureReason("")).toBeUndefined();
+    // A genuine sentence is capped rather than dropped.
+    const long = `Error: ${"detail ".repeat(40)}`.trim();
+    const reason = readableFailureReason(long)!;
+    expect(reason.length).toBeLessThanOrEqual(200);
+    expect(reason.startsWith("Error: detail")).toBe(true);
   });
 
   it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {

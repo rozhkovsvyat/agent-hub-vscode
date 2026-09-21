@@ -28,6 +28,7 @@ import {
   bridgeSilenceLimits,
   BridgeSilenceWatchdog,
   bridgeStartupAdvice,
+  reportsToolsAfterTheFact,
 } from "./bridgeSilenceWatchdog";
 import {
   argvRequestsVendorResume,
@@ -1600,6 +1601,33 @@ interface BridgeProcessFailureMessageArgs {
 }
 
 /**
+ * Recover the one human-readable sentence a native CLI printed before dying.
+ * `bridge exited with code 1` alone told the user nothing and sent them to the
+ * log file for what was usually a single plain line (card 8011ef2f).
+ *
+ * Protocol frames, stack frames and long dumps stay out: the receipt must
+ * explain, never paste the transport.
+ */
+export function readableFailureReason(detail: string): string | undefined {
+  const MAX_REASON_CHARS = 200;
+  const candidates = detail
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("{") && !line.startsWith("["))
+    .filter((line) => !/^at\s/.test(line))
+    // A line with no letters is a separator or a hex/byte dump, never a reason.
+    .filter((line) => /\p{L}/u.test(line))
+    // An overlong line is tool output or a serialized payload, not a message.
+    .filter((line) => line.length <= 300);
+  const reason = candidates[candidates.length - 1];
+  if (!reason) return undefined;
+  return reason.length > MAX_REASON_CHARS
+    ? `${reason.slice(0, MAX_REASON_CHARS - 1)}…`
+    : reason;
+}
+
+/**
  * Turn a noisy native stderr/stdout tail into one actionable terminal receipt.
  * The transport log remains available on disk, but protocol JSON and completed
  * tool output must never be pasted into the conversation as the error message.
@@ -1613,6 +1641,16 @@ export function bridgeProcessFailureMessage({
 }: BridgeProcessFailureMessageArgs): string {
   const logSuffix = logFile ? ` Bridge log: ${logFile}` : "";
   const creditFailure = /out of credits|refill/i.test(detail);
+  // Kimi answers an exhausted plan with `insufficient_quota: 429` and a reset
+  // time, then exits 1. That is a usage limit, and the reset time is the one
+  // fact the user needs (card 8011ef2f).
+  const quotaFailure =
+    /insufficient_quota|quota (?:has been )?exhausted|quota will reset/i.test(
+      detail,
+    );
+  const quotaReset = detail.match(
+    /quota will reset at ([0-9:\-\s]{4,}(?:UTC)?)/i,
+  );
   const policyFailure =
     /Rejected\(|blocked by (?:the )?(?:local )?(?:safety )?policy/i.test(
       detail,
@@ -1636,6 +1674,15 @@ export function bridgeProcessFailureMessage({
       logSuffix
     );
   }
+  if (quotaFailure) {
+    return (
+      `${label} bridge stopped because the vendor plan quota is exhausted. This is a usage limit, not a Cukii defect: ${
+        quotaReset
+          ? `it resets at ${quotaReset[1].trim()}`
+          : "wait for the plan to reset"
+      }, or switch to another model or auth method.` + logSuffix
+    );
+  }
   if (capacityFailure) {
     return (
       `${label} is temporarily at capacity. Choose another model or send the message again.` +
@@ -1648,10 +1695,13 @@ export function bridgeProcessFailureMessage({
       logSuffix
     );
   }
+  const reason = readableFailureReason(detail);
   return (
     `${label} bridge exited ${
       signal ? `after signal ${signal}` : `with code ${code}`
-    }. Native CLI stopped before returning a normal response.` + logSuffix
+    }. Native CLI stopped before returning a normal response.` +
+    (reason ? ` It last said: ${reason}` : "") +
+    logSuffix
   );
 }
 
@@ -2137,6 +2187,7 @@ async function* launchBridgeChild(options: {
     bridgeSilenceLimits(silenceVendor),
     { now: Date.now },
     bridgeStartupAdvice(silenceVendor),
+    reportsToolsAfterTheFact(silenceVendor),
   );
   let settledByWatchdog = false;
   const enqueueVisibleEvents = (events: BridgeEvent[]) => {

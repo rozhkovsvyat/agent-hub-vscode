@@ -5,6 +5,7 @@ import {
   bridgeSilenceLimits,
   BridgeSilenceWatchdog,
   bridgeStartupAdvice,
+  reportsToolsAfterTheFact,
 } from "./bridgeSilenceWatchdog";
 
 function clock(start = 1_000) {
@@ -60,6 +61,48 @@ describe("BridgeSilenceWatchdog", () => {
     const fail = watchdog.poll();
     expect(fail.kind).toBe("fail");
     expect(fail.kind === "fail" && fail.text).toMatch(/no in-flight tool/i);
+  });
+
+  // Card 0d7dfdd6: kimi narrates a tool call and its result in the same
+  // instant, so `activeTools` is never above zero on that route. The 15-minute
+  // idle bound then killed long internal work and the receipt blamed a
+  // condition the route can never contradict.
+  it("gives a post-hoc tool reporter the tool-backed idle budget", () => {
+    expect(bridgeSilenceLimits("kimi").idleFailMs).toBe(
+      BRIDGE_SILENCE_LIMITS.toolIdleFailMs,
+    );
+    expect(bridgeSilenceLimits("kimi").idleWarnMs).toBe(
+      BRIDGE_SILENCE_LIMITS.toolIdleWarnMs,
+    );
+    // Vendors that stream a real tool start keep the tighter idle bound.
+    expect(bridgeSilenceLimits("cursor").idleFailMs).toBe(
+      BRIDGE_SILENCE_LIMITS.idleFailMs,
+    );
+    expect(bridgeSilenceLimits("claude").idleFailMs).toBe(
+      BRIDGE_SILENCE_LIMITS.idleFailMs,
+    );
+    // Grok's widened startup budget must survive the idle override.
+    expect(bridgeSilenceLimits("grok").firstOutputFailMs).toBe(600_000);
+    expect(reportsToolsAfterTheFact("kimi")).toBe(true);
+    expect(reportsToolsAfterTheFact("grok")).toBe(false);
+  });
+
+  it("does not claim an unobservable in-flight tool for a post-hoc reporter", () => {
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("kimi"),
+      time,
+      bridgeStartupAdvice("kimi"),
+      reportsToolsAfterTheFact("kimi"),
+    );
+    watchdog.noteActivity();
+    time.advance(BRIDGE_SILENCE_LIMITS.toolIdleFailMs);
+    const fail = watchdog.poll();
+    expect(fail.kind).toBe("fail");
+    expect(fail.kind === "fail" && fail.text).toMatch(
+      /reports tools only after running them/i,
+    );
+    expect(fail.kind === "fail" && fail.text).not.toMatch(/no in-flight tool/i);
   });
 
   it("resets the idle clock when a tool finishes", () => {
