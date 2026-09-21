@@ -8,6 +8,7 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
   CUKII_MEMORY_SECRET_KEY,
   CukiiMemoryAccountController,
+  CukiiMemoryUpstream,
   cukiiMemoryAccountForContext,
   describeDisciplineOutcome,
   normalizeMemoryEndpoint,
@@ -507,5 +508,80 @@ describe("Cukii Box account", () => {
     });
     expect(remove).toHaveBeenCalledTimes(1);
     expect(store.values.get(CUKII_MEMORY_SECRET_KEY)).toBeUndefined();
+  });
+});
+
+describe("выбор адреса коробки реле памяти", () => {
+  const remote = "https://box.cukii.ru/mcp";
+  const local = "http://127.0.0.1:8780/mcp";
+  const connection = { endpoint: remote, token: "t0ken" };
+
+  // 🔴 Почему это вообще проверяется. На машине-коробке настроенный адрес внешний, и запрос
+  // к памяти уходит через VPN, VPS и frp-туннель обратно в тот же компьютер. Туннель рвётся
+  // при смене адреса выхода AnyConnect: замер 22.09.2026 — три подряд healthz наружу дали
+  // 000 за 10,2 с, 000 за 10,2 с и 200 за 0,5 с, тогда как локальный порт отвечал за 0,03 с.
+  it("идёт в локальную коробку, когда она принимает наш токен", async () => {
+    const calls: string[] = [];
+    const fetchStub = (async (url: any, init: any) => {
+      calls.push(String(url));
+      expect(init.headers.authorization).toBe("Bearer t0ken");
+      return { ok: true, status: 200 } as any;
+    }) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(local);
+    expect(calls).toEqual([local]);
+  });
+
+  // Цена ошибки здесь не «медленно», а «агент читает и пишет ЧУЖУЮ память», поэтому
+  // признаком служит принятый токен, а не доступность порта.
+  it("остаётся на внешнем адресе, если локальный порт отверг токен", async () => {
+    const fetchStub = (async () => ({ ok: false, status: 401 }) as any) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("остаётся на внешнем адресе, если локально никого нет", async () => {
+    const fetchStub = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("не пробует локальный порт перед каждым запросом", async () => {
+    let probes = 0;
+    const fetchStub = (async () => {
+      probes += 1;
+      return { ok: true, status: 200 } as any;
+    }) as any;
+    let clock = 1_000;
+    const upstream = new CukiiMemoryUpstream(
+      connection,
+      fetchStub,
+      () => clock,
+    );
+    await upstream.choose();
+    await upstream.choose();
+    clock += 30_000;
+    await upstream.choose();
+    expect(probes).toBe(1);
+    // …но решение не вечное: коробку поднимают и гасят руками.
+    clock += 40_000;
+    await upstream.choose();
+    expect(probes).toBe(2);
+  });
+
+  it("не пробует ничего, когда локальный адрес и настроен", async () => {
+    let probes = 0;
+    const fetchStub = (async () => {
+      probes += 1;
+      return { ok: true, status: 200 } as any;
+    }) as any;
+    const upstream = new CukiiMemoryUpstream(
+      { endpoint: local, token: "t0ken" },
+      fetchStub,
+    );
+    expect(await upstream.choose()).toBe(local);
+    expect(probes).toBe(0);
   });
 });
