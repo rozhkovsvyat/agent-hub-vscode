@@ -347,6 +347,41 @@ describe("native bridge argv", () => {
     expect(reason.startsWith("Error: detail")).toBe(true);
   });
 
+  // Card 2d80143f, reported as "Краш какой-то" on 2.0.122: codex reports a
+  // failed edit as one ERROR line followed by the whole block of lines it
+  // expected to find. The chat filled with the owner's own source rendered as
+  // capsules, which reads as a crash dump rather than a failed edit.
+  it("does not quote the user's own source back as the failure reason", () => {
+    const detail = [
+      "2026-09-10T14:00:31.774013Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in [PATH]",
+      'it("opens the browser and stores the key only after the API accepts it", async () => {',
+      "  const secrets = store();",
+      "  const host = authHost(KEY);",
+      "expect(result.message).toContain(OWNER);",
+      "});",
+    ].join("\n");
+
+    const reason = readableFailureReason(detail)!;
+    expect(reason).toContain("apply_patch verification failed");
+    // The log furniture is not part of the sentence the owner reads.
+    expect(reason).not.toContain("codex_core::tools::router");
+    expect(reason).not.toMatch(/^\d{4}-/);
+    // Nothing from the expected-lines block may surface as "what it said".
+    expect(reason).not.toContain("expect(result.message)");
+    expect(reason).not.toContain("const secrets");
+
+    const message = bridgeProcessFailureMessage({
+      label: "GPT-5.6 Sol",
+      detail,
+      code: 1,
+      signal: null,
+    });
+    expect(message).toMatch(/could not apply its own patch/i);
+    expect(message).toContain("left untouched");
+    expect(message).not.toContain("expect(result.message)");
+    expect(message).not.toContain("codex_core::tools::router");
+  });
+
   it("keeps an eagerly parsed newline-less terminal receipt authoritative", () => {
     const parser = new BridgeEventParser("codex-thread");
     expect(parser.push('{"type":"turn.completed"}')).toEqual([

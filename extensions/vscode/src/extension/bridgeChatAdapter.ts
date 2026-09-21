@@ -1609,6 +1609,20 @@ interface BridgeProcessFailureMessageArgs {
  * Protocol frames, stack frames and long dumps stay out: the receipt must
  * explain, never paste the transport.
  */
+/**
+ * Strips the log furniture a Rust-style CLI puts in front of its message:
+ * `2026-09-10T14:00:05.567235Z ERROR codex_core::tools::router: error=…`.
+ */
+function withoutLogPrefix(line: string): string {
+  // Only a full timestamp+level header counts as furniture. A sentence that
+  // merely opens with "Error:" is the message itself and must survive intact.
+  const header = line.match(
+    /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(?:ERROR|WARN|FATAL)\s+(?:[\w:]+:\s*)?/i,
+  );
+  if (!header) return line;
+  return line.slice(header[0].length).replace(/^error=/i, "").trim();
+}
+
 export function readableFailureReason(detail: string): string | undefined {
   const MAX_REASON_CHARS = 200;
   const candidates = detail
@@ -1621,11 +1635,22 @@ export function readableFailureReason(detail: string): string | undefined {
     .filter((line) => /\p{L}/u.test(line))
     // An overlong line is tool output or a serialized payload, not a message.
     .filter((line) => line.length <= 300);
-  const reason = candidates[candidates.length - 1];
+  // 🔴 The last readable line is not the reason when the CLI prints its error
+  // first and the evidence after it. Codex reports a failed edit as one
+  // `ERROR …: error=…` line followed by the whole block of lines it expected
+  // to find, so "last readable line" picked an arbitrary line of the user's
+  // own source and quoted it back as the failure (card 2d80143f).
+  const marked = candidates.filter((line) =>
+    /(^|\s)(ERROR|FATAL|panic)\b|error[=:]/i.test(line),
+  );
+  const reason = (marked.length ? marked : candidates)[
+    (marked.length ? marked : candidates).length - 1
+  ];
   if (!reason) return undefined;
-  return reason.length > MAX_REASON_CHARS
-    ? `${reason.slice(0, MAX_REASON_CHARS - 1)}…`
-    : reason;
+  const clean = withoutLogPrefix(reason) || reason;
+  return clean.length > MAX_REASON_CHARS
+    ? `${clean.slice(0, MAX_REASON_CHARS - 1)}…`
+    : clean;
 }
 
 /**
@@ -1693,6 +1718,15 @@ export function bridgeProcessFailureMessage({
   if (cacheField) {
     return (
       `${label} bridge could not start: the Codex models cache is missing the field "${cacheField[1]}". This is a cache incompatibility, not a usage limit. Cukii repairs known fields before the next launch; if it repeats, delete ~/.codex/models_cache.json so the CLI fetches a fresh one.` +
+      logSuffix
+    );
+  }
+  // A failed edit is the CLI's own retryable mistake, and its receipt carries
+  // the entire block of lines it expected to find. Quoting any of that back is
+  // what made this look like a crash dump (card 2d80143f).
+  if (/apply_patch verification failed|Failed to find expected lines/i.test(detail)) {
+    return (
+      `${label} bridge stopped because the CLI could not apply its own patch: the file did not hold the lines it expected. The file was left untouched. This is the vendor's edit going stale, not a Cukii defect — send the message again so it re-reads the file first.` +
       logSuffix
     );
   }
