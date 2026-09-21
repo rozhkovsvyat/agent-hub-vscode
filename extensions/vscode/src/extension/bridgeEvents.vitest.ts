@@ -278,6 +278,30 @@ describe("BridgeEventParser", () => {
     ]);
   });
 
+  // Card c2167c31 (cursor:claude-opus-5, reported on 2.0.128): every capsule
+  // held its own text twice, concatenated with no separator — "…снимаю
+  // состояние ветки.Гейт памяти сработал…". The route streams no deltas at
+  // all, so the doubling came from the whole message being restated: once as a
+  // repeated frame, once as two blocks inside a single frame. Both shapes
+  // duplicate on 2.0.128 and fold here.
+  it("folds a restated assistant message, whether repeated as a frame or as a block", () => {
+    const repeatedFrame = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Гейт памяти сработал."}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Гейт памяти сработал."}]}}',
+    ]);
+    const repeatedBlock = collect("anthropic-envelope", [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Гейт памяти сработал."},{"type":"text","text":"Гейт памяти сработал."}]}}',
+    ]);
+
+    for (const { events } of [repeatedFrame, repeatedBlock]) {
+      const text = events
+        .filter((event) => event.kind === "text")
+        .map((event) => (event as { text: string }).text)
+        .join("");
+      expect(text).toBe("Гейт памяти сработал.");
+    }
+  });
+
   it("unwraps Grok stream_event deltas without duplicating the final assistant message", () => {
     const { events } = collect("anthropic-envelope", [
       '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}',
