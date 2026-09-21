@@ -90,19 +90,46 @@ export function bridgeSilenceLimits(
  * own startup: repeating the prompt repeats the wait, and the model was never
  * the problem. `grok mcp doctor` names the server that did not come up.
  */
-export function bridgeStartupAdvice(vendor: BrokerVendorId): {
+export type BridgeVendorAdvice = {
   waiting: string;
   failed: string;
-} {
+  /**
+   * Said when the vendor spoke and then went quiet. A launch that never
+   * printed and a turn that stalled mid-tool have different causes, so the
+   * generic idle receipt must not inherit the startup advice.
+   */
+  stalled?: string;
+};
+
+/**
+ * What the owner should actually do, per vendor. The generic advice ("send it
+ * again, or pick another model") is wrong for a vendor whose silence is its
+ * own startup: repeating the prompt repeats the wait, and the model was never
+ * the problem.
+ *
+ * `mcp`, when Cukii has something concrete to say about Grok's MCP servers,
+ * replaces the generic pointer to `grok mcp doctor`: it already names the
+ * offender, and sending the owner to run a diagnostic Cukii has effectively
+ * just run is not advice (card d10fd9a0). The two faces of that fault differ
+ * in strength, so they are kept apart: only an unstartable program is allowed
+ * to explain a launch, while the weaker fetch-on-start evidence is offered
+ * once a turn has already stalled.
+ */
+export function bridgeStartupAdvice(
+  vendor: BrokerVendorId,
+  mcp?: { failed?: string; stalled?: string },
+): BridgeVendorAdvice {
   if (vendor === "grok") {
     return {
       waiting:
         "Grok stays silent until its whole session is set up — MCP handshakes alone " +
         "have a 70 s ceiling of their own. The run is alive; Cukii keeps waiting.",
       failed:
+        mcp?.failed ??
         "Grok never finished starting its session, so it never printed anything — " +
-        "this is its MCP/hook startup, not the model. Run `grok mcp doctor` to see " +
-        "which server does not come up.",
+          "this is its MCP/hook startup, not the model. Run `grok mcp doctor` to see " +
+          "which server does not come up.",
+      stalled: mcp?.stalled,
     };
   }
   return {
@@ -144,7 +171,7 @@ export class BridgeSilenceWatchdog {
   constructor(
     private readonly limits: SilenceWatchdogLimits = BRIDGE_SILENCE_LIMITS,
     private readonly clock: SilenceWatchdogClock = { now: Date.now },
-    private readonly advice: { waiting: string; failed: string } = {
+    private readonly advice: BridgeVendorAdvice = {
       waiting: "Waiting a bit longer, then this turn will be failed closed.",
       failed: "Send the message again, or pick another model.",
     },
@@ -211,16 +238,22 @@ export class BridgeSilenceWatchdog {
         : this.limits.idleWarnMs;
     if (quietMs >= failMs) {
       this.failed = true;
+      const observed =
+        this.activeTools > 0
+          ? `Native vendor has been silent for ${seconds(quietMs)} while a tool is still running. Cukii stopped waiting so the chat can continue.`
+          : this.toolsReportedAfterTheFact
+            ? // This vendor narrates a tool only once it has run, so silence
+              // cannot be told apart from a long tool. Say what was seen.
+              `Native vendor has been silent for ${seconds(quietMs)}. This CLI reports tools only after running them, so Cukii cannot tell a long tool from a stuck turn. Cukii stopped waiting so the chat can continue.`
+            : `Native vendor has been silent for ${seconds(quietMs)} with no in-flight tool. Cukii stopped waiting so the chat can continue.`;
       return {
         kind: "fail",
-        text:
-          this.activeTools > 0
-            ? `Native vendor has been silent for ${seconds(quietMs)} while a tool is still running. Cukii stopped waiting so the chat can continue.`
-            : this.toolsReportedAfterTheFact
-              ? // This vendor narrates a tool only once it has run, so silence
-                // cannot be told apart from a long tool. Say what was seen.
-                `Native vendor has been silent for ${seconds(quietMs)}. This CLI reports tools only after running them, so Cukii cannot tell a long tool from a stuck turn. Cukii stopped waiting so the chat can continue.`
-              : `Native vendor has been silent for ${seconds(quietMs)} with no in-flight tool. Cukii stopped waiting so the chat can continue.`,
+        // A stall with a known cause must say the cause: a tool that never
+        // returns because its MCP server never started looks exactly like a
+        // slow tool until Cukii names the server.
+        text: this.advice.stalled
+          ? `${observed} ${this.advice.stalled}`
+          : observed,
       };
     }
     if (quietMs >= warnMs && !this.warned) {

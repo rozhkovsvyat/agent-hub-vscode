@@ -176,7 +176,13 @@ describe("native bridge argv", () => {
     // `new BridgeSilenceWatchdog()` would put Grok back under the 180 s
     // first-output limit its MCP handshakes cannot meet (card CUK-111).
     expect(source).toContain("bridgeSilenceLimits(silenceVendor)");
-    expect(source).toContain("bridgeStartupAdvice(silenceVendor)");
+    expect(source).toContain("bridgeStartupAdvice(silenceVendor, grokMcpFaults)");
+    // The MCP preflight only runs for the vendor that adopts foreign servers;
+    // making every launch read two configs would tax routes that cannot hit
+    // this fault at all (card d10fd9a0).
+    expect(source).toContain(
+      'silenceVendor === "grok" ? describeGrokMcpFaults() : undefined',
+    );
     expect(source).toContain("silenceWatchdog.poll()");
     expect(source).toContain("settledByWatchdog");
     expect(source).toContain("rememberVendorSession");

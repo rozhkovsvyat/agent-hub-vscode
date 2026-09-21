@@ -30,6 +30,7 @@ import {
   bridgeStartupAdvice,
   reportsToolsAfterTheFact,
 } from "./bridgeSilenceWatchdog";
+import { describeGrokMcpFaults } from "./grokMcpPreflight";
 import {
   argvRequestsVendorResume,
   forgetVendorSession,
@@ -2183,10 +2184,15 @@ async function* launchBridgeChild(options: {
   // The startup budget belongs to the vendor, not to the bridge: Grok cannot
   // print anything before its MCP/hook setup completes (see the watchdog).
   const silenceVendor = brokerVendorForModel(brokerModel);
+  // Only Grok adopts foreign MCP servers and hangs forever on a broken one, so
+  // only Grok pays for the lookup (card d10fd9a0). Read once per launch: the
+  // owner can fix the config between runs and must see the receipt change.
+  const grokMcpFaults =
+    silenceVendor === "grok" ? describeGrokMcpFaults() : undefined;
   const silenceWatchdog = new BridgeSilenceWatchdog(
     bridgeSilenceLimits(silenceVendor),
     { now: Date.now },
-    bridgeStartupAdvice(silenceVendor),
+    bridgeStartupAdvice(silenceVendor, grokMcpFaults),
     reportsToolsAfterTheFact(silenceVendor),
   );
   let settledByWatchdog = false;

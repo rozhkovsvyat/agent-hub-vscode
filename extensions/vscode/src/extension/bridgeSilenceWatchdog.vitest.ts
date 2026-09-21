@@ -105,6 +105,55 @@ describe("BridgeSilenceWatchdog", () => {
     expect(fail.kind === "fail" && fail.text).not.toMatch(/no in-flight tool/i);
   });
 
+  // Card d10fd9a0: a broken MCP server makes Grok print a tool call and then
+  // wait forever. That stall is indistinguishable from a slow tool until the
+  // receipt names the server, so the known cause must reach the idle verdict —
+  // not only the never-started one.
+  it("carries a known stall cause into the idle receipt", () => {
+    const broken = "Cukii cannot find the program for playwright.";
+    const advice = bridgeStartupAdvice("grok", {
+      failed: broken,
+      stalled: broken,
+    });
+    expect(advice.failed).toBe(broken);
+    expect(advice.stalled).toBe(broken);
+
+    // Weak evidence must not be promoted into a launch verdict.
+    const stallOnly = bridgeStartupAdvice("grok", { stalled: broken });
+    expect(stallOnly.failed).toMatch(/grok mcp doctor/);
+    expect(stallOnly.stalled).toBe(broken);
+
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("grok"),
+      time,
+      advice,
+    );
+    watchdog.noteActivity();
+    watchdog.noteToolStart();
+    time.advance(BRIDGE_SILENCE_LIMITS.toolIdleFailMs);
+    const fail = watchdog.poll();
+    expect(fail.kind).toBe("fail");
+    expect(fail.kind === "fail" && fail.text).toMatch(/tool is still running/i);
+    expect(fail.kind === "fail" && fail.text).toContain(broken);
+  });
+
+  it("keeps the generic idle receipt clean when no cause is known", () => {
+    const time = clock();
+    const watchdog = new BridgeSilenceWatchdog(
+      bridgeSilenceLimits("grok"),
+      time,
+      bridgeStartupAdvice("grok"),
+    );
+    watchdog.noteActivity();
+    time.advance(BRIDGE_SILENCE_LIMITS.idleFailMs);
+    const fail = watchdog.poll();
+    expect(fail.kind).toBe("fail");
+    // The startup advice explains a launch that never printed; a turn that
+    // spoke and stalled must not inherit it.
+    expect(fail.kind === "fail" && fail.text).not.toMatch(/grok mcp doctor/);
+  });
+
   it("resets the idle clock when a tool finishes", () => {
     const time = clock();
     const watchdog = new BridgeSilenceWatchdog(BRIDGE_SILENCE_LIMITS, time);
