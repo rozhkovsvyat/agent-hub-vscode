@@ -584,4 +584,52 @@ describe("выбор адреса коробки реле памяти", () => {
     expect(await upstream.choose()).toBe(local);
     expect(probes).toBe(0);
   });
+
+  // 🔴 Без этого кэш работает против нас. Реле ловит любую осечку и отдаёт 502; если после
+  // отказа решение донашивается до конца TTL, одна упавшая коробка держит память мёртвой
+  // целую минуту, хотя второе плечо живо. Поэтому отказ обязан немедленно обнулять выбор.
+  it("после отказа выбирает заново, не дожидаясь истечения TTL", async () => {
+    let probes = 0;
+    let localAlive = true;
+    const fetchStub = (async () => {
+      probes += 1;
+      if (!localAlive) throw new Error("ECONNREFUSED");
+      return { ok: true, status: 200 } as any;
+    }) as any;
+    let clock = 1_000;
+    const upstream = new CukiiMemoryUpstream(
+      connection,
+      fetchStub,
+      () => clock,
+    );
+    expect(await upstream.choose()).toBe(local);
+    expect(probes).toBe(1);
+
+    // Коробка упала, запрос к ней отказал — реле сообщает об этом выбору.
+    localAlive = false;
+    upstream.invalidate();
+
+    // Секунда спустя, далеко внутри TTL: обязан перепробовать и уйти наружу.
+    clock += 1_000;
+    expect(await upstream.choose()).toBe(remote);
+    expect(probes).toBe(2);
+  });
+
+  it("без отказа кэш продолжает работать — invalidate не зовётся сам по себе", async () => {
+    let probes = 0;
+    const fetchStub = (async () => {
+      probes += 1;
+      return { ok: true, status: 200 } as any;
+    }) as any;
+    let clock = 1_000;
+    const upstream = new CukiiMemoryUpstream(
+      connection,
+      fetchStub,
+      () => clock,
+    );
+    await upstream.choose();
+    clock += 1_000;
+    await upstream.choose();
+    expect(probes).toBe(1);
+  });
 });
