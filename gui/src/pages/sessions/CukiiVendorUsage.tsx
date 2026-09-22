@@ -118,6 +118,16 @@ const AccountValue = styled.span`
   overflow-wrap: anywhere;
   text-align: right;
 `;
+/**
+ * Причина, по которой строка аккаунта ничего не говорит. Отдельной строкой, а не
+ * подсказкой при наведении: владелец видит блок глазами, а не мышью, и «Account
+ * status unavailable» без причины — тупик (наблюдение 22.09.2026 у grok).
+ */
+const AccountDetail = styled.div`
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+`;
 const UsageBars = styled.div`
   display: flex;
   flex-direction: column;
@@ -237,7 +247,9 @@ export function resetCopy(resetsAt?: number, now = Date.now()): string | null {
 }
 
 function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
-  const showAccount = Boolean(snapshot.accountLabel);
+  // Причина без ярлыка — всё ещё ответ на вопрос «что с аккаунтом»; прятать её
+  // из-за пустого accountLabel значило бы снова показать пустоту.
+  const showAccount = Boolean(snapshot.accountLabel ?? snapshot.statusDetail);
   const showUsage = snapshot.windows.length > 0;
   if (!showAccount && !showUsage) return null;
   return (
@@ -246,12 +258,22 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
         <BodySection>
           <BodyTitle>Account</BodyTitle>
           <AccountInfo>
-            <AccountRow>
-              <span>
-                {snapshot.accountLabel?.includes("@") ? "Email" : "Account"}
-              </span>
-              <AccountValue>{snapshot.accountLabel}</AccountValue>
-            </AccountRow>
+            {snapshot.accountLabel && (
+              <AccountRow>
+                <span>
+                  {snapshot.accountLabel.includes("@") ? "Email" : "Account"}
+                </span>
+                <AccountValue>{snapshot.accountLabel}</AccountValue>
+              </AccountRow>
+            )}
+            {snapshot.statusDetail && (
+              <AccountDetail
+                data-testid="cukii-vendor-usage-status-detail"
+                title={snapshot.statusDetail}
+              >
+                {snapshot.statusDetail}
+              </AccountDetail>
+            )}
           </AccountInfo>
         </BodySection>
       )}

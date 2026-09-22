@@ -90,6 +90,18 @@ export type BrokerVendorAuthStatus = {
   state: "connected" | "disconnected" | "unavailable" | "postponed" | "unknown";
   /** Account identity shown below the vendor name. Never put transport/auth diagnostics here. */
   accountLabel?: string;
+  /**
+   * Why the probe could not decide, for the `unknown` state only.
+   *
+   * 🔴 Без этого поля отказ пробы схлопывался в строку «Account status
+   * unavailable», а настоящая причина — текст ошибки запуска или непонятый
+   * вывод CLI — вычислялась и выбрасывалась. 22.09.2026 владелец видел эту
+   * строку у вендора, который на самом деле был залогинен (`grok models`
+   * снаружи отвечал «You are logged in with grok.com» за 1,3 с), и ни он, ни
+   * агент не могли узнать, что именно не получилось. Это диагностика, а не
+   * идентичность: место ей в подсказке, а не в `accountLabel`.
+   */
+  statusDetail?: string;
   actions: BrokerVendorAuthAction[];
 };
 
@@ -131,6 +143,8 @@ export type CukiiVendorUsageWindow = {
 export type CukiiVendorUsageSnapshot = {
   vendor: BrokerVendorId;
   accountLabel?: string;
+  /** Why the account line says nothing useful; see BrokerVendorAuthStatus.statusDetail. */
+  statusDetail?: string;
   windows: CukiiVendorUsageWindow[];
   observedAt?: number;
 };

@@ -1638,9 +1638,45 @@ type VendorProbeOptions = {
   timeoutMs?: number;
 };
 
+/**
+ * Секреты в диагностике. Вывод пробы не обязан быть безобидным: `codex login
+ * status` печатает bearer-токен, у остальных в JSON попадаются `token`/`api_key`.
+ * Раньше этот текст никуда не шёл, теперь он идёт в интерфейс — значит вырезать
+ * надо здесь, в единственной точке, а не надеяться на конкретный вендорский
+ * формат.
+ */
+const PROBE_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\b(?:sk|pk|rk|xai|gsk|ghp|ghu|ghs|glpat)-[A-Za-z0-9._-]{8,}/gi,
+  /\beyJ[A-Za-z0-9._-]{16,}/g,
+  /("?\b(?:access_?token|refresh_?token|id_?token|api_?key|apikey|secret|password|passwd|authorization|cookie|session)\b"?\s*[:=]\s*"?)[^\s",}]+/gi,
+];
+
+/** Одна строка, без секретов, без управляющих символов и без хвоста на пол-экрана. */
+export function probeStatusDetail(text: string): string | undefined {
+  const redacted = PROBE_SECRET_PATTERNS.reduce(
+    (value, pattern) =>
+      value.replace(pattern, (match, prefix?: string) =>
+        prefix === undefined ? "***" : `${prefix}***`,
+      ),
+    String(text),
+  );
+  const line = redacted
+    // Управляющие символы вместе с переводами строк: деталь живёт в одной
+    // строке интерфейса, а вывод CLI приходит многострочным и в ANSI.
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return line || undefined;
+}
+
 function unavailableVendorStatus(
   vendor: VendorWithCli,
+  detail?: string,
 ): BrokerVendorAuthStatus {
+  const statusDetail =
+    detail === undefined ? undefined : probeStatusDetail(detail);
   return {
     id: vendor,
     label: cukiiVendorLabel(vendor),
@@ -1648,6 +1684,7 @@ function unavailableVendorStatus(
     state: "unknown",
     authenticated: false,
     accountLabel: "Account status unavailable",
+    ...(statusDetail ? { statusDetail } : {}),
     actions: ["login"],
   };
 }
@@ -1690,7 +1727,12 @@ export async function probeVendorExecutable(
         : localMetadata(vendor);
   const identity = accountLabelFromAuthMetadata(vendor, metadata);
   const spec = probeSpec(vendor, executable);
-  if (!spec) return unavailableVendorStatus(vendor);
+  if (!spec) {
+    return unavailableVendorStatus(
+      vendor,
+      `no status probe is defined for this CLI: ${executable}`,
+    );
+  }
   const qwenProbe =
     vendor === "qwen" ? await qwenAuthProbePayload(metadata) : undefined;
   try {
@@ -1740,6 +1782,19 @@ export async function probeVendorExecutable(
       label: cukiiVendorLabel(vendor),
       installed: true,
       ...classified,
+      // Проба отработала, но её вывод не опознан. Причина — в самом выводе, и
+      // без него «status unavailable» остаётся тупиком для владельца. Порядок
+      // слов не косметика: деталь режется по 200 символам, поэтому опознаваемое
+      // (путь и сам вывод) стоит раньше, чем длинная командная строка.
+      ...(classified.state === "unknown"
+        ? {
+            statusDetail: probeStatusDetail(
+              output.trim()
+                ? `${executable} returned an unrecognized status: ${output}`
+                : `${executable} returned nothing to classify`,
+            ),
+          }
+        : {}),
       ...(vendor === "kimi" && kimiIdentity && classified.authenticated
         ? { accountLabel: kimiIdentity }
         : {}),
@@ -1752,20 +1807,32 @@ export async function probeVendorExecutable(
       return notInstalledVendorStatus(vendor);
     }
     const output = qwenProbe ? qwenProbe.output : errorText(error);
+    const classified = classifyVendorAuthOutput(
+      vendor,
+      output,
+      identity ?? qwenProbe?.identity,
+      vendor === "kimi" && isRecord(metadata)
+        ? typeof metadata.credentialPresent === "boolean"
+          ? metadata.credentialPresent
+          : undefined
+        : undefined,
+    );
     return {
       id: vendor,
       label: cukiiVendorLabel(vendor),
       installed: true,
-      ...classifyVendorAuthOutput(
-        vendor,
-        output,
-        identity ?? qwenProbe?.identity,
-        vendor === "kimi" && isRecord(metadata)
-          ? typeof metadata.credentialPresent === "boolean"
-            ? metadata.credentialPresent
-            : undefined
-          : undefined,
-      ),
+      ...classified,
+      // 🔴 Текст ошибки запуска здесь уже вычислен и раньше выбрасывался:
+      // классификатор сворачивал его в «Account status unavailable», и причина
+      // (не запустился, таймаут, не тот шим) не доходила ни до владельца, ни до
+      // следующего агента. Диагностика — не идентичность, поэтому отдельным полем.
+      ...(classified.state === "unknown"
+        ? {
+            statusDetail: probeStatusDetail(
+              `${executable} failed to report a status: ${output}`,
+            ),
+          }
+        : {}),
     };
   }
 }

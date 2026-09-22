@@ -591,6 +591,11 @@ export class VsCodeMessenger {
         ...(account?.accountLabel
           ? { accountLabel: account.accountLabel }
           : {}),
+        // Диагностика идёт рядом с ярлыком, а не вместо него: сайдбар показывает
+        // «Account status unavailable» и без причины упирается в тупик.
+        ...(account?.statusDetail
+          ? { statusDetail: account.statusDetail }
+          : {}),
         windows: cached?.vendor === data.vendor ? cached.windows : [],
         ...(cached?.observedAt ? { observedAt: cached.observedAt } : {}),
       };

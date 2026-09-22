@@ -356,6 +356,70 @@ describe("VendorAccountsModal", () => {
     await getElementByText("Not installed");
   });
 
+  /**
+   * «Account status unavailable» одинаково для сорвавшегося запуска, таймаута и
+   * непонятого вывода. Причина, вычисленная хостом, обязана доехать до ряда:
+   * без неё владелец (и агент) упираются в тупик — наблюдение 22.09.2026.
+   */
+  it("shows the host's diagnosis under an undecidable account", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        id: "grok",
+        label: "xAI",
+        installed: true,
+        authenticated: false,
+        state: "unknown",
+        accountLabel: "Account status unavailable",
+        statusDetail:
+          "C:\\Users\\owner\\.grok\\bin\\grok.exe returned an unrecognized status: usage: grok [options]",
+        actions: ["login"],
+      },
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("Account status unavailable");
+    const detail = await waitFor(() => {
+      const node = document.querySelector(
+        '[data-testid="cukii-vendor-account-detail-grok"]',
+      );
+      if (!node) throw new Error("detail row is missing");
+      return node;
+    });
+    expect(detail.textContent).toContain("unrecognized status");
+    expect(detail).toHaveAttribute(
+      "title",
+      "C:\\Users\\owner\\.grok\\bin\\grok.exe returned an unrecognized status: usage: grok [options]",
+    );
+  });
+
+  it("NEGATIVE CONTROL: never shows a diagnosis under a decided account", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.responses["cukii/listVendorAccounts"] = [
+      {
+        ...connectedAccount("owner@company.ru"),
+        // Хост может прислать деталь и в решённом состоянии; ряд обязан её
+        // проигнорировать, иначе диагностика станет шумом в каждой строке.
+        statusDetail: "stale probe note",
+      },
+    ];
+
+    await renderWithProviders(<VendorAccountsModal onClose={vi.fn()} />, {
+      mockIdeMessenger: ideMessenger,
+    });
+
+    await getElementByText("owner@company.ru");
+    expect(document.body.textContent).not.toContain("stale probe note");
+    expect(
+      document.querySelector(
+        '[data-testid="cukii-vendor-account-detail-codex"]',
+      ),
+    ).toBeNull();
+  });
+
   it("NEGATIVE CONTROL: never renders Not logged in beside Log out", async () => {
     const ideMessenger = new MockIdeMessenger();
     ideMessenger.responses["cukii/listVendorAccounts"] = [

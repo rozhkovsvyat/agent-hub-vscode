@@ -34,6 +34,7 @@ import {
   waitForTerminalShellIntegration,
   launchKimiWeb,
   stopEphemeralKimiWeb,
+  probeStatusDetail,
   probeVendorExecutable,
   resolveKimiAccountIdentity,
   sortVendorAccountsByLabel,
@@ -1959,6 +1960,120 @@ describe("Cukii vendor CLI accounts", () => {
           accountLabel: "Account status unavailable",
         });
         expect(fs.existsSync(marker)).toBe(false);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+/**
+ * 22.09.2026 владелец видел в сайдбаре у grok «Account status unavailable»,
+ * тогда как `grok models` снаружи в ту же минуту отвечал «You are logged in
+ * with grok.com» за 1,3 с. Ни строка, ни лог не говорили, что именно не
+ * получилось: текст ошибки запуска и непонятый вывод CLI вычислялись и
+ * выбрасывались. Эти случаи закрывают выброс — и следят, чтобы вместе с
+ * диагностикой наружу не поехал секрет.
+ */
+describe("probe diagnosis for an undecidable vendor status", () => {
+  it("keeps the diagnosis to one capped line", () => {
+    expect(probeStatusDetail("  spawn\n\tfailed  ")).toBe("spawn failed");
+    expect(probeStatusDetail("\u001b[31mred\u001b[0m alert")).toBe("red alert");
+    expect(probeStatusDetail("   ")).toBeUndefined();
+    expect(probeStatusDetail("")).toBeUndefined();
+    expect(probeStatusDetail("x".repeat(500))).toHaveLength(200);
+  });
+
+  it("redacts credentials that a status probe prints", () => {
+    const detail = probeStatusDetail(
+      'grok status: Authorization: Bearer abcdef1234567890 key=sk-live-ABCDEFGH1234 {"access_token":"tok_zzzzzzzzzzzz","refresh_token":"r_yyyyyyyyyyyy"} id=eyJhbGciOiJub25lIn0abcdefghijklmnop',
+    );
+    expect(detail).toBeDefined();
+    expect(detail).toContain("***");
+    for (const secret of [
+      "abcdef1234567890",
+      "sk-live-ABCDEFGH1234",
+      "tok_zzzzzzzzzzzz",
+      "r_yyyyyyyyyyyy",
+      "eyJhbGciOiJub25lIn0abcdefghijklmnop",
+    ]) {
+      expect(detail).not.toContain(secret);
+    }
+  });
+
+  // win32 only: the fixtures are .cmd, like the rest of the live probe suite.
+  it.runIf(process.platform === "win32")(
+    "carries the unrecognized probe output, and only when the state is unknown",
+    async () => {
+      const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-detail-");
+      const fixture = (name: string, body: string): string => {
+        const file = path.join(directory, `${name}.cmd`);
+        fs.writeFileSync(file, `@echo off\r\n${body}\r\n`, "utf8");
+        return file;
+      };
+
+      try {
+        const [undecided, leaky, decided] = await Promise.all([
+          probeVendorExecutable(
+            "grok",
+            fixture("grok", "echo CUKII_UNRECOGNIZED_PROBE_OUTPUT"),
+          ),
+          probeVendorExecutable(
+            "grok",
+            fixture("grok2", "echo token=sk-live-ABCDEFGH1234"),
+          ),
+          probeVendorExecutable(
+            "codex",
+            fixture("codex", "echo Logged in using ChatGPT"),
+            { metadata: undefined },
+          ),
+        ]);
+
+        expect(undecided).toMatchObject({
+          state: "unknown",
+          accountLabel: "Account status unavailable",
+        });
+        expect(undecided.statusDetail).toContain(
+          "CUKII_UNRECOGNIZED_PROBE_OUTPUT",
+        );
+
+        // Диагностика идёт в интерфейс, поэтому редактура обязана работать и на
+        // живом выводе, а не только на строке в юнит-тесте.
+        expect(leaky.statusDetail).toBeDefined();
+        expect(leaky.statusDetail).not.toContain("sk-live-ABCDEFGH1234");
+        expect(leaky.statusDetail).toContain("***");
+
+        // Решённое состояние диагностику не носит: это был бы шум в каждой
+        // нормальной строке.
+        expect(decided.state).toBe("connected");
+        expect(decided.statusDetail).toBeUndefined();
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "names the failure when the probe never returns an output at all",
+    async () => {
+      const directory = fs.mkdtempSync("D:\\Scratch\\cukii-vendor-detail-to-");
+      const file = path.join(directory, "grok.cmd");
+      fs.writeFileSync(
+        file,
+        "@echo off\r\nping 127.0.0.1 -n 4 > nul\r\n",
+        "utf8",
+      );
+
+      try {
+        const timedOut = await probeVendorExecutable("grok", file, {
+          timeoutMs: 50,
+        });
+        expect(timedOut).toMatchObject({
+          state: "unknown",
+          accountLabel: "Account status unavailable",
+        });
+        expect(timedOut.statusDetail).toBeDefined();
+        expect(timedOut.statusDetail).toContain(file);
       } finally {
         fs.rmSync(directory, { recursive: true, force: true });
       }

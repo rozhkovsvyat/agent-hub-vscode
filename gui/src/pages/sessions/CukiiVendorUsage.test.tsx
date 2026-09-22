@@ -211,6 +211,64 @@ describe("Cukii vendor usage Claude parity", () => {
     );
   });
 
+  /**
+   * 22.09.2026 сайдбар у grok показывал ровно «Account status unavailable» и
+   * больше ничего, тогда как сам CLI снаружи отвечал «You are logged in». Ряд
+   * обязан нести причину, иначе владелец упирается в строку, которая одинакова
+   * на любой отказ.
+   */
+  it("shows why the account line could not be decided", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({
+        vendor,
+        accountLabel: "Account status unavailable",
+        statusDetail:
+          "C:\\Users\\owner\\.grok\\bin\\grok.exe failed to report a status: spawn ETIMEDOUT",
+        windows: [],
+      }),
+    );
+
+    const { container } = await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="grok-4-6" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    await screen.findByText("Account status unavailable");
+    const detail = container.querySelector(
+      '[data-testid="cukii-vendor-usage-status-detail"]',
+    )!;
+    expect(detail).toBeInTheDocument();
+    expect(detail.textContent).toContain("spawn ETIMEDOUT");
+    expect(detail).toHaveAttribute(
+      "title",
+      "C:\\Users\\owner\\.grok\\bin\\grok.exe failed to report a status: spawn ETIMEDOUT",
+    );
+  });
+
+  it("keeps the account block silent when the probe decided cleanly", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({
+        vendor,
+        accountLabel: "owner@example.com",
+        windows: [],
+      }),
+    );
+
+    const { container } = await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="grok-4-6" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    await screen.findByText("owner@example.com");
+    expect(
+      container.querySelector(
+        '[data-testid="cukii-vendor-usage-status-detail"]',
+      ),
+    ).toBeNull();
+  });
+
   it("formats reset times with the same compact Claude copy", () => {
     const now = Date.parse("2026-09-15T20:00:00Z");
     expect(resetCopy(Math.floor(now / 1_000) + 7_200, now)).toBe(

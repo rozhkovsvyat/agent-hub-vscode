@@ -56,6 +56,19 @@ export function accountStatusSubtitle(
   return label;
 }
 
+/**
+ * Причина отказа пробы — только для `unknown`. В остальных состояниях строка
+ * аккаунта уже говорит правду, и диагностика рядом с ней была бы шумом; у
+ * `unknown` же подпись одна и та же на любой отказ, и без причины владелец не
+ * отличает «CLI не запустился» от «вывод не опознан».
+ */
+export function accountStatusDetail(
+  account: BrokerVendorAuthStatus,
+): string | undefined {
+  if (account.state !== "unknown") return undefined;
+  return account.statusDetail?.trim() || undefined;
+}
+
 export function accountStatusActions(
   account: BrokerVendorAuthStatus,
 ): BrokerVendorAuthAction[] {
@@ -301,6 +314,7 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                   </div>
                   {rows.map((account) => {
                     const subtitle = accountStatusSubtitle(account);
+                    const detail = accountStatusDetail(account);
                     const actions = accountStatusActions(account);
                     return (
                       <section
@@ -323,6 +337,17 @@ export function VendorAccountsModal({ onClose }: VendorAccountsModalProps) {
                           {subtitle && (
                             <span className="block truncate text-[12px] text-[var(--vscode-descriptionForeground)]">
                               {subtitle}
+                            </span>
+                          )}
+                          {/* Почему проба не смогла решить. Строка усечена по
+                      ширине ряда, полный текст — в подсказке. */}
+                          {detail && (
+                            <span
+                              data-testid={`cukii-vendor-account-detail-${account.id}`}
+                              title={detail}
+                              className="block truncate text-[11px] italic text-[var(--vscode-descriptionForeground)] opacity-80"
+                            >
+                              {detail}
                             </span>
                           )}
                         </span>
