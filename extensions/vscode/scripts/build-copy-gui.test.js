@@ -5,10 +5,66 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  assertGuiCoreLink,
   buildAndCopyGui,
   buildGui,
   expectedNpmRoots,
 } = require("./build-copy-gui");
+
+// 🔴 `gui/node_modules/core` is a link. On 2026-09-22 it resolved to
+// `D:\Scratch\cukii-2.0.139-reportform\core`, so the webview compiled against a
+// protocol the extension no longer used — and the only symptom was a type error
+// that read as a component bug. The guard has to name the wrong target, not
+// merely fail.
+test("refuses a gui core link that resolves outside the checkout", () => {
+  const seen = {
+    "D:/repo/gui/node_modules/core": "D:/Scratch/cukii-2.0.139-reportform/core",
+    "D:/repo/core": "D:/repo/core",
+  };
+  const fakeFs = {
+    existsSync: (p) => p.split(path.sep).join("/") in seen,
+    realpathSync: (p) => seen[p.split(path.sep).join("/")],
+  };
+
+  assert.throws(
+    () =>
+      assertGuiCoreLink("D:/repo/gui", {
+        repoCore: "D:/repo/core",
+        fileSystem: fakeFs,
+      }),
+    (error) =>
+      /points outside this checkout/.test(error.message) &&
+      /cukii-2\.0\.139-reportform/.test(error.message),
+  );
+});
+
+test("accepts a gui core link that resolves to this checkout", () => {
+  const fakeFs = {
+    existsSync: () => true,
+    realpathSync: () => "D:/repo/core",
+  };
+  assert.doesNotThrow(() =>
+    assertGuiCoreLink("D:/repo/gui", {
+      repoCore: "D:/repo/core",
+      fileSystem: fakeFs,
+    }),
+  );
+});
+
+test("says nothing when the gui has no core link yet", () => {
+  const fakeFs = {
+    existsSync: () => false,
+    realpathSync: () => {
+      throw new Error("must not be called");
+    },
+  };
+  assert.doesNotThrow(() =>
+    assertGuiCoreLink("D:/repo/gui", {
+      repoCore: "D:/repo/core",
+      fileSystem: fakeFs,
+    }),
+  );
+});
 
 function withFixture(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-gui-package-"));

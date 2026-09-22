@@ -102,6 +102,40 @@ function validateGuiBuild(guiDist) {
   }
 }
 
+/**
+ * 🔴 The webview compiles against `gui/node_modules/core`, which is a link, not
+ * a copy. On 2026-09-22 it pointed at `D:\Scratch\cukii-2.0.139-reportform\core`
+ * — a throwaway experiment whose `CukiiIssueReportSubmission` still had the old
+ * `description` field. The webview and the extension were therefore built
+ * against two different protocols, and the only symptom was a type error that
+ * read as a bug in the component. A link into a scratch directory is worse than
+ * a wrong link: that directory is explicitly disposable, so the build would
+ * break the day it is swept. Fail here, naming the target, instead of letting
+ * the mismatch be discovered downstream.
+ */
+function assertGuiCoreLink(
+  guiDir,
+  { repoCore = path.join(continueDir, "core"), fileSystem = fs } = {},
+) {
+  const link = path.join(guiDir, "node_modules", "core");
+  if (!fileSystem.existsSync(link)) return;
+  const actual = fileSystem.realpathSync(link);
+  const expected = fileSystem.realpathSync(repoCore);
+  if (
+    path.resolve(actual).toLowerCase() === path.resolve(expected).toLowerCase()
+  ) {
+    return;
+  }
+  throw new Error(
+    `gui/node_modules/core points outside this checkout:\n` +
+      `  link:     ${link}\n` +
+      `  resolves: ${actual}\n` +
+      `  expected: ${expected}\n` +
+      `The webview would compile against a different protocol than the ` +
+      `extension. Repoint it: rmdir the link and recreate it at ${expected}.`,
+  );
+}
+
 function buildGui(
   guiDir,
   {
@@ -112,8 +146,10 @@ function buildGui(
     npmExecPath = process.env.npm_execpath,
     fileSystem = fs,
     npmRoots,
+    assertCoreLink = assertGuiCoreLink,
   } = {},
 ) {
+  assertCoreLink(guiDir, { fileSystem });
   try {
     const npmCliPath = resolveNpmCli({
       npmExecPath,
@@ -266,6 +302,7 @@ function buildAndCopyGui({
 }
 
 module.exports = {
+  assertGuiCoreLink,
   buildAndCopyGui,
   buildGui,
   expectedNpmRoots,
