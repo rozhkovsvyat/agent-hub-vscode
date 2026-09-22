@@ -1871,6 +1871,13 @@ const AUTH_FLOW_CODE_LABEL_PATTERN =
 // bare shouted word on the next line (ERROR, NOTE) is not mistaken for a code.
 const AUTH_FLOW_CODE_STANDALONE_PATTERN =
   /^[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10}){0,3}$/;
+// 🔴 The look-ahead needs a stricter label than `\bcode\b`, which also matches
+// `exit code`, `status code` and `error code`. Counter-example from review
+// (2026-09-22): `Process exited with error code below` followed by `ABCD-1234`
+// would have put a build artefact in the owner's clipboard. Only a label that
+// plainly announces a sign-in code may claim the line below it.
+const AUTH_FLOW_CODE_LABEL_LINE_PATTERN =
+  /\b(?:one[-\s]?time|device|verification|pairing|user|login|auth(?:orization)?)\b[^\n]*\bcode\b|\bcode\b[^\n]*\b(?:expires|enter)\b/i;
 
 function standaloneAuthFlowCode(line: string): string | undefined {
   const token = line.trim();
@@ -1889,6 +1896,29 @@ const OSC_PATTERN = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 const CSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const ESCAPE_PATTERN = /\u001b[@-Z\\-_]/g;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
+/**
+ * 🔴 This assist is the first thing that ever turned CLI stdout into a browser
+ * navigation, so the URL is checked before it is handed to `openExternal`.
+ * `https://` alone is not enough: `https://evil@auth.openai.com` reads as the
+ * vendor's host and goes elsewhere, and a punycode or non-ASCII host reads as
+ * one letter and resolves as another. A vendor's own sign-in link needs none
+ * of that, so all three are refused rather than opened.
+ */
+export function safeAuthFlowUrl(candidate: string): string | undefined {
+  const trimmed = candidate.replace(/[.,;:!?'")\]]+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "https:") return undefined;
+  if (parsed.username || parsed.password) return undefined;
+  if (!/^[a-z0-9.-]+$/i.test(parsed.hostname)) return undefined;
+  if (/(^|\.)xn--/i.test(parsed.hostname)) return undefined;
+  return trimmed;
+}
 
 export function stripTerminalStyling(text: string): string {
   return text
@@ -1911,7 +1941,10 @@ export function extractAuthFlowAssist(text: string): {
   code?: string;
 } {
   const plain = stripTerminalStyling(text);
-  const url = plain.match(AUTH_FLOW_URL_PATTERN)?.[0];
+  const url = plain
+    .match(new RegExp(AUTH_FLOW_URL_PATTERN, "gi"))
+    ?.map(safeAuthFlowUrl)
+    .find((candidate) => candidate !== undefined);
   const lines = plain.split("\n");
   let code: string | undefined;
   for (let index = 0; index < lines.length && !code; index += 1) {
@@ -1921,6 +1954,7 @@ export function extractAuthFlowAssist(text: string): {
       line.match(AUTH_FLOW_CODE_LABEL_PATTERN)?.[1] ??
       line.match(AUTH_FLOW_CODE_PATTERN)?.[0];
     if (code) break;
+    if (!AUTH_FLOW_CODE_LABEL_LINE_PATTERN.test(line)) continue;
     // The label announced a code but did not carry one: codex puts it on the
     // next non-empty line. Look no further than that — anything beyond is a
     // different sentence, not this label's value.

@@ -338,6 +338,7 @@ export class VsCodeMessenger {
       name: string;
       command: string;
       followup?: string;
+      shellPath?: string;
       closesTerminal?: boolean;
     },
     vendor: BrokerVendorId,
@@ -355,9 +356,12 @@ export class VsCodeMessenger {
     // immediately, and missing that fast close left the Accounts loader stuck
     // until its five-minute cap.
     let closeSubscription: vscode.Disposable | undefined;
+    let terminalClosed = false;
     const closed = new Promise<"terminal-closed">((resolve) => {
       closeSubscription = vscode.window.onDidCloseTerminal((closedTerminal) => {
-        if (closedTerminal === terminal) resolve("terminal-closed");
+        if (closedTerminal !== terminal) return;
+        terminalClosed = true;
+        resolve("terminal-closed");
       });
     });
     // Device-auth CLIs print a URL/code instead of opening a browser. Shell
@@ -377,16 +381,36 @@ export class VsCodeMessenger {
     // 🔴 It is never present on a terminal this young — VS Code activates it
     // after the shell announces itself, so the property must be awaited, not
     // read. Reading it inline is what silently disabled the assist.
-    const shellIntegration = await waitForTerminalShellIntegration(
-      terminal as vscode.Terminal & {
-        shellIntegration?: AuthFlowShellIntegration;
-      },
-      (
-        vscode.window as typeof vscode.window & {
-          onDidChangeTerminalShellIntegration?: AuthFlowShellIntegrationSubscribe;
-        }
-      ).onDidChangeTerminalShellIntegration,
-    );
+    const typedTerminal = terminal as vscode.Terminal & {
+      shellIntegration?: AuthFlowShellIntegration;
+    };
+    // Waiting buys exactly one thing — reading the login output — so it is not
+    // paid for anywhere else. `/bin/sh` is never instrumented by VS Code, so on
+    // macOS the wait would be five seconds of guaranteed silence before the
+    // same fallback (see the macOS limit in the shift diary).
+    const readsOutput = action === "login" && spec.shellPath !== "/bin/sh";
+    const shellIntegration = readsOutput
+      ? await Promise.race([
+          waitForTerminalShellIntegration(
+            typedTerminal,
+            (
+              vscode.window as typeof vscode.window & {
+                onDidChangeTerminalShellIntegration?: AuthFlowShellIntegrationSubscribe;
+              }
+            ).onDidChangeTerminalShellIntegration,
+          ),
+          // Closing the terminal ends the wait at once: five seconds of
+          // silence followed by a command sent into a dead terminal helps
+          // nobody.
+          closed.then(() => undefined),
+        ])
+      : typedTerminal.shellIntegration;
+    if (terminalClosed) {
+      closeSubscription?.dispose();
+      return { outcome: "terminal-closed", assisted };
+    }
+
+    let followupTimer: NodeJS.Timeout | undefined;
     if (shellIntegration) {
       const runThroughShell = (command: string) => {
         const stream = shellIntegration.executeCommand(command).read();
@@ -401,13 +425,16 @@ export class VsCodeMessenger {
       runThroughShell(spec.command);
       if (spec.followup) {
         const followup = spec.followup;
-        setTimeout(() => runThroughShell(followup), 1_500);
+        followupTimer = setTimeout(() => runThroughShell(followup), 1_500);
       }
     } else {
       terminal.sendText(spec.command, true);
       if (spec.followup) {
         const followup = spec.followup;
-        setTimeout(() => terminal.sendText(followup, true), 1_500);
+        followupTimer = setTimeout(
+          () => terminal.sendText(followup, true),
+          1_500,
+        );
       }
     }
 
@@ -438,6 +465,9 @@ export class VsCodeMessenger {
       controller.abort();
       closeSubscription?.dispose();
       if (capTimer) clearTimeout(capTimer);
+      // A pending followup would otherwise fire into a terminal the flow has
+      // already finished with.
+      if (followupTimer) clearTimeout(followupTimer);
     }
   }
 

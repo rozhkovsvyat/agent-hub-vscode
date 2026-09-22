@@ -29,6 +29,7 @@ import {
   clearBrokerVendorAccountCache,
   createAuthFlowAssist,
   extractAuthFlowAssist,
+  safeAuthFlowUrl,
   stripTerminalStyling,
   waitForTerminalShellIntegration,
   launchKimiWeb,
@@ -2094,6 +2095,42 @@ describe("vendor auth flow assist", () => {
       extractAuthFlowAssist("Enter this one-time code below\n\n   ERROR\n")
         .code,
     ).toBeUndefined();
+  });
+
+  // Counter-example from the adversarial review (2026-09-22): `\bcode\b` alone
+  // also matches an exit/status/error code, and the line below such a message
+  // is not a sign-in code.
+  it("does not claim the line below an exit-code message", () => {
+    expect(
+      extractAuthFlowAssist(
+        "Process exited with error code below\n\nABCD-1234\n",
+      ).code,
+    ).toBeUndefined();
+    expect(
+      extractAuthFlowAssist("npm exited with status code\n\nE404-9\n").code,
+    ).toBeUndefined();
+  });
+
+  it("refuses a URL that reads as the vendor host but is not", () => {
+    expect(safeAuthFlowUrl("https://evil@auth.openai.com/codex/device")).toBe(
+      undefined,
+    );
+    expect(safeAuthFlowUrl("https://xn--80ak6aa92e.com/device")).toBe(
+      undefined,
+    );
+    expect(safeAuthFlowUrl("http://auth.openai.com/device")).toBe(undefined);
+    expect(safeAuthFlowUrl("https://auth.openai.com/codex/device.")).toBe(
+      "https://auth.openai.com/codex/device",
+    );
+  });
+
+  it("skips a poisoned first link and takes the vendor's own", () => {
+    expect(
+      extractAuthFlowAssist(
+        "note: https://evil@auth.openai.com/steal\n" +
+          "   https://auth.openai.com/codex/device\n",
+      ).url,
+    ).toBe("https://auth.openai.com/codex/device");
   });
 
   it("sees the code through terminal colouring", () => {

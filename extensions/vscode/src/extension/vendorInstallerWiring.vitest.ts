@@ -38,8 +38,16 @@ describe("vendor installer host wiring", () => {
   // the property inline always sees `undefined` and drops the flow into the
   // sendText fallback, which cannot read output at all.
   it("awaits shell integration instead of reading it off a freshly created terminal", () => {
-    expect(messengerSource).toContain("await waitForTerminalShellIntegration(");
-    expect(messengerSource).toContain("onDidChangeTerminalShellIntegration");
+    const assignment = messengerSource.indexOf("const shellIntegration =");
+    const segment = messengerSource.slice(assignment, assignment + 1_200);
+
+    expect(assignment).toBeGreaterThan(0);
+    expect(segment).toContain("await");
+    expect(segment).toContain("waitForTerminalShellIntegration(");
+    expect(segment).toContain("onDidChangeTerminalShellIntegration");
+    // A closed terminal ends the wait, and nothing is sent into it afterwards.
+    expect(segment).toContain("closed.then(() => undefined)");
+    expect(messengerSource).toContain("if (terminalClosed) {");
     expect(messengerSource).not.toMatch(/\)\s*\.shellIntegration;/);
   });
 
