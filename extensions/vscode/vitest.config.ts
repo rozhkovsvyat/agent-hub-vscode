@@ -7,6 +7,10 @@ export default defineConfig({
     // not the last packed file: dependency that happens to be installed.
     alias: {
       core: path.resolve(__dirname, "../../core"),
+      "@cukii/vendor-bridge": path.resolve(
+        __dirname,
+        "../../packages/vendor-bridge/src/index.ts",
+      ),
     },
   },
   test: {
