@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,8 +24,24 @@ import { runToolHooks } from "./toolHooks.js";
 // диск-относительный `D:Brain`, который разрешается от текущего каталога на этом диске, —
 // путь молча уезжает в несуществующий, хук падает без вывода, и проверка «не заблокировано»
 // становится ложно зелёной. Поймано на этом самом тесте.
-const HARNESS_CANON = "D:/Brain/repo/personal/agents/infra/claude";
+// 🔴 ЯКОРЬ — КОРЕНЬ РЕПОЗИТОРИЯ ХАРНЕССА, А НЕ КАТАЛОГ КАНОНА. Первая редакция этой
+// проверки якорилась на сам `infra/claude`, и независимое ревью 22.09.2026 показало
+// контрпример (находка F6): перенос канона ЦЕЛИКОМ делает `existsSync(канон)` ложным,
+// проверка скипается и прогон снова зелёный — ровно та ловушка уровнем выше. Корень
+// репозитория переживает перестановки внутри него, поэтому краснеет то, что должно.
+const HARNESS_REPO = "D:/Brain/repo/personal/agents";
+const HARNESS_CANON = `${HARNESS_REPO}/infra/claude`;
 const GUARD = `${HARNESS_CANON}/memory-first-guard.ps1`;
+// Развёрнутая копия: инвариант ADR 0014 — не «файл где-то есть», а «оболочки исполняют
+// ТОТ ЖЕ байт». Проверка существования этого не доказывает: месяц канон и развёрнутая
+// копия расходились, и все проверки существования были зелёными.
+const DEPLOYED_GUARD = path.join(
+  os.homedir(),
+  ".claude",
+  "memory-first-guard.ps1",
+);
+const sha256 = (p: string) =>
+  createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
 const hasPwsh = (() => {
   try {
@@ -37,15 +54,21 @@ const hasPwsh = (() => {
   }
 })();
 
-// 🔴 `skipIf(!existsSync(GUARD))` один, без этой пары, — ловушка: стоит канону переехать,
+// 🔴 `skipIf(!existsSync(GUARD))` один, без этого блока, — ловушка: стоит канону переехать,
 // и вся проверка паритета молча выключается, оставаясь зелёной. Так и было — путь указывал
 // на замороженную 24.08 копию `agent-hub/harness/memory`, и тест месяц доказывал паритет
 // не с тем файлом (измерено хэшами 21.09.2026: из 20 общих файлов ни один не совпал).
-// Поэтому: на машине без харнесса (CI GitHub) скип честный, а на машине, где канон ЕСТЬ,
-// отсутствие гварда обязано краснеть.
-describe.skipIf(!fs.existsSync(HARNESS_CANON))("канон хуков памяти", () => {
+// Поэтому: на машине без репозитория харнесса (CI GitHub, ubuntu) скип честный, а на
+// машине, где репозиторий ЕСТЬ, и пропажа гварда, и расхождение с развёрнутой копией
+// обязаны краснеть.
+describe.skipIf(!fs.existsSync(HARNESS_REPO))("канон хуков памяти", () => {
   it("memory-first-guard.ps1 лежит в каноне, а не в отставленной копии", () => {
     expect(fs.existsSync(GUARD)).toBe(true);
+  });
+
+  it("развёрнутая копия байт в байт равна канону", () => {
+    expect(fs.existsSync(DEPLOYED_GUARD)).toBe(true);
+    expect(sha256(DEPLOYED_GUARD)).toBe(sha256(GUARD));
   });
 });
 
