@@ -8,6 +8,7 @@ import type { ProtectedSecretStore } from "./alibabaTokenPlan";
 import {
   CUKII_MEMORY_SECRET_KEY,
   CukiiMemoryAccountController,
+  CukiiMemoryRelay,
   CukiiMemoryUpstream,
   cukiiMemoryAccountForContext,
   describeDisciplineOutcome,
@@ -516,6 +517,14 @@ describe("выбор адреса коробки реле памяти", () => {
   const local = "http://127.0.0.1:8780/mcp";
   const connection = { endpoint: remote, token: "t0ken" };
 
+  /** Ответ НАШЕЙ коробки: 2xx и `serverInfo.name`, по которому её и опознают. */
+  const okBox = () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: { serverInfo: { name: "cukii-memory" } } }),
+    }) as any;
+
   // 🔴 Почему это вообще проверяется. На машине-коробке настроенный адрес внешний, и запрос
   // к памяти уходит через VPN, VPS и frp-туннель обратно в тот же компьютер. Туннель рвётся
   // при смене адреса выхода AnyConnect: замер 22.09.2026 — три подряд healthz наружу дали
@@ -525,7 +534,7 @@ describe("выбор адреса коробки реле памяти", () => {
     const fetchStub = (async (url: any, init: any) => {
       calls.push(String(url));
       expect(init.headers.authorization).toBe("Bearer t0ken");
-      return { ok: true, status: 200 } as any;
+      return okBox();
     }) as any;
     const upstream = new CukiiMemoryUpstream(connection, fetchStub);
     expect(await upstream.choose()).toBe(local);
@@ -552,7 +561,7 @@ describe("выбор адреса коробки реле памяти", () => {
     let probes = 0;
     const fetchStub = (async () => {
       probes += 1;
-      return { ok: true, status: 200 } as any;
+      return okBox();
     }) as any;
     let clock = 1_000;
     const upstream = new CukiiMemoryUpstream(
@@ -575,7 +584,7 @@ describe("выбор адреса коробки реле памяти", () => {
     let probes = 0;
     const fetchStub = (async () => {
       probes += 1;
-      return { ok: true, status: 200 } as any;
+      return okBox();
     }) as any;
     const upstream = new CukiiMemoryUpstream(
       { endpoint: local, token: "t0ken" },
@@ -594,7 +603,7 @@ describe("выбор адреса коробки реле памяти", () => {
     const fetchStub = (async () => {
       probes += 1;
       if (!localAlive) throw new Error("ECONNREFUSED");
-      return { ok: true, status: 200 } as any;
+      return okBox();
     }) as any;
     let clock = 1_000;
     const upstream = new CukiiMemoryUpstream(
@@ -619,7 +628,7 @@ describe("выбор адреса коробки реле памяти", () => {
     let probes = 0;
     const fetchStub = (async () => {
       probes += 1;
-      return { ok: true, status: 200 } as any;
+      return okBox();
     }) as any;
     let clock = 1_000;
     const upstream = new CukiiMemoryUpstream(
@@ -631,5 +640,163 @@ describe("выбор адреса коробки реле памяти", () => {
     clock += 1_000;
     await upstream.choose();
     expect(probes).toBe(1);
+  });
+
+  // 🔴 F1 из независимого ревью (grok, 22.09.2026). Признаком «наша коробка» был голый
+  // response.ok, то есть ЛЮБОЙ 2xx на :8780 — посторонний MCP без авторизации, заглушка,
+  // не тот контейнер. Заявленный инвариант «не читать и не писать чужую память» при этом
+  // не выполнялся. Рядом в том же файле probeCukiiMemory уже проверял строже.
+  it("не принимает за свою коробку чужой 2xx без serverInfo", async () => {
+    const fetchStub = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ result: {} }),
+      }) as any) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("не принимает за свою коробку чужое имя сервера", async () => {
+    const fetchStub = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ result: { serverInfo: { name: "other-mcp" } } }),
+      }) as any) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("не принимает 2xx с JSON-RPC ошибкой", async () => {
+    const fetchStub = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ error: { message: "нет доступа" } }),
+      }) as any) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("не принимает 2xx с телом, которое вообще не JSON", async () => {
+    const fetchStub = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new Error("Unexpected token < in JSON");
+        },
+      }) as any) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    expect(await upstream.choose()).toBe(remote);
+  });
+
+  it("запрещает редирект: иначе зачёлся бы 2xx с чужого origin", async () => {
+    let seen: any;
+    const fetchStub = (async (_url: any, init: any) => {
+      seen = init.redirect;
+      return okBox();
+    }) as any;
+    await new CukiiMemoryUpstream(connection, fetchStub).choose();
+    expect(seen).toBe("error");
+  });
+
+  // F4: без single-flight два параллельных кадра дают две пробы.
+  it("параллельные вызовы делят одну пробу", async () => {
+    let probes = 0;
+    const fetchStub = (async () => {
+      probes += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      return okBox();
+    }) as any;
+    const upstream = new CukiiMemoryUpstream(connection, fetchStub);
+    const [a, b, c] = await Promise.all([
+      upstream.choose(),
+      upstream.choose(),
+      upstream.choose(),
+    ]);
+    expect([a, b, c]).toEqual([local, local, local]);
+    expect(probes).toBe(1);
+  });
+
+  // 🔴 F4, опасный порядок из ревью: кадр отказал и сбросил выбор, но проба, стартовавшая
+  // ДО сброса, возвращается позже и снова объявляет плечо живым. Получается пила.
+  it("проба, стартовавшая до сброса, не воскрешает отказавшее плечо", async () => {
+    let release: (() => void) | undefined;
+    const fetchStub = (async () => {
+      await new Promise<void>((r) => (release = r));
+      return okBox();
+    }) as any;
+    let clock = 1_000;
+    const upstream = new CukiiMemoryUpstream(
+      connection,
+      fetchStub,
+      () => clock,
+    );
+
+    const pending = upstream.choose();
+    // Пока проба висит, реальный кадр отказал.
+    upstream.invalidate();
+    release!();
+    await pending;
+
+    // Решение записаться не должно: следующий выбор обязан пробовать заново.
+    expect((upstream as any).decided).toBeUndefined();
+  });
+});
+
+// 🔴 Ревью показало, что мутант «убрать this.upstream.invalidate() из catch реле» не
+// краснел: тесты звали invalidate() сами и проверяли метод, а не проводку. Здесь
+// проверяется именно связь «плечо отказало -> выбор сброшен».
+describe("реле сбрасывает выбор плеча по факту отказа", () => {
+  const remote = "https://box.cukii.ru/mcp";
+  const connection = { endpoint: remote, token: "t0ken" };
+
+  const makeRelay = (httpFetch: any) =>
+    new CukiiMemoryRelay(connection, "proxy.js", "node", httpFetch);
+
+  /** Ставит решение как будто проба уже прошла, гоняет один кадр и возвращает выбор после. */
+  const decidedAfterOneFrame = async (relay: any) => {
+    const upstream = relay.upstream as any;
+    upstream.decided = remote;
+    upstream.decidedAt = Date.now();
+    try {
+      await relay.fetchUpstream(
+        remote,
+        Buffer.from("{}"),
+        new AbortController().signal,
+      );
+    } catch {
+      /* сетевой отказ пробрасывается наружу — здесь нас интересует только выбор */
+    }
+    return upstream.decided;
+  };
+
+  it("HTTP 502 от плеча сбрасывает выбор, хотя fetch не бросает", async () => {
+    const relay: any = makeRelay(async () => ({
+      ok: false,
+      status: 502,
+      headers: { get: () => "application/json" },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+    expect(await decidedAfterOneFrame(relay)).toBeUndefined();
+  });
+
+  it("успешный ответ плеча выбор не сбрасывает", async () => {
+    const relay: any = makeRelay(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "application/json" },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+    expect(await decidedAfterOneFrame(relay)).toBe(remote);
+  });
+
+  it("сетевой отказ плеча сбрасывает выбор", async () => {
+    const relay: any = makeRelay(async () => {
+      throw new Error("ECONNRESET");
+    });
+    expect(await decidedAfterOneFrame(relay)).toBeUndefined();
   });
 });

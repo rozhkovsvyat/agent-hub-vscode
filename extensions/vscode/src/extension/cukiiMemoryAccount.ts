@@ -187,6 +187,14 @@ export function validateMemoryToken(value: string): string {
 export class CukiiMemoryUpstream {
   private decided: string | undefined;
   private decidedAt = 0;
+  /**
+   * Счётчик поколений выбора. `invalidate()` его увеличивает, и проба, стартовавшая до
+   * сброса, своим результатом решение уже не перезапишет. Без этого проба успевала
+   * «оживить» плечо, которое только что отказало на реальном кадре, и получалась пила.
+   */
+  private generation = 0;
+  /** Один in-flight выбор на экземпляр: параллельные кадры не плодят проб. */
+  private inFlight: Promise<string> | undefined;
 
   constructor(
     private readonly connection: MemoryConnection,
@@ -202,22 +210,45 @@ export class CukiiMemoryUpstream {
     if (this.decided && this.now() - this.decidedAt < LOCAL_PROBE_TTL_MS) {
       return this.decided;
     }
-    const local = await this.localAnswersOurToken();
-    this.decided = local ? this.localEndpoint : this.connection.endpoint;
-    this.decidedAt = this.now();
-    return this.decided;
+    if (this.inFlight) return this.inFlight;
+    const startedAt = this.generation;
+    this.inFlight = (async () => {
+      try {
+        const local = await this.localIsOurBox();
+        const chosen = local ? this.localEndpoint : this.connection.endpoint;
+        // Пока мы пробовали, кадр мог отказать и сбросить выбор. Результат устаревшей
+        // пробы не записываем — но этому кадру он всё ещё годится как адрес.
+        if (startedAt === this.generation) {
+          this.decided = chosen;
+          this.decidedAt = this.now();
+        }
+        return chosen;
+      } finally {
+        this.inFlight = undefined;
+      }
+    })();
+    return this.inFlight;
   }
 
   /**
-   * Забыть выбранный адрес. Зовётся, когда запрос к нему только что отказал: иначе одна
-   * осечка коробки держит нас на мёртвом плече до истечения TTL, хотя второе плечо живо.
+   * Забыть выбранный адрес. Зовётся, когда запрос к нему только что отказал — и отказом
+   * считается не только брошенное исключение, но и HTTP-статус ошибки: иначе одна осечка
+   * коробки держит нас на мёртвом плече до истечения TTL, хотя второе плечо живо.
    */
   invalidate(): void {
     this.decided = undefined;
     this.decidedAt = 0;
+    this.generation += 1;
   }
 
-  private async localAnswersOurToken(): Promise<boolean> {
+  /**
+   * 🔴 Признак — не «порт ответил», а «это НАША коробка». Цена ошибки здесь не медленный
+   * запрос, а агент, читающий и пишущий чужую память, поэтому планка та же, что у
+   * `probeCukiiMemory`: 2xx, отсутствие JSON-RPC error и `serverInfo.name === "cukii-memory"`.
+   * Голого `response.ok` мало: 2xx отдаст любой посторонний MCP без авторизации, заглушка
+   * или не тот контейнер на том же порту.
+   */
+  private async localIsOurBox(): Promise<boolean> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LOCAL_PROBE_TIMEOUT_MS);
     try {
@@ -237,10 +268,18 @@ export class CukiiMemoryUpstream {
             clientInfo: { name: "cukii-vscode-local-probe", version: "1" },
           },
         }),
+        // Редирект увёл бы пробу на другой origin, а зачтён был бы финальный 2xx.
+        redirect: "error",
         signal: controller.signal,
       });
       // 401 — на порту КАКАЯ-ТО коробка, но не наша: идём наружу, а не в чужую память.
-      return response.ok;
+      if (!response.ok) return false;
+      const body = (await response.json()) as {
+        result?: { serverInfo?: { name?: unknown } };
+        error?: { message?: unknown };
+      };
+      if (body?.error) return false;
+      return body?.result?.serverInfo?.name === "cukii-memory";
     } catch {
       return false;
     } finally {
@@ -335,7 +374,9 @@ function safeCapabilityMatch(expected: string, actual: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-class CukiiMemoryRelay {
+// Экспортируется ради приёмки: проводку «отказ плеча -> сброс выбора» нельзя проверить
+// на голом CukiiMemoryUpstream — тест звал бы invalidate() сам и покрывал метод, а не связь.
+export class CukiiMemoryRelay {
   private server?: http.Server;
   private descriptorValue?: CukiiMemoryRelayDescriptor;
   private readonly upstream: CukiiMemoryUpstream;
@@ -347,6 +388,39 @@ class CukiiMemoryRelay {
     private readonly httpFetch: MemoryFetch,
   ) {
     this.upstream = new CukiiMemoryUpstream(connection, httpFetch);
+  }
+
+  /**
+   * Единственное место, которое знает об отказе ПЛЕЧА, и потому единственное, которое
+   * сбрасывает выбор адреса.
+   */
+  private async fetchUpstream(
+    endpoint: string,
+    body: Buffer,
+    signal: AbortSignal,
+  ) {
+    let upstream;
+    try {
+      upstream = await this.httpFetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.connection.token}`,
+          "content-type": "application/json",
+        },
+        body,
+        signal,
+      });
+    } catch (error) {
+      // Сеть, отказ соединения, истёкший abort.
+      this.upstream.invalidate();
+      throw error;
+    }
+    // 🔴 Отказ приходит и статусом, БЕЗ исключения: fetch не бросает на 4xx/5xx, а Caddy
+    // при лежащем туннеле отдаёт ровно 502, не обрывая TCP. Пока этой строки не было,
+    // обещание «отказ сбрасывает выбор» держалось только для сетевых ошибок, и самый
+    // частый случай — внешнее плечо отвечает 502 — залипал до конца TTL.
+    if (!upstream.ok) this.upstream.invalidate();
+    return upstream;
   }
 
   async start(): Promise<CukiiMemoryRelayDescriptor> {
@@ -369,15 +443,11 @@ class CukiiMemoryRelay {
         const timer = setTimeout(() => controller.abort(), 125_000);
         try {
           const upstreamEndpoint = await this.upstream.choose();
-          const upstream = await this.httpFetch(upstreamEndpoint, {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${this.connection.token}`,
-              "content-type": "application/json",
-            },
+          const upstream = await this.fetchUpstream(
+            upstreamEndpoint,
             body,
-            signal: controller.signal,
-          });
+            controller.signal,
+          );
           const result = Buffer.from(await upstream.arrayBuffer());
           if (result.length > MAX_MCP_BODY_BYTES) {
             throw new Error("MCP response is too large");
@@ -391,9 +461,11 @@ class CukiiMemoryRelay {
           clearTimeout(timer);
         }
       } catch (error) {
-        // Выбранное плечо только что отказало — следующий запрос обязан выбирать заново,
-        // а не донашивать протухшее решение до конца TTL.
-        this.upstream.invalidate();
+        // 🔴 Здесь НЕ сбрасываем выбор плеча. В этот catch попадает и то, что к плечу
+        // отношения не имеет: неразобранное тело клиента, слишком большой ответ, отказ
+        // авторизации самого реле. Сброс отсюда означал бы, что один толстый кадр одного
+        // вендора перекидывает на другое плечо всех остальных. Сбрасывает только тот, кто
+        // видел отказ плеча, — fetchUpstream.
         response.writeHead(502, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
