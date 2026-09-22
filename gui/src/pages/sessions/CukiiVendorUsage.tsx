@@ -249,7 +249,9 @@ export function resetCopy(resetsAt?: number, now = Date.now()): string | null {
 function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
   // Причина без ярлыка — всё ещё ответ на вопрос «что с аккаунтом»; прятать её
   // из-за пустого accountLabel значило бы снова показать пустоту.
-  const showAccount = Boolean(snapshot.accountLabel ?? snapshot.statusDetail);
+  // `||`, а не `??`: пустой accountLabel — тоже отсутствие ярлыка, и при `??`
+  // деталь исчезала бы вместе с ним (находка ревью 22.09.2026).
+  const showAccount = Boolean(snapshot.accountLabel || snapshot.statusDetail);
   const showUsage = snapshot.windows.length > 0;
   if (!showAccount && !showUsage) return null;
   return (

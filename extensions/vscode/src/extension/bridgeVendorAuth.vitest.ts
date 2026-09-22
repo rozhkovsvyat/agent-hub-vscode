@@ -1984,6 +1984,25 @@ describe("probe diagnosis for an undecidable vendor status", () => {
     expect(probeStatusDetail("x".repeat(500))).toHaveLength(200);
   });
 
+  /**
+   * Срез в 200 символов ест ХВОСТ, а хвост — это текст ошибки CLI. Пока путь к
+   * шиму стоял в начале, длинный `%LOCALAPPDATA%` съедал диагноз целиком; путь
+   * ушёл в конец и урезан с головы.
+   */
+  it("keeps the CLI's own words when the executable path is long", () => {
+    const executable = `C:\\Users\\owner\\AppData\\Local\\Programs\\${"nested\\".repeat(12)}grok.exe`;
+    const detail = probeStatusDetail(
+      "the probe failed: Error: EPERM: operation not permitted, open the shim",
+      executable,
+    );
+    expect(detail).toBeDefined();
+    expect(detail!.length).toBeLessThanOrEqual(200);
+    expect(detail).toContain("EPERM: operation not permitted");
+    // Путь всё ещё называет шим — просто хвостом.
+    expect(detail).toContain("grok.exe");
+    expect(detail).toContain("…");
+  });
+
   it("redacts credentials that a status probe prints", () => {
     const detail = probeStatusDetail(
       'grok status: Authorization: Bearer abcdef1234567890 key=sk-live-ABCDEFGH1234 {"access_token":"tok_zzzzzzzzzzzz","refresh_token":"r_yyyyyyyyyyyy"} id=eyJhbGciOiJub25lIn0abcdefghijklmnop',
@@ -1999,6 +2018,79 @@ describe("probe diagnosis for an undecidable vendor status", () => {
     ]) {
       expect(detail).not.toContain(secret);
     }
+    // 🔴 Вторым аргументом у шаблона БЕЗ группы приходит смещение, а не
+    // `undefined`: проверка на `undefined` печатала «28***» — секрет уходил, но
+    // строка выходила мусорной, и проверка «нет секрета» этого не ловила.
+    expect(detail).not.toMatch(/\d+\*\*\*/);
+  });
+
+  /**
+   * Ревью (cursor composer-2.5, 22.09.2026) назвало перечисление известных форм
+   * недостаточным и перечислило обходы поимённо. Каждый — отдельный случай:
+   * перечисление закрывает то, что знает, а длинный opaque-токен не знает никто.
+   */
+  it.each([
+    {
+      name: "голый token= без access_",
+      text: "auth error token=Zq7SecretValue",
+    },
+    {
+      name: "секрет в query URL",
+      text: "see https://api.x.ai/v1/session?token=Zq7SecretValue&next=1",
+    },
+    { name: "github fine-grained PAT", text: "github_pat_Zq7SecretValue11" },
+    { name: "префикс без дефиса", text: "gho_Zq7SecretValue11 rejected" },
+    { name: "google oauth", text: "ya29.Zq7SecretValue11 expired" },
+    { name: "aws access key id", text: "AKIAZQ7SECRETVALUE1 denied" },
+    {
+      name: "PEM целиком",
+      text: "-----BEGIN PRIVATE KEY-----\nZq7SecretValue11\n-----END PRIVATE KEY-----",
+    },
+  ])("redacts a credential shaped as $name", ({ text }) => {
+    const detail = probeStatusDetail(text);
+    expect(detail).toBeDefined();
+    expect(detail).not.toContain("Zq7SecretValue");
+    expect(detail).not.toContain("AKIAZQ7SECRETVALUE1");
+    expect(detail).toContain("***");
+  });
+
+  it("redacts a long opaque token that matches no known shape", () => {
+    // Ни префикса, ни имени поля рядом: перечислению зацепиться не за что,
+    // ловит только замок по длине и смеси регистров с цифрами.
+    const opaque = "Zq7rTvMx91KdLpWn38HbYcJf52QsEr64Ut";
+    const detail = probeStatusDetail(`rejected by upstream: ${opaque}`);
+    expect(detail).toBeDefined();
+    expect(detail).not.toContain(opaque);
+    expect(detail).toContain("***");
+  });
+
+  /**
+   * NEGATIVE CONTROL к слепому замку. Он обязан молчать на том, ради чего
+   * деталь и заведена: путь к шиму, имя переменной, обычный текст ошибки.
+   */
+  it("NEGATIVE CONTROL: leaves paths and plain diagnostics alone", () => {
+    const detail = probeStatusDetail(
+      "unrecognized status: CUKII_UNRECOGNIZED_PROBE_OUTPUT from C:\\Users\\Svyat\\AppData\\Local\\Programs\\grok\\bin\\grok.exe (exit 0)",
+    );
+    expect(detail).toContain("CUKII_UNRECOGNIZED_PROBE_OUTPUT");
+    expect(detail).toContain(
+      "C:\\Users\\Svyat\\AppData\\Local\\Programs\\grok\\bin\\grok.exe",
+    );
+    expect(detail).not.toContain("***");
+  });
+
+  /**
+   * ReDoS: вывод пробы ограничен `maxBuffer` в 256 КиБ, и враждебный CLI может
+   * отдать все 256 КиБ без единого перевода строки. Редактура обязана остаться
+   * линейной — иначе интерфейс встанет на строке, которая вообще ничего не
+   * должна была стоить.
+   */
+  it("stays fast on a hostile quarter-megabyte of output", () => {
+    const hostile = `token=${"Aa0".repeat(20_000)} ${"=".repeat(60_000)}`;
+    const started = Date.now();
+    const detail = probeStatusDetail(hostile);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(detail!.length).toBeLessThanOrEqual(200);
   });
 
   // win32 only: the fixtures are .cmd, like the rest of the live probe suite.

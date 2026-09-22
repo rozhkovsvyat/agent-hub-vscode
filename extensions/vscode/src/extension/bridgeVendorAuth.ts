@@ -1644,39 +1644,94 @@ type VendorProbeOptions = {
  * Раньше этот текст никуда не шёл, теперь он идёт в интерфейс — значит вырезать
  * надо здесь, в единственной точке, а не надеяться на конкретный вендорский
  * формат.
+ *
+ * 🔴 Перечислением известных форм задача не решается: ревью назвало голый
+ * `token=`, query в URL, префиксы без дефиса, PEM и просто длинный opaque-токен
+ * без опознавательных знаков. Поэтому именованные формы — первый рубеж, а не
+ * единственный; последним идёт слепой замок по длине и энтропии.
  */
 const PROBE_SECRET_PATTERNS: RegExp[] = [
+  // PEM — до схлопывания переводов строк, иначе тело ключа станет одной строкой
+  // и попадёт под срез в 200 символов уже без заголовка.
+  /-----BEGIN[^-]*-----[\s\S]*?-----END[^-]*-----/g,
   /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
-  /\b(?:sk|pk|rk|xai|gsk|ghp|ghu|ghs|glpat)-[A-Za-z0-9._-]{8,}/gi,
+  /\b(?:sk|pk|rk|xai|gsk|ghp|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xapp)-[A-Za-z0-9._-]{8,}/gi,
+  /\b(?:gho_|ghu_|ghs_|ghr_|ghp_|github_pat_|hf_|sk_|pat_|dop_v1_)[A-Za-z0-9._-]{8,}/gi,
+  /\bAKIA[0-9A-Z]{12,}\b/g,
+  /\bya29\.[A-Za-z0-9._-]{8,}/g,
   /\beyJ[A-Za-z0-9._-]{16,}/g,
-  /("?\b(?:access_?token|refresh_?token|id_?token|api_?key|apikey|secret|password|passwd|authorization|cookie|session)\b"?\s*[:=]\s*"?)[^\s",}]+/gi,
+  // Именованное поле: json, yaml, ini, аргумент командной строки и query в URL.
+  // `&` в отсечке значения — ради `?token=…&next=…`.
+  /("?\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|client[_-]?secret|secret|password|passwd|pwd|authorization|credential|cookie|session|token|key|auth)\b"?\s*[:=]\s*"?)[^\s",}&]+/gi,
 ];
 
-/** Одна строка, без секретов, без управляющих символов и без хвоста на пол-экрана. */
-export function probeStatusDetail(text: string): string | undefined {
-  const redacted = PROBE_SECRET_PATTERNS.reduce(
+/**
+ * Слепой замок. Длинный «слово целиком» блок, где смешаны регистры и цифры, —
+ * это токен, а не диагностика. Разделители пути (`\`, `/`, `-`, `.`, `:`) в
+ * класс НЕ входят: иначе замок съел бы путь к шиму, ради которого деталь и
+ * заведена.
+ */
+const PROBE_OPAQUE_PATTERN = /[A-Za-z0-9+=_]{32,}/g;
+
+function looksLikeOpaqueSecret(token: string): boolean {
+  return /[a-z]/.test(token) && /[A-Z]/.test(token) && /[0-9]/.test(token);
+}
+
+function redactProbeSecrets(text: string): string {
+  const named = PROBE_SECRET_PATTERNS.reduce(
     (value, pattern) =>
-      value.replace(pattern, (match, prefix?: string) =>
-        prefix === undefined ? "***" : `${prefix}***`,
+      value.replace(pattern, (_match, prefix: unknown) =>
+        // 🔴 У шаблона без группы вторым аргументом приходит СМЕЩЕНИЕ, а не
+        // `undefined`: проверка на `undefined` печатала бы «28***». Ловится
+        // только по типу.
+        typeof prefix === "string" ? `${prefix}***` : "***",
       ),
     String(text),
   );
-  const line = redacted
+  return named.replace(PROBE_OPAQUE_PATTERN, (token) =>
+    looksLikeOpaqueSecret(token) ? "***" : token,
+  );
+}
+
+const PROBE_DETAIL_LIMIT = 200;
+const PROBE_DETAIL_SOURCE_LIMIT = 64;
+
+/**
+ * Путь к шиму — хвостом и в урезанном виде. Начало (диск, профиль) ничего не
+ * объясняет, а занятое им место срезало бы КОНЕЦ вывода CLI, то есть сам текст
+ * ошибки: ревью показало это на длинном пути в `%LOCALAPPDATA%`.
+ */
+function shortenProbeSource(source: string): string {
+  const compact = redactProbeSecrets(source).replace(/\s+/g, " ").trim();
+  return compact.length <= PROBE_DETAIL_SOURCE_LIMIT
+    ? compact
+    : `…${compact.slice(-(PROBE_DETAIL_SOURCE_LIMIT - 1))}`;
+}
+
+/** Одна строка, без секретов, без управляющих символов и без хвоста на пол-экрана. */
+export function probeStatusDetail(
+  text: string,
+  source?: string,
+): string | undefined {
+  const tail = source?.trim() ? ` · ${shortenProbeSource(source)}` : "";
+  const line = redactProbeSecrets(String(text))
     // Управляющие символы вместе с переводами строк: деталь живёт в одной
     // строке интерфейса, а вывод CLI приходит многострочным и в ANSI.
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 200);
-  return line || undefined;
+    .slice(0, Math.max(0, PROBE_DETAIL_LIMIT - tail.length));
+  if (!line) return undefined;
+  return `${line}${tail}`;
 }
 
 function unavailableVendorStatus(
   vendor: VendorWithCli,
   detail?: string,
+  source?: string,
 ): BrokerVendorAuthStatus {
   const statusDetail =
-    detail === undefined ? undefined : probeStatusDetail(detail);
+    detail === undefined ? undefined : probeStatusDetail(detail, source);
   return {
     id: vendor,
     label: cukiiVendorLabel(vendor),
@@ -1730,7 +1785,8 @@ export async function probeVendorExecutable(
   if (!spec) {
     return unavailableVendorStatus(
       vendor,
-      `no status probe is defined for this CLI: ${executable}`,
+      "no status probe is defined for this CLI",
+      executable,
     );
   }
   const qwenProbe =
@@ -1783,15 +1839,16 @@ export async function probeVendorExecutable(
       installed: true,
       ...classified,
       // Проба отработала, но её вывод не опознан. Причина — в самом выводе, и
-      // без него «status unavailable» остаётся тупиком для владельца. Порядок
-      // слов не косметика: деталь режется по 200 символам, поэтому опознаваемое
-      // (путь и сам вывод) стоит раньше, чем длинная командная строка.
+      // без него «status unavailable» остаётся тупиком для владельца. Вывод
+      // идёт первым: срез в 200 символов ест хвост, а хвост здесь — это и есть
+      // текст ошибки CLI.
       ...(classified.state === "unknown"
         ? {
             statusDetail: probeStatusDetail(
               output.trim()
-                ? `${executable} returned an unrecognized status: ${output}`
-                : `${executable} returned nothing to classify`,
+                ? `unrecognized status: ${output}`
+                : "the probe printed nothing to classify",
+              executable,
             ),
           }
         : {}),
@@ -1829,7 +1886,8 @@ export async function probeVendorExecutable(
       ...(classified.state === "unknown"
         ? {
             statusDetail: probeStatusDetail(
-              `${executable} failed to report a status: ${output}`,
+              `the probe failed: ${output}`,
+              executable,
             ),
           }
         : {}),
