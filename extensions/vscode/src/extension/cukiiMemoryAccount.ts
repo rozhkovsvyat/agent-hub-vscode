@@ -208,6 +208,15 @@ export class CukiiMemoryUpstream {
     return this.decided;
   }
 
+  /**
+   * Забыть выбранный адрес. Зовётся, когда запрос к нему только что отказал: иначе одна
+   * осечка коробки держит нас на мёртвом плече до истечения TTL, хотя второе плечо живо.
+   */
+  invalidate(): void {
+    this.decided = undefined;
+    this.decidedAt = 0;
+  }
+
   private async localAnswersOurToken(): Promise<boolean> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LOCAL_PROBE_TIMEOUT_MS);
@@ -382,6 +391,9 @@ class CukiiMemoryRelay {
           clearTimeout(timer);
         }
       } catch (error) {
+        // Выбранное плечо только что отказало — следующий запрос обязан выбирать заново,
+        // а не донашивать протухшее решение до конца TTL.
+        this.upstream.invalidate();
         response.writeHead(502, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
