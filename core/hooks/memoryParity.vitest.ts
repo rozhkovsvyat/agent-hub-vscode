@@ -23,8 +23,8 @@ import { runToolHooks } from "./toolHooks.js";
 // диск-относительный `D:Brain`, который разрешается от текущего каталога на этом диске, —
 // путь молча уезжает в несуществующий, хук падает без вывода, и проверка «не заблокировано»
 // становится ложно зелёной. Поймано на этом самом тесте.
-const GUARD =
-  "D:/Brain/repo/personal/agent-hub/harness/memory/memory-first-guard.ps1";
+const HARNESS_CANON = "D:/Brain/repo/personal/agents/infra/claude";
+const GUARD = `${HARNESS_CANON}/memory-first-guard.ps1`;
 
 const hasPwsh = (() => {
   try {
@@ -36,6 +36,18 @@ const hasPwsh = (() => {
     return false;
   }
 })();
+
+// 🔴 `skipIf(!existsSync(GUARD))` один, без этой пары, — ловушка: стоит канону переехать,
+// и вся проверка паритета молча выключается, оставаясь зелёной. Так и было — путь указывал
+// на замороженную 24.08 копию `agent-hub/harness/memory`, и тест месяц доказывал паритет
+// не с тем файлом (измерено хэшами 21.09.2026: из 20 общих файлов ни один не совпал).
+// Поэтому: на машине без харнесса (CI GitHub) скип честный, а на машине, где канон ЕСТЬ,
+// отсутствие гварда обязано краснеть.
+describe.skipIf(!fs.existsSync(HARNESS_CANON))("канон хуков памяти", () => {
+  it("memory-first-guard.ps1 лежит в каноне, а не в отставленной копии", () => {
+    expect(fs.existsSync(GUARD)).toBe(true);
+  });
+});
 
 describe.skipIf(!hasPwsh || !fs.existsSync(GUARD))(
   "memory-first parity в расширении",
