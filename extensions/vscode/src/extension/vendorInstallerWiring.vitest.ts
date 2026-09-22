@@ -32,6 +32,27 @@ describe("vendor installer host wiring", () => {
     expect(subscribe).toBeLessThan(fallback);
   });
 
+  // 🔴 The assist helpers can be correct and still never run: the defect the
+  // owner reported was exactly a correct helper wired in wrongly. VS Code
+  // activates `shellIntegration` after the shell announces itself, so reading
+  // the property inline always sees `undefined` and drops the flow into the
+  // sendText fallback, which cannot read output at all.
+  it("awaits shell integration instead of reading it off a freshly created terminal", () => {
+    expect(messengerSource).toContain("await waitForTerminalShellIntegration(");
+    expect(messengerSource).toContain("onDidChangeTerminalShellIntegration");
+    expect(messengerSource).not.toMatch(/\)\s*\.shellIntegration;/);
+  });
+
+  it("assists the device-auth login from the accumulated stream, not one fragment", () => {
+    expect(messengerSource).toContain("createAuthFlowAssist({");
+    expect(messengerSource).toContain(
+      "vscode.env.openExternal(vscode.Uri.parse(url))",
+    );
+    expect(messengerSource).toContain("vscode.env.clipboard.writeText(code)");
+    // Matching a single chunk is what could open a half-written URL.
+    expect(messengerSource).not.toContain("extractAuthFlowAssist(chunk)");
+  });
+
   it("turns a closed failed install into a terminal response instead of the cap", () => {
     expect(messengerSource).toContain(
       "closed.then(() => vendorInstallTerminalOutcome(vendor))",
