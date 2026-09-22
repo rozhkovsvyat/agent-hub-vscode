@@ -1860,12 +1860,24 @@ export function vendorAuthTransitionReached(
 const AUTH_FLOW_URL_PATTERN = /https:\/\/[^\s"'<>()\]]+/i;
 const AUTH_FLOW_CODE_LINE_PATTERN = /\bcode\b/i;
 const AUTH_FLOW_CODE_PATTERN = /\b[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10}){1,3}\b/;
-// `codex login --device-auth` prints `Enter this one-time code <CODE> (expires
-// in 15 minutes)` — measured in the shipped binary, not guessed. The token that
-// follows the label is the code, with or without a dash group, so the label
-// anchor is tried before the dashed-token rule below.
 const AUTH_FLOW_CODE_LABEL_PATTERN =
   /\b[Cc]ode\b[:\s]+([A-Z0-9][A-Z0-9-]{3,20})(?![A-Za-z0-9-])/;
+// 🔴 Measured from a real `codex login --device-auth` run (2026-09-22), which
+// refuted the layout read off the binary's string fragments: the label line
+// says `2. Enter this one-time code (expires in 15 minutes)` and the code
+// itself sits on the NEXT line, indented and alone. That line never contains
+// the word "code", so a rule that only looks at code-mentioning lines finds
+// nothing at all — which is what shipped. A digit or a dash is required so a
+// bare shouted word on the next line (ERROR, NOTE) is not mistaken for a code.
+const AUTH_FLOW_CODE_STANDALONE_PATTERN =
+  /^[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10}){0,3}$/;
+
+function standaloneAuthFlowCode(line: string): string | undefined {
+  const token = line.trim();
+  return AUTH_FLOW_CODE_STANDALONE_PATTERN.test(token) && /[0-9-]/.test(token)
+    ? token
+    : undefined;
+}
 
 // Terminal output is a styled byte stream, not text: colours, cursor moves and
 // OSC 8 hyperlinks sit inside the very lines the assist reads. CSI is dropped
@@ -1900,14 +1912,21 @@ export function extractAuthFlowAssist(text: string): {
 } {
   const plain = stripTerminalStyling(text);
   const url = plain.match(AUTH_FLOW_URL_PATTERN)?.[0];
+  const lines = plain.split("\n");
   let code: string | undefined;
-  for (const line of plain.split("\n")) {
+  for (let index = 0; index < lines.length && !code; index += 1) {
+    const line = lines[index];
     if (!AUTH_FLOW_CODE_LINE_PATTERN.test(line)) continue;
-    const match =
+    code =
       line.match(AUTH_FLOW_CODE_LABEL_PATTERN)?.[1] ??
       line.match(AUTH_FLOW_CODE_PATTERN)?.[0];
-    if (match) {
-      code = match;
+    if (code) break;
+    // The label announced a code but did not carry one: codex puts it on the
+    // next non-empty line. Look no further than that — anything beyond is a
+    // different sentence, not this label's value.
+    for (let next = index + 1; next < lines.length; next += 1) {
+      if (!lines[next].trim()) continue;
+      code = standaloneAuthFlowCode(lines[next]);
       break;
     }
   }

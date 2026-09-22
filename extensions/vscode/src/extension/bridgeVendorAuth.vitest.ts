@@ -2054,22 +2054,46 @@ describe("vendor auth flow assist", () => {
     expect(extractAuthFlowAssist("You are logged in.")).toEqual({});
   });
 
-  // Measured in the shipped codex binary (2026-09-22), not guessed: the login
-  // crate prints the link on its own line and the code inline after the label,
-  // and nothing promises the code carries a dash group.
+  // 🔴 Captured from a real `codex login --device-auth` run against a throwaway
+  // CODEX_HOME (2026-09-22, codex 0.153.4) — a reconstruction from the binary's
+  // string fragments had the code inline after the label and was wrong. The
+  // code below is a placeholder of the observed shape: real one-time codes are
+  // never written down. Note the code line carries no word "code" at all.
   const CODEX_DEVICE_AUTH_OUTPUT =
+    "Welcome to Codex [v0.153.4]\n" +
+    "OpenAI's command-line coding agent\n" +
+    "\n" +
     "Follow these steps to sign in with ChatGPT using device code authorization:\n" +
     "\n" +
-    "1. Open this link in your browser and sign in to your account.\n" +
-    "   https://chatgpt.com/codex/device\n" +
+    "1. Open this link in your browser and sign in to your account\n" +
+    "   https://auth.openai.com/codex/device\n" +
     "\n" +
-    "2. Enter this one-time code XQ7P4M2R (expires in 15 minutes)\n";
+    "2. Enter this one-time code (expires in 15 minutes)\n" +
+    "\n" +
+    "   ABCD-EFGH1\n" +
+    "\n" +
+    "Continue only if you started this login in Codex. If a website or another person gave you this code, cancel.\n";
 
-  it("reads codex device-auth output, code without a dash group included", () => {
+  it("reads the real codex device-auth layout: code on its own line", () => {
     expect(extractAuthFlowAssist(CODEX_DEVICE_AUTH_OUTPUT)).toEqual({
-      url: "https://chatgpt.com/codex/device",
-      code: "XQ7P4M2R",
+      url: "https://auth.openai.com/codex/device",
+      code: "ABCD-EFGH1",
     });
+  });
+
+  it("takes an inline code after the label too, dash group or not", () => {
+    expect(
+      extractAuthFlowAssist(
+        "2. Enter this one-time code XQ7P4M2R (expires in 15 minutes)\n",
+      ).code,
+    ).toBe("XQ7P4M2R");
+  });
+
+  it("does not take a shouted word on the line after a code label", () => {
+    expect(
+      extractAuthFlowAssist("Enter this one-time code below\n\n   ERROR\n")
+        .code,
+    ).toBeUndefined();
   });
 
   it("sees the code through terminal colouring", () => {
