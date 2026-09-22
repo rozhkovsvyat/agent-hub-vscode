@@ -269,6 +269,80 @@ describe("Cukii vendor usage Claude parity", () => {
     ).toBeNull();
   });
 
+  /**
+   * Различающая пара к залипанию: хост сперва не смог решить, потом решил.
+   * Владелец не должен ничего нажимать — вкладка подробностей, смонтированная
+   * позже, в тот день показывала правду, а сайдбар продолжал врать.
+   */
+  it("asks again after a probe that could not decide", async () => {
+    vi.useFakeTimers();
+    try {
+      const messenger = new MockIdeMessenger();
+      let call = 0;
+      messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+        async ({ vendor }) => {
+          call += 1;
+          return call === 1
+            ? {
+                vendor,
+                accountLabel: "Account status unavailable",
+                statusDetail: "the probe failed: spawn ETIMEDOUT",
+                windows: [],
+              }
+            : { vendor, accountLabel: "owner@example.com", windows: [] };
+        },
+      );
+
+      await renderWithProviders(
+        <CukiiVendorUsageSection brokerModel="grok-4-6" />,
+        { mockIdeMessenger: messenger },
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(
+        screen.getByText("Account status unavailable"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_500);
+      });
+      expect(screen.getByText("owner@example.com")).toBeInTheDocument();
+      expect(screen.queryByText("Account status unavailable")).toBeNull();
+      expect(call).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("NEGATIVE CONTROL: does not re-ask after a probe that decided", async () => {
+    vi.useFakeTimers();
+    try {
+      const messenger = new MockIdeMessenger();
+      let call = 0;
+      messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+        async ({ vendor }) => {
+          call += 1;
+          // «Не залогинен» — это решение, а не осечка: переспрашивать нечего.
+          return { vendor, accountLabel: "Not logged in", windows: [] };
+        },
+      );
+
+      await renderWithProviders(
+        <CukiiVendorUsageSection brokerModel="grok-4-6" />,
+        { mockIdeMessenger: messenger },
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(call).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("formats reset times with the same compact Claude copy", () => {
     const now = Date.parse("2026-09-15T20:00:00Z");
     expect(resetCopy(Math.floor(now / 1_000) + 7_200, now)).toBe(

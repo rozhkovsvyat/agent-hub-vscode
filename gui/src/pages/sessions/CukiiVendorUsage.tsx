@@ -316,12 +316,32 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
   );
 }
 
+/**
+ * Осечку пробы надо переспросить, а не запомнить навсегда.
+ *
+ * 🔴 Наблюдение 22.09.2026: сайдбар у grok показывал «Account status
+ * unavailable», а вкладка подробностей того же вендора в ту же минуту —
+ * `rozhkovsvyat@gmail.com`. Поверхности разные только временем монтирования:
+ * обе ходят в один `cukii/getVendorUsage`. Сайдбар спрашивает ОДИН раз, при
+ * монтировании, и дальше обновляется лишь по чужому событию `vendorUsageChanged`
+ * — то есть только если в этом вендоре пошёл прогон. Разовая осечка (холодный
+ * старт 150-мегабайтного grok.exe не уложился в 10 с таймаута, пока хост занят)
+ * залипала на всё время жизни панели. Признак нерешённости — `statusDetail`:
+ * хост ставит его ровно при `state === "unknown"`.
+ */
+const UNDECIDED_RETRY_DELAYS_MS = [2_000, 6_000, 15_000];
+
 function useVendorUsage(vendor: BrokerVendorId | undefined) {
   const messenger = useContext(IdeMessengerContext);
   const [snapshot, setSnapshot] = useState<CukiiVendorUsageSnapshot | null>(
     null,
   );
   const requestSequence = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const retryAttempt = useRef(0);
+  const loadRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const load = useCallback(async () => {
     const sequence = ++requestSequence.current;
     if (!vendor) {
@@ -330,18 +350,34 @@ function useVendorUsage(vendor: BrokerVendorId | undefined) {
     }
     const result = await messenger.request("cukii/getVendorUsage", { vendor });
     if (
-      sequence === requestSequence.current &&
-      result.status === "success" &&
-      result.content.vendor === vendor
+      sequence !== requestSequence.current ||
+      result.status !== "success" ||
+      result.content.vendor !== vendor
     ) {
-      setSnapshot(result.content);
+      return;
     }
+    setSnapshot(result.content);
+    clearTimeout(retryTimer.current);
+    if (!result.content.statusDetail) {
+      retryAttempt.current = 0;
+      return;
+    }
+    // Попытки конечны: вендор может быть сломан по-настоящему, и тогда
+    // бесконечный опрос стоил бы дороже неверной строки.
+    const delay = UNDECIDED_RETRY_DELAYS_MS[retryAttempt.current];
+    if (delay === undefined) return;
+    retryAttempt.current += 1;
+    retryTimer.current = setTimeout(() => void loadRef.current?.(), delay);
   }, [messenger, vendor]);
+  // Таймер должен звать СВЕЖИЙ load, иначе повтор уйдёт за прежним вендором.
+  loadRef.current = load;
   useEffect(() => {
     setSnapshot(null);
+    retryAttempt.current = 0;
     void load();
     return () => {
       requestSequence.current += 1;
+      clearTimeout(retryTimer.current);
     };
   }, [load]);
   useWebviewListener(
