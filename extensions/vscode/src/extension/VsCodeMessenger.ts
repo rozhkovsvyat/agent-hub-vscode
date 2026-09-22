@@ -98,12 +98,15 @@ import {
 import { runAlibabaAuthAction } from "./alibabaTokenPlan";
 import {
   clearBrokerVendorAccountCache,
-  extractAuthFlowAssist,
+  createAuthFlowAssist,
   listCukiiAccounts,
   probeBrokerVendorAccount,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
+  waitForTerminalShellIntegration,
   watchVendorAuthTransition,
+  type AuthFlowShellIntegration,
+  type AuthFlowShellIntegrationSubscribe,
 } from "./bridgeVendorAuth";
 import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
 import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
@@ -348,7 +351,6 @@ export class VsCodeMessenger {
       | "timeout";
     assisted: string[];
   }> {
-    const assisted: string[] = [];
     // Subscribe before sending the command. A dependency preflight can reject
     // immediately, and missing that fast close left the Accounts loader stuck
     // until its five-minute cap.
@@ -361,30 +363,30 @@ export class VsCodeMessenger {
     // Device-auth CLIs print a URL/code instead of opening a browser. Shell
     // integration is the only supported way to read terminal output; without
     // it the flow still works, just without the browser/clipboard assist.
+    const assist = createAuthFlowAssist({
+      openUrl: (url) => void vscode.env.openExternal(vscode.Uri.parse(url)),
+      copyCode: (code) => void vscode.env.clipboard.writeText(code),
+    });
+    const assisted = assist.assisted;
     const watchOutput = (chunk: string) => {
       if (action !== "login") return;
-      const assist = extractAuthFlowAssist(chunk);
-      if (assist.url && !assisted.includes("url")) {
-        assisted.push("url");
-        void vscode.env.openExternal(vscode.Uri.parse(assist.url));
-      }
-      if (assist.code && !assisted.includes("code")) {
-        assisted.push("code");
-        void vscode.env.clipboard.writeText(assist.code);
-      }
+      assist.push(chunk);
     };
     // Shell integration shipped in VS Code 1.93; the pinned 1.70 typings do
     // not declare it, so feature-detect a minimal shape at runtime instead.
-    type TerminalShellIntegrationReader = {
-      executeCommand: (command: string) => {
-        read: () => AsyncIterable<string>;
-      };
-    };
-    const shellIntegration = (
+    // 🔴 It is never present on a terminal this young — VS Code activates it
+    // after the shell announces itself, so the property must be awaited, not
+    // read. Reading it inline is what silently disabled the assist.
+    const shellIntegration = await waitForTerminalShellIntegration(
       terminal as vscode.Terminal & {
-        shellIntegration?: TerminalShellIntegrationReader;
-      }
-    ).shellIntegration;
+        shellIntegration?: AuthFlowShellIntegration;
+      },
+      (
+        vscode.window as typeof vscode.window & {
+          onDidChangeTerminalShellIntegration?: AuthFlowShellIntegrationSubscribe;
+        }
+      ).onDidChangeTerminalShellIntegration,
+    );
     if (shellIntegration) {
       const runThroughShell = (command: string) => {
         const stream = shellIntegration.executeCommand(command).read();

@@ -27,7 +27,10 @@ import {
   managedKimiProfileIdentity,
   kimiCredentialFingerprint,
   clearBrokerVendorAccountCache,
+  createAuthFlowAssist,
   extractAuthFlowAssist,
+  stripTerminalStyling,
+  waitForTerminalShellIntegration,
   launchKimiWeb,
   stopEphemeralKimiWeb,
   probeVendorExecutable,
@@ -2049,5 +2052,146 @@ describe("vendor auth flow assist", () => {
 
   it("returns nothing for output without URL or code", () => {
     expect(extractAuthFlowAssist("You are logged in.")).toEqual({});
+  });
+
+  // Measured in the shipped codex binary (2026-09-22), not guessed: the login
+  // crate prints the link on its own line and the code inline after the label,
+  // and nothing promises the code carries a dash group.
+  const CODEX_DEVICE_AUTH_OUTPUT =
+    "Follow these steps to sign in with ChatGPT using device code authorization:\n" +
+    "\n" +
+    "1. Open this link in your browser and sign in to your account.\n" +
+    "   https://chatgpt.com/codex/device\n" +
+    "\n" +
+    "2. Enter this one-time code XQ7P4M2R (expires in 15 minutes)\n";
+
+  it("reads codex device-auth output, code without a dash group included", () => {
+    expect(extractAuthFlowAssist(CODEX_DEVICE_AUTH_OUTPUT)).toEqual({
+      url: "https://chatgpt.com/codex/device",
+      code: "XQ7P4M2R",
+    });
+  });
+
+  it("sees the code through terminal colouring", () => {
+    const styled =
+      "\u001b[1m2. Enter this one-time code \u001b[36mABCD-EFGH\u001b[0m (expires in 15 minutes)\n";
+    expect(stripTerminalStyling(styled)).toBe(
+      "2. Enter this one-time code ABCD-EFGH (expires in 15 minutes)\n",
+    );
+    expect(extractAuthFlowAssist(styled).code).toBe("ABCD-EFGH");
+  });
+
+  it("keeps the URI of an OSC 8 hyperlink, where a styled terminal hides the link", () => {
+    const linked =
+      "   \u001b]8;;https://chatgpt.com/codex/device\u0007sign in\u001b]8;;\u0007\n";
+    expect(extractAuthFlowAssist(linked).url).toBe(
+      "https://chatgpt.com/codex/device",
+    );
+  });
+
+  it("does not mistake a device-code failure line for a code", () => {
+    expect(
+      extractAuthFlowAssist("device code request failed with status 404\n")
+        .code,
+    ).toBeUndefined();
+  });
+});
+
+describe("Cukii device-auth assist over a chunked terminal stream", () => {
+  function collector() {
+    const opened: string[] = [];
+    const copied: string[] = [];
+    const assist = createAuthFlowAssist({
+      openUrl: (url) => opened.push(url),
+      copyCode: (code) => copied.push(code),
+    });
+    return { assist, opened, copied };
+  }
+
+  it("joins chunks and never opens a half-written URL", () => {
+    const { assist, opened, copied } = collector();
+    assist.push("1. Open this link in your browser\n   https://chatgpt.com/co");
+    // The URL line has not ended yet: acting now would open a truncated link.
+    expect(opened).toEqual([]);
+    assist.push(
+      "dex/device\n\n2. Enter this one-time code XQ7P4M2R (expires in 15 minutes)\n",
+    );
+    expect(opened).toEqual(["https://chatgpt.com/codex/device"]);
+    expect(copied).toEqual(["XQ7P4M2R"]);
+    expect(assist.assisted).toEqual(["url", "code"]);
+  });
+
+  it("assists once per login, however much the CLI keeps printing", () => {
+    const { assist, opened, copied } = collector();
+    assist.push("   https://chatgpt.com/codex/device\ncode: XQ7P4M2R\n");
+    assist.push("   https://chatgpt.com/codex/device\ncode: OTHER-9999\n");
+    expect(opened).toHaveLength(1);
+    expect(copied).toEqual(["XQ7P4M2R"]);
+  });
+});
+
+describe("Cukii terminal shell integration wait", () => {
+  type FakeIntegration = {
+    executeCommand: (command: string) => { read: () => AsyncIterable<string> };
+  };
+  const integration = (): FakeIntegration => ({
+    executeCommand: () => ({
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      read: () => (async function* () {})(),
+    }),
+  });
+
+  it("returns an integration that is already active", async () => {
+    const ready = integration();
+    await expect(
+      waitForTerminalShellIntegration({ shellIntegration: ready }, undefined),
+    ).resolves.toBe(ready);
+  });
+
+  it("waits for the activation event on this terminal, ignoring other terminals", async () => {
+    const terminal: { shellIntegration?: FakeIntegration } = {};
+    const listeners: ((event: {
+      terminal: unknown;
+      shellIntegration?: FakeIntegration;
+    }) => void)[] = [];
+    let disposed = 0;
+    const pending = waitForTerminalShellIntegration(
+      terminal,
+      (listener) => {
+        listeners.push(listener);
+        return {
+          dispose: () => {
+            disposed += 1;
+          },
+        };
+      },
+      { timeoutMs: 1_000 },
+    );
+    // A terminal this young has no integration yet — that is the whole point.
+    expect(terminal.shellIntegration).toBeUndefined();
+    listeners[0]({ terminal: {}, shellIntegration: integration() });
+    const late = integration();
+    terminal.shellIntegration = late;
+    listeners[0]({ terminal, shellIntegration: late });
+    await expect(pending).resolves.toBe(late);
+    expect(disposed).toBe(1);
+  });
+
+  it("gives up after the timeout so a shell without integration still runs", async () => {
+    await expect(
+      waitForTerminalShellIntegration(
+        {},
+        () => ({ dispose: () => undefined }),
+        {
+          timeoutMs: 5,
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not wait at all on a VS Code without the event", async () => {
+    await expect(
+      waitForTerminalShellIntegration({}, undefined),
+    ).resolves.toBeUndefined();
   });
 });

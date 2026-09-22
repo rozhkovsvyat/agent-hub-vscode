@@ -1860,6 +1860,33 @@ export function vendorAuthTransitionReached(
 const AUTH_FLOW_URL_PATTERN = /https:\/\/[^\s"'<>()\]]+/i;
 const AUTH_FLOW_CODE_LINE_PATTERN = /\bcode\b/i;
 const AUTH_FLOW_CODE_PATTERN = /\b[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10}){1,3}\b/;
+// `codex login --device-auth` prints `Enter this one-time code <CODE> (expires
+// in 15 minutes)` — measured in the shipped binary, not guessed. The token that
+// follows the label is the code, with or without a dash group, so the label
+// anchor is tried before the dashed-token rule below.
+const AUTH_FLOW_CODE_LABEL_PATTERN =
+  /\b[Cc]ode\b[:\s]+([A-Z0-9][A-Z0-9-]{3,20})(?![A-Za-z0-9-])/;
+
+// Terminal output is a styled byte stream, not text: colours, cursor moves and
+// OSC 8 hyperlinks sit inside the very lines the assist reads. CSI is dropped
+// outright (it never carries payload); an OSC 8 hyperlink keeps its URI, which
+// is often the only place the sign-in URL appears unsplit.
+const OSC_HYPERLINK_PATTERN =
+  /\u001b\]8;[^;]*;([^\u0007\u001b]*)(?:\u0007|\u001b\\)/g;
+const OSC_PATTERN = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
+const CSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+const ESCAPE_PATTERN = /\u001b[@-Z\\-_]/g;
+const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
+export function stripTerminalStyling(text: string): string {
+  return text
+    .replace(OSC_HYPERLINK_PATTERN, " $1 ")
+    .replace(OSC_PATTERN, " ")
+    .replace(CSI_PATTERN, "")
+    .replace(ESCAPE_PATTERN, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(CONTROL_PATTERN, "");
+}
 
 /**
  * Device-auth CLIs print a URL and a one-time code instead of opening a
@@ -1871,17 +1898,111 @@ export function extractAuthFlowAssist(text: string): {
   url?: string;
   code?: string;
 } {
-  const url = text.match(AUTH_FLOW_URL_PATTERN)?.[0];
+  const plain = stripTerminalStyling(text);
+  const url = plain.match(AUTH_FLOW_URL_PATTERN)?.[0];
   let code: string | undefined;
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of plain.split("\n")) {
     if (!AUTH_FLOW_CODE_LINE_PATTERN.test(line)) continue;
-    const match = line.match(AUTH_FLOW_CODE_PATTERN);
+    const match =
+      line.match(AUTH_FLOW_CODE_LABEL_PATTERN)?.[1] ??
+      line.match(AUTH_FLOW_CODE_PATTERN)?.[0];
     if (match) {
-      code = match[0];
+      code = match;
       break;
     }
   }
   return { ...(url ? { url } : {}), ...(code ? { code } : {}) };
+}
+
+const AUTH_FLOW_ASSIST_BUFFER_LIMIT = 64_000;
+
+/**
+ * Shell integration hands over arbitrary fragments, not lines: the sign-in URL
+ * and the code routinely straddle a chunk boundary, and matching each fragment
+ * on its own both misses them and risks opening a half-written URL. Accumulate
+ * instead, and only ever match the part of the buffer that is already
+ * terminated by a newline.
+ */
+export function createAuthFlowAssist(handlers: {
+  openUrl: (url: string) => void;
+  copyCode: (code: string) => void;
+}): { push: (chunk: string) => void; assisted: string[] } {
+  let buffer = "";
+  const assisted: string[] = [];
+  return {
+    assisted,
+    push(chunk: string): void {
+      buffer = (buffer + chunk).slice(-AUTH_FLOW_ASSIST_BUFFER_LIMIT);
+      const plain = stripTerminalStyling(buffer);
+      const lastLineEnd = plain.lastIndexOf("\n");
+      if (lastLineEnd < 0) return;
+      const assist = extractAuthFlowAssist(plain.slice(0, lastLineEnd + 1));
+      if (assist.url && !assisted.includes("url")) {
+        assisted.push("url");
+        handlers.openUrl(assist.url);
+      }
+      if (assist.code && !assisted.includes("code")) {
+        assisted.push("code");
+        handlers.copyCode(assist.code);
+      }
+    },
+  };
+}
+
+export type AuthFlowShellIntegration = {
+  executeCommand: (command: string) => { read: () => AsyncIterable<string> };
+};
+
+export type AuthFlowShellIntegrationSubscribe = (
+  listener: (event: {
+    terminal: unknown;
+    shellIntegration?: AuthFlowShellIntegration;
+  }) => void,
+) => { dispose: () => void };
+
+export const AUTH_FLOW_SHELL_INTEGRATION_TIMEOUT_MS = 5_000;
+
+/**
+ * 🔴 `Terminal.shellIntegration` is documented as `undefined` immediately after
+ * `createTerminal`: VS Code activates it only once the shell has started and
+ * announced itself. Reading the property straight after creating the terminal
+ * is therefore not a race that is sometimes won — it is always lost, and that
+ * is why the owner never saw the browser open or the code land in the
+ * clipboard (2026-09-22): every device-auth login fell through to `sendText`,
+ * which cannot read output at all. Wait for the activation event, and keep the
+ * timeout so a shell without integration (or an older VS Code) still runs the
+ * command, just without the assist.
+ */
+export function waitForTerminalShellIntegration(
+  terminal: { shellIntegration?: AuthFlowShellIntegration },
+  subscribe: AuthFlowShellIntegrationSubscribe | undefined,
+  options: { timeoutMs?: number } = {},
+): Promise<AuthFlowShellIntegration | undefined> {
+  if (terminal.shellIntegration) {
+    return Promise.resolve(terminal.shellIntegration);
+  }
+  if (!subscribe) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    let settled = false;
+    let subscription: { dispose: () => void } | undefined;
+    const finish = (value: AuthFlowShellIntegration | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      subscription?.dispose();
+      resolve(value);
+    };
+    const timer = setTimeout(
+      () => finish(terminal.shellIntegration),
+      options.timeoutMs ?? AUTH_FLOW_SHELL_INTEGRATION_TIMEOUT_MS,
+    );
+    const opened = subscribe((event) => {
+      if (event.terminal !== terminal) return;
+      finish(event.shellIntegration ?? terminal.shellIntegration);
+    });
+    if (settled) opened.dispose();
+    else subscription = opened;
+  });
 }
 
 // No state is retained between requests: after a terminal login/logout every
