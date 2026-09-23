@@ -67,11 +67,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 🔴 The macOS installer smoke moved into @cukii/vendor-bridge with the
+      # 2.0.142 extraction; the old in-repo path made vitest exit with
+      # "No test files found", which skipped every carrier build. Run it from a
+      # library checkout pinned to the revision the extension lock resolved, so
+      # the smoke proves the code the carriers actually bundle.
       - name: Run the real Anthropic bootstrap through Cukii on macOS
-        working-directory: extensions/vscode
-        run: npm test -- src/extension/vendorCliInstaller.macos.vitest.ts
+        shell: bash
         env:
           CUKII_REAL_VENDOR_INSTALL_SMOKE: "1"
+        run: |
+          set -euo pipefail
+          SPEC=$(node -p "require('./extensions/vscode/package.json').dependencies['@cukii/vendor-bridge']")
+          LOCK_SHA=$(node -p "require('./extensions/vscode/package-lock.json').packages['node_modules/@cukii/vendor-bridge'].resolved.split('#')[1]")
+          REF="${SPEC##*#}"
+          echo "vendor-bridge spec=$SPEC ref=$REF lock=$LOCK_SHA"
+          lib="${RUNNER_TEMP//\\//}/vendor-bridge-smoke"
+          rm -rf "$lib"
+          git clone --quiet --depth 1 --branch "$REF" \
+            git@github.com:rozhkovsvyat/vendor-bridge.git "$lib"
+          HEAD_SHA=$(git -C "$lib" rev-parse HEAD)
+          if [ "$HEAD_SHA" != "$LOCK_SHA" ]; then
+            echo "::error::vendor-bridge smoke checkout $HEAD_SHA != lock $LOCK_SHA"
+            exit 1
+          fi
+          echo "vendor-bridge smoke checkout: $REF ($HEAD_SHA)"
+          cd "$lib"
+          npm ci --no-audit --no-fund
+          npm test -- src/vendorCliInstaller.macos.vitest.ts
 
   build:
     needs: [checks, macos-vendor-bootstrap]
