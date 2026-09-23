@@ -120,6 +120,7 @@ export function cukiiCapabilityRating(
 
   if (
     matches(/gpt[-\s]?6[-\s]?astra/) ||
+    matches(/opus[-\s.]?5[.-]5/) ||
     matches(/fable[-\s]?5[.-]1/) ||
     matches(/qwen[-\s]?3[.-]8[-\s]max/)
   ) {

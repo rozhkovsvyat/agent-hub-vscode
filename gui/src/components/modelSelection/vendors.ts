@@ -40,6 +40,7 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "claude",
     label: "Anthropic",
     models: [
+      { value: "opus-5-5", label: "Opus 5.5", contextWindowLabel: "1M" },
       { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
       { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
       { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
@@ -193,6 +194,7 @@ export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
 export const BEST_MODELS: readonly BrokerModel[] = [
   "qwen-3-8-max",
   "qwen-deepseek-v4-pro-0813",
+  "opus-5-5",
   "fable-5-1",
   "opus-5",
   "codex:gpt-6-astra",
@@ -337,6 +339,7 @@ export function modelInfo(model: BrokerModel): ModelInfo | undefined {
 /** Native vendor acceleration, as opposed to a prompt-level approximation. */
 export function supportsNativeSpeed(model: BrokerModel): boolean {
   return (
+    model === "opus-5-5" ||
     model === "opus-5" ||
     model.startsWith("codex-") ||
     model.startsWith("codex:") ||
@@ -348,6 +351,7 @@ export function supportsNativeSpeed(model: BrokerModel): boolean {
 /** Native reasoning on/off, separate from the effort level. */
 export function supportsNativeThinking(model: BrokerModel): boolean {
   return (
+    model === "opus-5-5" ||
     model === "opus-5" ||
     model === "sonnet-5" ||
     model.startsWith("codex-") ||
@@ -391,6 +395,7 @@ export function effortLevelsForModel(
   if (
     model === "codex-5-6-luna" ||
     /(?:^|:)gpt-5\.6-luna$/.test(model) ||
+    model === "opus-5-5" ||
     model === "opus-5" ||
     model === "sonnet-5" ||
     model === "fable-5" ||

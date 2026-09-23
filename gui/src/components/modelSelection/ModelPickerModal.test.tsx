@@ -27,8 +27,12 @@ describe("ModelPickerModal", () => {
     expect(vendorHeading).toHaveClass("cursor-default", "select-none");
     await getElementByText("GPT-5.6 Terra");
 
+    await getElementByText("Opus 5.5");
     await getElementByText("Opus 5");
-    await getElementByText("1M • Best for everyday, complex tasks");
+    // Opus 5.5 and Opus 5 share the canonical description line; both render.
+    expect(
+      await screen.findAllByText("1M • Best for everyday, complex tasks"),
+    ).not.toHaveLength(0);
 
     // Select a model.
     await user.click(await getElementByText("Sonnet 5"));

@@ -102,6 +102,7 @@ export const VENDOR_CLI_HELP_FIXTURES: Record<BrokerVendorId, string> = {
 };
 
 const CLAUDE_MODELS = new Set([
+  "opus-5-5",
   "opus-5",
   "sonnet-5",
   "fable-5",

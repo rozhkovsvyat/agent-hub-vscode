@@ -1081,6 +1081,36 @@ describe("native bridge argv", () => {
     ]);
   });
 
+  it("routes Opus 5.5 through the exact verified Claude argv", () => {
+    const route = routeForModel(
+      "opus-5-5",
+      "D:/Brain/vault",
+      "prompt",
+      [],
+      resolveBridgeControls("opus-5-5", "high", "standard"),
+    );
+    expect(route.program).toMatch(/(?:^|[\\/])claude(?:\.exe)?$/i);
+    expect(route.format).toBe("anthropic-envelope");
+    expect(route.stdinFormat).toBe("claude-stream-json");
+    expect(route.args).toEqual([
+      "--model",
+      "claude-opus-5-5",
+      "--exclude-dynamic-system-prompt-sections",
+      "--effort",
+      "high",
+      "--settings",
+      '{"fastMode":false}',
+      "--dangerously-skip-permissions",
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--replay-user-messages",
+    ]);
+  });
+
   it("routes Fable 5.1 through the exact verified Claude argv", () => {
     const route = routeForModel(
       "fable-5-1",

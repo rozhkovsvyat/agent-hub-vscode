@@ -28,6 +28,7 @@ describe("Cukii model context labels", () => {
         ALL_MODELS.map((model) => [model.value, displayModelLabel(model)]),
       ),
     ).toEqual({
+      "opus-5-5": "Opus 5.5",
       "opus-5": "Opus 5",
       "sonnet-5": "Sonnet 5",
       "fable-5-1": "Fable 5.1",
@@ -104,6 +105,7 @@ describe("Cukii model context labels", () => {
     expect(BEST_MODELS).toEqual([
       "qwen-3-8-max",
       "qwen-deepseek-v4-pro-0813",
+      "opus-5-5",
       "fable-5-1",
       "opus-5",
       "codex:gpt-6-astra",
@@ -142,7 +144,14 @@ describe("Cukii model context labels", () => {
 
   it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
     const expectedModelOrderByVendor = {
-      claude: ["fable-5-1", "opus-5", "sonnet-5", "fable-5", "haiku-4-5"],
+      claude: [
+        "opus-5-5",
+        "fable-5-1",
+        "opus-5",
+        "sonnet-5",
+        "fable-5",
+        "haiku-4-5",
+      ],
       codex: [
         "codex:gpt-6-astra",
         "codex-5-6-sol",
@@ -319,6 +328,7 @@ describe("Cukii model context labels", () => {
 
   it.each([
     ["codex:gpt-6-astra", "GPT-6 Astra", 3],
+    ["opus-5-5", "Opus 5.5", 3],
     ["fable-5-1", "Fable 5.1", 3],
     ["cursor:claude-fable-5-1", "Dynamic Cursor model", 3],
     ["codex-5-6-sol", "GPT-5.6 Sol", 2],
