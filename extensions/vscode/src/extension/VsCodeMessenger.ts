@@ -55,23 +55,24 @@ import { VsCodeIde } from "../VsCodeIde";
 import { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 import { VsCodeExtension } from "./VsCodeExtension";
-import { BridgeImageScope } from "./bridgeImages";
+import "./vendorBridgeHost";
+import { BridgeImageScope } from "@cukii/vendor-bridge";
 import {
   isClaudeNativeModel,
   streamBridgeChat,
   supportsBrokerInbox,
   type ClaudePermissionTransport,
-} from "./bridgeChatAdapter";
+} from "@cukii/vendor-bridge";
 import {
   BridgeInboxWatch,
   bridgeInboxMessageStatus,
   purgeUnreadBridgeInboxMessages,
   writeBridgeInboxMessageWithReceipt,
-} from "./bridgeInbox";
-import type { ClaudePermissionBroker } from "./claudePermissionBroker";
+} from "@cukii/vendor-bridge";
+import type { ClaudePermissionBroker } from "@cukii/vendor-bridge";
 import { exportAutocompactForHarness } from "./cukiiAutocompactExport";
 import { cukiiSessionAttention } from "./cukiiSessionAttention";
-import { listBrokerModelCatalog } from "./bridgeModelCatalog";
+import { listBrokerModelCatalog } from "@cukii/vendor-bridge";
 import {
   cancelVoiceRecording,
   resolveWhisperTranscribeLanguage,
@@ -79,34 +80,34 @@ import {
   stopVoiceRecording,
   voiceRecordingStatus,
 } from "./voiceDictation";
-import { BridgeSteeringController } from "./bridgeSteer";
-import { BridgeRunCancellation } from "./bridgeRunCancellation";
+import { BridgeSteeringController } from "@cukii/vendor-bridge";
+import { BridgeRunCancellation } from "@cukii/vendor-bridge";
 import {
   isBridgeProcessTreeAlive,
   manualTreeKillCommand,
   retryBridgeTreeKill,
-} from "./bridgeChildLifecycle";
-import { retryBridgeTeardownOnDispose } from "./bridgeDisposeTeardown";
+} from "@cukii/vendor-bridge";
+import { retryBridgeTeardownOnDispose } from "@cukii/vendor-bridge";
 import {
   BridgeRunCoordinator,
   bridgeRunAcceptsSteer,
   type BridgeRunIdentity,
-} from "./bridgeRunCoordinator";
+} from "@cukii/vendor-bridge";
 import {
   allVendorPermissionCapabilities,
   vendorPermissionCapabilities,
-} from "./permissionCapabilities";
-import { runAlibabaAuthAction } from "./alibabaTokenPlan";
+} from "@cukii/vendor-bridge";
+import { runAlibabaAuthAction } from "@cukii/vendor-bridge";
 import {
   clearBrokerVendorAccountCache,
   extractAuthFlowAssist,
-  listCukiiAccounts,
   logoutNativeKimiAccount,
   probeBrokerVendorAccount,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
   watchVendorAuthTransition,
-} from "./bridgeVendorAuth";
+} from "@cukii/vendor-bridge";
+import { listCukiiAccounts } from "./cukiiAccounts";
 import { isYougileAccountId, runYougileAuthAction } from "./yougileAccount";
 import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
 import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
@@ -116,8 +117,8 @@ import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
 } from "./cukiiMemoryAccount";
-import { runVendorInstallProcess } from "./vendorCliInstallProcess";
-import { vendorSpawnEnv } from "./vendorCliInstaller";
+import { runVendorInstallProcess } from "@cukii/vendor-bridge";
+import { vendorSpawnEnv } from "@cukii/vendor-bridge";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;

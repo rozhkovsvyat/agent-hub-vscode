@@ -7,7 +7,7 @@ import readline from "node:readline";
 import {
   processLineage,
   resolveRunBindingFromLineage,
-} from "./bridgeRunBinding";
+} from "@cukii/vendor-bridge";
 import { resolveWithBoundedRetry } from "./bindingRetry";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;

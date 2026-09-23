@@ -10,7 +10,7 @@ import type {
 import {
   readRunBindingForPid,
   type CukiiRunBinding,
-} from "./bridgeRunBinding";
+} from "@cukii/vendor-bridge";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 /** How often a still-unanswered request is re-published to the panel. */

@@ -8,7 +8,7 @@ import type { BrokerVendorId } from "core/protocol/ideWebview";
 import {
   withOwnerFileLock,
   writeOwnerFileAtomic,
-} from "./ownerFileTransaction";
+} from "@cukii/vendor-bridge";
 
 export const CUKII_MEMORY_MCP_NAME = "cukii-memory";
 

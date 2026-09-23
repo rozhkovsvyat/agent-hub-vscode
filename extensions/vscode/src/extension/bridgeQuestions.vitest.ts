@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BridgeQuestionBroker, bridgeQuestionsRoot, RENOTIFY_INTERVAL_MS } from "./bridgeQuestions";
-import type { CukiiRunBinding } from "./bridgeRunBinding";
+import type { CukiiRunBinding } from "@cukii/vendor-bridge";
 
 let root = "";
 const nonce = "a".repeat(64);

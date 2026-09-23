@@ -4,8 +4,18 @@ import path from "node:path";
 import type { ChatMessage } from "core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// bridgeChatAdapter lives in the installed @cukii/vendor-bridge dependency
+// (git, tag v0.1.0); the source contracts below pin its shipped sources.
+const VENDOR_BRIDGE_SRC = path.join(
+  __dirname,
+  "..", "..", "node_modules", "@cukii", "vendor-bridge", "src",
+);
+
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
-vi.mock("./permissionCapabilities", () => ({
+// permissionCapabilities lives in the installed @cukii/vendor-bridge; mock
+// the real module id so the mock reaches both the package internals and
+// direct importers.
+vi.mock("../../node_modules/@cukii/vendor-bridge/src/permissionCapabilities", () => ({
   cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
     supportedModes:
@@ -22,15 +32,15 @@ import {
   brokerMemoryDirective,
   nativeResumeIdForModel,
   routeForModel,
-} from "./bridgeChatAdapter";
-import { BridgeEventParser } from "./bridgeEvents";
-import { resolveBridgeControls } from "./bridgeControls";
+} from "@cukii/vendor-bridge";
+import { BridgeEventParser } from "@cukii/vendor-bridge";
+import { resolveBridgeControls } from "@cukii/vendor-bridge";
 import {
   argvRequestsVendorResume,
   isVendorSessionLossError,
   rememberVendorSession,
   resetVendorSessionsForTests,
-} from "./bridgeVendorSession";
+} from "@cukii/vendor-bridge";
 
 afterEach(() => {
   resetVendorSessionsForTests();
@@ -181,7 +191,7 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
 
   it("keeps the streamBridgeChat resume gate open for kimi, not only Claude", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const start = source.indexOf("const vendorResumeId");
     expect(start).toBeGreaterThan(-1);

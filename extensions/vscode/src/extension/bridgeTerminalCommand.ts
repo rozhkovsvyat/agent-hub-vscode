@@ -5,7 +5,7 @@ import {
   bridgeStorageEnvOverrides,
   resolveBridgeStorageLayout,
   type BridgeStorageOptions,
-} from "./bridgeStorageEnv";
+} from "@cukii/vendor-bridge";
 
 export interface BridgeTerminalLaunchSpec {
   program: string;

@@ -1,3 +1,6 @@
+// Side effect: pins the host ports of @cukii/vendor-bridge (storage
+// volumes, workspace cwd, extension identity) before any bridge call.
+import "./vendorBridgeHost";
 import fs from "fs";
 import path from "path";
 
@@ -45,8 +48,8 @@ import {
   delegateBridgeWorker,
   openBridgeSession,
   recoverBridgeSession,
-} from "./bridgeUiClient";
-import { bindAlibabaSecretStore, alibabaSpawnEnv } from "./alibabaTokenPlan";
+} from "@cukii/vendor-bridge";
+import { bindAlibabaSecretStore, alibabaSpawnEnv } from "@cukii/vendor-bridge";
 import { bridgeTerminalLaunchSpec } from "./bridgeTerminalCommand";
 
 import { modelSupportsNextEdit } from "core/llm/autodetect";
