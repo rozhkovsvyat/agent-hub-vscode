@@ -7,7 +7,7 @@ import {
   brokerMemoryDirective,
   brokerUserQuestionDirective,
   supportsBrokerInbox,
-} from "./bridgeChatAdapter";
+} from "@cukii/vendor-bridge";
 
 describe("broker inbox steering gate", () => {
   it("covers every MCP-capable vendor; claude stays out", () => {

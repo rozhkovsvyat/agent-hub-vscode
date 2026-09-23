@@ -6,7 +6,7 @@ import {
   resolveOwnerFile,
   withOwnerFileLock,
   writeOwnerFileAtomic,
-} from "./ownerFileTransaction";
+} from "@cukii/vendor-bridge";
 
 export const CUKII_RULES_BEGIN = "<!-- cukii-memory:begin -->";
 export const CUKII_RULES_END = "<!-- cukii-memory:end -->";

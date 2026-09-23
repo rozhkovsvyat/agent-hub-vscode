@@ -26,11 +26,16 @@ vi.mock("node:child_process", async () => {
     spawnSync: vi.fn(actual.spawnSync),
   };
 });
+// The Grok argv-limit fixture below is calibrated against the host scratch
+// root length: the spill-file path is counted in the serialized prompt bytes.
+// Pin the host storage root explicitly; the library default (system temp) is
+// longer on this machine and would trip the image budget before the argv one.
+configureBridgeStorageHost({ preferredWindowsScratchRoot: "D:\\Scratch" });
+
 // permissionCapabilities lives in packages/vendor-bridge since phase 2; mock
 // the real module id so the mock reaches both the package internals and the
 // extension shim.
-vi.mock("../../../../packages/vendor-bridge/src/permissionCapabilities", () => ({
-  cachedVendorPermissionCapabilities: (vendor: string) => ({
+vi.mock("../../../../packages/vendor-bridge/src/permissionCapabilities", () => ({  cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
     supportedModes:
       vendor === "codex"
@@ -68,14 +73,15 @@ import {
   settleBridgeChildError,
   toChatMessages,
   windowsCommandLineUtf16Length,
-} from "./bridgeChatAdapter";
-import { ClaudePermissionBroker } from "./claudePermissionBroker";
-import { resolveBridgeControls } from "./bridgeControls";
-import { BridgeEventParser } from "./bridgeEvents";
+} from "@cukii/vendor-bridge";
+import { ClaudePermissionBroker } from "@cukii/vendor-bridge";
+import { configureBridgeStorageHost } from "@cukii/vendor-bridge";
+import { resolveBridgeControls } from "@cukii/vendor-bridge";
+import { BridgeEventParser } from "@cukii/vendor-bridge";
 import {
   cursorCatalogFromOutput,
   grokCatalogFromOutput,
-} from "./bridgeModelCatalog";
+} from "@cukii/vendor-bridge";
 
 const promptFiles: string[] = [];
 

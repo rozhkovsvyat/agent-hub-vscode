@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-import { terminateBridgeChild } from "./bridgeChildLifecycle";
+import { terminateBridgeChild } from "@cukii/vendor-bridge";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 
 describe("Claude permission lifecycle", () => {

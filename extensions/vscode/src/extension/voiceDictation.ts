@@ -7,11 +7,11 @@ import { promisify } from "util";
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
+import { CUKII_VOICE_SCRATCH_ROOT } from "./vendorBridgeHost";
 import {
-  CUKII_VOICE_SCRATCH_ROOT,
   createCukiiScratchDirectory,
   removeCukiiScratchDirectory,
-} from "./bridgeScratch";
+} from "@cukii/vendor-bridge";
 
 const execFileAsync = promisify(execFile);
 

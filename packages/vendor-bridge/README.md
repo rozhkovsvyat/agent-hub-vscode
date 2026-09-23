@@ -7,8 +7,19 @@ permission capabilities and the Claude permission broker.
 
 The extension consumes this package as TypeScript source
 (`"main": "src/index.ts"`, `file:` dependency), exactly like it consumes
-`core`. The original module locations under `extensions/vscode/src/extension/`
-are re-export shims — import surfaces did not move for plugin code.
+`core`. Since phase 3 the plugin imports `@cukii/vendor-bridge` directly —
+the re-export shims under `extensions/vscode/src/extension/` are gone.
+Plugin-side pieces that stay in the extension by design:
+
+- `vendorBridgeHost.ts` — binds both host ports (below) and owns the eager
+  `CUKII_*_SCRATCH_ROOT` constants (resolved from the lazy package path
+  functions after the host config lands).
+- `cukiiAccounts.ts` — `listCukiiAccounts`, composing vendor rows with
+  Yougile (the yougile family stays in the plugin).
+- `claudePermissionMcpWorker.ts` — two-line esbuild entry keeping the
+  `out/claudePermissionMcpWorker.js` bundle name.
+- `bridgeTerminalCommand.ts`, `voiceDictation.ts`, `cukiiMemoryVendorMcp.ts`,
+  `cukiiMemoryProxy.ts` — VS Code-facing glue, deliberately not moved.
 
 ## Host configuration
 
@@ -25,9 +36,10 @@ own values from `extensions/vscode/src/extension/vendorBridgeHost.ts`:
   machine. Options passed directly to `resolveBridgeStorageLayout` /
   `resolveWindowsScratchRoot` override the host config.
 
-Shims that depend on the host values import `./vendorBridgeHost` for side
-effects before computing anything eager (the `CUKII_*_SCRATCH_ROOT`
-constants).
+Modules that depend on the host values either take them as call options or are
+reached only after the plugin's side-effect imports (`VsCodeExtension.ts` and
+`VsCodeMessenger.ts` both `import "./vendorBridgeHost"` at module scope, so
+activation always configures the ports before any bridge call).
 
 ## Live tests
 

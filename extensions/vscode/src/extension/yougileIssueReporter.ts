@@ -12,7 +12,7 @@ import type {
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import type { ProtectedSecretStore } from "./alibabaTokenPlan";
+import type { ProtectedSecretStore } from "@cukii/vendor-bridge";
 import {
   recentCukiiDiagnostics,
   recordCukiiDiagnostic,

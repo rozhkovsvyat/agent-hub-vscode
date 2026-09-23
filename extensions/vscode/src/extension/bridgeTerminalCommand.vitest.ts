@@ -4,7 +4,18 @@ import { describe, expect, it } from "vitest";
 
 import { bridgeTerminalLaunchSpec } from "./bridgeTerminalCommand";
 
+// The host values the plugin pins via configureBridgeStorageHost; the test
+// passes them explicitly because the library default is machine-free.
 const windowsStorageOptions = {
+  preferredWindowsScratchRoot: "D:\\Scratch",
+  preferredWindowsPnpmStoreRoot: "D:\\PnpmStore",
+  forbiddenWindowsRoots: [
+    "d:\\tmp",
+    "d:\\brain\\tmp",
+    "d:\\brain\\worktrees",
+    "d:\\brain\\pnpm-store",
+    "d:\\.pnpm-store",
+  ],
   env: {
     TeMp: "D:\\tmp",
     NPM_CONFIG_STORE_DIR: "D:\\Brain\\pnpm-store",
@@ -84,12 +95,22 @@ describe("interactive bridge terminal command", () => {
   });
 
   it("does not ship the obsolete Qwen preview model id", () => {
-    for (const file of [
-      "bridgeChatAdapter.ts",
-      "bridgeTerminalCommand.ts",
-      "bridgeVendorAuth.ts",
+    const vendorBridgeSrc = path.join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "packages",
+      "vendor-bridge",
+      "src",
+    );
+    for (const [dir, file] of [
+      [vendorBridgeSrc, "bridgeChatAdapter.ts"],
+      [__dirname, "bridgeTerminalCommand.ts"],
+      [vendorBridgeSrc, "bridgeVendorAuth.ts"],
     ]) {
-      const source = fs.readFileSync(path.join(__dirname, file), "utf8");
+      const source = fs.readFileSync(path.join(dir, file), "utf8");
       expect(source).not.toContain("qwen3.8-max-preview");
     }
     expect(

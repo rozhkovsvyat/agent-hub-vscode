@@ -33,15 +33,15 @@ import {
   brokerMemoryDirective,
   nativeResumeIdForModel,
   routeForModel,
-} from "./bridgeChatAdapter";
-import { BridgeEventParser } from "./bridgeEvents";
-import { resolveBridgeControls } from "./bridgeControls";
+} from "@cukii/vendor-bridge";
+import { BridgeEventParser } from "@cukii/vendor-bridge";
+import { resolveBridgeControls } from "@cukii/vendor-bridge";
 import {
   argvRequestsVendorResume,
   isVendorSessionLossError,
   rememberVendorSession,
   resetVendorSessionsForTests,
-} from "./bridgeVendorSession";
+} from "@cukii/vendor-bridge";
 
 afterEach(() => {
   resetVendorSessionsForTests();

@@ -10,7 +10,7 @@ import type {
 } from "core/protocol/ideWebview";
 import { brokerVendorForModel } from "core/cukiiPermissionModes";
 
-import type { ProtectedSecretStore } from "./alibabaTokenPlan";
+import type { ProtectedSecretStore } from "@cukii/vendor-bridge";
 import {
   bundledDisciplineBlock,
   fetchDisciplineBlock,

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ProtectedSecretStore } from "./alibabaTokenPlan";
+import type { ProtectedSecretStore } from "@cukii/vendor-bridge";
 import {
   CUKII_MEMORY_SECRET_KEY,
   CukiiMemoryAccountController,

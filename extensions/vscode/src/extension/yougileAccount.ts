@@ -5,7 +5,7 @@ import type {
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ProtectedSecretStore } from "./alibabaTokenPlan";
+import type { ProtectedSecretStore } from "@cukii/vendor-bridge";
 
 /**
  * YouGile is the first non-vendor account: it carries no model catalog and
