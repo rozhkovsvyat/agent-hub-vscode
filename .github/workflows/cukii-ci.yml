@@ -22,6 +22,36 @@ jobs:
         with:
           node-version-file: ".nvmrc"
 
+      # extensions/vscode resolves @cukii/vendor-bridge from the private
+      # rozhkovsvyat/vendor-bridge repo over git+ssh (see package-lock.json).
+      # GITHUB_TOKEN cannot read another private repo, so authorize the
+      # read-only deploy key before any install step runs.
+      - name: Authorize vendor-bridge deploy key
+        shell: bash
+        env:
+          VENDOR_BRIDGE_DEPLOY_KEY: ${{ secrets.VENDOR_BRIDGE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VENDOR_BRIDGE_DEPLOY_KEY" ]; then
+            echo "::error::VENDOR_BRIDGE_DEPLOY_KEY is not available to this job"
+            exit 1
+          fi
+          # RUNNER_TEMP carries Windows backslashes; ssh and git want forward slashes.
+          keydir="${RUNNER_TEMP//\\//}/vendor-bridge-ci-key"
+          mkdir -p "$keydir"
+          printf '%s\n' "$VENDOR_BRIDGE_DEPLOY_KEY" > "$keydir/id_ed25519"
+          chmod 600 "$keydir/id_ed25519"
+          ssh-keyscan -t ed25519,rsa github.com > "$keydir/known_hosts"
+          if [ ! -s "$keydir/known_hosts" ]; then
+            echo "::error::ssh-keyscan returned no github.com host keys"
+            exit 1
+          fi
+          git config --global core.sshCommand "ssh -i $keydir/id_ed25519 -o UserKnownHostsFile=$keydir/known_hosts -o IdentitiesOnly=yes"
+          # Prove read access to the library now, so a key problem cannot
+          # surface later as an opaque npm install failure.
+          git ls-remote git@github.com:rozhkovsvyat/vendor-bridge.git HEAD > /dev/null
+          echo "vendor-bridge deploy key authorized (read-only)"
+
       # Fail-fast guard from the vacation repo pipeline: an unfinished merge
       # must not reach build/test; fail before any install work happens.
       - name: Conflict marker guard
