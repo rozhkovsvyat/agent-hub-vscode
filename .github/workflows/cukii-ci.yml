@@ -7,6 +7,12 @@ on:
       - "cukii/**"
   pull_request:
   workflow_call:
+    secrets:
+      # cukii-release.yml calls this workflow, and the caller may only pass a
+      # secret that the called workflow declares. Without this declaration the
+      # whole release run dies as startup_failure before any job is created.
+      VENDOR_BRIDGE_DEPLOY_KEY:
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
