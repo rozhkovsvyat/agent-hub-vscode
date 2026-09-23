@@ -99,9 +99,8 @@ describe("interactive bridge terminal command", () => {
       __dirname,
       "..",
       "..",
-      "..",
-      "..",
-      "packages",
+      "node_modules",
+      "@cukii",
       "vendor-bridge",
       "src",
     );

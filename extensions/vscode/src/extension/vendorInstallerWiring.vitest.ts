@@ -6,16 +6,15 @@ const messengerSource = fs.readFileSync(
   path.join(__dirname, "VsCodeMessenger.ts"),
   "utf8",
 );
-// The vendor auth probe and the bridge launch environment live in
-// packages/vendor-bridge since phase 2; the wiring contract they must keep is
-// unchanged, only the file location moved.
+// The vendor auth probe and the bridge launch environment live in the
+// installed @cukii/vendor-bridge dependency; the wiring contract they must
+// keep is unchanged, only the file location moved.
 const vendorBridgeSrc = path.join(
   __dirname,
   "..",
   "..",
-  "..",
-  "..",
-  "packages",
+  "node_modules",
+  "@cukii",
   "vendor-bridge",
   "src",
 );

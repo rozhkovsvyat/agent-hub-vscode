@@ -7,12 +7,11 @@ const source = fs.readFileSync(
   path.join(__dirname, "VsCodeMessenger.ts"),
   "utf8",
 );
-// bridgeChatAdapter lives in packages/vendor-bridge since phase 2; the source
-// contracts below pin the same text at its new location.
+// bridgeChatAdapter lives in the installed @cukii/vendor-bridge dependency
+// (git, tag v0.1.0); the source contracts below pin its shipped sources.
 const VENDOR_BRIDGE_SRC = path.join(
   __dirname,
-  "..", "..", "..", "..",
-  "packages", "vendor-bridge", "src",
+  "..", "..", "node_modules", "@cukii", "vendor-bridge", "src",
 );
 const adapterSource = fs.readFileSync(
   path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),

@@ -6,12 +6,11 @@ import path from "node:path";
 import type { ChatMessage } from "core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// bridgeChatAdapter lives in packages/vendor-bridge since phase 2; the source
-// contracts below pin the same text at its new location.
+// bridgeChatAdapter lives in the installed @cukii/vendor-bridge dependency
+// (git, tag v0.1.0); the source contracts below pin its shipped sources.
 const VENDOR_BRIDGE_SRC = path.join(
   __dirname,
-  "..", "..", "..", "..",
-  "packages", "vendor-bridge", "src",
+  "..", "..", "node_modules", "@cukii", "vendor-bridge", "src",
 );
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
@@ -32,10 +31,10 @@ vi.mock("node:child_process", async () => {
 // longer on this machine and would trip the image budget before the argv one.
 configureBridgeStorageHost({ preferredWindowsScratchRoot: "D:\\Scratch" });
 
-// permissionCapabilities lives in packages/vendor-bridge since phase 2; mock
-// the real module id so the mock reaches both the package internals and the
-// extension shim.
-vi.mock("../../../../packages/vendor-bridge/src/permissionCapabilities", () => ({  cachedVendorPermissionCapabilities: (vendor: string) => ({
+// permissionCapabilities lives in the installed @cukii/vendor-bridge; mock
+// the real module id so the mock reaches both the package internals and
+// direct importers.
+vi.mock("../../node_modules/@cukii/vendor-bridge/src/permissionCapabilities", () => ({  cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
     supportedModes:
       vendor === "codex"

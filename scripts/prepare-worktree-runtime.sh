@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stage native/runtime artefacts into a fresh worktree of agent-hub-vscode.
-# See packages/vendor-bridge/README.md ("Worktree runtime ritual") for why.
+# The vendor bridge is an installed git dependency (dist committed upstream),
+# so it needs nothing here; the ritual covers the monorepo internals only.
 # Usage: scripts/prepare-worktree-runtime.sh <worktree-root> [main-checkout]
 set -euo pipefail
 
@@ -11,7 +12,6 @@ npm_install() {
   (cd "$1" && npm install --ignore-scripts)
 }
 
-npm_install "$W/packages/vendor-bridge"
 npm_install "$W/core"
 npm_install "$W/extensions/vscode"
 
