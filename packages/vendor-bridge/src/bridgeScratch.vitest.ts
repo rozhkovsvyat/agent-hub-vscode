@@ -5,18 +5,29 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  CUKII_BRIDGE_SCRATCH_ROOT,
-  CUKII_PERMISSION_SCRATCH_ROOT,
-  CUKII_VOICE_SCRATCH_ROOT,
   bridgeScratchRoot,
+  bridgeScratchRootPath,
   createCukiiScratchDirectory,
   createDirectoryWithoutReparse,
+  permissionScratchRootPath,
   removeBridgeScratchFile,
   removeCukiiScratchDirectory,
   voiceScratchRoot,
+  voiceScratchRootPath,
   windowsScratchBase,
   writeBridgeScratchFile,
 } from "./bridgeScratch";
+import { configureBridgeStorageHost } from "./bridgeStorageEnv";
+
+// The library default is machine-free; the host values the plugin pins are
+// configured here so the ladder assertions exercise the same contract.
+configureBridgeStorageHost({
+  preferredWindowsScratchRoot: "D:\\Scratch",
+});
+
+const CUKII_BRIDGE_SCRATCH_ROOT = bridgeScratchRootPath();
+const CUKII_PERMISSION_SCRATCH_ROOT = permissionScratchRootPath();
+const CUKII_VOICE_SCRATCH_ROOT = voiceScratchRootPath();
 
 // The Windows roots are fixed volumes (`D:\Scratch\cukii-*`) and the
 // hardening here is about Windows junction/reparse points, which do not

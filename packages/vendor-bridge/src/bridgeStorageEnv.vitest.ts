@@ -13,9 +13,25 @@ const identityWindowsFs = {
   realPath: (candidate: string) => candidate,
 };
 
+// The library carries no machine roots of its own; these options emulate what
+// the Cukii plugin pins through configureBridgeStorageHost on the owner's
+// machine (the "KOMPUTER" ladder these tests describe).
+const KOMPUTER_STORAGE = {
+  preferredWindowsScratchRoot: "D:\\Scratch",
+  preferredWindowsPnpmStoreRoot: "D:\\PnpmStore",
+  forbiddenWindowsRoots: [
+    "d:\\tmp",
+    "d:\\brain\\tmp",
+    "d:\\brain\\worktrees",
+    "d:\\brain\\pnpm-store",
+    "d:\\.pnpm-store",
+  ],
+};
+
 describe("resolveBridgeStorageLayout", () => {
   it("uses the canonical KOMPUTER scratch and pnpm roots when present", () => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: {},
       pathExists: (candidate) =>
@@ -32,6 +48,7 @@ describe("resolveBridgeStorageLayout", () => {
 
   it("honours an explicit absolute scratch root and store", () => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: {
         CUKII_SCRATCH_DIR: "E:\\AgentScratch",
@@ -53,6 +70,7 @@ describe("resolveBridgeStorageLayout", () => {
 
   it("keeps KOMPUTER canonical roots above a stale inherited override", () => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: {
         CUKII_SCRATCH_DIR: "D:\\tmp",
@@ -73,6 +91,7 @@ describe("resolveBridgeStorageLayout", () => {
   it("rejects forbidden stale roots even when canonical folders are missing", () => {
     expect(() =>
       resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
         platform: "win32",
         env: {
           CUKII_SCRATCH_DIR: "D:\\tmp",
@@ -88,6 +107,7 @@ describe("resolveBridgeStorageLayout", () => {
   it("rejects descendants of every forbidden Windows root", () => {
     expect(() =>
       resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
         platform: "win32",
         env: {
           CUKII_SCRATCH_DIR: "D:\\tmp\\nested",
@@ -98,6 +118,26 @@ describe("resolveBridgeStorageLayout", () => {
         systemTempDir: "D:\\Brain\\tmp\\vendor",
       }),
     ).toThrow(/no safe existing windows temporary root/i);
+  });
+
+  it("rejects existing descendants of a forbidden Windows root", () => {
+    // The descendant check, not the missing-path fallback: every candidate
+    // below exists, so only the forbidden-root prefix rule can save us. The
+    // preferred host roots are absent so the env rungs are what get tested.
+    const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
+      platform: "win32",
+      env: {
+        CUKII_SCRATCH_DIR: "D:\\tmp\\nested",
+        npm_config_store_dir: "D:\\Brain\\pnpm-store\\v3",
+      },
+      pathExists: (candidate) =>
+        candidate !== "D:\\Scratch" && candidate !== "D:\\PnpmStore",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Temp",
+    });
+
+    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
   });
 
   it("removes inherited environment keys case-insensitively", () => {
@@ -115,6 +155,7 @@ describe("resolveBridgeStorageLayout", () => {
 
   it("does not invent machine-specific roots on another machine", () => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: { CUKII_SCRATCH_DIR: "relative", npm_config_store_dir: "relative" },
       pathExists: (candidate) => candidate === "C:\\Temp",
@@ -131,6 +172,7 @@ describe("resolveBridgeStorageLayout", () => {
   // one answer — so the two cannot disagree again.
   it("hands the same ladder to Cukii's own scratch roots", () => {
     const onKomputer = resolveWindowsScratchRoot({
+      ...KOMPUTER_STORAGE,
       env: {},
       pathExists: (candidate) => candidate === "D:\\Scratch",
       ...identityWindowsFs,
@@ -140,6 +182,7 @@ describe("resolveBridgeStorageLayout", () => {
 
     // The colleague's machine: no D: at all.
     const withoutDVolume = resolveWindowsScratchRoot({
+      ...KOMPUTER_STORAGE,
       env: {},
       pathExists: (candidate) =>
         candidate === "C:\\Users\\STARK\\AppData\\Local\\Temp",
@@ -149,6 +192,7 @@ describe("resolveBridgeStorageLayout", () => {
     expect(withoutDVolume).toBe("C:\\Users\\STARK\\AppData\\Local\\Temp");
 
     const configured = resolveWindowsScratchRoot({
+      ...KOMPUTER_STORAGE,
       env: { cukii_scratch_dir: "E:\\AgentScratch" },
       pathExists: (candidate) =>
         candidate === "E:\\AgentScratch" || candidate === "C:\\Temp",
@@ -159,6 +203,7 @@ describe("resolveBridgeStorageLayout", () => {
 
     expect(
       resolveWindowsScratchRoot({
+      ...KOMPUTER_STORAGE,
         env: {},
         pathExists: () => false,
         ...identityWindowsFs,
@@ -174,6 +219,7 @@ describe("resolveBridgeStorageLayout", () => {
     "D:\\safe \\nested",
   ])("rejects Windows namespace or trailing-alias root %s", (unsafeRoot) => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: {
         CUKII_SCRATCH_DIR: unsafeRoot,
@@ -190,6 +236,7 @@ describe("resolveBridgeStorageLayout", () => {
 
   it("rejects a permitted-looking junction whose physical target is forbidden", () => {
     const result = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       platform: "win32",
       env: {
         CUKII_SCRATCH_DIR: "E:\\AgentScratch",
@@ -211,6 +258,7 @@ describe("resolveBridgeStorageLayout", () => {
   it("rejects a vendor-runtime leaf junction that escapes the verified root", () => {
     expect(() =>
       resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
         platform: "win32",
         env: {},
         pathExists: (candidate) =>
@@ -235,6 +283,7 @@ describe("resolveBridgeStorageLayout", () => {
       systemTempDir: "C:\\Temp",
     };
     const statFailure = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       ...common,
       pathIsDirectory: (candidate) => {
         if (candidate === "E:\\AgentScratch") throw new Error("locked");
@@ -243,6 +292,7 @@ describe("resolveBridgeStorageLayout", () => {
       realPath: (candidate) => candidate,
     });
     const realPathFailure = resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
       ...common,
       pathIsDirectory: () => true,
       realPath: (candidate) => {
@@ -262,6 +312,7 @@ describe("resolveBridgeStorageLayout", () => {
     (failure) => {
       expect(() =>
         resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
           platform: "win32",
           env: { npm_config_store_dir: "E:\\Store" },
           pathExists: (candidate) =>
@@ -289,6 +340,7 @@ describe("resolveBridgeStorageLayout", () => {
   it("fails closed when no verified temp root exists instead of inventing C:\\Temp", () => {
     expect(() =>
       resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
         platform: "win32",
         env: {},
         pathExists: () => false,
@@ -300,6 +352,7 @@ describe("resolveBridgeStorageLayout", () => {
 
   it("sanitizes mixed-case terminal and process storage variables", () => {
     const options = {
+      ...KOMPUTER_STORAGE,
       platform: "win32" as const,
       env: {
         TeMp: "D:\\tmp",
@@ -338,11 +391,27 @@ describe("resolveBridgeStorageLayout", () => {
   it("keeps non-Windows vendors under their normal temporary root", () => {
     expect(
       resolveBridgeStorageLayout({
+      ...KOMPUTER_STORAGE,
         platform: "linux",
         env: { CUKII_SCRATCH_DIR: "/custom" },
         pathExists: () => true,
         systemTempDir: "/tmp",
       }),
     ).toEqual({ tempDir: "/tmp/cukii-vendor-runtime" });
+  });
+
+  it("carries no machine roots of its own without host configuration", () => {
+    // Even when a D:\Scratch-alike volume exists, the bare library must not
+    // prefer it: machine roots arrive only from options or the host config.
+    const result = resolveBridgeStorageLayout({
+      platform: "win32",
+      env: {},
+      pathExists: (candidate) =>
+        candidate === "D:\\Scratch" || candidate === "C:\\Temp",
+      ...identityWindowsFs,
+      systemTempDir: "C:\\Temp",
+    });
+
+    expect(result).toEqual({ tempDir: "C:\\Temp\\cukii-vendor-runtime" });
   });
 });

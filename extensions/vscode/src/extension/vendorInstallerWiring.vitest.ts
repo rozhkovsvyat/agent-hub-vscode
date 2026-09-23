@@ -6,16 +6,29 @@ const messengerSource = fs.readFileSync(
   path.join(__dirname, "VsCodeMessenger.ts"),
   "utf8",
 );
+// The vendor auth probe and the bridge launch environment live in
+// packages/vendor-bridge since phase 2; the wiring contract they must keep is
+// unchanged, only the file location moved.
+const vendorBridgeSrc = path.join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "vendor-bridge",
+  "src",
+);
 const authSource = fs.readFileSync(
-  path.join(__dirname, "bridgeVendorAuth.ts"),
+  path.join(vendorBridgeSrc, "bridgeVendorAuth.ts"),
   "utf8",
 );
 const bridgeSource = fs.readFileSync(
-  path.join(__dirname, "bridgeChatAdapter.ts"),
+  path.join(vendorBridgeSrc, "bridgeChatAdapter.ts"),
   "utf8",
 );
 const capabilitiesSource = fs.readFileSync(
-  path.join(__dirname, "permissionCapabilities.ts"),
+  path.join(vendorBridgeSrc, "permissionCapabilities.ts"),
   "utf8",
 );
 

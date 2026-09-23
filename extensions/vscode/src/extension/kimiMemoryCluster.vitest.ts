@@ -4,8 +4,19 @@ import path from "node:path";
 import type { ChatMessage } from "core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// bridgeChatAdapter lives in packages/vendor-bridge since phase 2; the source
+// contracts below pin the same text at its new location.
+const VENDOR_BRIDGE_SRC = path.join(
+  __dirname,
+  "..", "..", "..", "..",
+  "packages", "vendor-bridge", "src",
+);
+
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
-vi.mock("./permissionCapabilities", () => ({
+// permissionCapabilities lives in packages/vendor-bridge since phase 2; mock
+// the real module id so the mock reaches both the package internals and the
+// extension shim.
+vi.mock("../../../../packages/vendor-bridge/src/permissionCapabilities", () => ({
   cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
     supportedModes:
@@ -181,7 +192,7 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
 
   it("keeps the streamBridgeChat resume gate open for kimi, not only Claude", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const start = source.indexOf("const vendorResumeId");
     expect(start).toBeGreaterThan(-1);

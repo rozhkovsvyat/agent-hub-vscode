@@ -6,6 +6,14 @@ import path from "node:path";
 import type { ChatMessage } from "core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// bridgeChatAdapter lives in packages/vendor-bridge since phase 2; the source
+// contracts below pin the same text at its new location.
+const VENDOR_BRIDGE_SRC = path.join(
+  __dirname,
+  "..", "..", "..", "..",
+  "packages", "vendor-bridge", "src",
+);
+
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
 vi.mock("node:child_process", async () => {
   const actual =
@@ -18,7 +26,10 @@ vi.mock("node:child_process", async () => {
     spawnSync: vi.fn(actual.spawnSync),
   };
 });
-vi.mock("./permissionCapabilities", () => ({
+// permissionCapabilities lives in packages/vendor-bridge since phase 2; mock
+// the real module id so the mock reaches both the package internals and the
+// extension shim.
+vi.mock("../../../../packages/vendor-bridge/src/permissionCapabilities", () => ({
   cachedVendorPermissionCapabilities: (vendor: string) => ({
     vendor,
     supportedModes:
@@ -84,7 +95,7 @@ describe("broker delegation recovery guidance", () => {
   // connected. The locked branch already carries the guidance; Auto must too.
   it("carries the not_routable semantics into Auto subagent routing as well", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const autoAt = source.indexOf('brokerSubagent === "auto"');
     const lockedAt = source.indexOf(
@@ -134,7 +145,7 @@ describe("native bridge argv", () => {
     expect(bridgeProcessExitIsFailure(0, null, true, true)).toBe(false);
 
     const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
+      path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const enqueueAt = source.indexOf(
@@ -201,7 +212,7 @@ describe("native bridge argv", () => {
     expect(grokBridgeEnv("composer-2-5")).toEqual({});
     // The launch must actually carry it, not just compute it.
     const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
+      path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
       "utf8",
     );
     expect(source).toContain("...grokBridgeEnv(model)");
@@ -485,7 +496,7 @@ describe("native bridge argv", () => {
 
   it("drops the own-prompt echo instead of rendering it as a user capsule", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const branchAt = source.indexOf("const messageId = queuedMessageId");
     expect(branchAt).toBeGreaterThan(-1);
@@ -998,7 +1009,7 @@ describe("native bridge argv", () => {
 
   it("does not write the Grok transcript to stdin", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
+      path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const grokAt = source.indexOf("function grokRoute(");
@@ -1618,7 +1629,7 @@ describe("native bridge argv", () => {
 
   it("acknowledges a redelivered follow-up only after structured vendor acceptance", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
+      path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const handoffAt = source.indexOf("child.stdin.write(");
@@ -1648,7 +1659,7 @@ describe("native bridge argv", () => {
 
   it("swallows a vendor echo of an already-acknowledged follow-up", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "bridgeChatAdapter.ts"),
+      path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
       "utf8",
     );
     const swallowAt = source.indexOf(
@@ -1673,7 +1684,7 @@ describe("native bridge argv", () => {
 
   it("selects the image carrier before prompt, route, and process launch", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const selectAt = source.indexOf(
       "const transportMessages = selectBridgeImageSources(",
@@ -1731,7 +1742,7 @@ describe("native bridge argv", () => {
 
   it("rechecks Grok after resolving its final Windows executable", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const resolveAt = source.indexOf(
       "command = ensureProgramAvailable(route);",
@@ -1749,7 +1760,7 @@ describe("native bridge argv", () => {
 
   it("does not paint a live-steer read receipt on stdin write success (ID-238)", () => {
     const source = fs
-      .readFileSync(path.join(__dirname, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
       .replace(/\r\n/g, "\n");
     const writerAt = source.indexOf(
       "permissionTransport?.steering?.attachWriter(async (message) => {",
