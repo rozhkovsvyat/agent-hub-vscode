@@ -53,6 +53,7 @@ jobs:
             exit 1
           fi
           git config --global core.sshCommand "ssh -i $keydir/id_ed25519 -o UserKnownHostsFile=$keydir/known_hosts -o IdentitiesOnly=yes"
+          printf 'GIT_SSH_COMMAND=ssh -i %s/id_ed25519 -o UserKnownHostsFile=%s/known_hosts -o IdentitiesOnly=yes\n' "$keydir" "$keydir" >> "$GITHUB_ENV"
           # Prove read access to the library now, so a key problem cannot
           # surface later as an opaque npm install failure.
           git ls-remote git@github.com:rozhkovsvyat/vendor-bridge.git HEAD > /dev/null
