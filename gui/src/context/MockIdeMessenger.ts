@@ -144,6 +144,21 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       label: "OpenAI",
       models: [
         {
+          value: "codex:gpt-6-astra",
+          label: "GPT-6 Astra",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-sol",
+          label: "GPT-6 Sol",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-luna",
+          label: "GPT-6 Luna",
+          contextWindowLabel: "272K",
+        },
+        {
           value: "codex-5-6-sol",
           label: "GPT-5.6 Sol",
           contextWindowLabel: "272K",

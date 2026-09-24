@@ -123,12 +123,13 @@ describe("ModelPickerModal", () => {
     await renderWithProviders(<ModelPickerModal onClose={vi.fn()} />);
 
     // Curated routes stay visible in the default scope.
-    await getElementByText("GPT-5.6 Sol");
+    await getElementByText("GPT-6 Sol");
     await getElementByText("Fable 5.1");
     await getElementByText("Kimi K3");
     // Full-catalog-only entries must not leak into Milky.
     expect(screen.queryByText("Fable 5")).toBeNull();
     expect(screen.queryByText("Grok 4.5")).toBeNull();
+    expect(screen.queryByText("GPT-5.6 Sol")).toBeNull();
     expect(screen.queryByText("V4 Pro (soon)")).toBeNull();
   });
 

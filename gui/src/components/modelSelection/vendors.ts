@@ -12,6 +12,7 @@ import {
   canonicalCukiiModelLabel,
   cukiiCapabilityRating,
   cukiiModelUpstreamVendor,
+  observeCukiiLatestGeneration,
 } from "core/cukiiModelPresentation";
 
 export type VendorId = BrokerVendorId;
@@ -61,7 +62,17 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
         label: "GPT-6 Astra",
         contextWindowLabel: "272K",
       },
-      // Match the currently usable Codex CLI route; live metadata can raise it.
+      {
+        value: "codex:gpt-6-sol",
+        label: "GPT-6 Sol",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex:gpt-6-luna",
+        label: "GPT-6 Luna",
+        contextWindowLabel: "272K",
+      },
+      // Older Codex routes stay visible in All; live metadata can raise latest.
       {
         value: "codex-5-6-sol",
         label: "GPT-5.6 Sol",
@@ -98,6 +109,7 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "grok",
     label: "xAI",
     models: [
+      { value: "grok-4-7", label: "Grok 4.7", contextWindowLabel: "500K" },
       { value: "grok-4-6", label: "Grok 4.6", contextWindowLabel: "500K" },
       { value: "grok-4-5", label: "Grok 4.5", contextWindowLabel: "500K" },
     ],
@@ -106,6 +118,11 @@ const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
     id: "cursor",
     label: "Cursor",
     models: [
+      {
+        value: "cursor:grok-4.7",
+        label: "Grok 4.7",
+        contextWindowLabel: "500K",
+      },
       {
         value: "cursor:grok-4.6",
         label: "Grok 4.6",
@@ -184,27 +201,6 @@ export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
 
 export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
 
-/**
- * The static routes of the model picker's Milky scope. Every entry must be a
- * live, selectable route; a model without a connected bridge belongs in the
- * full catalog only. Bottle ratings (cukiiCapabilityRating) are the source of
- * truth for scope membership, so vendor-routed models of the same families
- * join the Milky scope automatically.
- */
-export const BEST_MODELS: readonly BrokerModel[] = [
-  "qwen-3-8-max",
-  "qwen-deepseek-v4-pro-0813",
-  "opus-5-5",
-  "fable-5-1",
-  "opus-5",
-  "codex:gpt-6-astra",
-  "codex-5-6-sol",
-  "codex-5-6-terra",
-  "grok-4-6",
-  "composer-2-5",
-  "kimi-k3",
-];
-
 export function isBestModel(
   model: Pick<ModelInfo, "value" | "label">,
 ): boolean {
@@ -226,34 +222,43 @@ export function applyRuntimeVendorCatalog(
   catalog: BrokerVendorModelCatalog[],
 ): void {
   const byId = new Map(catalog.map((vendor) => [vendor.id, vendor]));
-  const next = sortVendorsByLabel(
-    CUKII_VENDOR_REGISTRY.map((registered) => {
-      const live = byId.get(registered.id);
-      const fallback = FALLBACK_VENDORS.find(
-        (vendor) => vendor.id === registered.id,
-      );
-      const liveModels = live?.models ?? fallback?.models ?? [];
-      const models =
-        registered.id === "codex" && live
-          ? [
-              ...(fallback?.models.filter(
-                (model) => model.value === "codex:gpt-6-astra",
-              ) ?? []),
-              ...liveModels.filter(
-                (model) => model.value !== "codex:gpt-6-astra",
-              ),
-            ]
-          : liveModels;
-      return {
-        id: registered.id,
-        label: registered.label,
-        models: presentVendorModels(models, {
-          groupByUpstreamVendor: registered.id === "cursor",
-        }),
-      };
-    }).filter((vendor) => vendor.models.length > 0),
+  const assembled = CUKII_VENDOR_REGISTRY.map((registered) => {
+    const live = byId.get(registered.id);
+    const fallback = FALLBACK_VENDORS.find(
+      (vendor) => vendor.id === registered.id,
+    );
+    const liveModels = live?.models ?? fallback?.models ?? [];
+    const models =
+      registered.id === "codex" && live
+        ? [
+            ...(fallback?.models.filter(
+              (model) => model.value === "codex:gpt-6-astra",
+            ) ?? []),
+            ...liveModels.filter(
+              (model) => model.value !== "codex:gpt-6-astra",
+            ),
+          ]
+        : liveModels;
+    return {
+      id: registered.id,
+      label: registered.label,
+      models,
+      groupByUpstreamVendor: registered.id === "cursor",
+    };
+  }).filter((vendor) => vendor.models.length > 0);
+  if (assembled.length === 0) return;
+  observeCukiiLatestGeneration(
+    assembled.flatMap((vendor) => vendor.models),
   );
-  if (next.length === 0) return;
+  const next = sortVendorsByLabel(
+    assembled.map((vendor) => ({
+      id: vendor.id,
+      label: vendor.label,
+      models: presentVendorModels(vendor.models, {
+        groupByUpstreamVendor: vendor.groupByUpstreamVendor,
+      }),
+    })),
+  );
   VENDORS.splice(0, VENDORS.length, ...next);
   ALL_MODELS.splice(0, ALL_MODELS.length, ...VENDORS.flatMap((v) => v.models));
   BROKER_MODEL_OPTIONS.splice(
