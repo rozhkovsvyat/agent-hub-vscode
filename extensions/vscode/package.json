@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.143",
+  "version": "2.0.144",
   "repository": {
     "type": "git",
     "url": "https://github.com/rozhkovsvyat/agent-hub-vscode"
@@ -762,7 +762,7 @@
   "dependencies": {
     "@continuedev/config-types": "file:../../packages/config-types",
     "@continuedev/fetch": "file:../../packages/fetch",
-    "@cukii/vendor-bridge": "github:rozhkovsvyat/vendor-bridge#v0.1.2",
+    "@cukii/vendor-bridge": "github:rozhkovsvyat/vendor-bridge#v0.1.3",
     "@electron/rebuild": "^4.0.3",
     "@reduxjs/toolkit": "^1.9.3",
     "@vscode/ripgrep": "^1.15.9",
