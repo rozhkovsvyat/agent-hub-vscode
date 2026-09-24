@@ -24,6 +24,7 @@ const execFileAsync = promisify(execFile);
 
 const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
   claude: [
+    { value: "opus-5-5", label: "Opus 5.5", contextWindowLabel: "1M" },
     { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
     { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
     { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
@@ -104,6 +105,9 @@ const FALLBACK_MODELS: Record<BrokerVendorId, BrokerModelCatalogEntry[]> = {
 };
 
 const CODEX_MODEL_IDS: Record<string, string> = {
+  "gpt-6-astra": "codex:gpt-6-astra",
+  "gpt-6-sol": "codex:gpt-6-sol",
+  "gpt-6-luna": "codex:gpt-6-luna",
   "gpt-5.6-sol": "codex-5-6-sol",
   "gpt-5.6-terra": "codex-5-6-terra",
   "gpt-5.6-luna": "codex-5-6-luna",
@@ -115,6 +119,9 @@ const CODEX_MODEL_IDS: Record<string, string> = {
 const CODEX_CONTEXT: Record<string, string> = {
   // The current Codex CLI route exposes the standard 272K window.  The 1M
   // Codex capability is experimental opt-in and is not enabled by Cukii.
+  "gpt-6-astra": "272K",
+  "gpt-6-sol": "272K",
+  "gpt-6-luna": "272K",
   "gpt-5.6-sol": "272K",
   "gpt-5.6-terra": "272K",
   "gpt-5.6-luna": "272K",
@@ -154,6 +161,9 @@ function inferredCursorContext(label: string): string {
   if (/Composer 2\.5/i.test(label)) return "200K";
   if (/Gemini 3/i.test(label)) return "1M";
   if (/Claude (?:Opus|Sonnet|Fable)/i.test(label)) return "1M";
+  if (/(?:GPT|Codex)[ -]?6(?:\.|\b)/i.test(label)) {
+    return "272K";
+  }
   if (/(?:GPT|Codex)[ -]?5(?:\.|\b)/i.test(label)) {
     return /\b(?:Mini|Nano)\b/i.test(label) ? "400K" : "1M";
   }
@@ -440,6 +450,7 @@ export function compareDottedVersions(left: string, right: string): number {
  * needed to surface it.
  */
 const CLAUDE_MODEL_MIN_CLI_VERSION: Record<string, string> = {
+  "opus-5-5": "2.1.280",
   "fable-5-1": "2.1.258",
 };
 

@@ -166,6 +166,9 @@ describe("Cukii live subscription model catalog", () => {
     expect(staticCatalogForUnavailableDiscovery("kimi")).toEqual([]);
     expect(staticCatalogForUnavailableDiscovery("deepseek")).toEqual([]);
     expect(staticCatalogForUnavailableDiscovery("claude")).toContainEqual(
+      expect.objectContaining({ value: "opus-5-5", label: "Opus 5.5" }),
+    );
+    expect(staticCatalogForUnavailableDiscovery("claude")).toContainEqual(
       expect.objectContaining({ value: "haiku-4-5" }),
     );
     expect(staticCatalogForUnavailableDiscovery("claude")).toContainEqual(
@@ -211,11 +214,17 @@ describe("claude catalog version gate", () => {
       (model) => model.value,
     );
     expect(outdated).not.toContain("fable-5-1");
+    expect(outdated).not.toContain("opus-5-5");
     expect(outdated).toContain("opus-5");
     const current = filterClaudeCatalogByVersion(maintained, "2.1.258").map(
       (model) => model.value,
     );
     expect(current).toContain("fable-5-1");
+    expect(current).not.toContain("opus-5-5");
+    const next = filterClaudeCatalogByVersion(maintained, "2.1.280").map(
+      (model) => model.value,
+    );
+    expect(next).toContain("opus-5-5");
     expect(filterClaudeCatalogByVersion(maintained, undefined)).toEqual(
       maintained,
     );

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_MODELS,
   applyRuntimeVendorCatalog,
-  BEST_MODELS,
   BROKER_MODEL_OPTIONS,
   cukiiCapabilityRating,
   displayModelLabel,
@@ -17,8 +16,12 @@ import {
 } from "./vendors";
 import {
   canonicalCukiiModelLabel,
+  CUKII_FAMILY_TIER_RATING,
   cukiiModelUpstreamVendor,
   formatCukiiModelSubtitle,
+  observeCukiiLatestGeneration,
+  parseCukiiModelIdentity,
+  resetCukiiLatestGeneration,
 } from "core/cukiiModelPresentation";
 
 describe("Cukii model context labels", () => {
@@ -28,20 +31,25 @@ describe("Cukii model context labels", () => {
         ALL_MODELS.map((model) => [model.value, displayModelLabel(model)]),
       ),
     ).toEqual({
+      "opus-5-5": "Opus 5.5",
       "opus-5": "Opus 5",
       "sonnet-5": "Sonnet 5",
       "fable-5-1": "Fable 5.1",
       "fable-5": "Fable 5",
       "haiku-4-5": "Haiku 4.5",
       "codex:gpt-6-astra": "GPT-6 Astra",
+      "codex:gpt-6-sol": "GPT-6 Sol",
+      "codex:gpt-6-luna": "GPT-6 Luna",
       "codex-5-6-sol": "GPT-5.6 Sol",
       "codex-5-6-terra": "GPT-5.6 Terra",
       "codex-5-6-luna": "GPT-5.6 Luna",
       "codex-5-5": "GPT-5.5",
       "codex-5-4": "GPT-5.4",
       "codex-5-4-mini": "GPT-5.4 Mini",
+      "grok-4-7": "Grok 4.7",
       "grok-4-6": "Grok 4.6",
       "grok-4-5": "Grok 4.5",
+      "cursor:grok-4.7": "Grok 4.7",
       "cursor:grok-4.6": "Grok 4.6",
       "composer-2-5": "Composer 2.5",
       "kimi-k2": "Kimi K2.7 Coding",
@@ -71,6 +79,8 @@ describe("Cukii model context labels", () => {
   it("uses the known Codex CLI route capacity as the static fallback", () => {
     for (const value of [
       "codex:gpt-6-astra",
+      "codex:gpt-6-sol",
+      "codex:gpt-6-luna",
       "codex-5-6-sol",
       "codex-5-6-terra",
       "codex-5-6-luna",
@@ -101,26 +111,34 @@ describe("Cukii model context labels", () => {
   });
 
   it("keeps the curated Milky scope live and selectable", () => {
-    expect(BEST_MODELS).toEqual([
-      "qwen-3-8-max",
-      "qwen-deepseek-v4-pro-0813",
-      "fable-5-1",
-      "opus-5",
-      "codex:gpt-6-astra",
-      "codex-5-6-sol",
-      "codex-5-6-terra",
-      "grok-4-6",
-      "composer-2-5",
-      "kimi-k3",
-    ]);
-    for (const value of BEST_MODELS) {
-      const model = ALL_MODELS.find((entry) => entry.value === value);
-      expect(model, value).toBeDefined();
-      expect(model?.disabled, value).toBeFalsy();
-      if (model) expect(isBestModel(model), value).toBe(true);
+    const milky = ALL_MODELS.filter(
+      (model) => !model.disabled && isBestModel(model),
+    );
+    expect(milky.map((model) => model.value).sort()).toEqual(
+      [
+        "qwen-3-8-max",
+        "qwen-deepseek-v4-pro-0813",
+        "fable-5-1",
+        "opus-5-5",
+        "codex:gpt-6-astra",
+        "codex:gpt-6-sol",
+        "codex:gpt-6-luna",
+        "grok-4-7",
+        "cursor:grok-4.7",
+        "composer-2-5",
+        "kimi-k3",
+      ].sort(),
+    );
+    for (const model of milky) {
+      expect(model.disabled, model.value).toBeFalsy();
     }
     expect(isBestModel({ value: "haiku-4-5", label: "Haiku 4.5" })).toBe(false);
     expect(isBestModel({ value: "sonnet-5", label: "Sonnet 5" })).toBe(false);
+    expect(isBestModel({ value: "opus-5", label: "Opus 5" })).toBe(false);
+    expect(isBestModel({ value: "grok-4-6", label: "Grok 4.6" })).toBe(false);
+    expect(isBestModel({ value: "codex-5-6-terra", label: "GPT-5.6 Terra" })).toBe(
+      false,
+    );
   });
 
   it("does not put Alibaba image/audio/video capabilities in the chat picker", () => {
@@ -142,9 +160,18 @@ describe("Cukii model context labels", () => {
 
   it("orders every vendor's model matrix by descending bottle rating with stable canonical ties", () => {
     const expectedModelOrderByVendor = {
-      claude: ["fable-5-1", "opus-5", "sonnet-5", "fable-5", "haiku-4-5"],
+      claude: [
+        "fable-5-1",
+        "opus-5-5",
+        "opus-5",
+        "sonnet-5",
+        "fable-5",
+        "haiku-4-5",
+      ],
       codex: [
         "codex:gpt-6-astra",
+        "codex:gpt-6-sol",
+        "codex:gpt-6-luna",
         "codex-5-6-sol",
         "codex-5-6-terra",
         "codex-5-6-luna",
@@ -152,8 +179,8 @@ describe("Cukii model context labels", () => {
         "codex-5-4",
         "codex-5-4-mini",
       ],
-      grok: ["grok-4-6", "grok-4-5"],
-      cursor: ["cursor:grok-4.6", "composer-2-5"],
+      grok: ["grok-4-7", "grok-4-6", "grok-4-5"],
+      cursor: ["cursor:grok-4.7", "composer-2-5", "cursor:grok-4.6"],
       // K3-256K lost its bottles (it is a quota-saving sibling, not a Milky
       // route), so it falls in with the other unrated Kimi models and keeps
       // catalog order among them.
@@ -190,13 +217,13 @@ describe("Cukii model context labels", () => {
     const canonical = [
       { value: "codex-5-4", label: "GPT-5.4", contextWindowLabel: "1M" },
       {
-        value: "codex-5-6-terra",
-        label: "GPT-5.6 Terra",
+        value: "codex:gpt-6-luna",
+        label: "GPT-6 Luna",
         contextWindowLabel: "1M",
       },
       {
-        value: "codex-5-6-sol",
-        label: "GPT-5.6 Sol",
+        value: "codex:gpt-6-sol",
+        label: "GPT-6 Sol",
         contextWindowLabel: "1M",
       },
       {
@@ -215,8 +242,8 @@ describe("Cukii model context labels", () => {
       );
 
     expect(presented.map((model) => model.value)).toEqual([
-      "codex-5-6-sol",
-      "codex-5-6-terra",
+      "codex:gpt-6-sol",
+      "codex:gpt-6-luna",
       "codex-5-4",
       "codex-5-5",
     ]);
@@ -321,22 +348,29 @@ describe("Cukii model context labels", () => {
     ["codex:gpt-6-astra", "GPT-6 Astra", 3],
     ["fable-5-1", "Fable 5.1", 3],
     ["cursor:claude-fable-5-1", "Dynamic Cursor model", 3],
-    ["codex-5-6-sol", "GPT-5.6 Sol", 2],
-    ["cursor:gpt-5.6-sol", "Dynamic Cursor model", 2],
-    ["qwen-3-8-max", "Qwen 3.8 Max", 3],
-    ["opus-5", "Opus 5", 2],
-    ["cursor:claude-opus-5", "Dynamic Cursor model", 2],
+    ["codex:gpt-6-sol", "GPT-6 Sol", 2],
+    ["opus-5-5", "Opus 5.5", 2],
+    ["cursor:claude-opus-5-5", "Dynamic Cursor model", 2],
+    ["qwen-3-8-max", "Qwen 3.8 Max", 2],
     ["kimi-k3", "Kimi K3", 2],
-    // Superseded Opus generations Cursor still resells, and the quota-saving
-    // Kimi sibling: present in the full catalog, never in Milky.
+    ["codex:gpt-6-luna", "GPT-6 Luna", 1],
+    ["grok-4-7", "Grok 4.7", 1],
+    ["cursor:grok-4.7", "Dynamic Cursor model", 1],
+    ["cursor:cursor-grok-4.7", "Dynamic Cursor model", 1],
+    ["composer-2-5", "Composer 2.5", 1],
+    ["qwen-deepseek-v4-pro-0813", "DeepSeek V4 Pro 0813", 1],
+    ["grok:grok-4.7-build-fast", "Grok 4.7 Build Fast", 1],
+    // Superseded generations and the quota-saving Kimi sibling stay at 0.
+    ["codex-5-6-sol", "GPT-5.6 Sol", 0],
+    ["cursor:gpt-5.6-sol", "Dynamic Cursor model", 0],
+    ["opus-5", "Opus 5", 0],
+    ["cursor:claude-opus-5", "Dynamic Cursor model", 0],
     ["cursor:claude-opus-4-8", "Dynamic Cursor model", 0],
     ["cursor:claude-opus-4-5", "Dynamic Cursor model", 0],
     ["kimi-k3-256k", "Kimi K3-256K", 0],
-    ["codex-5-6-terra", "GPT-5.6 Terra", 1],
-    ["grok-4-6", "Grok 4.6", 1],
-    ["cursor:grok-4.6", "Dynamic Cursor model", 1],
-    ["composer-2-5", "Composer 2.5", 1],
-    ["qwen-deepseek-v4-pro-0813", "DeepSeek V4 Pro 0813", 1],
+    ["codex-5-6-terra", "GPT-5.6 Terra", 0],
+    ["grok-4-6", "Grok 4.6", 0],
+    ["cursor:grok-4.6", "Dynamic Cursor model", 0],
     ["fable-5", "Fable 5", 0],
     ["sonnet-5", "Sonnet 5", 0],
     ["cursor:claude-4.6-sonnet", "Dynamic Cursor model", 0],
@@ -345,7 +379,6 @@ describe("Cukii model context labels", () => {
     ["codex-5-4", "GPT-5.4", 0],
     ["codex-5-6-luna", "GPT-5.6 Luna", 0],
     ["grok-4-5", "Grok 4.5", 0],
-    ["cursor:cursor-grok-4.7", "Dynamic Cursor model", 0],
     ["qwen-3-7-max", "Qwen 3.7 Max", 0],
     ["deepseek-v4-pro", "V4 Pro", 0],
     ["cursor:gemini-3.7-flash", "Gemini 3.7 Flash", 0],
@@ -473,8 +506,8 @@ describe("Cukii model context labels", () => {
     ).toEqual([
       "codex:gpt-6-astra",
       "codex-5-6-sol",
-      "codex-5-6-terra",
       "codex-5-6-luna",
+      "codex-5-6-terra",
       "codex-5-5",
       "codex-5-4",
       "codex:custom",
@@ -525,8 +558,8 @@ describe("Cukii model context labels", () => {
     ]);
 
     // Anthropic, Cursor, Google, OpenAI, xAI — alphabetical by maker, with no
-    // heading printed for any of them; Fable outranks Opus 4.8 on bottles and
-    // Sol outranks Terra, both inside their own maker.
+    // heading printed for any of them. Native fallbacks keep Opus/Grok/Sol on
+    // the current generation, so Cursor's superseded resales get 0 bottles.
     expect(
       VENDORS.find((vendor) => vendor.id === "cursor")?.models.map(
         (model) => model.label,
@@ -536,8 +569,8 @@ describe("Cukii model context labels", () => {
       "Opus 4.8",
       "Composer 2.5",
       "Gemini 3.7 Flash",
-      "GPT-5.6 Sol",
       "GPT-5.6 Terra",
+      "GPT-5.6 Sol",
       "Grok 4.6",
     ]);
   });
@@ -566,5 +599,78 @@ describe("Cukii model context labels", () => {
     expect(cukiiModelUpstreamVendor({ value: "cursor:x1", label: "X1" })).toBe(
       "",
     );
+  });
+
+  it("keeps the family-tier bottle table populated without version literals", () => {
+    expect(CUKII_FAMILY_TIER_RATING["gpt:astra"]).toBe(3);
+    expect(CUKII_FAMILY_TIER_RATING.fable).toBe(3);
+    expect(CUKII_FAMILY_TIER_RATING.opus).toBe(2);
+    expect(CUKII_FAMILY_TIER_RATING["qwen:max"]).toBe(2);
+    expect(CUKII_FAMILY_TIER_RATING["gpt:sol"]).toBe(2);
+    expect(CUKII_FAMILY_TIER_RATING["gpt:luna"]).toBe(1);
+    expect(CUKII_FAMILY_TIER_RATING.grok).toBe(1);
+    expect(CUKII_FAMILY_TIER_RATING.composer).toBe(1);
+    expect(CUKII_FAMILY_TIER_RATING.kimi).toBe(2);
+    expect(CUKII_FAMILY_TIER_RATING["qwen-deepseek:pro"]).toBe(1);
+    expect(CUKII_FAMILY_TIER_RATING["gpt:terra"]).toBeUndefined();
+  });
+
+  it("collapses vendor prefixes, aliases and variants onto one identity", () => {
+    expect(
+      parseCukiiModelIdentity({ value: "codex-5-6-sol", label: "GPT-5.6 Sol" }),
+    ).toMatchObject({ family: "gpt", version: [5, 6], tier: "sol" });
+    expect(
+      parseCukiiModelIdentity({ value: "grok-4-6", label: "Grok 4.6" }),
+    ).toMatchObject({ family: "grok", version: [4, 6] });
+    expect(
+      parseCukiiModelIdentity({
+        value: "composer-2-5",
+        label: "Composer 2.5",
+      }),
+    ).toMatchObject({ family: "composer", version: [2, 5] });
+    expect(
+      parseCukiiModelIdentity({ value: "kimi-k2", label: "Kimi K2.7 Coding" }),
+    ).toMatchObject({ family: "kimi", version: [2, 7] });
+    expect(
+      parseCukiiModelIdentity({
+        value: "grok:grok-4.7-build-fast",
+        label: "Grok 4.7 Build Fast",
+      }),
+    ).toMatchObject({
+      family: "grok",
+      version: [4, 7],
+      variant: "build-fast",
+    });
+    expect(
+      parseCukiiModelIdentity({
+        value: "cursor:cursor-grok-4.7",
+        label: "Grok 4.7",
+      }),
+    ).toMatchObject({ family: "grok", version: [4, 7] });
+  });
+
+  it("drops bottles from a generation when a newer one is observed", () => {
+    resetCukiiLatestGeneration();
+    expect(
+      cukiiCapabilityRating({ value: "grok-4-7", label: "Grok 4.7" }),
+    ).toBe(1);
+    observeCukiiLatestGeneration([
+      { value: "grok-4-7", label: "Grok 4.7" },
+      { value: "grok-4.8", label: "Grok 4.8" },
+      { value: "grok-4.7-build-fast", label: "Grok 4.7 Build Fast" },
+    ]);
+    expect(
+      cukiiCapabilityRating({ value: "grok-4-7", label: "Grok 4.7" }),
+    ).toBe(0);
+    expect(
+      cukiiCapabilityRating({ value: "grok-4.8", label: "Grok 4.8" }),
+    ).toBe(1);
+    expect(
+      cukiiCapabilityRating({
+        value: "grok-4.7-build-fast",
+        label: "Grok 4.7 Build Fast",
+      }),
+    ).toBe(0);
+    resetCukiiLatestGeneration();
   });
 });

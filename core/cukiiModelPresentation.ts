@@ -53,11 +53,12 @@ export function canonicalCukiiModelDescription(
   if (matches(/(?:^|[-\s])sonnet(?:[-\s]|$)/))
     return "Efficient for routine development tasks";
   if (matches(/(?:^|[-\s])haiku(?:[-\s]|$)/)) return "Fastest for simple tasks";
-  if (matches(/gpt[-\s]?5[.-]6[-\s]sol/))
+  if (matches(/astra/)) return "Latest frontier agentic coding model";
+  if (matches(/(?:gpt|codex).*sol/))
     return "Latest frontier agentic coding model";
-  if (matches(/gpt[-\s]?5[.-]6[-\s]terra/))
+  if (matches(/(?:gpt|codex).*terra/))
     return "Balanced agentic coding model for everyday work";
-  if (matches(/gpt[-\s]?5[.-]6[-\s]luna/))
+  if (matches(/(?:gpt|codex).*luna/))
     return "Fast, affordable agentic coding model";
   if (matches(/gpt[-\s]?5[.-]5/))
     return "Frontier model for complex coding and research";
@@ -104,46 +105,309 @@ export function canonicalCukiiModelDescription(
   return "Model available through the vendor CLI";
 }
 
+const VENDOR_PREFIX = /^(?:cursor|codex|grok|kimi|claude|qwen):/i;
+const BRANDING_ID_PREFIX = /^(?:cursor|claude)[-_\s]+/i;
+
+export interface CukiiModelIdentity {
+  family: string;
+  version: number[];
+  tier?: string;
+  variant?: string;
+}
+
+/**
+ * Bottle counts by family (and optional product tier). Versions never appear
+ * here: a newer generation of the same family inherits the tier automatically.
+ */
+export const CUKII_FAMILY_TIER_RATING: Readonly<Record<string, 1 | 2 | 3>> = {
+  "gpt:astra": 3,
+  fable: 3,
+  opus: 2,
+  "qwen:max": 2,
+  "gpt:sol": 2,
+  kimi: 2,
+  "gpt:luna": 1,
+  grok: 1,
+  composer: 1,
+  "qwen-deepseek:pro": 1,
+};
+
+const DEFAULT_LATEST_GENERATION: ReadonlyArray<{
+  family: string;
+  tier?: string;
+  version: readonly number[];
+}> = [
+  { family: "fable", version: [5, 1] },
+  { family: "opus", version: [5, 5] },
+  { family: "gpt", tier: "astra", version: [6] },
+  { family: "gpt", tier: "sol", version: [6] },
+  { family: "gpt", tier: "luna", version: [6] },
+  { family: "grok", version: [4, 7] },
+  { family: "composer", version: [2, 5] },
+  { family: "kimi", version: [3] },
+  { family: "qwen", tier: "max", version: [3, 8] },
+  { family: "qwen-deepseek", tier: "pro", version: [4, 813] },
+];
+
+const latestGenerationByFamily: Array<{ key: string; version: number[] }> = [];
+
+function familyKey(family: string, tier?: string): string {
+  return tier ? `${family}:${tier}` : family;
+}
+
+function cloneVersion(version: readonly number[]): number[] {
+  return [...version];
+}
+
+function seedLatestGeneration(): void {
+  latestGenerationByFamily.splice(
+    0,
+    latestGenerationByFamily.length,
+    ...DEFAULT_LATEST_GENERATION.map((row) => ({
+      key: familyKey(row.family, row.tier),
+      version: cloneVersion(row.version),
+    })),
+  );
+}
+
+seedLatestGeneration();
+
+export function resetCukiiLatestGeneration(): void {
+  seedLatestGeneration();
+}
+
+export function compareCukiiModelVersion(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (left[index] ?? 0) - (right[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+function parseVersionParts(raw: string | undefined): number[] {
+  if (!raw) return [];
+  return raw
+    .split(/[.\-]/)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
+}
+
+function detectVariant(id: string, text: string): string | undefined {
+  if (/256k/.test(id) || /256k/.test(text)) return "256k";
+  if (/build-fast/.test(id) || /build-fast/.test(text)) return "build-fast";
+  if (/highspeed/.test(id) || /highspeed/.test(text)) return "highspeed";
+  if (/(?:^|[\s-])thinking(?:[\s-]|$)/.test(id)) return "thinking";
+  if (/(?:^|[\s.-])fast(?:[\s-]|$)/.test(id) && !/flash/.test(id)) return "fast";
+  return undefined;
+}
+
+function stripIdentityNoise(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(VENDOR_PREFIX, "")
+    .replace(BRANDING_ID_PREFIX, "");
+}
+
+function stripVariantTokens(raw: string): string {
+  return raw
+    .replace(/build-fast/gi, " ")
+    .replace(/highspeed/gi, " ")
+    .replace(/256k/gi, " ")
+    .replace(/(?:^|[\s.-])fast(?:[\s-]|$)/gi, " ")
+    .replace(/(?:^|[\s-])thinking(?:[\s-]|$)/gi, " ");
+}
+
+/**
+ * Collapse a vendor id + label into one family/version/tier identity so Cursor
+ * resales and native CLIs rate the same route the same way.
+ */
+export function parseCukiiModelIdentity(
+  model: Pick<CukiiModelPresentation, "value" | "label">,
+): CukiiModelIdentity | undefined {
+  const id = stripIdentityNoise(model.value);
+  const label = model.label.trim().toLowerCase().replace(BRANDING_PREFIX, "");
+  const variant = detectVariant(id, `${id} ${label}`);
+  const text = stripVariantTokens(`${id} ${label}`);
+
+  const identity = (partial: {
+    family: string;
+    version: number[];
+    tier?: string;
+  }): CukiiModelIdentity =>
+    variant ? { ...partial, variant } : partial;
+
+  const deepseek = text.match(
+    /deepseek[-_\s]*v(\d+)(?:[-_\s]+(pro|flash))?(?:[-_\s]+(\d{4}))?/,
+  );
+  if (deepseek && /qwen/.test(text)) {
+    const version = parseVersionParts(deepseek[1]);
+    if (deepseek[3]) version.push(Number.parseInt(deepseek[3], 10));
+    return identity({
+      family: "qwen-deepseek",
+      version,
+      tier: deepseek[2] ?? "pro",
+    });
+  }
+
+  if (/(?:^|[-\s:])glm(?:[-\s:]|$)/.test(text) || /qwen-glm/.test(id)) {
+    const glmVersion = text.match(/glm[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "glm",
+      version: parseVersionParts(glmVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])qwen(?:[-\s:]|$)/.test(text)) {
+    const qwenVersion = text.match(/qwen[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    const tierMatch = text.match(/\b(max|flash|plus)\b/);
+    return identity({
+      family: "qwen",
+      version: parseVersionParts(qwenVersion?.[1]),
+      tier: tierMatch?.[1],
+    });
+  }
+
+  if (
+    /kimi/.test(text) ||
+    /(?:^|[\s/_-])k\d/.test(id) ||
+    /(?:^|[\s/_-])k\d/.test(text)
+  ) {
+    const kimiVersion =
+      text.match(/(?:kimi[\s._-]*k|\/k)(\d+(?:[.\-]\d+)*)/) ??
+      text.match(/(?:^|[\s/_-])k(\d+(?:[.\-]\d+)*)/);
+    let version = parseVersionParts(kimiVersion?.[1]);
+    if (version.length === 1 && version[0] === 2) version = [2, 7];
+    return identity({ family: "kimi", version });
+  }
+
+  if (/composer/.test(text)) {
+    const composerVersion = text.match(/composer[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "composer",
+      version: parseVersionParts(composerVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])grok(?:[-\s:]|$)/.test(text)) {
+    const grokVersion = text.match(/grok[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "grok",
+      version: parseVersionParts(grokVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])fable(?:[-\s:]|$)/.test(text)) {
+    const fableVersion = text.match(/fable[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "fable",
+      version: parseVersionParts(fableVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])opus(?:[-\s:]|$)/.test(text)) {
+    const opusVersion = text.match(/opus[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "opus",
+      version: parseVersionParts(opusVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])sonnet(?:[-\s:]|$)/.test(text)) {
+    const sonnetVersion = text.match(/sonnet[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "sonnet",
+      version: parseVersionParts(sonnetVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])haiku(?:[-\s:]|$)/.test(text)) {
+    const haikuVersion = text.match(/haiku[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "haiku",
+      version: parseVersionParts(haikuVersion?.[1]),
+    });
+  }
+
+  if (/(?:^|[-\s:])(?:gpt|codex)(?:[-\s:]|$)/.test(text) || /gpt/.test(id)) {
+    const gptVersion = text.match(/(?:gpt|codex)[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    const tierMatch = text.match(/\b(astra|sol|luna|terra|mini|nano)\b/);
+    return identity({
+      family: "gpt",
+      version: parseVersionParts(gptVersion?.[1]),
+      tier: tierMatch?.[1],
+    });
+  }
+
+  if (/gemini/.test(text)) {
+    const geminiVersion = text.match(/gemini[\s._-]*(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "gemini",
+      version: parseVersionParts(geminiVersion?.[1]),
+    });
+  }
+
+  if (/deepseek/.test(text)) {
+    const dsVersion = text.match(/deepseek[\s._-]*v?(\d+(?:[.\-]\d+)*)/);
+    return identity({
+      family: "deepseek",
+      version: parseVersionParts(dsVersion?.[1]),
+    });
+  }
+
+  return undefined;
+}
+
+function latestVersionFor(key: string): number[] | undefined {
+  return latestGenerationByFamily.find((row) => row.key === key)?.version;
+}
+
+/**
+ * Replace the latest-generation registry with the max version of each
+ * family+tier seen in the catalogs the picker actually received.
+ */
+export function observeCukiiLatestGeneration(
+  models: Array<Pick<CukiiModelPresentation, "value" | "label">>,
+): void {
+  const max = new Map<string, number[]>();
+  for (const model of models) {
+    const parsed = parseCukiiModelIdentity(model);
+    if (!parsed || parsed.version.length === 0) continue;
+    const key = familyKey(parsed.family, parsed.tier);
+    const current = max.get(key);
+    if (!current || compareCukiiModelVersion(parsed.version, current) > 0) {
+      max.set(key, cloneVersion(parsed.version));
+    }
+  }
+  latestGenerationByFamily.splice(
+    0,
+    latestGenerationByFamily.length,
+    ...[...max.entries()].map(([key, version]) => ({ key, version })),
+  );
+}
+
 /**
  * Product-level capability tier shown as Cukii bottles in the model picker.
- * Only the curated top group ("Milky") carries bottles: 3 for the flagships,
- * 2 for the strong seconds, 1 for the remaining curated routes. Every other
- * model rates 0 and renders no bottles at all.
+ * Only the curated top group ("Milky") carries bottles, and only the latest
+ * known generation of that family. Every other model rates 0.
  */
 export function cukiiCapabilityRating(
   model: Pick<CukiiModelPresentation, "value" | "label">,
 ): 0 | 1 | 2 | 3 {
-  const stableId = model.value.toLowerCase().replace(/^cursor:/, "");
-  const fallbackLabel = model.label.toLowerCase();
-  const matches = (pattern: RegExp) =>
-    pattern.test(stableId) || pattern.test(fallbackLabel);
-
-  if (
-    matches(/gpt[-\s]?6[-\s]?astra/) ||
-    matches(/fable[-\s]?5[.-]1/) ||
-    matches(/qwen[-\s]?3[.-]8[-\s]max/)
-  ) {
-    return 3;
-  }
-  // Opus earns its bottles as the current generation only: Cursor also resells
-  // Opus 4.5-4.8, and a superseded generation is not a Milky route. Kimi K3 is
-  // rated, but its quota-saving K3-256K sibling is not.
-  if (
-    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]sol/) ||
-    matches(/(?:^|[-\s.])opus[-\s.]?5(?![\d.])/) ||
-    (matches(/kimi[-\s]?k3/) && !matches(/256k?(?:[-\s.]|$)/))
-  ) {
-    return 2;
-  }
-  if (
-    matches(/(?:gpt|codex)[-\s]?5[.-]6[-\s]terra/) ||
-    matches(/grok[-\s]?4[.-]6/) ||
-    matches(/composer[-\s]?2[.-]5/) ||
-    matches(/qwen[-\s]?deepseek[-\s]?v4[-\s]?pro[-\s]?0813/)
-  ) {
-    return 1;
-  }
-  return 0;
+  const parsed = parseCukiiModelIdentity(model);
+  if (!parsed) return 0;
+  if (parsed.variant === "256k") return 0;
+  const key = familyKey(parsed.family, parsed.tier);
+  const tierRating = CUKII_FAMILY_TIER_RATING[key];
+  if (!tierRating) return 0;
+  const latest = latestVersionFor(key);
+  if (!latest) return 0;
+  if (compareCukiiModelVersion(parsed.version, latest) !== 0) return 0;
+  return tierRating;
 }
 
 /**

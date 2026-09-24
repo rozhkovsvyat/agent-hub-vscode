@@ -128,6 +128,7 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       label: "Anthropic",
       models: [
         { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
+        { value: "opus-5-5", label: "Opus 5.5", contextWindowLabel: "1M" },
         { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
         { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
         { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
@@ -142,6 +143,21 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       id: "codex",
       label: "OpenAI",
       models: [
+        {
+          value: "codex:gpt-6-astra",
+          label: "GPT-6 Astra",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-sol",
+          label: "GPT-6 Sol",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-luna",
+          label: "GPT-6 Luna",
+          contextWindowLabel: "272K",
+        },
         {
           value: "codex-5-6-sol",
           label: "GPT-5.6 Sol",

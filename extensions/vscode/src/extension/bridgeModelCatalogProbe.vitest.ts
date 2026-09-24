@@ -86,14 +86,25 @@ describe("Claude catalog refresh probe", () => {
     const catalog = await listBrokerModelCatalog();
     const values = claudeModels(catalog).map((model) => model.value);
     expect(values).not.toContain("fable-5-1");
+    expect(values).not.toContain("opus-5-5");
     expect(values).toContain("opus-5");
   });
 
   it("surfaces Fable 5.1 once the installed CLI reaches its minimum build", async () => {
     answerClaudeVersion("2.1.258");
     const catalog = await listBrokerModelCatalog();
-    expect(claudeModels(catalog)).toContainEqual(
+    const models = claudeModels(catalog);
+    expect(models).toContainEqual(
       expect.objectContaining({ value: "fable-5-1", label: "Fable 5.1" }),
+    );
+    expect(models.map((model) => model.value)).not.toContain("opus-5-5");
+  });
+
+  it("surfaces Opus 5.5 once the installed CLI reaches its minimum build", async () => {
+    answerClaudeVersion("2.1.280");
+    const catalog = await listBrokerModelCatalog();
+    expect(claudeModels(catalog)).toContainEqual(
+      expect.objectContaining({ value: "opus-5-5", label: "Opus 5.5" }),
     );
   });
 
