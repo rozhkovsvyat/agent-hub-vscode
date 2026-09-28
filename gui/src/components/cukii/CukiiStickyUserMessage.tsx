@@ -8,47 +8,37 @@ import {
 } from "react";
 
 export const CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX = 20;
-/** The transcript's leading spacer is 20px. A viewport-filling prompt is
- * already pinned in practice before that spacer has scrolled away. */
-export const STICKY_EDGE_SLACK_PX = 32;
+/** A row counts as pinned while its painted top sits on the scrollport edge.
+ * Rows displaced upward by a newer sticky turn report a negative top and
+ * remain pinned for fold purposes: they must leave the window folded. */
+export const STICKY_PIN_EDGE_PX = 1;
 
-type StickyCollapsePhase = "flow" | "collapsed";
-
-interface StickyCollapseGeometryArgs {
-  fullHeight: number;
-  hasReachedStickyEdge: boolean;
-}
-
-export function isStickyCollapseActive({
+export function isStickyRowPinned({
   rowTopFromScrollport,
-  fullHeight,
-  transcriptClientHeight,
   scrollTop,
 }: {
   rowTopFromScrollport: number;
-  fullHeight: number;
-  transcriptClientHeight: number;
   scrollTop: number;
 }): boolean {
-  if (rowTopFromScrollport <= 1 && scrollTop > 0) return true;
-  if (transcriptClientHeight <= 0) return false;
-  const dominatesViewport =
-    fullHeight >=
-    Math.max(
-      CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX * 4,
-      transcriptClientHeight * 0.4,
-    );
-  return dominatesViewport && rowTopFromScrollport < STICKY_EDGE_SLACK_PX;
+  return rowTopFromScrollport <= STICKY_PIN_EDGE_PX && scrollTop > 0;
 }
 
+/**
+ * The fold is a pure function of how far the transcript scrolled past the
+ * point where the row first touched the sticky edge: every consumed scroll
+ * pixel removes exactly one painted pixel, down to one line, and reversing
+ * the wheel restores them one by one. No binary phase, no time-based
+ * transition — the capsule cannot pop open or snap shut between frames.
+ */
 export function resolveStickyCollapseGeometry({
   fullHeight,
-  hasReachedStickyEdge,
-}: StickyCollapseGeometryArgs): {
-  phase: StickyCollapsePhase;
+  consumedScroll,
+}: {
+  fullHeight: number;
+  consumedScroll: number;
+}): {
   progress: number;
   visibleHeight: number;
-  flowHeight: number;
 } {
   const naturalHeight = Math.max(
     CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
@@ -56,19 +46,13 @@ export function resolveStickyCollapseGeometry({
   );
   const collapseDistance =
     naturalHeight - CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
-  if (!hasReachedStickyEdge || collapseDistance <= 0) {
-    return {
-      phase: "flow",
-      progress: 0,
-      visibleHeight: naturalHeight,
-      flowHeight: naturalHeight,
-    };
+  if (collapseDistance <= 0) {
+    return { progress: 0, visibleHeight: naturalHeight };
   }
+  const progress = Math.min(1, Math.max(0, consumedScroll / collapseDistance));
   return {
-    phase: "collapsed",
-    progress: 1,
-    visibleHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
-    flowHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
+    progress,
+    visibleHeight: naturalHeight - progress * collapseDistance,
   };
 }
 
@@ -80,10 +64,17 @@ interface CukiiStickyUserMessageProps {
 }
 
 /**
- * Long prompts fold to one line as soon as their row reaches the transcript
- * top and remain folded while a newer sticky turn displaces them upward.
- * Cukii keeps the fold toggle and delivery metadata in one compact MAX-style
- * footer so neither state creates a second toolbar row.
+ * Long prompts pin at the transcript top, then fold line by line as the
+ * reader scrolls past them and unfold symmetrically on reverse. A newer
+ * sticky turn displaces the row upward; because the fold is driven by scroll
+ * position alone, the displaced capsule keeps exactly the fold it had —
+ * closed unless the reader expanded it with the chevron. The chevron's
+ * expanded state is user-owned and is never reset by scroll.
+ *
+ * The row's document-flow height stays at the full measured size for the
+ * whole fold; only the painted clip (`--cukii-sticky-visible-height`) and the
+ * mask shrink. Flow changes are what triggered scroll anchoring and made the
+ * window jerk; scroll handlers here never write `scrollTop`.
  */
 export function CukiiStickyUserMessage({
   bubbleClassName,
@@ -158,6 +149,12 @@ export function CukiiStickyUserMessage({
     if (!content || !row || !transcript || !bubble) return;
 
     let stableFlowHeight = 0;
+    // Scroll position of the row's flow top. While the row moves with the
+    // document it equals scrollTop + rowTop; once pinned, the captured value
+    // freezes so progress measures the scroll consumed since the pin. Blink's
+    // painted sticky offset tracks live scrollTop, so re-deriving the origin
+    // from the pinned row would lock progress at zero.
+    let stickyStart: number | null = null;
     // Collapsing the inner ProseMirror to one row also makes Chromium report a
     // smaller `content.scrollHeight` on the next scroll/ResizeObserver tick.
     // That painted measurement is not the prompt's natural height: keep the
@@ -194,38 +191,40 @@ export function CukiiStickyUserMessage({
         naturalContentHeightRef.current,
         content.scrollHeight,
       );
-      const transcriptRect = transcript.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const rowTopFromScrollport = rowRect.top - transcriptRect.top;
-
       const fullHeight = naturalContentHeightRef.current;
       if (
         !isLongPrompt ||
         fullHeight <= CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX
       ) {
+        stickyStart = null;
         clearFold();
         return;
       }
 
-      // Collapse as soon as the row reaches the sticky edge, including the
-      // 20px leading spacer band. A previous row pushed above it by the next
-      // sticky prompt stays collapsed while it leaves the viewport instead of
-      // expanding into a large orange block. A viewport-filling prompt also
-      // folds at scrollTop 0 — otherwise it covers the rest of the turn.
-      const hasReachedStickyEdge = isStickyCollapseActive({
-        rowTopFromScrollport,
-        fullHeight,
-        transcriptClientHeight: transcript.clientHeight,
-        scrollTop: transcript.scrollTop,
-      });
+      const transcriptRect = transcript.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTopFromScrollport = rowRect.top - transcriptRect.top;
+      const scrollTop = transcript.scrollTop;
+
+      if (!isStickyRowPinned({ rowTopFromScrollport, scrollTop })) {
+        // Plain flow: the capsule paints at its natural height and the next
+        // pin inherits an exact fold origin. The user's expanded/collapsed
+        // choice is untouched — unpinning never flips it.
+        stickyStart = scrollTop + Math.max(0, rowTopFromScrollport);
+        clearFold();
+        return;
+      }
+      if (stickyStart === null) {
+        stickyStart = scrollTop + Math.max(0, rowTopFromScrollport);
+      }
+
       const geometry = resolveStickyCollapseGeometry({
         fullHeight,
-        hasReachedStickyEdge,
+        consumedScroll: scrollTop - stickyStart,
       });
-      const visibleHeight =
-        isExpandedRef.current || geometry.phase === "flow"
-          ? fullHeight
-          : geometry.visibleHeight;
+      const paintedVisibleHeight = isExpandedRef.current
+        ? fullHeight
+        : geometry.visibleHeight;
 
       const contentHeight = content.getBoundingClientRect().height;
       const bubbleOverhead = Math.max(
@@ -238,18 +237,18 @@ export function CukiiStickyUserMessage({
       const measuredFlowHeight =
         rowPaddingTop + rowPaddingBottom + bubbleOverhead + fullHeight;
       // Receipt layout can still change when the inline-fit observer runs.
-      // Never let that state edge shrink the uncollapsed document-flow box.
+      // The flow box never shrinks during the fold: keeping it at the full
+      // measurement is what makes the painted fold pixel-synchronous without
+      // triggering scroll anchoring.
       stableFlowHeight = Math.max(stableFlowHeight, measuredFlowHeight);
       const paintedRowHeight =
-        rowPaddingTop + rowPaddingBottom + bubbleOverhead + visibleHeight;
-      // Collapsed layout height must match the painted capsule. Keeping the
-      // expanded min-height after the fold is what left the huge empty gap
-      // between the sticky header and the next message.
-      const useCollapsedFlow =
-        geometry.phase === "collapsed" && !isExpandedRef.current;
+        rowPaddingTop +
+        rowPaddingBottom +
+        bubbleOverhead +
+        paintedVisibleHeight;
       row.style.setProperty(
         "--cukii-sticky-flow-height",
-        `${Math.ceil(useCollapsedFlow ? paintedRowHeight : stableFlowHeight)}px`,
+        `${Math.ceil(stableFlowHeight)}px`,
       );
       row.style.setProperty(
         "--cukii-sticky-mask-height",
@@ -260,7 +259,9 @@ export function CukiiStickyUserMessage({
         geometry.progress.toFixed(4),
       );
 
-      if (geometry.phase !== "flow" && !isExpandedRef.current) {
+      const folded = !isExpandedRef.current && geometry.progress > 0;
+      const fullyCollapsed = !isExpandedRef.current && geometry.progress >= 1;
+      if (folded) {
         content.dataset.cukiiScrollFolding = "true";
         content.style.setProperty(
           "--cukii-sticky-visible-height",
@@ -271,7 +272,7 @@ export function CukiiStickyUserMessage({
         content.style.removeProperty("--cukii-sticky-visible-height");
       }
 
-      const isCollapsible = geometry.phase !== "flow";
+      const isCollapsible = folded || isExpandedRef.current;
       if (isCollapsible) {
         if (bubble.dataset.cukiiCollapsible !== "true") {
           bubble.setAttribute("data-cukii-collapsible", "true");
@@ -279,13 +280,10 @@ export function CukiiStickyUserMessage({
       } else if (bubble.hasAttribute("data-cukii-collapsible")) {
         bubble.removeAttribute("data-cukii-collapsible");
       }
-      bubble.classList.toggle(
-        "cukii-user-bubble--collapsed",
-        geometry.phase === "collapsed" && !isExpandedRef.current,
-      );
+      bubble.classList.toggle("cukii-user-bubble--collapsed", fullyCollapsed);
       content.classList.toggle(
         "cukii-user-message-content--collapsed",
-        geometry.phase === "collapsed" && !isExpandedRef.current,
+        fullyCollapsed,
       );
       const toggle = bubble.querySelector<HTMLButtonElement>(
         ".cukii-user-fold-toggle",
@@ -303,10 +301,6 @@ export function CukiiStickyUserMessage({
         } else {
           toggle.removeAttribute("aria-label");
         }
-      }
-      if (geometry.phase === "flow" && isExpandedRef.current) {
-        isExpandedRef.current = false;
-        setIsExpanded(false);
       }
     };
 

@@ -2280,16 +2280,15 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
 }
 
-/* Once the capsule is folded, the row itself must shrink. min-height alone
-   kept the expanded document-flow box and left a gap the size of the original
-   prompt between the sticky header and the next turn. */
-.cukii-user-row--sticky[data-cukii-collapse-progress="1.0000"]:not(
-    :has([aria-expanded="true"])
-  ) {
-  height: var(--cukii-sticky-flow-height);
-  max-height: var(--cukii-sticky-flow-height);
-  overflow: hidden;
-}
+/* The fold is pixel-synchronous with scroll, so the row's document-flow box
+   stays at the full measured height for the entire fold: every consumed
+   scroll pixel removes exactly one painted pixel through
+   `--cukii-sticky-visible-height`, and the content below stays glued under
+   the capsule. Shrinking the flow box mid-fold is what used to trigger
+   scroll anchoring and made the window jerk, and keying terminal layout off
+   the string `data-cukii-collapse-progress="1.0000"` broke on any rounding
+   change. The attribute remains for debugging and tests; layout never reads
+   it. */
 
 /* The sticky mask must equal whatever actually paints behind the transcript.
    Naming a token twice is what kept breaking this: `sideBar-background` was
