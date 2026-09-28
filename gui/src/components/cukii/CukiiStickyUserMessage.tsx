@@ -67,6 +67,26 @@ export function resolveStickyFlowSpacerHeight({
   return Math.max(0, Math.ceil(stableFlowHeight - paintedRowHeight));
 }
 
+export function resolveStickyNaturalHeight({
+  measuredHeight,
+  previousHeight,
+  terminallyCollapsed,
+}: {
+  measuredHeight: number;
+  previousHeight: number;
+  terminallyCollapsed: boolean;
+}): number {
+  // At the terminal one-line state CSS also shrinks the ProseMirror itself,
+  // so its 20px scrollHeight is no longer a natural measurement. Preserve the
+  // last expanded value for that single state. Everywhere else the current
+  // measurement is authoritative: keeping the historical maximum makes a
+  // capsule remember an older, narrower layout and jump on the final reverse
+  // scroll pixel after the sidebar or window becomes wider.
+  return terminallyCollapsed
+    ? Math.max(CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX, previousHeight)
+    : Math.max(CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX, measuredHeight);
+}
+
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
   children: ReactNode;
@@ -111,10 +131,13 @@ export function CukiiStickyUserMessage({
     setIsExpanded(false);
     naturalContentHeightRef.current = 0;
     const measure = () => {
-      naturalContentHeightRef.current = Math.max(
-        naturalContentHeightRef.current,
-        content.scrollHeight,
-      );
+      naturalContentHeightRef.current = resolveStickyNaturalHeight({
+        measuredHeight: content.scrollHeight,
+        previousHeight: naturalContentHeightRef.current,
+        terminallyCollapsed: content.classList.contains(
+          "cukii-user-message-content--collapsed",
+        ),
+      });
       const next =
         naturalContentHeightRef.current >
         CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
@@ -181,10 +204,13 @@ export function CukiiStickyUserMessage({
     // That painted measurement is not the prompt's natural height: keep the
     // largest uncollapsed measurement for the lifetime of this message so the
     // fold cannot immediately clear itself after reaching one row.
-    naturalContentHeightRef.current = Math.max(
-      naturalContentHeightRef.current,
-      content.scrollHeight,
-    );
+    naturalContentHeightRef.current = resolveStickyNaturalHeight({
+      measuredHeight: content.scrollHeight,
+      previousHeight: naturalContentHeightRef.current,
+      terminallyCollapsed: content.classList.contains(
+        "cukii-user-message-content--collapsed",
+      ),
+    });
 
     const clearFold = () => {
       delete content.dataset.cukiiScrollFolding;
@@ -208,10 +234,13 @@ export function CukiiStickyUserMessage({
     };
 
     const syncFoldWithScroll = () => {
-      naturalContentHeightRef.current = Math.max(
-        naturalContentHeightRef.current,
-        content.scrollHeight,
-      );
+      naturalContentHeightRef.current = resolveStickyNaturalHeight({
+        measuredHeight: content.scrollHeight,
+        previousHeight: naturalContentHeightRef.current,
+        terminallyCollapsed: content.classList.contains(
+          "cukii-user-message-content--collapsed",
+        ),
+      });
       const fullHeight = naturalContentHeightRef.current;
       if (
         !isLongPrompt ||

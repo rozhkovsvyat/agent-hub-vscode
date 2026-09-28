@@ -8,6 +8,7 @@ import {
   isStickyRowPinned,
   resolveStickyCollapseGeometry,
   resolveStickyFlowSpacerHeight,
+  resolveStickyNaturalHeight,
 } from "../../../components/cukii/CukiiStickyUserMessage";
 import { Chat } from "../Chat";
 
@@ -154,6 +155,35 @@ test("folds line by line as scroll is consumed past the pin", () => {
   expect(
     resolveStickyCollapseGeometry({ fullHeight: 60, consumedScroll: 40 }),
   ).toEqual({ progress: 1, visibleHeight: 20 });
+});
+
+test("reflows to the current expanded height but ignores the terminal 20px clip", () => {
+  expect(
+    resolveStickyNaturalHeight({
+      measuredHeight: 449,
+      previousHeight: 0,
+      terminallyCollapsed: false,
+    }),
+  ).toBe(449);
+  // The owner widened the window while the capsule was not terminally folded.
+  // Historical-max logic kept 449 here and made reverse scroll overshoot to
+  // 448px before jumping to the actual 332px expanded layout.
+  expect(
+    resolveStickyNaturalHeight({
+      measuredHeight: 332,
+      previousHeight: 449,
+      terminallyCollapsed: false,
+    }),
+  ).toBe(332);
+  // Once CSS has reduced the real descendant to one row, keep that fresh
+  // expanded baseline until the first reverse pixel removes the terminal class.
+  expect(
+    resolveStickyNaturalHeight({
+      measuredHeight: 20,
+      previousHeight: 332,
+      terminallyCollapsed: true,
+    }),
+  ).toBe(332);
 });
 
 test("pins a row only while its painted top sits on the sticky edge (ID-234)", () => {
