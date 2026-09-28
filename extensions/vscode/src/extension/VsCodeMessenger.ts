@@ -73,7 +73,10 @@ import {
 import type { ClaudePermissionBroker } from "@cukii/vendor-bridge";
 import { exportAutocompactForHarness } from "./cukiiAutocompactExport";
 import { cukiiSessionAttention } from "./cukiiSessionAttention";
-import { listBrokerModelCatalog } from "@cukii/vendor-bridge";
+import {
+  listBrokerModelCatalog,
+  resetClaudeCatalogProbeCache,
+} from "@cukii/vendor-bridge";
 import {
   cancelVoiceRecording,
   resolveWhisperTranscribeLanguage,
@@ -122,8 +125,20 @@ import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
 } from "./cukiiMemoryAccount";
-import { runVendorInstallProcess } from "@cukii/vendor-bridge";
-import { vendorSpawnEnv } from "@cukii/vendor-bridge";
+import {
+  CUKII_MANAGED_AUTO_UPDATE_VENDORS,
+  managedVendorAutoUpdateSpec,
+  runVendorInstallProcess,
+  vendorSpawnEnv,
+} from "@cukii/vendor-bridge";
+import {
+  VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS,
+  VENDOR_CLI_UPDATE_IDLE_RETRY_MS,
+  VENDOR_CLI_UPDATE_START_DELAY_MS,
+  VENDOR_CLI_UPDATE_STATE_KEY,
+  type VendorCliUpdateState,
+  vendorCliUpdateIsDue,
+} from "./vendorCliAutoUpdate";
 
 type ToIdeOrWebviewFromCoreProtocol = ToIdeFromCoreProtocol &
   ToWebviewFromCoreProtocol;
@@ -178,6 +193,9 @@ type OwnedPermissionBroker = {
 export class VsCodeMessenger {
   private readonly usageLog: vscode.OutputChannel;
   private readonly usagePoller: VendorUsagePoller;
+  private vendorCliUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+  private vendorCliUpdateRun: Promise<void> | undefined;
+  private vendorCliUpdaterDisposed = false;
   /** Brokers are scoped to the exact webview protocol that created the run. */
   private readonly claudePermissionBrokers = new Map<
     VsCodeWebviewProtocol,
@@ -220,6 +238,95 @@ export class VsCodeMessenger {
           }`,
         );
       });
+  }
+
+  private scheduleManagedVendorCliUpdates(
+    delayMs = VENDOR_CLI_UPDATE_START_DELAY_MS,
+  ): void {
+    if (this.vendorCliUpdaterDisposed || this.vendorCliUpdateTimer) return;
+    this.vendorCliUpdateTimer = setTimeout(() => {
+      this.vendorCliUpdateTimer = undefined;
+      const run = this.updateManagedVendorClis()
+        .catch((error) => {
+          this.usageLog.appendLine(
+            `[${new Date().toISOString()}] [cli-updater] unexpected failure: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          this.scheduleManagedVendorCliUpdates(
+            VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS,
+          );
+        })
+        .finally(() => {
+          if (this.vendorCliUpdateRun === run) {
+            this.vendorCliUpdateRun = undefined;
+          }
+        });
+      this.vendorCliUpdateRun = run;
+    }, delayMs);
+    this.vendorCliUpdateTimer.unref?.();
+  }
+
+  private async updateManagedVendorClis(): Promise<void> {
+    if (this.vendorCliUpdaterDisposed) return;
+    if (this.bridgeRunCandidates.size > 0) {
+      this.scheduleManagedVendorCliUpdates(VENDOR_CLI_UPDATE_IDLE_RETRY_MS);
+      return;
+    }
+
+    const state =
+      this.context.globalState.get<VendorCliUpdateState>(
+        VENDOR_CLI_UPDATE_STATE_KEY,
+      ) ?? {};
+    for (const vendor of CUKII_MANAGED_AUTO_UPDATE_VENDORS) {
+      if (this.vendorCliUpdaterDisposed) return;
+      if (this.bridgeRunCandidates.size > 0) {
+        this.scheduleManagedVendorCliUpdates(VENDOR_CLI_UPDATE_IDLE_RETRY_MS);
+        return;
+      }
+      const spec = managedVendorAutoUpdateSpec(vendor);
+      if (!spec) continue;
+      const now = Date.now();
+      const previous = state[vendor];
+      if (!vendorCliUpdateIsDue(previous, now)) continue;
+
+      state[vendor] = { attemptedAt: now };
+      await this.context.globalState.update(VENDOR_CLI_UPDATE_STATE_KEY, state);
+      this.usageLog.appendLine(
+        `[${new Date(now).toISOString()}] [cli-updater] ${vendor}: checking npm latest`,
+      );
+      let output = "";
+      const result = await runVendorInstallProcess(spec, {
+        env: vendorSpawnEnv(),
+        onOutput: (chunk) => {
+          output = `${output}${chunk}`.slice(-8_192);
+        },
+      });
+      if (result.exitCode === 0 && !result.error) {
+        state[vendor] = { attemptedAt: now, succeededAt: now };
+        await this.context.globalState.update(
+          VENDOR_CLI_UPDATE_STATE_KEY,
+          state,
+        );
+        clearBrokerVendorAccountCache();
+        if (vendor === "claude") resetClaudeCatalogProbeCache();
+        this.usageLog.appendLine(
+          `[${new Date().toISOString()}] [cli-updater] ${vendor}: updated successfully`,
+        );
+      } else {
+        const reason =
+          result.error?.message ??
+          `exit ${result.exitCode ?? "unknown"}${
+            result.signal ? ` (${result.signal})` : ""
+          }`;
+        this.usageLog.appendLine(
+          `[${new Date().toISOString()}] [cli-updater] ${vendor}: ${reason}${
+            output.trim() ? `\n${output.trim()}` : ""
+          }`,
+        );
+      }
+    }
+    this.scheduleManagedVendorCliUpdates(VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS);
   }
 
   private enqueueSessionRename<T>(sessionId: string, work: () => Promise<T>) {
@@ -560,6 +667,16 @@ export class VsCodeMessenger {
     });
     this.usagePoller.start();
     context.subscriptions.push({ dispose: () => this.usagePoller.stop() });
+    this.scheduleManagedVendorCliUpdates();
+    context.subscriptions.push({
+      dispose: () => {
+        this.vendorCliUpdaterDisposed = true;
+        if (this.vendorCliUpdateTimer) {
+          clearTimeout(this.vendorCliUpdateTimer);
+          this.vendorCliUpdateTimer = undefined;
+        }
+      },
+    });
     // Every discipline attempt lands here, success or failure. Without it the
     // only way to learn why a machine has no contract was to read the source.
     const memoryLog = vscode.window.createOutputChannel("Cukii · memory");
@@ -1540,8 +1657,15 @@ export class VsCodeMessenger {
         abortSignal: controller.signal,
       };
       this.registerBridgeCandidate(protocol, run);
+      // If the owner submits a message during the small startup update window,
+      // wait for the already-running package write to finish before spawning
+      // the CLI. Registering the candidate first makes the updater stop before
+      // the next vendor, so this wait is bounded by one installer rather than
+      // the whole vendor list.
+      const vendorCliUpdateRun = this.vendorCliUpdateRun;
       run.questionBroker.start();
       const stream = (async function* () {
+        await vendorCliUpdateRun;
         // Memory is additive and fail-open: an unavailable Box must not block
         // the vendor run, but a connected account is wired before the CLI is
         // spawned so its MCP discovery sees the current loopback relay.

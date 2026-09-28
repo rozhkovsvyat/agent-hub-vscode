@@ -41,3 +41,35 @@ describe("vendor usage API poller wiring", () => {
     );
   });
 });
+
+describe("vendor CLI auto-update wiring", () => {
+  it("never installs while a bridge run is active", () => {
+    const updaterAt = messengerSource.indexOf(
+      "private async updateManagedVendorClis",
+    );
+    const updaterEnd = messengerSource.indexOf(
+      "private enqueueSessionRename",
+      updaterAt,
+    );
+    const updater = messengerSource.slice(updaterAt, updaterEnd);
+
+    expect(updaterAt).toBeGreaterThan(-1);
+    expect(updater).toContain("this.bridgeRunCandidates.size > 0");
+    expect(updater.indexOf("this.bridgeRunCandidates.size > 0")).toBeLessThan(
+      updater.indexOf("runVendorInstallProcess(spec"),
+    );
+    expect(messengerSource).toContain(
+      "const vendorCliUpdateRun = this.vendorCliUpdateRun",
+    );
+    expect(messengerSource).toContain("await vendorCliUpdateRun");
+  });
+
+  it("uses only ownership-checked specs and invalidates model probes after updating", () => {
+    expect(messengerSource).toContain("managedVendorAutoUpdateSpec(vendor)");
+    expect(messengerSource).not.toContain("vendorInstallTerminalSpec(vendor)");
+    expect(messengerSource).toContain("clearBrokerVendorAccountCache()");
+    expect(messengerSource).toContain(
+      'if (vendor === "claude") resetClaudeCatalogProbeCache()',
+    );
+  });
+});
