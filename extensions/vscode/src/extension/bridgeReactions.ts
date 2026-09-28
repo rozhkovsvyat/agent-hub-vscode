@@ -36,7 +36,10 @@ type ReactionRecord = {
 export function bridgeReactionsRoot(): string {
   return (
     process.env.CUKII_REACTIONS_DIR ||
-    path.join(os.homedir(), ".continue", "cukii-reactions")
+    path.join(
+      process.env.CONTINUE_GLOBAL_DIR || path.join(os.homedir(), ".cukii"),
+      "cukii-reactions",
+    )
   );
 }
 

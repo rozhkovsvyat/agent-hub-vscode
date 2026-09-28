@@ -5,9 +5,16 @@
 import { setupCa } from "core/util/ca";
 import * as vscode from "vscode";
 
+import {
+  configureCukiiGlobalDir,
+  migrateLegacyCukiiGlobalDir,
+} from "./cukiiGlobalDir";
+
 export { default as buildTimestamp } from "./.buildTimestamp";
 
 async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
+  const globalDir = configureCukiiGlobalDir();
+  await migrateLegacyCukiiGlobalDir(globalDir);
   await setupCa();
   const { activateExtension } = await import("./activation/activate");
   return await activateExtension(context);

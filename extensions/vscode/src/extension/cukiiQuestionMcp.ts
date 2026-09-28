@@ -143,14 +143,20 @@ function normalizeQuestions(value: unknown): Question[] {
 function questionsRoot(): string {
   return (
     process.env.CUKII_QUESTIONS_DIR ||
-    path.join(os.homedir(), ".continue", "cukii-questions")
+    path.join(
+      process.env.CONTINUE_GLOBAL_DIR || path.join(os.homedir(), ".cukii"),
+      "cukii-questions",
+    )
   );
 }
 
 function inboxRoot(): string {
   return (
     process.env.CUKII_INBOX_DIR ||
-    path.join(os.homedir(), ".continue", "cukii-inbox")
+    path.join(
+      process.env.CONTINUE_GLOBAL_DIR || path.join(os.homedir(), ".cukii"),
+      "cukii-inbox",
+    )
   );
 }
 
@@ -381,7 +387,10 @@ async function brokerInboxAck(argumentsValue: unknown) {
 export function reactionsRoot(): string {
   return (
     process.env.CUKII_REACTIONS_DIR ||
-    path.join(os.homedir(), ".continue", "cukii-reactions")
+    path.join(
+      process.env.CONTINUE_GLOBAL_DIR || path.join(os.homedir(), ".cukii"),
+      "cukii-reactions",
+    )
   );
 }
 

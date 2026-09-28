@@ -75,7 +75,10 @@ function validQuestions(
 export function bridgeQuestionsRoot(): string {
   return (
     process.env.CUKII_QUESTIONS_DIR ||
-    path.join(os.homedir(), ".continue", "cukii-questions")
+    path.join(
+      process.env.CONTINUE_GLOBAL_DIR || path.join(os.homedir(), ".cukii"),
+      "cukii-questions",
+    )
   );
 }
 
