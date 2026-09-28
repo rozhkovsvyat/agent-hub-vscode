@@ -14,13 +14,16 @@ import {
 export const CUKII_MEMORY_MCP_NAME = "cukii-memory";
 
 export type CukiiMemoryProxyDescriptor = {
+  endpoint: string;
   proxyPath: string;
   nodePath: string;
 };
 
-export type CukiiMemoryRelayDescriptor = CukiiMemoryProxyDescriptor & {
+export type CukiiMemoryRelayDescriptor = {
   url: string;
   capability: string;
+  proxyPath: string;
+  nodePath: string;
 };
 
 type MemoryMcpOptions = {
@@ -154,9 +157,13 @@ function isManagedTomlConfig(body: string): boolean {
   const block = tomlMemoryBlock(body);
   return Boolean(
     block &&
-      block.includes("cukiiMemoryProxy.js") &&
-      (block.includes("CUKII_MEMORY_MANAGED") ||
-        block.includes("CUKII_MEMORY_RELAY_URL")),
+      ((block.includes("cukiiMemoryProxy.js") &&
+        (block.includes("CUKII_MEMORY_MANAGED") ||
+          block.includes("CUKII_MEMORY_RELAY_URL"))) ||
+        (/^\s*url\s*=\s*["'][^"']+["']\s*$/m.test(block) &&
+          /^\s*bearer_token_env_var\s*=\s*["']CUKII_MEMORY_RELAY_TOKEN["']\s*$/m.test(
+            block,
+          ))),
   );
 }
 
@@ -234,6 +241,11 @@ function configureCodex(
   descriptor: CukiiMemoryProxyDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
+  // Codex intentionally filters the environment inherited by stdio MCP
+  // children. The Cukii vendor process therefore sees the short-lived Box
+  // binding while a bundled proxy spawned below it does not. Let Codex own the
+  // HTTPS transport instead: the stable endpoint is non-secret, and the
+  // bearer is read from the per-run environment without ever entering TOML.
   return configureCliVendor(
     "codex",
     descriptor,
@@ -241,10 +253,10 @@ function configureCodex(
       "mcp",
       "add",
       CUKII_MEMORY_MCP_NAME,
-      ...commandEnvironmentArgs(descriptor),
-      "--",
-      descriptor.nodePath,
-      descriptor.proxyPath,
+      "--url",
+      descriptor.endpoint,
+      "--bearer-token-env-var",
+      "CUKII_MEMORY_RELAY_TOKEN",
     ],
     options,
   );

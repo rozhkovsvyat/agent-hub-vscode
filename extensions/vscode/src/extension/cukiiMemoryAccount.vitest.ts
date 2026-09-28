@@ -129,11 +129,12 @@ describe("Cukii Box account", () => {
     expect(store.values.get(CUKII_MEMORY_SECRET_KEY)).toContain(boxToken);
     expect(JSON.stringify(descriptors)).not.toContain(boxToken);
     expect(descriptors[0]).toEqual({
+      endpoint: "https://box.example.test/mcp",
       proxyPath: expect.stringMatching(/cukiiMemoryProxy\.js$/),
       nodePath: process.execPath,
     });
     expect(JSON.stringify(descriptors)).not.toContain("127.0.0.1");
-    expect(JSON.stringify(descriptors)).not.toContain(
+    expect(JSON.stringify(descriptors)).toContain(
       "https://box.example.test/mcp",
     );
     const launch = await controller.prepareForModel("gpt-5.6-sol");

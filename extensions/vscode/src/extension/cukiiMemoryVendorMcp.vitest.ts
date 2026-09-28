@@ -8,6 +8,7 @@ import {
   ensureCukiiMemoryVendorMcp,
   memoryMcpEntry,
   removeCukiiMemoryVendorMcp,
+  type CukiiMemoryProxyDescriptor,
   type CukiiMemoryRelayDescriptor,
 } from "./cukiiMemoryVendorMcp";
 
@@ -20,7 +21,8 @@ afterEach(() => {
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-memory-mcp-"));
   roots.push(root);
-  const descriptor: CukiiMemoryRelayDescriptor = {
+  const descriptor: CukiiMemoryRelayDescriptor & CukiiMemoryProxyDescriptor = {
+    endpoint: "https://box.example.test/mcp",
     url: "http://127.0.0.1:43123/mcp",
     capability: "local-capability-" + "x".repeat(40),
     proxyPath: path.join(root, "extension", "out", "cukiiMemoryProxy.js"),
@@ -75,25 +77,45 @@ describe("Cukii memory vendor MCP registration", () => {
     expect(removed.mcpServers["cukii-memory"]).toBeUndefined();
   });
 
-  it.each(["codex", "grok"] as const)(
-    "uses the official %s MCP command without the remote bearer",
-    (vendor) => {
-      const { root, descriptor } = fixture();
-      const spawn = vi.fn(() => ({ status: 0 })) as never;
-      expect(
-        ensureCukiiMemoryVendorMcp(vendor, descriptor, {
-          userHome: root,
-          spawn,
-        }),
-      ).toBe(true);
-      const calls = (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls;
-      const addArguments = calls.at(-1)?.[1] as string[];
-      expect(addArguments).toContain("cukii-memory");
-      expect(addArguments).toContain(descriptor.proxyPath);
-      expect(JSON.stringify(calls)).not.toContain(descriptor.url);
-      expect(JSON.stringify(calls)).not.toContain(descriptor.capability);
-    },
-  );
+  it("registers Codex through native HTTPS with an inherited bearer name", () => {
+    const { root, descriptor } = fixture();
+    const spawn = vi.fn(() => ({ status: 0 })) as never;
+    expect(
+      ensureCukiiMemoryVendorMcp("codex", descriptor, {
+        userHome: root,
+        spawn,
+      }),
+    ).toBe(true);
+    const calls = (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const addArguments = calls.at(-1)?.[1] as string[];
+    expect(addArguments).toEqual([
+      "mcp",
+      "add",
+      "cukii-memory",
+      "--url",
+      descriptor.endpoint,
+      "--bearer-token-env-var",
+      "CUKII_MEMORY_RELAY_TOKEN",
+    ]);
+    expect(JSON.stringify(calls)).not.toContain(descriptor.capability);
+  });
+
+  it("keeps Grok on the bundled proxy without a persisted endpoint or bearer", () => {
+    const { root, descriptor } = fixture();
+    const spawn = vi.fn(() => ({ status: 0 })) as never;
+    expect(
+      ensureCukiiMemoryVendorMcp("grok", descriptor, {
+        userHome: root,
+        spawn,
+      }),
+    ).toBe(true);
+    const calls = (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const addArguments = calls.at(-1)?.[1] as string[];
+    expect(addArguments).toContain("cukii-memory");
+    expect(addArguments).toContain(descriptor.proxyPath);
+    expect(JSON.stringify(calls)).not.toContain(descriptor.endpoint);
+    expect(JSON.stringify(calls)).not.toContain(descriptor.capability);
+  });
 
   it("uses the managed Codex path when a GUI-launched macOS host cannot see it on PATH", () => {
     const { root, descriptor } = fixture();

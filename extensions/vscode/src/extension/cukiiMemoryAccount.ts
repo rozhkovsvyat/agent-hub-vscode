@@ -655,6 +655,7 @@ export class CukiiMemoryAccountController {
     const connection = await this.connection();
     if (!connection) return undefined;
     return {
+      endpoint: connection.endpoint,
       proxyPath: path.join(this.extensionPath, "out", "cukiiMemoryProxy.js"),
       nodePath: this.nodePath,
     };
