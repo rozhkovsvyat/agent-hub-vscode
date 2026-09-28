@@ -486,12 +486,12 @@ test("collapses a restored long prompt that mounts already sticky", async () => 
     );
     expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
 
-    // Once fully folded, reverse scrolling cannot reopen the capsule. The
-    // explicit chevron is now the only opening control in sticky mode.
+    // Reverse scrolling restores the exact same pixels instead of keeping the
+    // row closed until it suddenly unpins at full height.
     transcriptScrollTop = 280;
     act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("0.5000");
+    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
   } finally {
     if (scrollHeightDescriptor) {
       Object.defineProperty(
@@ -697,6 +697,26 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
 
+    // Reversing by one pixel immediately restores one painted pixel. This is
+    // the regression pair for the old latch, which stayed at 20px throughout
+    // the reverse journey and then jumped to the full prompt when unpinned.
+    transcript.scrollTop = 219;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("0.9917");
+    expect(
+      content.style.getPropertyValue("--cukii-sticky-visible-height"),
+    ).toBe("21px");
+    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    expect(
+      flowSpacer.style.getPropertyValue("--cukii-sticky-flow-spacer-height"),
+    ).toBe("119px");
+
+    transcript.scrollTop = 220;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+
     const collapsedToggle = container.querySelector('[aria-label="Show more"]');
     const footer = bubble?.querySelector(".cukii-user-fold-footer");
     expect(footer).not.toBeNull();
@@ -729,8 +749,8 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
 
-    // Once the automatic fold reaches one row it latches. Reverse scrolling
-    // cannot reopen it behind the reader's back; the chevron owns that choice.
+    // The explicit Show less click above, unlike scroll-created closure,
+    // latches the one-line state until the chevron opens it again.
     transcript.scrollTop = 190;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
