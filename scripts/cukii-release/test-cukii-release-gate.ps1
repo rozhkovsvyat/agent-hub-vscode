@@ -163,6 +163,27 @@ try {
         [void](New-Item -ItemType Directory -Force -Path (Split-Path $destination))
         Copy-Item -LiteralPath $critical.FullName -Destination $destination -Force
     }
+    # sqlite3 stays external to the esbuild bundle. The carrier binding checks
+    # both its native binary and the JavaScript loader chain; seed the detached
+    # happy-path fixture with that complete staged runtime, not only *.node.
+    # Copying the roots recursively keeps this self-test aligned when one of
+    # those packages adds another loader file in a future dependency update.
+    foreach ($runtimeRoot in @(
+        'out\node_modules\sqlite3',
+        'out\node_modules\bindings',
+        'out\node_modules\file-uri-to-path'
+    )) {
+        $sourceRuntimeRoot = Join-Path $sourceExtension $runtimeRoot
+        if (-not (Test-Path -LiteralPath $sourceRuntimeRoot -PathType Container)) {
+            throw "source external runtime missing: $sourceRuntimeRoot"
+        }
+        foreach ($runtimeFile in @(Get-ChildItem -LiteralPath $sourceRuntimeRoot -Recurse -File)) {
+            $relative = [IO.Path]::GetRelativePath($sourceExtension, $runtimeFile.FullName)
+            $destination = Join-Path $fixtureWorktree ('extensions\vscode\' + $relative)
+            [void](New-Item -ItemType Directory -Force -Path (Split-Path $destination))
+            Copy-Item -LiteralPath $runtimeFile.FullName -Destination $destination -Force
+        }
+    }
 
     $happy = Invoke-GateEnvRetry $candidate $fixtureManifest
     Check ($happy.ExitCode -eq 0 -and $happy.Output -match 'ACTIVATION-SMOKE-PASS') 'real isolated activation passes' $happy.Output
@@ -312,4 +333,3 @@ setTimeout(() => {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     } finally { Close-CukiiReleaseLease $releaseLease }
 }
-
