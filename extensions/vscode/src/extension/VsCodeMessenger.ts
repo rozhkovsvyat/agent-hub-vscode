@@ -122,6 +122,7 @@ import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 import { BridgeQuestionBroker } from "./bridgeQuestions";
 import { BridgeReactionBroker } from "./bridgeReactions";
+import { terminalCloseAfterAuthGrace } from "./authTerminalGrace";
 import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
@@ -586,7 +587,9 @@ export class VsCodeMessenger {
       const terminalFinished =
         action === "install" && vendor !== "deepseek"
           ? closed.then(() => vendorInstallTerminalOutcome(vendor))
-          : closed;
+          : vendor !== "deepseek"
+            ? terminalCloseAfterAuthGrace(closed, controller.signal)
+            : closed;
       return {
         outcome:
           vendor !== "deepseek"
