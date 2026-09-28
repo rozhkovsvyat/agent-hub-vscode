@@ -43,7 +43,7 @@ describe("vendor usage API poller wiring", () => {
 });
 
 describe("vendor CLI auto-update wiring", () => {
-  it("never installs while a bridge run is active", () => {
+  it("never installs while a bridge run is active and bounds an in-flight install", () => {
     const updaterAt = messengerSource.indexOf(
       "private async updateManagedVendorClis",
     );
@@ -58,8 +58,9 @@ describe("vendor CLI auto-update wiring", () => {
     expect(updater.indexOf("this.bridgeRunCandidates.size > 0")).toBeLessThan(
       updater.indexOf("runVendorInstallProcess(spec"),
     );
+    expect(messengerSource).toContain("this.vendorCliUpdating === runVendor");
     expect(messengerSource).toContain(
-      "const vendorCliUpdateRun = this.vendorCliUpdateRun",
+      "timeoutMs: VENDOR_CLI_UPDATE_INSTALL_TIMEOUT_MS",
     );
     expect(messengerSource).toContain("await vendorCliUpdateRun");
   });

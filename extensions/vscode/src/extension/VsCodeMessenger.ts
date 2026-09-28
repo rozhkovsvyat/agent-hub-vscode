@@ -136,6 +136,7 @@ import {
 import {
   VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS,
   VENDOR_CLI_UPDATE_IDLE_RETRY_MS,
+  VENDOR_CLI_UPDATE_INSTALL_TIMEOUT_MS,
   VENDOR_CLI_UPDATE_START_DELAY_MS,
   VENDOR_CLI_UPDATE_STATE_KEY,
   type VendorCliUpdateState,
@@ -198,6 +199,7 @@ export class VsCodeMessenger {
   private readonly usagePoller: VendorUsagePoller;
   private vendorCliUpdateTimer: ReturnType<typeof setTimeout> | undefined;
   private vendorCliUpdateRun: Promise<void> | undefined;
+  private vendorCliUpdating: BrokerVendorId | undefined;
   private vendorCliUpdaterDisposed = false;
   /** Brokers are scoped to the exact webview protocol that created the run. */
   private readonly claudePermissionBrokers = new Map<
@@ -299,12 +301,21 @@ export class VsCodeMessenger {
         `[${new Date(now).toISOString()}] [cli-updater] ${vendor}: checking npm latest`,
       );
       let output = "";
-      const result = await runVendorInstallProcess(spec, {
-        env: vendorSpawnEnv(),
-        onOutput: (chunk) => {
-          output = `${output}${chunk}`.slice(-8_192);
-        },
-      });
+      this.vendorCliUpdating = vendor;
+      let result;
+      try {
+        result = await runVendorInstallProcess(spec, {
+          env: vendorSpawnEnv(),
+          timeoutMs: VENDOR_CLI_UPDATE_INSTALL_TIMEOUT_MS,
+          onOutput: (chunk) => {
+            output = `${output}${chunk}`.slice(-8_192);
+          },
+        });
+      } finally {
+        if (this.vendorCliUpdating === vendor) {
+          this.vendorCliUpdating = undefined;
+        }
+      }
       if (result.exitCode === 0 && !result.error) {
         state[vendor] = { attemptedAt: now, succeededAt: now };
         await this.context.globalState.update(
@@ -1689,7 +1700,11 @@ export class VsCodeMessenger {
       // the CLI. Registering the candidate first makes the updater stop before
       // the next vendor, so this wait is bounded by one installer rather than
       // the whole vendor list.
-      const vendorCliUpdateRun = this.vendorCliUpdateRun;
+      const runVendor = brokerVendorForModel(msg.data.brokerModel);
+      const vendorCliUpdateRun =
+        this.vendorCliUpdating === runVendor
+          ? this.vendorCliUpdateRun
+          : undefined;
       run.questionBroker.start();
       run.reactionBroker?.start();
       const stream = (async function* () {

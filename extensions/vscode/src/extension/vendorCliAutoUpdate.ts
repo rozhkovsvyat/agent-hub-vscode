@@ -5,6 +5,7 @@ export const VENDOR_CLI_UPDATE_SUCCESS_INTERVAL_MS = 24 * 60 * 60_000;
 export const VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS = 60 * 60_000;
 export const VENDOR_CLI_UPDATE_IDLE_RETRY_MS = 60_000;
 export const VENDOR_CLI_UPDATE_START_DELAY_MS = 5_000;
+export const VENDOR_CLI_UPDATE_INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 export type VendorCliUpdateReceipt = {
   attemptedAt: number;
