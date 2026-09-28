@@ -2,11 +2,24 @@ import { ILLM } from "core";
 import { isModelInstaller } from "core/llm";
 import * as vscode from "vscode";
 
+import { describeCukiiEnvironmentError } from "./environmentError";
+
 /**
  * @param error Handles common LLM errors. Currently handles Ollama and Lemonade-related errors.
  * @returns true if error is handled, false otherwise
  */
 export async function handleLLMError(error: unknown): Promise<boolean> {
+  const environmentError = describeCukiiEnvironmentError(error);
+  if (environmentError) {
+    void vscode.window
+      .showErrorMessage(environmentError, "View Logs")
+      .then((value) => {
+        if (value === "View Logs") {
+          void vscode.commands.executeCommand("continue.viewLogs");
+        }
+      });
+    return true;
+  }
   if (!error || !(error instanceof Error) || !error.message) {
     return false;
   }

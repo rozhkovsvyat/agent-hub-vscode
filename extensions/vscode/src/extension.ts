@@ -9,6 +9,7 @@ import {
   configureCukiiGlobalDir,
   migrateLegacyCukiiGlobalDir,
 } from "./cukiiGlobalDir";
+import { describeCukiiEnvironmentError } from "./util/environmentError";
 
 export { default as buildTimestamp } from "./.buildTimestamp";
 
@@ -23,9 +24,10 @@ async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
 export function activate(context: vscode.ExtensionContext) {
   return dynamicImportAndActivate(context).catch((e) => {
     console.log("Error activating extension: ", e);
+    const environmentError = describeCukiiEnvironmentError(e);
     vscode.window
       .showWarningMessage(
-        "Error activating the Cukii extension.",
+        environmentError ?? "Error activating the Cukii extension.",
         "View Logs",
         "Retry",
       )
