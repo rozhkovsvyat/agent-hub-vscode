@@ -126,6 +126,13 @@ export function processEditorContent(
           imageUrl: brokerMode
             ? {
                 url: originalUrl,
+                // The editor already owns a 1024px JPEG display copy. Native
+                // CLIs such as Qwen retain every expanded image in all later
+                // model requests; carrying full camera originals there made
+                // multi-photo turns fail repeatedly.
+                ...(p.attrs?.src && p.attrs.src !== originalUrl
+                  ? { transportPreviewUrl: p.attrs.src }
+                  : {}),
                 ...(inlineArgvUrl ? { inlineArgvUrl } : {}),
               }
             : { url: p.attrs?.src },

@@ -372,6 +372,8 @@ export type ImageMessagePart = {
     url: string;
     /** Alternate copy bounded for Grok's Windows inline-argv carrier. */
     inlineArgvUrl?: string;
+    /** Bounded visual copy for native transports that retain image context. */
+    transportPreviewUrl?: string;
   };
 };
 

@@ -276,7 +276,7 @@ describe("processEditorContent", () => {
     ]);
   });
 
-  test("keeps both the exact original and the Grok argv alternate in broker history", () => {
+  test("keeps original, 1024px transport preview, and Grok argv alternate in broker history", () => {
     const editorState: JSONContent = {
       type: "doc",
       content: [
@@ -299,6 +299,7 @@ describe("processEditorContent", () => {
       type: "imageUrl",
       imageUrl: {
         url: "data:image/png;base64,original-full-size",
+        transportPreviewUrl: "data:image/jpeg;base64,standard-1024",
         inlineArgvUrl: "data:image/jpeg;base64,grok-384",
       },
     });
@@ -341,6 +342,7 @@ describe("processEditorContent", () => {
       type: "imageUrl",
       imageUrl: {
         url: "data:image/png;base64,legacy-display-copy",
+        transportPreviewUrl: "data:image/jpeg;base64,legacy-384",
         inlineArgvUrl: "data:image/jpeg;base64,legacy-384",
       },
     });

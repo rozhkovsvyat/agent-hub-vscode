@@ -290,7 +290,11 @@ declare global {
   export interface MessagePart {
     type: "text" | "imageUrl";
     text?: string;
-    imageUrl?: { url: string; inlineArgvUrl?: string };
+    imageUrl?: {
+      url: string;
+      inlineArgvUrl?: string;
+      transportPreviewUrl?: string;
+    };
   }
   
   export type MessageContent = string | MessagePart[];
