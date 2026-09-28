@@ -69,15 +69,15 @@ describe("cukiiQuestionMcp", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("bounds the wait between one minute and two hours, defaulting to 30", () => {
-    expect(waitTimeoutMs({})).toBe(30 * 60_000);
+  it("waits indefinitely by default but bounds an explicit operator timeout", () => {
+    expect(waitTimeoutMs({})).toBe(Number.POSITIVE_INFINITY);
     expect(waitTimeoutMs({ CUKII_QUESTION_TIMEOUT_MS: "90000" })).toBe(90_000);
     expect(waitTimeoutMs({ CUKII_QUESTION_TIMEOUT_MS: "5000" })).toBe(60_000);
     expect(waitTimeoutMs({ CUKII_QUESTION_TIMEOUT_MS: "99999999999" })).toBe(
       2 * 60 * 60_000,
     );
     expect(waitTimeoutMs({ CUKII_QUESTION_TIMEOUT_MS: "abc" })).toBe(
-      30 * 60_000,
+      Number.POSITIVE_INFINITY,
     );
   });
 
@@ -151,6 +151,8 @@ describe("cukiiQuestionMcp", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "request_user_input",
       "react_to_user_message",
+      "broker_inbox",
+      "broker_inbox_ack",
     ]);
     expect(reactionsRoot()).toBe(path.join(root, "reactions"));
     const answered = await mcpResponseForMessage(
@@ -202,12 +204,46 @@ describe("cukiiQuestionMcp", () => {
       reacted: true,
       emoji: "❤️",
     });
+    const inbox = await mcpResponseForMessage(
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: { name: "broker_inbox", arguments: {} },
+      },
+      async () => ({}),
+      async () => ({}),
+      async () => ({ messages: [], batchSize: 0 }),
+    );
+    expect(JSON.parse((inbox?.result as any).content[0].text)).toEqual({
+      messages: [],
+      batchSize: 0,
+    });
+    const ack = await mcpResponseForMessage(
+      {
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: {
+          name: "broker_inbox_ack",
+          arguments: { messageIds: ["message-a"] },
+        },
+      },
+      async () => ({}),
+      async () => ({}),
+      async () => ({}),
+      async () => ({ acked: ["message-a"], ackedCount: 1 }),
+    );
+    expect(JSON.parse((ack?.result as any).content[0].text)).toEqual({
+      acked: ["message-a"],
+      ackedCount: 1,
+    });
     const unknown = await mcpResponseForMessage({
       jsonrpc: "2.0",
-      id: 6,
+      id: 8,
       method: "resources/list",
     });
-    expect(unknown).toMatchObject({ id: 6, error: { code: -32601 } });
+    expect(unknown).toMatchObject({ id: 8, error: { code: -32601 } });
     expect(
       await mcpResponseForMessage({
         jsonrpc: "2.0",

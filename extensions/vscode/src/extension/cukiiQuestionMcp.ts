@@ -7,14 +7,17 @@ import readline from "node:readline";
 import {
   processLineage,
   resolveRunBindingFromLineage,
+  type CukiiRunBinding,
 } from "@cukii/vendor-bridge";
 import { resolveWithBoundedRetry } from "./bindingRetry";
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
-const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60_000;
 const MIN_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WAIT_TIMEOUT_MS = 2 * 60 * 60_000;
 const POLL_INTERVAL_MS = 100;
+const INBOX_LEASE_MS = 24 * 60 * 60_000;
+const INBOX_LOCK_STALE_MS = 30_000;
+const INBOX_READER_ID = `mcp-js-${process.pid}-${randomUUID().replace(/-/g, "")}`;
 
 export const CUKII_REACTION_EMOJIS = [
   "❤️",
@@ -35,14 +38,45 @@ type Question = {
   options: { label: string; description: string }[];
 };
 
+type InboxRecord = {
+  id: string;
+  sessionId: string;
+  text: string;
+  createdMs: number;
+  status: "pending" | "read";
+  from?: string;
+  leaseOwner?: string;
+  leasePid?: number;
+  leaseProcessStartToken?: string;
+  leaseUntilMs?: number;
+  hookOfferedAtMs?: number;
+  hookOfferedCount?: number;
+  readAt?: string;
+};
+
+let cachedBinding: CukiiRunBinding | undefined;
+
+async function toolBinding(): Promise<CukiiRunBinding | undefined> {
+  if (cachedBinding) return cachedBinding;
+  const lineage = processLineage(process.ppid);
+  cachedBinding = await resolveWithBoundedRetry(() =>
+    resolveRunBindingFromLineage(lineage),
+  );
+  return cachedBinding;
+}
+
 /**
- * How long one tools/call waits for the user. Bounded so an agent never
- * hangs forever on a dead panel, long enough that a human can read and
- * answer; CUKII_QUESTION_TIMEOUT_MS tunes it within sane clamps.
+ * How long one tools/call waits for the user. By default it has no wall-clock
+ * expiry: the user asked for a question, so only an answer, explicit cancel,
+ * session replacement, or vendor disconnect may retire it. Operators can set
+ * CUKII_QUESTION_TIMEOUT_MS for a bounded unattended environment.
  */
 export function waitTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  if (env.CUKII_QUESTION_TIMEOUT_MS === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
   const raw = Number(env.CUKII_QUESTION_TIMEOUT_MS);
-  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_WAIT_TIMEOUT_MS;
+  if (!Number.isFinite(raw) || raw <= 0) return Number.POSITIVE_INFINITY;
   return Math.min(
     Math.max(Math.floor(raw), MIN_WAIT_TIMEOUT_MS),
     MAX_WAIT_TIMEOUT_MS,
@@ -111,6 +145,237 @@ function questionsRoot(): string {
     process.env.CUKII_QUESTIONS_DIR ||
     path.join(os.homedir(), ".continue", "cukii-questions")
   );
+}
+
+function inboxRoot(): string {
+  return (
+    process.env.CUKII_INBOX_DIR ||
+    path.join(os.homedir(), ".continue", "cukii-inbox")
+  );
+}
+
+function inboxSessionDir(sessionId: string): string | undefined {
+  return SAFE_SEGMENT.test(sessionId)
+    ? path.join(inboxRoot(), sessionId)
+    : undefined;
+}
+
+function readInboxRecords(
+  sessionId: string,
+): { file: string; record: InboxRecord }[] {
+  const directory = inboxSessionDir(sessionId);
+  if (!directory) return [];
+  try {
+    return fs
+      .readdirSync(directory)
+      .filter((name) => name.endsWith(".json"))
+      .sort()
+      .map((name) => {
+        const file = path.join(directory, name);
+        try {
+          const record = JSON.parse(
+            fs.readFileSync(file, "utf8"),
+          ) as InboxRecord;
+          if (
+            SAFE_SEGMENT.test(record?.id ?? "") &&
+            record?.sessionId === sessionId &&
+            typeof record?.text === "string" &&
+            Number.isSafeInteger(record?.createdMs) &&
+            (record?.status === "pending" || record?.status === "read")
+          ) {
+            return { file, record };
+          }
+        } catch {
+          // Torn or foreign record: the normal turn-end drain remains safe.
+        }
+        return undefined;
+      })
+      .filter((item): item is { file: string; record: InboxRecord } =>
+        Boolean(item),
+      )
+      .sort((left, right) => left.record.createdMs - right.record.createdMs);
+  } catch {
+    return [];
+  }
+}
+
+function replaceInboxRecord(file: string, record: InboxRecord): boolean {
+  return replaceRecord(file, JSON.stringify(record));
+}
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
+    0,
+    0,
+    milliseconds,
+  );
+}
+
+function withInboxLock<T>(sessionId: string, action: () => T): T {
+  const directory = inboxSessionDir(sessionId);
+  if (!directory) throw new Error("invalid Cukii inbox session");
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const lock = path.join(directory, ".claim-lock");
+  let acquired = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      fs.mkdirSync(lock);
+      acquired = true;
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > INBOX_LOCK_STALE_MS) {
+          fs.rmdirSync(lock);
+          continue;
+        }
+      } catch {
+        // The owner may have released or reclaimed it between calls.
+      }
+      sleepSync(10);
+    }
+  }
+  if (!acquired) throw new Error("Cukii inbox claim lock is busy");
+  try {
+    return action();
+  } finally {
+    try {
+      fs.rmdirSync(lock);
+    } catch {
+      // A crashed/reclaimed lock must not cause a second failure.
+    }
+  }
+}
+
+function liveLease(record: InboxRecord, now: number): boolean {
+  if (
+    !Number.isSafeInteger(record.leasePid) ||
+    (record.leasePid ?? 0) <= 0 ||
+    !record.leaseProcessStartToken ||
+    (record.leaseUntilMs ?? 0) <= now
+  ) {
+    return false;
+  }
+  const snapshot = processLineage(record.leasePid as number)[0];
+  return snapshot?.startToken === record.leaseProcessStartToken;
+}
+
+function ownProcessStartToken(): string | undefined {
+  return processLineage(process.pid)[0]?.startToken;
+}
+
+async function brokerInbox(argumentsValue: unknown) {
+  const binding = await toolBinding();
+  if (!binding) {
+    return {
+      messages: [],
+      batchSize: 0,
+      note: "Cukii run binding unavailable; live inbox is unavailable",
+    };
+  }
+  const replayOutstanding =
+    (argumentsValue as { replayOutstanding?: unknown } | undefined)
+      ?.replayOutstanding === true;
+  const startToken = ownProcessStartToken();
+  if (!startToken) throw new Error("Cukii MCP reader identity unavailable");
+  const claimed = withInboxLock(binding.sessionId, () => {
+    const now = Date.now();
+    const result: InboxRecord[] = [];
+    for (const { file, record } of readInboxRecords(binding.sessionId)) {
+      if (record.status !== "pending") continue;
+      const leased = liveLease(record, now);
+      const owned = leased && record.leaseOwner === INBOX_READER_ID;
+      if (owned) {
+        if (replayOutstanding) result.push(record);
+        continue;
+      }
+      if (leased) continue;
+      if (record.hookOfferedAtMs !== undefined && !replayOutstanding) continue;
+      const updated: InboxRecord = {
+        ...record,
+        leaseOwner: INBOX_READER_ID,
+        leasePid: process.pid,
+        leaseProcessStartToken: startToken,
+        leaseUntilMs: now + INBOX_LEASE_MS,
+      };
+      delete updated.hookOfferedAtMs;
+      delete updated.hookOfferedCount;
+      if (replaceInboxRecord(file, updated)) result.push(updated);
+    }
+    return result;
+  });
+  const outstandingMessageIds = readInboxRecords(binding.sessionId)
+    .filter(
+      ({ record }) =>
+        record.status === "pending" &&
+        record.leaseOwner === INBOX_READER_ID &&
+        liveLease(record, Date.now()),
+    )
+    .map(({ record }) => record.id);
+  const messages = claimed.map((record) => ({
+    text: record.text,
+    messageId: record.id,
+    sentAtMs: record.createdMs,
+    from: record.from || "user",
+  }));
+  return {
+    messages,
+    batchSize: messages.length,
+    ackRequired: outstandingMessageIds.length > 0,
+    outstandingMessageIds,
+    replayedOutstanding: replayOutstanding,
+    ...(!messages.length && outstandingMessageIds.length
+      ? {
+          note: "Earlier text is not repeated; acknowledge outstandingMessageIds after processing.",
+        }
+      : {}),
+  };
+}
+
+async function brokerInboxAck(argumentsValue: unknown) {
+  const binding = await toolBinding();
+  if (!binding) {
+    return { acked: [], ackedCount: 0, note: "Cukii run binding unavailable" };
+  }
+  const rawIds = (argumentsValue as { messageIds?: unknown } | undefined)
+    ?.messageIds;
+  if (
+    !Array.isArray(rawIds) ||
+    rawIds.length < 1 ||
+    rawIds.length > 256 ||
+    rawIds.some((id) => typeof id !== "string" || !SAFE_SEGMENT.test(id))
+  ) {
+    throw new Error("broker_inbox_ack requires valid messageIds");
+  }
+  const wanted = new Set(rawIds as string[]);
+  const acked = withInboxLock(binding.sessionId, () => {
+    const result: string[] = [];
+    for (const { file, record } of readInboxRecords(binding.sessionId)) {
+      if (record.status !== "pending" || !wanted.has(record.id)) continue;
+      const offeredByHook = record.hookOfferedAtMs !== undefined;
+      if (
+        record.leaseOwner !== INBOX_READER_ID &&
+        !(record.leaseOwner === undefined && offeredByHook)
+      ) {
+        continue;
+      }
+      const updated: InboxRecord = {
+        ...record,
+        status: "read",
+        readAt: new Date().toISOString(),
+      };
+      delete updated.leaseOwner;
+      delete updated.leasePid;
+      delete updated.leaseProcessStartToken;
+      delete updated.leaseUntilMs;
+      delete updated.hookOfferedAtMs;
+      delete updated.hookOfferedCount;
+      if (replaceInboxRecord(file, updated)) result.push(record.id);
+    }
+    return result;
+  });
+  return { acked, ackedCount: acked.length };
 }
 
 export function reactionsRoot(): string {
@@ -196,7 +461,9 @@ export async function waitForAnswer(
     deps.sleep ??
     ((milliseconds: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
-  const deadline = now() + timeoutMs;
+  const deadline = Number.isFinite(timeoutMs)
+    ? now() + timeoutMs
+    : Number.POSITIVE_INFINITY;
   while (now() < deadline) {
     try {
       const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<
@@ -235,10 +502,7 @@ async function requestUserInput(argumentsValue: unknown) {
   // Capturing Windows ancestry can involve WMI, so do it once. The bounded
   // retry then polls only owner files while the Extension Host publishes the
   // binding; one slow OS snapshot cannot multiply into minutes of blocking.
-  const lineage = processLineage(process.ppid);
-  const binding = await resolveWithBoundedRetry(() =>
-    resolveRunBindingFromLineage(lineage),
-  );
+  const binding = await toolBinding();
   if (!binding)
     return { cancelled: true, reason: "Cukii run binding unavailable" };
   const questions = normalizeQuestions(
@@ -292,10 +556,7 @@ function normalizeReactionEmoji(argumentsValue: unknown): CukiiReactionEmoji {
  * means the request was durably queued, not that a stale/forged record won.
  */
 async function reactToUserMessage(argumentsValue: unknown) {
-  const lineage = processLineage(process.ppid);
-  const binding = await resolveWithBoundedRetry(() =>
-    resolveRunBindingFromLineage(lineage),
-  );
+  const binding = await toolBinding();
   if (!binding) {
     return { reacted: false, reason: "Cukii run binding unavailable" };
   }
@@ -381,6 +642,36 @@ const REACTION_TOOL = {
   },
 };
 
+const BROKER_INBOX_TOOL = {
+  name: "broker_inbox",
+  description:
+    "Return one FIFO batch containing every newly offered live user follow-up for this Cukii session. Text already returned to this live reader is not repeated unless replayOutstanding is true; acknowledge processed IDs with broker_inbox_ack.",
+  inputSchema: {
+    type: "object",
+    properties: { replayOutstanding: { type: "boolean", default: false } },
+    additionalProperties: false,
+  },
+};
+
+const BROKER_INBOX_ACK_TOOL = {
+  name: "broker_inbox_ack",
+  description:
+    "Acknowledge exact Cukii follow-up message IDs only after their whole delivered batch has been processed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      messageIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: 256,
+        items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" },
+      },
+    },
+    required: ["messageIds"],
+    additionalProperties: false,
+  },
+};
+
 export async function mcpResponseForMessage(
   message: unknown,
   callQuestionTool: (
@@ -389,6 +680,10 @@ export async function mcpResponseForMessage(
   callReactionTool: (
     argumentsValue: unknown,
   ) => Promise<unknown> = reactToUserMessage,
+  callInboxTool: (argumentsValue: unknown) => Promise<unknown> = brokerInbox,
+  callInboxAckTool: (
+    argumentsValue: unknown,
+  ) => Promise<unknown> = brokerInboxAck,
 ): Promise<Record<string, unknown> | undefined> {
   if (typeof message !== "object" || message === null) return undefined;
   const frame = message as Record<string, unknown>;
@@ -419,7 +714,14 @@ export async function mcpResponseForMessage(
     return {
       jsonrpc: "2.0",
       id,
-      result: { tools: [QUESTION_TOOL, REACTION_TOOL] },
+      result: {
+        tools: [
+          QUESTION_TOOL,
+          REACTION_TOOL,
+          BROKER_INBOX_TOOL,
+          BROKER_INBOX_ACK_TOOL,
+        ],
+      },
     };
   }
   if (method === "tools/call" && params.name === "request_user_input") {
@@ -461,6 +763,52 @@ export async function mcpResponseForMessage(
         id,
         result: {
           content: [{ type: "text", text: "Cukii reaction request rejected" }],
+          isError: true,
+        },
+      };
+    }
+  }
+  if (method === "tools/call" && params.name === "broker_inbox") {
+    try {
+      const result = await callInboxTool(params.arguments);
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          isError: false,
+        },
+      };
+    } catch {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: "Cukii inbox request rejected" }],
+          isError: true,
+        },
+      };
+    }
+  }
+  if (method === "tools/call" && params.name === "broker_inbox_ack") {
+    try {
+      const result = await callInboxAckTool(params.arguments);
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          isError: false,
+        },
+      };
+    } catch {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [
+            { type: "text", text: "Cukii inbox acknowledgement rejected" },
+          ],
           isError: true,
         },
       };

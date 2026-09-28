@@ -4,6 +4,7 @@ import type {
 } from "core/protocol/ideWebview";
 import {
   FormEvent,
+  PointerEvent as ReactPointerEvent,
   useContext,
   useEffect,
   useMemo,
@@ -39,11 +40,20 @@ export function CukiiUserQuestionPrompt() {
   const firstOptionRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [other, setOther] = useState<Record<string, string>>({});
+  const [position, setPosition] = useState<{ left: number; top: number }>();
+  const dragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    width: number;
+    height: number;
+  }>();
   pendingRef.current = pending;
 
   useEffect(() => {
     setSelected({});
     setOther({});
+    setPosition(undefined);
     queueMicrotask(() => firstOptionRef.current?.focus());
   }, [request?.runId, request?.requestId]);
 
@@ -122,11 +132,60 @@ export function CukiiUserQuestionPrompt() {
     if (answers) respond(request, { answers });
   };
 
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const sheet = event.currentTarget.closest(".cukii-user-question");
+    if (!(sheet instanceof HTMLElement)) return;
+    const rect = sheet.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  const drag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = dragRef.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const margin = 8;
+    setPosition({
+      left: Math.min(
+        Math.max(margin, event.clientX - state.offsetX),
+        Math.max(margin, window.innerWidth - state.width - margin),
+      ),
+      top: Math.min(
+        Math.max(margin, event.clientY - state.offsetY),
+        Math.max(margin, window.innerHeight - state.height - margin),
+      ),
+    });
+  };
+
+  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = undefined;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
   return (
     <form
       aria-label="User question"
       aria-modal="true"
       className="cukii-user-question"
+      style={
+        position
+          ? {
+              left: position.left,
+              top: position.top,
+              right: "auto",
+              bottom: "auto",
+              marginInline: 0,
+            }
+          : undefined
+      }
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -136,7 +195,13 @@ export function CukiiUserQuestionPrompt() {
       onSubmit={submit}
       role="dialog"
     >
-      <div className="cukii-user-question-title">
+      <div
+        className="cukii-user-question-title"
+        onPointerCancel={stopDrag}
+        onPointerDown={startDrag}
+        onPointerMove={drag}
+        onPointerUp={stopDrag}
+      >
         Cukii needs your input
         {request.questions.length > 1 && (
           <span className="cukii-user-question-count">

@@ -195,8 +195,7 @@ export class BridgeQuestionBroker {
     private readonly sessionId: string,
     private readonly runId: string,
     private readonly onRequest: (request: CukiiUserQuestionRequest) => void,
-    private readonly bindingReader: typeof readRunBindingForPid =
-      readRunBindingForPid,
+    private readonly bindingReader: typeof readRunBindingForPid = readRunBindingForPid,
     private readonly onWithdraw?: (withdrawn: {
       runId: string;
       requestId: string;
@@ -239,8 +238,7 @@ export class BridgeQuestionBroker {
         record.runId !== this.runId ||
         record.producerNonce !== this.binding.nonce ||
         record.createdMs < this.binding.createdMs ||
-        record.createdMs > now + 5_000 ||
-        now - record.createdMs > 30 * 60_000
+        record.createdMs > now + 5_000
       )
         continue;
       live.add(record.id);
@@ -271,7 +269,11 @@ export class BridgeQuestionBroker {
       if (live.has(id)) continue;
       this.pending.delete(id);
       this.notifiedMs.delete(id);
-      this.onWithdraw?.({ runId: this.runId, requestId: id, sessionId: this.sessionId });
+      this.onWithdraw?.({
+        runId: this.runId,
+        requestId: id,
+        sessionId: this.sessionId,
+      });
     }
   }
 

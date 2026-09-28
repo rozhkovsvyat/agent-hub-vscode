@@ -635,7 +635,10 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   right: 16px;
   bottom: 108px;
   left: 16px;
-  z-index: 2001;
+  /* Stay above transcript/sticky capsules (15/16), but below the composer
+     shell and every menu it owns (20+). The question remains usable without
+     swallowing +, slash or model-picker interactions. */
+  z-index: 18;
   box-sizing: border-box;
   width: auto;
   max-width: 680px;
@@ -658,6 +661,9 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   margin-bottom: 12px;
   font-size: 14px;
   font-weight: 650;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
 }
 
 .cukii-user-question-count {
