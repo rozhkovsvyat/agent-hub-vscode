@@ -6,6 +6,7 @@ import path from "node:path";
 import type { BrokerVendorId } from "core/protocol/ideWebview";
 
 import {
+  nativeCliCandidates,
   withOwnerFileLock,
   writeOwnerFileAtomic,
 } from "@cukii/vendor-bridge";
@@ -22,6 +23,7 @@ export type CukiiMemoryRelayDescriptor = {
 type MemoryMcpOptions = {
   userHome?: string;
   spawn?: typeof spawnSync;
+  platform?: NodeJS.Platform;
 };
 
 function home(options?: MemoryMcpOptions): string {
@@ -47,7 +49,9 @@ function stringParts(entry: { command?: unknown; args?: unknown }): string[] {
 
 function isCukiiMemoryProxyPath(file: string): boolean {
   const base = path.basename(file).toLowerCase();
-  return base === "cukiiMemoryProxy.js".toLowerCase() || base === "mcp_proxy.py";
+  return (
+    base === "cukiiMemoryProxy.js".toLowerCase() || base === "mcp_proxy.py"
+  );
 }
 
 function isManagedJsonEntry(value: unknown): boolean {
@@ -159,6 +163,17 @@ function configureCliVendor(
   const configPath = path.join(home(options), `.${vendor}`, "config.toml");
   return withOwnerFileLock(configPath, () => {
     const run = options?.spawn ?? spawnSync;
+    // GUI-launched VS Code on macOS does not inherit ~/.local/bin. Use the
+    // exact managed/native candidate already shared by install, auth and chat
+    // instead of silently failing `codex mcp add` through a bare PATH lookup.
+    const platform = options?.platform ?? process.platform;
+    const executable =
+      platform === "win32"
+        ? vendor
+        : (nativeCliCandidates(vendor, home(options), platform).find(
+            (candidate) =>
+              path.isAbsolute(candidate) && fs.existsSync(candidate),
+          ) ?? vendor);
     const before = fs.existsSync(configPath)
       ? fs.readFileSync(configPath, "utf8")
       : undefined;
@@ -169,13 +184,16 @@ function configureCliVendor(
         ? ["mcp", "remove", CUKII_MEMORY_MCP_NAME]
         : ["mcp", "remove", "-s", "user", CUKII_MEMORY_MCP_NAME];
     if (existing) {
-      const removed = run(vendor, removeArgs, {
+      const removed = run(executable, removeArgs, {
         timeout: 10_000,
         encoding: "utf8",
       });
       if (removed.status !== 0) return false;
     }
-    const added = run(vendor, addArgs, { timeout: 15_000, encoding: "utf8" });
+    const added = run(executable, addArgs, {
+      timeout: 15_000,
+      encoding: "utf8",
+    });
     if (added.status !== 0) {
       if (before !== undefined) {
         writeOwnerFileAtomic(configPath, before);

@@ -95,6 +95,25 @@ describe("Cukii memory vendor MCP registration", () => {
     },
   );
 
+  it("uses the managed Codex path when a GUI-launched macOS host cannot see it on PATH", () => {
+    const { root, descriptor } = fixture();
+    const managed = path.join(root, ".local", "bin", "codex");
+    fs.mkdirSync(path.dirname(managed), { recursive: true });
+    fs.writeFileSync(managed, "#!/bin/sh\n", "utf8");
+    const spawn = vi.fn(() => ({ status: 0 })) as never;
+
+    expect(
+      ensureCukiiMemoryVendorMcp("codex", descriptor, {
+        userHome: root,
+        spawn,
+        platform: "darwin",
+      }),
+    ).toBe(true);
+    expect(
+      (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0],
+    ).toBe(managed);
+  });
+
   it("leaves a torn owner JSON config byte-for-byte untouched", () => {
     const { root, descriptor } = fixture();
     const target = path.join(root, ".cursor", "mcp.json");
