@@ -14,6 +14,7 @@ import {
 } from "../slices/sessionSlice";
 import { setupStore } from "../store";
 import {
+  bridgeTurnNeedsColdStart,
   isSameTerminalError,
   streamBrokerBridgeInput,
 } from "./streamBrokerBridgeInput";
@@ -26,6 +27,44 @@ function messageWithId<T extends ChatMessage>(
 }
 
 describe("streamBrokerBridgeInput controls", () => {
+  it("cold-starts exactly the first turn after a model switch", () => {
+    const switched: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId({ role: "system", content: "" }, "switch"),
+        contextItems: [],
+        modelSwitch: { model: "kimi-k3", displayName: "Kimi K3" },
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "Continue our last discussion" },
+          "user",
+        ),
+        contextItems: [],
+      },
+    ];
+    expect(bridgeTurnNeedsColdStart(switched)).toBe(true);
+    expect(
+      bridgeTurnNeedsColdStart([
+        ...switched,
+        {
+          message: messageWithId(
+            { role: "assistant", content: "I have the shared context." },
+            "answer",
+          ),
+          contextItems: [],
+        },
+        {
+          message: messageWithId(
+            { role: "user", content: "And one more thing" },
+            "next",
+          ),
+          contextItems: [],
+        },
+      ]),
+    ).toBe(false);
+    expect(bridgeTurnNeedsColdStart([])).toBe(false);
+  });
+
   it("keeps the newer run active when this bridge request is superseded", async () => {
     const ideMessenger = new MockIdeMessenger();
     ideMessenger.streamRequest = vi.fn(async function* () {
@@ -815,6 +854,7 @@ describe("streamBrokerBridgeInput controls", () => {
     );
     expect(captured).toEqual([
       expect.objectContaining({
+        forceColdStart: true,
         messages: [
           expect.objectContaining({ role: "user", content: "Run it" }),
         ],

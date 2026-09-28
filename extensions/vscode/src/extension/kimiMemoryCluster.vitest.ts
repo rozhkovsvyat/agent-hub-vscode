@@ -8,25 +8,33 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // (git, tag v0.1.0); the source contracts below pin its shipped sources.
 const VENDOR_BRIDGE_SRC = path.join(
   __dirname,
-  "..", "..", "node_modules", "@cukii", "vendor-bridge", "src",
+  "..",
+  "..",
+  "node_modules",
+  "@cukii",
+  "vendor-bridge",
+  "src",
 );
 
 vi.mock("vscode", () => ({ workspace: { workspaceFolders: [] } }));
 // permissionCapabilities lives in the installed @cukii/vendor-bridge; mock
 // the real module id so the mock reaches both the package internals and
 // direct importers.
-vi.mock("../../node_modules/@cukii/vendor-bridge/src/permissionCapabilities", () => ({
-  cachedVendorPermissionCapabilities: (vendor: string) => ({
-    vendor,
-    supportedModes:
-      vendor === "codex"
-        ? ["bypass"]
-        : vendor === "deepseek"
-          ? []
-          : ["plan", "bypass"],
-    helpSource: "test-kimi-memory-cluster",
+vi.mock(
+  "../../node_modules/@cukii/vendor-bridge/src/permissionCapabilities",
+  () => ({
+    cachedVendorPermissionCapabilities: (vendor: string) => ({
+      vendor,
+      supportedModes:
+        vendor === "codex"
+          ? ["bypass"]
+          : vendor === "deepseek"
+            ? []
+            : ["plan", "bypass"],
+      helpSource: "test-kimi-memory-cluster",
+    }),
   }),
-}));
+);
 
 import {
   brokerMemoryDirective,
@@ -100,7 +108,9 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
     expect(route.args[route.args.indexOf("-p") + 1]).toBe(
       "continue from the stop",
     );
-    expect(route.args.join("\n")).not.toContain("old task with a long transcript");
+    expect(route.args.join("\n")).not.toContain(
+      "old task with a long transcript",
+    );
   });
 
   it("does not pass --session on a kimi cold start", () => {
@@ -113,18 +123,19 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
   it("feeds a remembered kimi id into the next native launch (511c222a)", () => {
     rememberVendorSession("cukii-1", "kimi-k3", KIMI_RESUME_ID);
     expect(nativeResumeIdForModel("cukii-1", "kimi-k3")).toBe(KIMI_RESUME_ID);
+    expect(nativeResumeIdForModel("cukii-1", "kimi-k3", true)).toBeUndefined();
     expect(nativeResumeIdForModel("cukii-1", "fable-5-1")).toBeUndefined();
     expect(nativeResumeIdForModel("cukii-1", "grok-4-6")).toBeUndefined();
   });
 
   it("treats kimi --session argv as a resume so a lost native id can cold-start", () => {
     expect(argvRequestsVendorResume(["--resume", "9252c6e5"])).toBe(true);
-    expect(argvRequestsVendorResume(["--session", KIMI_RESUME_ID, "-p", "go"])).toBe(
-      true,
-    );
-    expect(argvRequestsVendorResume(["-p", "go", "--output-format", "stream-json"])).toBe(
-      false,
-    );
+    expect(
+      argvRequestsVendorResume(["--session", KIMI_RESUME_ID, "-p", "go"]),
+    ).toBe(true);
+    expect(
+      argvRequestsVendorResume(["-p", "go", "--output-format", "stream-json"]),
+    ).toBe(false);
   });
 
   it("recognizes kimi 2.0 session-loss wording (511c222a)", () => {
@@ -144,9 +155,7 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
         content: `${MEMORY_FOOTER}Привет! Принял задачу.`,
       }) + "\n",
     );
-    expect(events).toEqual([
-      { kind: "text", text: "Привет! Принял задачу." },
-    ]);
+    expect(events).toEqual([{ kind: "text", text: "Привет! Принял задачу." }]);
   });
 
   it("drops a kimi assistant frame that is only the memory inject (c2584a34, 1c9dd37d)", () => {
@@ -191,7 +200,10 @@ describe("kimi memory cluster (511c222a / c2584a34 / 7ffde5c2 / 1c9dd37d)", () =
 
   it("keeps the streamBridgeChat resume gate open for kimi, not only Claude", () => {
     const source = fs
-      .readFileSync(path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"), "utf8")
+      .readFileSync(
+        path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
+        "utf8",
+      )
       .replace(/\r\n/g, "\n");
     const start = source.indexOf("const vendorResumeId");
     expect(start).toBeGreaterThan(-1);

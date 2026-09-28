@@ -456,6 +456,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       /** The follow-up above interrupted an in-flight turn because the vendor
        * cannot accept live steering. The broker must resume the prior task. */
       steerInterrupt?: boolean;
+      /** A model switch crossed a native-vendor boundary. Ignore any stale
+       * vendor resume id and carry the complete shared Cukii transcript. */
+      forceColdStart?: boolean;
     },
     AsyncGenerator<ChatMessage, PromptLog | CukiiBridgeStreamDisposition>,
   ];

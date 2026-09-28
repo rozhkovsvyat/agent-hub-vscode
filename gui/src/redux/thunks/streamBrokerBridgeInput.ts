@@ -26,6 +26,7 @@ import {
   setToolCallCalling,
   streamUpdate,
   updateToolCallOutput,
+  type ChatHistoryItemWithMessageId,
 } from "../slices/sessionSlice";
 import { RootState, ThunkApiType } from "../store";
 
@@ -189,6 +190,24 @@ function settleObservedToolCalls(
   }
 }
 
+/**
+ * A remembered native session contains only turns seen by that vendor. On the
+ * first request after a model switch it is stale by definition: intervening
+ * Cukii turns may belong to another vendor, so the shared transcript must be
+ * replayed once before native resume is safe again.
+ */
+export function bridgeTurnNeedsColdStart(
+  history: ChatHistoryItemWithMessageId[],
+): boolean {
+  const switchIndex = history.findLastIndex((item) =>
+    Boolean(item.modelSwitch),
+  );
+  if (switchIndex < 0) return false;
+  return !history
+    .slice(switchIndex + 1)
+    .some((item) => !item.modelSwitch && item.message.role === "assistant");
+}
+
 export const streamBrokerBridgeInput = createAsyncThunk<
   void,
   | {
@@ -242,6 +261,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     const brokerEffort = state.session.brokerEffort;
     const brokerSpeed = state.session.brokerSpeed;
     const brokerAutocompact = state.session.brokerAutocompact;
+    const forceColdStart = bridgeTurnNeedsColdStart(state.session.history);
     const thinkingEnabled = state.session.hasReasoningEnabled;
     const streamAborter = state.session.streamAborter;
     const initialUserReceiptId =
@@ -411,6 +431,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           queuedFollowUpMessageId,
           queuedFollowUpMessageIds,
           steerInterrupt,
+          forceColdStart,
         },
         streamAborter.signal,
       );
