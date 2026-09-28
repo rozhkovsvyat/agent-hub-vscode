@@ -7,11 +7,13 @@ const path = require("node:path");
 const test = require("node:test");
 const JSZip = require("jszip");
 
+const powerShellAvailable =
+  spawnSync("pwsh", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion"], {
+    stdio: "ignore",
+  }).status === 0;
+
 const { runChildOperation } = require("./child-operation");
-const {
-  copySqlite,
-  installAndCopySqlite,
-} = require("./download-copy-sqlite");
+const { copySqlite, installAndCopySqlite } = require("./download-copy-sqlite");
 const {
   assertRipgrepArchiveSignature,
   ripgrepExtractionPlan,
@@ -173,7 +175,9 @@ test("Windows ripgrep extraction bypasses a hostile Git Bash tar on PATH", async
 });
 
 test("ripgrep archives are rejected by signature before extraction", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-rg-signature-"));
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "cukii-rg-signature-"),
+  );
   const zipPath = path.join(tempRoot, "rg.zip");
   const gzipPath = path.join(tempRoot, "rg.tar.gz");
 
@@ -240,6 +244,30 @@ test("sqlite staging uses trusted local tar and rejects silent child exit", asyn
   }
 });
 
+test("sqlite3 stays external and its complete native runtime is packaged", () => {
+  const esbuildSource = fs.readFileSync(
+    path.join(__dirname, "esbuild.js"),
+    "utf8",
+  );
+  const prepackageSource = fs.readFileSync(
+    path.join(__dirname, "prepackage.js"),
+    "utf8",
+  );
+
+  assert.match(esbuildSource, /external:\s*\[[\s\S]*["']sqlite3["']/);
+  for (const runtimePath of [
+    "out/node_modules/sqlite3/lib/sqlite3.js",
+    "out/node_modules/sqlite3/build/Release/node_sqlite3.node",
+    "out/node_modules/bindings/bindings.js",
+    "out/node_modules/file-uri-to-path/index.js",
+  ]) {
+    assert.ok(
+      prepackageSource.includes(runtimePath),
+      `prepackage must carry ${runtimePath}`,
+    );
+  }
+});
+
 test("tag release packages, verifies, and publishes every supported target", () => {
   const workflow = fs.readFileSync(
     path.resolve(
@@ -277,7 +305,10 @@ test("tag release packages, verifies, and publishes every supported target", () 
   assert.match(workflow, /Get-AuthenticodeSignature/);
   assert.match(workflow, /test-cukii-vsix-activation\.ps1/);
   assert.match(workflow, /test-cukii-release-gate\.ps1/);
-  assert.match(workflow, /ACTIVATION-SMOKE-PASS|Activate packaged Windows carrier/);
+  assert.match(
+    workflow,
+    /ACTIVATION-SMOKE-PASS|Activate packaged Windows carrier/,
+  );
   assert.ok(
     workflow.indexOf("Activate packaged Windows carrier") <
       workflow.indexOf("Upload VSIX"),
@@ -291,10 +322,7 @@ test("tag release packages, verifies, and publishes every supported target", () 
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: read/);
   assert.doesNotMatch(workflow, /VSCE_PAT/);
-  assert.doesNotMatch(
-    workflow,
-    /uses:\s+[^\s#]+@(v\d+|main|master)(?:\s|$)/,
-  );
+  assert.doesNotMatch(workflow, /uses:\s+[^\s#]+@(v\d+|main|master)(?:\s|$)/);
   for (const target of [
     "win32-x64",
     "darwin-arm64",
@@ -648,7 +676,11 @@ test("skip-install mode rejects a hidden native dependency install", () => {
   );
 });
 
-test("carrier gate rejects empty and unrecognized native files", async () => {
+test("carrier gate rejects empty and unrecognized native files", async (t) => {
+  if (!powerShellAvailable) {
+    t.skip("pwsh is not installed on this host");
+    return;
+  }
   const tempRoot = fs.mkdtempSync(
     path.join(
       process.platform === "win32" && fs.existsSync("D:\\Scratch")

@@ -195,6 +195,11 @@ const esbuildConfig = {
     "esbuild",
     "onnxruntime-node",
     "sharp",
+    // sqlite3 resolves its native binding relative to its package root via
+    // `bindings`. Bundling that loader erases the real filename under modern
+    // Electron (`node:internal/modules/cjs/loader`) and activation aborts.
+    // Prepackage carries the JS wrapper and target-specific .node payload.
+    "sqlite3",
     "./xhr-sync-worker.js",
     "./voiceDictation",
     // jsdom's optional canvas backend. It is reached only after a

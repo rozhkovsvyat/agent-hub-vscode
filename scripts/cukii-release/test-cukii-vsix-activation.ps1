@@ -139,6 +139,13 @@ try {
         'extension/out/tree-sitter.wasm',
         'extension/out/xhr-sync-worker.js',
         'extension/out/build/Release/node_sqlite3.node',
+        'extension/out/node_modules/sqlite3/package.json',
+        'extension/out/node_modules/sqlite3/lib/sqlite3.js',
+        'extension/out/node_modules/sqlite3/build/Release/node_sqlite3.node',
+        'extension/out/node_modules/bindings/package.json',
+        'extension/out/node_modules/bindings/bindings.js',
+        'extension/out/node_modules/file-uri-to-path/package.json',
+        'extension/out/node_modules/file-uri-to-path/index.js',
         'extension/out/node_modules/@lancedb/vectordb-win32-x64-msvc/index.node',
         'extension/out/node_modules/@vscode/ripgrep/bin/rg.exe',
         'extension/out/node_modules/sharp/build/Release/sharp-win32-x64.node',
@@ -383,4 +390,3 @@ exports.activate = async function activate() {
         }
     } finally { Close-CukiiReleaseLease $releaseLease }
 }
-

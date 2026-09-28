@@ -348,7 +348,14 @@ void (async () => {
   });
 
   // Copy node_modules for pre-built binaries
-  const NODE_MODULES_TO_COPY = ["@lancedb", "@vscode/ripgrep", "workerpool"];
+  const NODE_MODULES_TO_COPY = [
+    "@lancedb",
+    "@vscode/ripgrep",
+    "workerpool",
+    "sqlite3",
+    "bindings",
+    "file-uri-to-path",
+  ];
 
   fs.mkdirSync("out/node_modules", { recursive: true });
 
@@ -376,6 +383,29 @@ void (async () => {
   );
 
   console.log(`[info] Copied ${NODE_MODULES_TO_COPY.join(", ")}`);
+
+  // npm may deliberately skip sqlite3's install script in the build shell.
+  // Use the target-specific binary already prepared in core, but place it
+  // under the externalized package root where `bindings` resolves it.
+  await new Promise((resolve, reject) => {
+    ncp(
+      path.join(__dirname, "../../../core/node_modules/sqlite3/build"),
+      path.join(__dirname, "../out/node_modules/sqlite3/build"),
+      { dereference: true },
+      (error) => {
+        if (error) {
+          console.error(
+            "[error] Error copying external sqlite3 binding",
+            error,
+          );
+          reject(error);
+        } else {
+          console.log("[info] Copied external sqlite3 binding");
+          resolve();
+        }
+      },
+    );
+  });
 
   if (packageDirName && expectedPackagePath) {
     const expectedOutPackagePath = path.join(
@@ -458,6 +488,13 @@ void (async () => {
     "out/xhr-sync-worker.js",
     // SQLite3 Node native module
     "out/build/Release/node_sqlite3.node",
+    "out/node_modules/sqlite3/package.json",
+    "out/node_modules/sqlite3/lib/sqlite3.js",
+    "out/node_modules/sqlite3/build/Release/node_sqlite3.node",
+    "out/node_modules/bindings/package.json",
+    "out/node_modules/bindings/bindings.js",
+    "out/node_modules/file-uri-to-path/package.json",
+    "out/node_modules/file-uri-to-path/index.js",
 
     // out/node_modules (to be accessed by extension.js)
     `out/node_modules/@vscode/ripgrep/bin/rg${exe}`,
