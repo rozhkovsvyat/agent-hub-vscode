@@ -13,8 +13,11 @@ import {
   PACKAGED_WHISPER_FILES,
   PACKAGED_WHISPER_REVISION,
   parseDirectShowAudioDevices,
+  parseAvFoundationAudioDevices,
+  parseMacOSDefaultAudioInput,
   requestRecorderQuit,
   selectDirectShowAudioDevice,
+  selectAvFoundationAudioDevice,
   startVoiceRecording,
   stopVoiceRecording,
   transcribeVoiceFile,
@@ -22,6 +25,7 @@ import {
   resolveWhisperTranscribeLanguage,
   verifyPackagedWhisperModel,
   voiceFfmpegExecutable,
+  voiceRecorderArgs,
   voiceRecordingStatus,
 } from "./voiceDictation";
 
@@ -190,6 +194,74 @@ describe("voice dictation runtime", () => {
         "Line (4- Steinberg UR22C)",
       ]),
     ).toBe("Line (4- Steinberg UR22C)");
+  });
+
+  it("extracts only AVFoundation audio devices and selects a physical microphone", () => {
+    const inventory = [
+      "[AVFoundation indev @ 0x1] AVFoundation video devices:",
+      "[AVFoundation indev @ 0x1] [0] FaceTime HD Camera",
+      "[AVFoundation indev @ 0x1] AVFoundation audio devices:",
+      "[AVFoundation indev @ 0x1] [0] BlackHole 2ch",
+      "[AVFoundation indev @ 0x1] [1] MacBook Air Microphone",
+    ].join("\n");
+    const devices = parseAvFoundationAudioDevices(inventory);
+    expect(devices).toEqual([
+      { id: "0", label: "BlackHole 2ch" },
+      { id: "1", label: "MacBook Air Microphone" },
+    ]);
+    expect(selectAvFoundationAudioDevice(devices)).toEqual({
+      id: "1",
+      label: "MacBook Air Microphone",
+    });
+    expect(selectAvFoundationAudioDevice(devices, "BlackHole 2ch")).toEqual({
+      id: "0",
+      label: "BlackHole 2ch",
+    });
+  });
+
+  it("reads the default macOS input selected by CoreAudio", () => {
+    expect(
+      parseMacOSDefaultAudioInput(
+        JSON.stringify({
+          SPAudioDataType: [
+            {
+              _items: [
+                { _name: "USB output" },
+                {
+                  _name: "MacBook Air Microphone",
+                  coreaudio_default_audio_input_device: "spaudio_yes",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    ).toBe("MacBook Air Microphone");
+    expect(parseMacOSDefaultAudioInput("not json")).toBeUndefined();
+  });
+
+  it("builds native AVFoundation capture argv without DirectShow flags", () => {
+    const args = voiceRecorderArgs(
+      {
+        id: "1",
+        label: "MacBook Air Microphone",
+        format: "avfoundation",
+      },
+      "/tmp/recording.wav",
+    );
+    expect(args).toContain("avfoundation");
+    expect(args).toContain(":1");
+    expect(args).not.toContain("dshow");
+    expect(args).not.toContain("-audio_buffer_size");
+    expect(args.slice(-7)).toEqual([
+      "16000",
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      "-y",
+      "/tmp/recording.wav",
+    ]);
   });
 
   it.each([
@@ -477,7 +549,7 @@ describe("voice dictation runtime", () => {
   });
 
   it.skipIf(!process.env.CUKII_VOICE_CAPTURE)(
-    "captures and cancels a real DirectShow microphone session",
+    "captures and cancels a real platform microphone session",
     async () => {
       const active = await startVoiceRecording();
       expect(active.device).toBeTruthy();

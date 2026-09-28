@@ -73,6 +73,7 @@ type Recording = {
   ownedDir: string;
   outputPath: string;
   device: string;
+  platform: NodeJS.Platform;
   exited?: { code: number | null; stderr: string };
   failure?: Error;
   durationTimer?: NodeJS.Timeout;
@@ -91,11 +92,18 @@ const terminalRecordings = new Map<
 let transcriberPromise: Promise<any> | undefined;
 
 type VoiceRecordingOptions = {
-  resolveDevice?: () => Promise<string>;
+  resolveDevice?: () => Promise<string | VoiceCaptureDevice>;
   spawnRecorder?: typeof spawn;
   startupDelayMs?: number;
   maxDurationMs?: number;
   tempDir?: string;
+  platform?: NodeJS.Platform;
+};
+
+export type VoiceCaptureDevice = {
+  id: string;
+  label: string;
+  format: "dshow" | "avfoundation";
 };
 
 export function verifyPackagedWhisperModel(modelDir = WHISPER_MODEL_ROOT): {
@@ -129,14 +137,95 @@ export function selectDirectShowAudioDevice(
   devices: string[],
 ): string | undefined {
   const softwareDevice =
-    /streaming|virtual|voicemeeter|vb[- ]?audio|cable|stereo mix|стерео микшер/i;
+    /streaming|virtual|voicemeeter|vb[- ]?audio|cable|stereo mix|стерео микшер|blackhole|soundflower|loopback/i;
   return devices.find((device) => !softwareDevice.test(device)) ?? devices[0];
 }
 
-async function audioDevice(): Promise<string> {
-  if (process.platform !== "win32") {
+export function parseAvFoundationAudioDevices(
+  stderr: string,
+): Array<{ id: string; label: string }> {
+  const devices: Array<{ id: string; label: string }> = [];
+  let inAudioSection = false;
+  for (const line of stderr.split(/\r?\n/u)) {
+    if (/AVFoundation audio devices:/iu.test(line)) {
+      inAudioSection = true;
+      continue;
+    }
+    if (/AVFoundation video devices:/iu.test(line)) {
+      inAudioSection = false;
+      continue;
+    }
+    if (!inAudioSection) continue;
+    const match = line.match(/\[(\d+)\]\s+(.+?)\s*$/u);
+    if (match) devices.push({ id: match[1], label: match[2] });
+  }
+  return devices;
+}
+
+export function selectAvFoundationAudioDevice(
+  devices: Array<{ id: string; label: string }>,
+  defaultInputLabel?: string,
+): { id: string; label: string } | undefined {
+  if (defaultInputLabel) {
+    const defaultDevice = devices.find(
+      (device) => device.label === defaultInputLabel,
+    );
+    if (defaultDevice) return defaultDevice;
+  }
+  const labels = devices.map((device) => device.label);
+  const selected = selectDirectShowAudioDevice(labels);
+  return devices.find((device) => device.label === selected) ?? devices[0];
+}
+
+export function parseMacOSDefaultAudioInput(
+  stdout: string,
+): string | undefined {
+  try {
+    const report = JSON.parse(stdout) as {
+      SPAudioDataType?: Array<{
+        _items?: Array<Record<string, unknown>>;
+      }>;
+    };
+    return report.SPAudioDataType?.flatMap((group) => group._items ?? []).find(
+      (device) =>
+        device.coreaudio_default_audio_input_device === "spaudio_yes" &&
+        typeof device._name === "string",
+    )?._name as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function voiceRecorderArgs(
+  device: VoiceCaptureDevice,
+  outputPath: string,
+): string[] {
+  const input =
+    device.format === "avfoundation"
+      ? ["-f", "avfoundation", "-i", `:${device.id}`]
+      : ["-f", "dshow", "-audio_buffer_size", "50", "-i", `audio=${device.id}`];
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...input,
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    "-y",
+    outputPath,
+  ];
+}
+
+async function audioDevice(
+  platform: NodeJS.Platform = process.platform,
+): Promise<VoiceCaptureDevice> {
+  if (platform !== "win32" && platform !== "darwin") {
     throw new Error(
-      "Voice input is currently available on Windows only. Cukii needs a platform recorder for this operating system.",
+      "Voice input is currently available on Windows and macOS only. Cukii needs a platform recorder for this operating system.",
     );
   }
   const ffmpeg = voiceFfmpegExecutable();
@@ -144,19 +233,63 @@ async function audioDevice(): Promise<string> {
   try {
     const result = await execFileAsync(
       ffmpeg,
-      ["-hide_banner", "-f", "dshow", "-list_devices", "true", "-i", "dummy"],
+      platform === "darwin"
+        ? [
+            "-hide_banner",
+            "-f",
+            "avfoundation",
+            "-list_devices",
+            "true",
+            "-i",
+            "",
+          ]
+        : [
+            "-hide_banner",
+            "-f",
+            "dshow",
+            "-list_devices",
+            "true",
+            "-i",
+            "dummy",
+          ],
       { windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024 },
     );
     stderr = String(result.stderr ?? "");
   } catch (error) {
     stderr = String((error as { stderr?: unknown }).stderr ?? "");
   }
+  if (platform === "darwin") {
+    let defaultInputLabel: string | undefined;
+    try {
+      const profile = await execFileAsync(
+        "/usr/sbin/system_profiler",
+        ["SPAudioDataType", "-json"],
+        { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
+      );
+      defaultInputLabel = parseMacOSDefaultAudioInput(
+        String(profile.stdout ?? ""),
+      );
+    } catch {
+      // AVFoundation inventory remains the authoritative fallback when the
+      // optional system profile cannot be queried.
+    }
+    const selected = selectAvFoundationAudioDevice(
+      parseAvFoundationAudioDevices(stderr),
+      defaultInputLabel,
+    );
+    if (!selected) {
+      throw new Error(
+        "No macOS recording device was found. Open System Settings → Privacy & Security → Microphone and allow Visual Studio Code/Cukii, then retry.",
+      );
+    }
+    return { ...selected, format: "avfoundation" };
+  }
   const devices = parseDirectShowAudioDevices(stderr);
   const selected = selectDirectShowAudioDevice(devices);
   if (!selected) {
     throw new Error("No Windows recording device was found.");
   }
-  return selected;
+  return { id: selected, label: selected, format: "dshow" };
 }
 
 async function waitForRecorderStart(
@@ -167,8 +300,19 @@ async function waitForRecorderStart(
   await new Promise((resolve) => setTimeout(resolve, startupDelayMs));
   if (isCancelled()) throw new Error("Voice recording was cancelled.");
   if (recording.exited) {
+    const stderr = recording.exited.stderr.trim();
+    if (
+      recording.platform === "darwin" &&
+      /(?:not authorized|operation not permitted|permission denied|failed to create av capture input|cannot open audio device)/iu.test(
+        stderr,
+      )
+    ) {
+      throw new Error(
+        "macOS denied microphone access. Open System Settings → Privacy & Security → Microphone, allow Visual Studio Code/Cukii, then retry.",
+      );
+    }
     throw new Error(
-      recording.exited.stderr.trim() ||
+      stderr ||
         `The recording device "${recording.device}" could not be opened.`,
     );
   }
@@ -196,7 +340,18 @@ export async function startVoiceRecording(
   let ownedDir: string | undefined;
   let cleanupOwnedDir: (() => void) | undefined;
   try {
-    const device = await (options.resolveDevice ?? audioDevice)();
+    const platform = options.platform ?? process.platform;
+    const resolvedDevice = await (
+      options.resolveDevice ?? (() => audioDevice(platform))
+    )();
+    const device: VoiceCaptureDevice =
+      typeof resolvedDevice === "string"
+        ? {
+            id: resolvedDevice,
+            label: resolvedDevice,
+            format: platform === "darwin" ? "avfoundation" : "dshow",
+          }
+        : resolvedDevice;
     if (cancelledStarts.delete(recordingId)) {
       throw new Error("Voice recording was cancelled.");
     }
@@ -211,32 +366,15 @@ export async function startVoiceRecording(
     const outputPath = path.join(ownedDir, "recording.wav");
     const child = (options.spawnRecorder ?? spawn)(
       voiceFfmpegExecutable(),
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "dshow",
-        "-audio_buffer_size",
-        "50",
-        "-i",
-        `audio=${device}`,
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        "-c:a",
-        "pcm_s16le",
-        "-y",
-        outputPath,
-      ],
+      voiceRecorderArgs(device, outputPath),
       { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] },
     );
     const recording: Recording = {
       process: child,
       ownedDir,
       outputPath,
-      device,
+      device: device.label,
+      platform,
       cleanupOwnedDir: cleanup,
     };
     let stderr = "";
@@ -264,7 +402,7 @@ export async function startVoiceRecording(
     if (cancelledStarts.delete(recordingId) || !recordings.has(recordingId)) {
       throw new Error("Voice recording was cancelled.");
     }
-    return { recordingId, device };
+    return { recordingId, device: device.label };
   } catch (error) {
     if (recordings.has(recordingId)) {
       await finalizeRecording(recordingId, "cancel");
@@ -290,9 +428,26 @@ async function stopRecorder(recording: Recording): Promise<void> {
   } catch (error) {
     quitError = error;
   }
-  if (!quitError && (await waitForProcessExit(recording, 5_000))) return;
-  if (!recording.exited) recording.process.kill();
-  if (!recording.exited && !(await waitForProcessExit(recording, 2_000))) {
+  const gracefulWaitMs = recording.platform === "darwin" ? 750 : 5_000;
+  if (!quitError && (await waitForProcessExit(recording, gracefulWaitMs))) {
+    return;
+  }
+  if (!recording.exited) {
+    recording.process.kill(
+      recording.platform === "darwin" ? "SIGINT" : "SIGTERM",
+    );
+  }
+  if (!recording.exited && (await waitForProcessExit(recording, 2_000))) {
+    if (quitError) throw quitError;
+    return;
+  }
+  if (!recording.exited) recording.process.kill("SIGTERM");
+  if (!recording.exited && (await waitForProcessExit(recording, 1_000))) {
+    if (quitError) throw quitError;
+    return;
+  }
+  if (!recording.exited) recording.process.kill("SIGKILL");
+  if (!recording.exited && !(await waitForProcessExit(recording, 1_000))) {
     throw new Error("The audio recorder did not stop after termination.");
   }
   if (quitError) throw quitError;
@@ -598,9 +753,7 @@ export function resolveWhisperTranscribeLanguage(
   return canonicalWhisperLanguage(source.vscodeLanguage);
 }
 
-function canonicalWhisperLanguage(
-  raw?: string | null,
-): string | undefined {
+function canonicalWhisperLanguage(raw?: string | null): string | undefined {
   if (!raw) return undefined;
   const normalized = raw.trim().toLowerCase().replace(/_/g, "-");
   if (
