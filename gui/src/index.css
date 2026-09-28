@@ -3151,7 +3151,9 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
   align-items: center;
   gap: 7px;
-  padding: 6px 8px 6px 0;
+  /* Keep the shell title off the card stroke. The old zero left inset made
+     every Bash/Shell label look clipped into the border. */
+  padding: 6px 8px;
   border: 0;
   border-bottom: 1px solid var(--vscode-commandCenter-inactiveBorder, #555555);
   background: transparent;
