@@ -8,6 +8,11 @@ export type CukiiChatSnapshot = {
   byteLength: number;
 };
 
+// A raster screenshot cannot display an unbounded transcript. Keeping a
+// generous text budget prevents a single hidden terminal/tool payload from
+// turning the self-contained SVG data URL into many megabytes.
+export const CUKII_SNAPSHOT_TEXT_BUDGET = 24 * 1024;
+
 /**
  * Every property the clone needs to lay itself out identically inside an SVG
  * foreignObject, where no stylesheet is available.
@@ -145,7 +150,33 @@ export function sanitizeCukiiSnapshotClone(root: HTMLElement): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const textNodes: Text[] = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
-  for (const node of textNodes) node.data = maskCukiiReportText(node.data);
+  let remainingText = CUKII_SNAPSHOT_TEXT_BUDGET;
+  for (const node of textNodes) {
+    if (remainingText <= 0) {
+      node.data = "";
+      continue;
+    }
+    const truncated = node.data.length > remainingText;
+    // Cut bulk text before the relatively expensive masking expressions. When
+    // cutting, discard a small boundary guard too, so a credential beginning
+    // at the edge cannot survive as an unmatched partial token.
+    const marker = "… [snapshot truncated]";
+    const sourceText = truncated
+      ? node.data.slice(0, Math.max(0, remainingText - marker.length - 512))
+      : node.data;
+    const masked = maskCukiiReportText(sourceText);
+    if (!truncated && masked.length <= remainingText) {
+      node.data = masked;
+      remainingText -= masked.length;
+      continue;
+    }
+    node.data =
+      `${masked.slice(0, Math.max(0, remainingText - marker.length))}${marker}`.slice(
+        0,
+        remainingText,
+      );
+    remainingText = 0;
+  }
 
   root.querySelectorAll<HTMLElement>("*").forEach((element) => {
     for (const attribute of [...element.attributes]) {
@@ -215,6 +246,57 @@ export function sanitizeCukiiSnapshotClone(root: HTMLElement): void {
   });
 }
 
+/**
+ * Retain only transcript turns that intersect the painted scrollport. The old
+ * capture cloned the entire loaded conversation and merely hid it with CSS;
+ * long sessions therefore produced an enormous SVG data URL which Chromium
+ * rejected before Image.onload. The source rectangles preserve the exact
+ * visible offset of a partially clipped first turn.
+ */
+export function pruneCukiiSnapshotToViewport(
+  sourceRoot: HTMLElement,
+  cloneRoot: HTMLElement,
+): boolean {
+  const source = sourceRoot.querySelector<HTMLElement>(".cukii-transcript");
+  const clone = cloneRoot.querySelector<HTMLElement>(".cukii-transcript");
+  if (!source || !clone) return false;
+  const viewport = source.getBoundingClientRect();
+  if (viewport.width < 1 || viewport.height < 1) return false;
+
+  const sourceChildren = [...source.children] as HTMLElement[];
+  const cloneChildren = [...clone.children] as HTMLElement[];
+  const count = Math.min(sourceChildren.length, cloneChildren.length);
+  const visible: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const rect = sourceChildren[index].getBoundingClientRect();
+    if (
+      rect.bottom >= viewport.top &&
+      rect.top <= viewport.bottom &&
+      rect.right >= viewport.left &&
+      rect.left <= viewport.right
+    ) {
+      visible.push(index);
+    }
+  }
+  if (visible.length === 0) return false;
+
+  const first = visible[0];
+  const last = visible.at(-1) ?? first;
+  const firstTop = sourceChildren[first].getBoundingClientRect().top;
+  const wrapper = document.createElement("div");
+  wrapper.style.display = "flex";
+  wrapper.style.flexDirection = "column";
+  wrapper.style.width = "100%";
+  wrapper.style.flex = "0 0 auto";
+  wrapper.style.transform = `translateY(${firstTop - viewport.top}px)`;
+  for (let index = first; index <= last; index += 1) {
+    wrapper.appendChild(cloneChildren[index]);
+  }
+  clone.replaceChildren(wrapper);
+  clone.style.overflow = "hidden";
+  return true;
+}
+
 function preserveTranscriptScroll(
   sourceRoot: HTMLElement,
   cloneRoot: HTMLElement,
@@ -271,7 +353,9 @@ export async function captureCukiiChatSnapshot(): Promise<CukiiChatSnapshot> {
 
   const clone = source.cloneNode(true) as HTMLElement;
   inlineComputedStyles(source, clone);
-  preserveTranscriptScroll(source, clone);
+  if (!pruneCukiiSnapshotToViewport(source, clone)) {
+    preserveTranscriptScroll(source, clone);
+  }
   sanitizeCukiiSnapshotClone(clone);
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   clone.style.width = `${rect.width}px`;

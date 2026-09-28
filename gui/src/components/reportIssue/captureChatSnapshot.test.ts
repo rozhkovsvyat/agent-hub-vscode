@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeCukiiSnapshotClone } from "./captureChatSnapshot";
+import {
+  CUKII_SNAPSHOT_TEXT_BUDGET,
+  pruneCukiiSnapshotToViewport,
+  sanitizeCukiiSnapshotClone,
+} from "./captureChatSnapshot";
+
+function rect(top: number, bottom: number, left = 0, right = 800): DOMRect {
+  return {
+    top,
+    bottom,
+    left,
+    right,
+    width: right - left,
+    height: bottom - top,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
 
 describe("sanitizeCukiiSnapshotClone", () => {
   it("removes overlays and every externally loadable URL", () => {
@@ -62,5 +80,45 @@ describe("sanitizeCukiiSnapshotClone", () => {
     expect(
       root.querySelector("button")?.getAttribute("aria-label"),
     ).not.toContain("another-secret");
+  });
+
+  it("keeps only the transcript turns painted inside the scrollport", () => {
+    const source = document.createElement("div");
+    const transcript = document.createElement("div");
+    transcript.className = "cukii-transcript";
+    source.appendChild(transcript);
+    const positions = [
+      rect(-900, -700),
+      rect(-40, 100),
+      rect(100, 300),
+      rect(700, 900),
+    ];
+    for (const [index, position] of positions.entries()) {
+      const turn = document.createElement("div");
+      turn.textContent = `turn-${index}`;
+      turn.getBoundingClientRect = () => position;
+      transcript.appendChild(turn);
+    }
+    transcript.getBoundingClientRect = () => rect(0, 600);
+    const clone = source.cloneNode(true) as HTMLElement;
+
+    expect(pruneCukiiSnapshotToViewport(source, clone)).toBe(true);
+    expect(clone.textContent).toBe("turn-1turn-2");
+    expect(
+      clone.querySelector<HTMLElement>(".cukii-transcript > div")?.style
+        .transform,
+    ).toBe("translateY(-40px)");
+  });
+
+  it("caps hidden tool output before serializing the snapshot SVG", () => {
+    const root = document.createElement("div");
+    root.textContent = `visible ${"x".repeat(CUKII_SNAPSHOT_TEXT_BUDGET * 3)}`;
+
+    sanitizeCukiiSnapshotClone(root);
+
+    expect(root.textContent?.length).toBeLessThanOrEqual(
+      CUKII_SNAPSHOT_TEXT_BUDGET,
+    );
+    expect(root.textContent).toContain("[snapshot truncated]");
   });
 });
