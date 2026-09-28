@@ -160,6 +160,7 @@ export function CukiiStickyUserMessage({
     const row = content?.closest<HTMLElement>(".cukii-user-row--sticky");
     const transcript = content?.closest<HTMLElement>(".cukii-transcript");
     const bubble = content?.closest<HTMLElement>(".cukii-user-message-bubble");
+    const messageFrame = bubble?.closest<HTMLElement>(".cukii-user-message");
     if (!content || !row || !transcript || !bubble) return;
     const flowSpacer = row.nextElementSibling?.classList.contains(
       "cukii-user-row-flow-spacer",
@@ -261,10 +262,14 @@ export function CukiiStickyUserMessage({
           : geometry.visibleHeight;
 
       const contentHeight = content.getBoundingClientRect().height;
-      const bubbleOverhead = Math.max(
-        0,
-        bubble.getBoundingClientRect().height - contentHeight,
+      const frameHeight = Math.max(
+        bubble.getBoundingClientRect().height,
+        messageFrame?.getBoundingClientRect().height ?? 0,
       );
+      // An outside MAX-style reaction is a sibling of the orange bubble but
+      // still part of this user turn. Measure the whole message frame so the
+      // sticky mask/collision geometry includes its 28px reaction row.
+      const bubbleOverhead = Math.max(0, frameHeight - contentHeight);
       const rowStyle = getComputedStyle(row);
       const rowPaddingTop = Number.parseFloat(rowStyle.paddingTop) || 0;
       const rowPaddingBottom = Number.parseFloat(rowStyle.paddingBottom) || 0;

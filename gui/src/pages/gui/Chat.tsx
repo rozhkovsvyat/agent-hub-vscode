@@ -65,6 +65,10 @@ import {
 } from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
 import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
+import {
+  CukiiMessageReaction,
+  readCukiiAgentReaction,
+} from "../../components/cukii/CukiiMessageReaction";
 import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
 import { useMeasuredCanvasBackground } from "../../components/cukii/useMeasuredCanvasBackground";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
@@ -604,6 +608,7 @@ export function Chat() {
       );
 
       if (message.role === "user") {
+        const agentReaction = readCukiiAgentReaction(message.metadata);
         const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
         const receiptStatus = item.messageReceipt?.status;
         const visualReceiptStatus =
@@ -720,6 +725,9 @@ export function Chat() {
                   />,
                 )}
               </CukiiStickyUserMessage>
+              {agentReaction && (
+                <CukiiMessageReaction reaction={agentReaction} />
+              )}
             </div>
           </div>,
           <div

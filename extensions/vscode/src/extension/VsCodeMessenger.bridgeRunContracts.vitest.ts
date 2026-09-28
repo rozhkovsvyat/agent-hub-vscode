@@ -11,7 +11,12 @@ const source = fs.readFileSync(
 // (git, tag v0.1.0); the source contracts below pin its shipped sources.
 const VENDOR_BRIDGE_SRC = path.join(
   __dirname,
-  "..", "..", "node_modules", "@cukii", "vendor-bridge", "src",
+  "..",
+  "..",
+  "node_modules",
+  "@cukii",
+  "vendor-bridge",
+  "src",
 );
 const adapterSource = fs.readFileSync(
   path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
@@ -19,6 +24,25 @@ const adapterSource = fs.readFileSync(
 );
 
 describe("VsCodeMessenger native bridge run contract", () => {
+  it("binds an agent reaction to the exact run and latest submitted user id", () => {
+    expect(source).toContain("new BridgeReactionBroker(");
+    expect(source).toContain('message.role === "user"');
+    expect(source).toContain(
+      'typeof (message as { id?: unknown }).id === "string"',
+    );
+    expect(source).toContain(
+      'protocol.send("cukii/userMessageReaction", reaction)',
+    );
+    expect(source).toContain(
+      "run.reactionBroker?.bindVendorProcess(pid, binding)",
+    );
+    expect(source).toContain("reactionBroker?.setTargetMessage(messageId)");
+    expect(source).toContain(
+      "run.reactionBroker?.setTargetMessage(msg.data.messageId)",
+    );
+    expect(source).toContain("run.reactionBroker?.dispose()");
+  });
+
   it("uses one coalescing coordinator instead of a previous.done chain", () => {
     expect(source).toContain("messenger.bridgeRuns.acquire(");
     expect(source).not.toMatch(/if \(previous\) await previous\.done/);

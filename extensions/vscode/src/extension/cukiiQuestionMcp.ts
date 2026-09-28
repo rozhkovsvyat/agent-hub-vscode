@@ -16,6 +16,18 @@ const MIN_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WAIT_TIMEOUT_MS = 2 * 60 * 60_000;
 const POLL_INTERVAL_MS = 100;
 
+export const CUKII_REACTION_EMOJIS = [
+  "❤️",
+  "😂",
+  "👍",
+  "🔥",
+  "👏",
+  "😮",
+  "😢",
+  "🤝",
+] as const;
+type CukiiReactionEmoji = (typeof CUKII_REACTION_EMOJIS)[number];
+
 type Question = {
   id: string;
   header: string;
@@ -51,7 +63,8 @@ function normalizeQuestions(value: unknown): Question[] {
   }
   const ids = new Set<string>();
   return value.map((raw) => {
-    if (typeof raw !== "object" || raw === null) throw new Error("invalid question");
+    if (typeof raw !== "object" || raw === null)
+      throw new Error("invalid question");
     const item = raw as Record<string, unknown>;
     if (
       !bounded(item.id, 128) ||
@@ -97,6 +110,13 @@ function questionsRoot(): string {
   return (
     process.env.CUKII_QUESTIONS_DIR ||
     path.join(os.homedir(), ".continue", "cukii-questions")
+  );
+}
+
+export function reactionsRoot(): string {
+  return (
+    process.env.CUKII_REACTIONS_DIR ||
+    path.join(os.homedir(), ".continue", "cukii-reactions")
   );
 }
 
@@ -219,7 +239,8 @@ async function requestUserInput(argumentsValue: unknown) {
   const binding = await resolveWithBoundedRetry(() =>
     resolveRunBindingFromLineage(lineage),
   );
-  if (!binding) return { cancelled: true, reason: "Cukii run binding unavailable" };
+  if (!binding)
+    return { cancelled: true, reason: "Cukii run binding unavailable" };
   const questions = normalizeQuestions(
     (argumentsValue as { questions?: unknown } | undefined)?.questions,
   );
@@ -254,7 +275,49 @@ async function requestUserInput(argumentsValue: unknown) {
   }
 }
 
-const TOOL = {
+function normalizeReactionEmoji(argumentsValue: unknown): CukiiReactionEmoji {
+  const emoji = (argumentsValue as { emoji?: unknown } | undefined)?.emoji;
+  if (
+    typeof emoji !== "string" ||
+    !CUKII_REACTION_EMOJIS.includes(emoji as CukiiReactionEmoji)
+  ) {
+    throw new Error("unsupported reaction emoji");
+  }
+  return emoji as CukiiReactionEmoji;
+}
+
+/**
+ * Publish a run-bound, one-way reaction request. The Extension Host validates
+ * the producer nonce again before it can reach a panel; the MCP receipt only
+ * means the request was durably queued, not that a stale/forged record won.
+ */
+async function reactToUserMessage(argumentsValue: unknown) {
+  const lineage = processLineage(process.ppid);
+  const binding = await resolveWithBoundedRetry(() =>
+    resolveRunBindingFromLineage(lineage),
+  );
+  if (!binding) {
+    return { reacted: false, reason: "Cukii run binding unavailable" };
+  }
+  const emoji = normalizeReactionEmoji(argumentsValue);
+  const reactionId = `reaction-${randomUUID().replace(/-/g, "")}`;
+  const record = {
+    id: reactionId,
+    sessionId: binding.sessionId,
+    runId: binding.runId,
+    producerNonce: binding.nonce,
+    createdMs: Date.now(),
+    status: "pending",
+    emoji,
+  };
+  writeExclusive(
+    path.join(reactionsRoot(), binding.sessionId, `${reactionId}.json`),
+    JSON.stringify(record),
+  );
+  return { reacted: true, reactionId, emoji };
+}
+
+const QUESTION_TOOL = {
   name: "request_user_input",
   description:
     "Show one shared Cukii dialog with 1-3 short questions and wait for the correlated answer.",
@@ -279,7 +342,11 @@ const TOOL = {
                 type: "object",
                 properties: {
                   label: { type: "string", minLength: 1, maxLength: 80 },
-                  description: { type: "string", minLength: 1, maxLength: 1024 },
+                  description: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 1024,
+                  },
                 },
                 required: ["label", "description"],
                 additionalProperties: false,
@@ -296,16 +363,42 @@ const TOOL = {
   },
 };
 
+const REACTION_TOOL = {
+  name: "react_to_user_message",
+  description:
+    "Optionally add one human-style emoji reaction to the latest user message. Default to no reaction; call only for a clear social signal such as genuine amusement, warmth, celebration, empathy, surprise, or strong approval. Never call for routine instructions, ordinary technical questions, status checks, or merely because this tool is available.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      emoji: {
+        type: "string",
+        enum: [...CUKII_REACTION_EMOJIS],
+        description: "The single reaction that best matches the whole context.",
+      },
+    },
+    required: ["emoji"],
+    additionalProperties: false,
+  },
+};
+
 export async function mcpResponseForMessage(
   message: unknown,
-  callTool: (argumentsValue: unknown) => Promise<unknown> = requestUserInput,
+  callQuestionTool: (
+    argumentsValue: unknown,
+  ) => Promise<unknown> = requestUserInput,
+  callReactionTool: (
+    argumentsValue: unknown,
+  ) => Promise<unknown> = reactToUserMessage,
 ): Promise<Record<string, unknown> | undefined> {
   if (typeof message !== "object" || message === null) return undefined;
   const frame = message as Record<string, unknown>;
   const id = frame.id;
   const method = frame.method;
   const params = (frame.params || {}) as Record<string, unknown>;
-  if (method === "notifications/initialized" || method === "notifications/cancelled")
+  if (
+    method === "notifications/initialized" ||
+    method === "notifications/cancelled"
+  )
     return undefined;
   if (method === "initialize") {
     return {
@@ -323,11 +416,15 @@ export async function mcpResponseForMessage(
     return { jsonrpc: "2.0", id, result: {} };
   }
   if (method === "tools/list") {
-    return { jsonrpc: "2.0", id, result: { tools: [TOOL] } };
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: { tools: [QUESTION_TOOL, REACTION_TOOL] },
+    };
   }
   if (method === "tools/call" && params.name === "request_user_input") {
     try {
-      const result = await callTool(params.arguments);
+      const result = await callQuestionTool(params.arguments);
       return {
         jsonrpc: "2.0",
         id,
@@ -342,6 +439,28 @@ export async function mcpResponseForMessage(
         id,
         result: {
           content: [{ type: "text", text: "Cukii question request rejected" }],
+          isError: true,
+        },
+      };
+    }
+  }
+  if (method === "tools/call" && params.name === "react_to_user_message") {
+    try {
+      const result = await callReactionTool(params.arguments);
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          isError: false,
+        },
+      };
+    } catch {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: "Cukii reaction request rejected" }],
           isError: true,
         },
       };

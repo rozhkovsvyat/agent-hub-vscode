@@ -81,7 +81,19 @@ const HISTORY = [
     messageReceipt: { sentAt: SENT_AT + 45_000, status: "read" },
   },
   {
-    message: { id: "plain-second", role: "user", content: "Plain second" },
+    message: {
+      id: "plain-second",
+      role: "user",
+      content: "Plain second",
+      metadata: {
+        cukiiReaction: {
+          reactionId: "reaction-harness-heart",
+          emoji: "❤️",
+          reactedAt: SENT_AT + 51_000,
+          source: "agent",
+        },
+      },
+    },
     contextItems: [],
     messageReceipt: { sentAt: SENT_AT + 50_000, status: "read" },
   },

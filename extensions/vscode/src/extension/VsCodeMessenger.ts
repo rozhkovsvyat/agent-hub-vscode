@@ -121,6 +121,7 @@ import { recordCukiiDiagnostic } from "./cukiiDiagnosticBuffer";
 import { yougileIssueReporterForContext } from "./yougileIssueReporterVscode";
 import { isRealPanelSessionTransition } from "./panelSessionTransition";
 import { BridgeQuestionBroker } from "./bridgeQuestions";
+import { BridgeReactionBroker } from "./bridgeReactions";
 import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
@@ -179,6 +180,7 @@ type ActiveBridgeRun = BridgeRunIdentity & {
   cancellation: BridgeRunCancellation;
   imageScope: BridgeImageScope;
   questionBroker: BridgeQuestionBroker;
+  reactionBroker?: BridgeReactionBroker;
 };
 
 type OwnedPermissionBroker = {
@@ -1513,6 +1515,7 @@ export class VsCodeMessenger {
       let cancellationError: unknown;
       for (const run of runs) {
         run.questionBroker.dispose("run stopped");
+        run.reactionBroker?.dispose();
         try {
           await this.cancelBridgeRun(protocol, run, `abort:${run.sessionId}`);
         } catch (error) {
@@ -1566,6 +1569,24 @@ export class VsCodeMessenger {
         isClaudeNativeModel(msg.data.brokerModel),
       );
       const imageScope = new BridgeImageScope();
+      const reactionTargetMessageId = [...msg.data.messages]
+        .reverse()
+        .find(
+          (message): message is typeof message & { id: string } =>
+            message.role === "user" &&
+            typeof (message as { id?: unknown }).id === "string",
+        )?.id;
+      const reactionBroker =
+        typeof reactionTargetMessageId === "string" &&
+        reactionTargetMessageId.length > 0
+          ? new BridgeReactionBroker(
+              msg.data.sessionId,
+              runId,
+              reactionTargetMessageId,
+              (reaction) =>
+                protocol.send("cukii/userMessageReaction", reaction),
+            )
+          : undefined;
       // Vendors without a live stdin channel can still pull follow-ups from
       // the broker inbox mid-run; the watch surfaces the vendor's claim as a
       // read receipt instead of leaving the bubble "queued" until turn end.
@@ -1573,6 +1594,7 @@ export class VsCodeMessenger {
         !isClaudeNativeModel(msg.data.brokerModel) &&
         supportsBrokerInbox(msg.data.brokerModel)
           ? new BridgeInboxWatch(msg.data.sessionId, (messageId) => {
+              reactionBroker?.setTargetMessage(messageId);
               protocol.send("cukii/steerInboxRead", {
                 sessionId: msg.data.sessionId,
                 messageId,
@@ -1602,6 +1624,7 @@ export class VsCodeMessenger {
           (withdrawn) =>
             protocol.send("cukii/userQuestionWithdrawn", withdrawn),
         ),
+        reactionBroker,
       };
       const permissionTransport: ClaudePermissionTransport = {
         panelId: this.panelIdForProtocol(protocol),
@@ -1652,6 +1675,7 @@ export class VsCodeMessenger {
           // The coordinator reclaims zombie slots by probing this pid.
           run.childPid = pid;
           if (pid) run.questionBroker.bindVendorProcess(pid, binding);
+          if (pid) run.reactionBroker?.bindVendorProcess(pid, binding);
         },
         imageScope,
         abortSignal: controller.signal,
@@ -1664,6 +1688,7 @@ export class VsCodeMessenger {
       // the whole vendor list.
       const vendorCliUpdateRun = this.vendorCliUpdateRun;
       run.questionBroker.start();
+      run.reactionBroker?.start();
       const stream = (async function* () {
         await vendorCliUpdateRun;
         // Memory is additive and fail-open: an unavailable Box must not block
@@ -1748,6 +1773,7 @@ export class VsCodeMessenger {
         steering.close();
         inboxWatch?.close();
         run.questionBroker.dispose("run finished");
+        run.reactionBroker?.dispose();
         imageScope.dispose();
       });
       return wrapped;
@@ -1780,7 +1806,11 @@ export class VsCodeMessenger {
             { sessionId: run.sessionId, messageId: msg.data.messageId },
           );
         }
-        return run.steering.deliver(msg.data);
+        const receipt = await run.steering.deliver(msg.data);
+        if (receipt.status === "delivered") {
+          run.reactionBroker?.setTargetMessage(msg.data.messageId);
+        }
+        return receipt;
       },
     );
     this.onWebview(

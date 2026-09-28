@@ -19,6 +19,7 @@ import {
   setInactive,
   markLatestUserReceiptDelivered,
   setSteerStatus,
+  setUserMessageReaction,
   abortStream,
   streamUpdate,
   submitEditorAndInitAtIndex,
@@ -106,6 +107,40 @@ describe("sessionSlice streamUpdate", () => {
     compactionLoading: {},
     pendingClaudePermissions: {},
     pendingUserQuestions: {},
+  });
+
+  it("attaches a run-bound agent reaction only to its exact user message", () => {
+    const initialState = createInitialState();
+    const reacted = sessionSlice.reducer(
+      initialState,
+      setUserMessageReaction({
+        sessionId: "test-session-id",
+        runId: "run-a",
+        reactionId: "reaction-a",
+        messageId: "initial-user-message",
+        emoji: "❤️",
+        reactedAt: 42,
+      }),
+    );
+    expect(reacted.history[0].message.metadata?.cukiiReaction).toEqual({
+      reactionId: "reaction-a",
+      emoji: "❤️",
+      reactedAt: 42,
+      source: "agent",
+    });
+
+    const foreign = sessionSlice.reducer(
+      initialState,
+      setUserMessageReaction({
+        sessionId: "another-session",
+        runId: "run-a",
+        reactionId: "reaction-b",
+        messageId: "initial-user-message",
+        emoji: "😂",
+        reactedAt: 43,
+      }),
+    );
+    expect(foreign.history[0].message.metadata).toBeUndefined();
   });
 
   it("restores controls per session and resets new tabs to defaults", () => {

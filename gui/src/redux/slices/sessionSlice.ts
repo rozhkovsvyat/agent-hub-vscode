@@ -44,6 +44,7 @@ import type {
   CukiiPermissionMode,
   CukiiClaudePermissionRequest,
   CukiiUserQuestionRequest,
+  CukiiUserMessageReaction,
 } from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
@@ -881,6 +882,25 @@ export const sessionSlice = createSlice({
         item.messageReceipt.status = "read";
       }
     },
+    setUserMessageReaction: (
+      state,
+      action: PayloadAction<CukiiUserMessageReaction>,
+    ) => {
+      if (action.payload.sessionId !== state.id) return;
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      if (item?.message.role !== "user") return;
+      item.message.metadata = {
+        ...item.message.metadata,
+        cukiiReaction: {
+          reactionId: action.payload.reactionId,
+          emoji: action.payload.emoji,
+          reactedAt: action.payload.reactedAt,
+          source: "agent",
+        },
+      };
+    },
     markLatestUserReceiptDelivered: (state) => {
       const item = state.history.findLast(
         (entry) => entry.message.role === "user" && !entry.isSteer,
@@ -1617,6 +1637,7 @@ export const {
   setCancellingSource,
   appendUserSteerMessage,
   markSteerRead,
+  setUserMessageReaction,
   markLatestUserReceiptDelivered,
   setSteerStatus,
   cancelQueuedSteers,

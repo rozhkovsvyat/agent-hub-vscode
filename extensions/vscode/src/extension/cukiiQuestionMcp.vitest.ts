@@ -9,6 +9,7 @@ import {
   finalizeCancelled,
   mcpResponseForMessage,
   outstandingRequests,
+  reactionsRoot,
   waitForAnswer,
   waitTimeoutMs,
 } from "./cukiiQuestionMcp";
@@ -59,10 +60,12 @@ function fakeClock(start = 1_000_000) {
 describe("cukiiQuestionMcp", () => {
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-question-mcp-"));
+    process.env.CUKII_REACTIONS_DIR = path.join(root, "reactions");
   });
 
   afterEach(() => {
     outstandingRequests.clear();
+    delete process.env.CUKII_REACTIONS_DIR;
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -109,9 +112,7 @@ describe("cukiiQuestionMcp", () => {
     );
     const pending = writeRequest("question-b");
     expect(finalizeCancelled(pending, "question-else", "timeout")).toBe(false);
-    expect(JSON.parse(fs.readFileSync(pending, "utf8")).status).toBe(
-      "pending",
-    );
+    expect(JSON.parse(fs.readFileSync(pending, "utf8")).status).toBe("pending");
   });
 
   it("converges every outstanding request when the vendor disconnects", () => {
@@ -146,9 +147,12 @@ describe("cukiiQuestionMcp", () => {
       id: 2,
       method: "tools/list",
     });
-    expect(
-      (list?.result as { tools: { name: string }[] }).tools,
-    ).toEqual([expect.objectContaining({ name: "request_user_input" })]);
+    const tools = (list?.result as { tools: { name: string }[] }).tools;
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "request_user_input",
+      "react_to_user_message",
+    ]);
+    expect(reactionsRoot()).toBe(path.join(root, "reactions"));
     const answered = await mcpResponseForMessage(
       {
         jsonrpc: "2.0",
@@ -179,12 +183,31 @@ describe("cukiiQuestionMcp", () => {
       },
     );
     expect((rejected?.result as { isError: boolean }).isError).toBe(true);
+    const reacted = await mcpResponseForMessage(
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: { name: "react_to_user_message", arguments: { emoji: "❤️" } },
+      },
+      async () => ({ cancelled: true }),
+      async (args) => ({ reacted: true, ...(args as object) }),
+    );
+    const reactionResult = reacted?.result as {
+      isError: boolean;
+      content: { text: string }[];
+    };
+    expect(reactionResult.isError).toBe(false);
+    expect(JSON.parse(reactionResult.content[0].text)).toEqual({
+      reacted: true,
+      emoji: "❤️",
+    });
     const unknown = await mcpResponseForMessage({
       jsonrpc: "2.0",
-      id: 5,
+      id: 6,
       method: "resources/list",
     });
-    expect(unknown).toMatchObject({ id: 5, error: { code: -32601 } });
+    expect(unknown).toMatchObject({ id: 6, error: { code: -32601 } });
     expect(
       await mcpResponseForMessage({
         jsonrpc: "2.0",

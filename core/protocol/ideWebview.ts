@@ -141,6 +141,26 @@ export type CukiiVendorUsageSnapshot = {
   observedAt?: number;
 };
 
+export type CukiiUserReactionEmoji =
+  | "❤️"
+  | "😂"
+  | "👍"
+  | "🔥"
+  | "👏"
+  | "😮"
+  | "😢"
+  | "🤝";
+
+/** Run-bound agent action applied to one durable user bubble. */
+export type CukiiUserMessageReaction = {
+  sessionId: string;
+  runId: string;
+  reactionId: string;
+  messageId: string;
+  emoji: CukiiUserReactionEmoji;
+  reactedAt: number;
+};
+
 export type CukiiSteerReceipt = {
   messageId: string;
   sessionId: string;
@@ -527,6 +547,7 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
   "cukii/activeChatContextChanged": [CukiiActiveChatContext | null, void];
   "cukii/vendorUsageChanged": [CukiiVendorUsageSnapshot, void];
+  "cukii/userMessageReaction": [CukiiUserMessageReaction, void];
   "cukii/activeEditorSelectionChanged": [{ hasSelection: boolean }, void];
   /** A real Claude `--permission-prompt-tool` request, scoped to this panel. */
   "cukii/claudePermissionRequested": [

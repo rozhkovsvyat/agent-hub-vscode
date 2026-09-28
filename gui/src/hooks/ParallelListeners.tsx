@@ -19,6 +19,7 @@ import {
   setIsSessionMetadataLoading,
   setMode,
   setSteerStatus,
+  setUserMessageReaction,
   setTitleManuallySet,
   updateSessionTitle,
 } from "../redux/slices/sessionSlice";
@@ -31,6 +32,7 @@ import { handleApplyStateUpdate } from "../redux/thunks/handleApplyStateUpdate";
 import {
   getSession,
   refreshSessionMetadata,
+  saveCurrentSession,
   selectChatModelForProfile,
 } from "../redux/thunks/session";
 import { updateFileSymbolsFromHistory } from "../redux/thunks/updateFileSymbols";
@@ -119,6 +121,24 @@ function ParallelListeners() {
         return;
       }
       dispatch(setSteerStatus({ messageId, status: "read" }));
+    },
+    [dispatch, sessionId],
+  );
+
+  useWebviewListener(
+    "cukii/userMessageReaction",
+    async (reaction) => {
+      if (reaction.sessionId !== sessionId) return;
+      dispatch(setUserMessageReaction(reaction));
+      // Reactions are independent agent actions and can arrive well before a
+      // long answer finishes. Persist now instead of betting them on the
+      // stream's final save or a renderer surviving until turn completion.
+      await dispatch(
+        saveCurrentSession({
+          openNewSession: false,
+          generateTitle: false,
+        }),
+      );
     },
     [dispatch, sessionId],
   );
