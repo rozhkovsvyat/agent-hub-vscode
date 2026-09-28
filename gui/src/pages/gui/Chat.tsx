@@ -119,10 +119,7 @@ export function stickySafeTranscriptStart(
   const start = Math.max(0, history.length - visibleCount);
   if (start === 0) return 0;
   const firstVisible = history[start];
-  if (
-    firstVisible?.message.role === "user" &&
-    !firstVisible.modelSwitch
-  ) {
+  if (firstVisible?.message.role === "user" && !firstVisible.modelSwitch) {
     return start;
   }
   for (let index = start - 1; index >= 0; index--) {
@@ -337,8 +334,7 @@ export function Chat() {
       if (!element) return;
       if (element.clientHeight <= 0 || element.scrollHeight <= 0) return;
       if (element.scrollTop > 64) return;
-      loadEarlierAnchorRef.current =
-        element.scrollHeight - element.scrollTop;
+      loadEarlierAnchorRef.current = element.scrollHeight - element.scrollTop;
       setTranscriptWindow((current) => ({
         sessionId,
         visibleCount:
@@ -349,14 +345,8 @@ export function Chat() {
     };
 
     transcript.addEventListener("scroll", expandIfAtTop, { passive: true });
-    return () =>
-      transcript.removeEventListener("scroll", expandIfAtTop);
-  }, [
-    history.length,
-    isSessionLoading,
-    sessionId,
-    visibleTranscriptCount,
-  ]);
+    return () => transcript.removeEventListener("scroll", expandIfAtTop);
+  }, [history.length, isSessionLoading, sessionId, visibleTranscriptCount]);
 
   // Claude parity: wheeling over the composer's own chrome — the padding
   // left/right of the editor, the toolbar backing zone below it — scrolls
@@ -732,6 +722,12 @@ export function Chat() {
               </CukiiStickyUserMessage>
             </div>
           </div>,
+          <div
+            aria-hidden="true"
+            className="cukii-user-row-flow-spacer shrink-0"
+            data-cukii-sticky-spacer-for={message.id}
+            key={`${message.id}-sticky-flow-spacer`}
+          />,
         ];
       }
 
@@ -819,33 +815,33 @@ export function Chat() {
               </div>,
             );
           } else {
-          rows.push(
-            <div
-              key={`${message.id}-text`}
-              className={`cukii-assistant-row shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
-            >
-              {errorBoundary(
-                <div className="thread-message">
-                  <StepContainer
-                    index={historyIndex}
-                    isLast={historyIndex === history.length - 1}
-                    // 🔴 Folded in here, not read from the store inside the
-                    // capsule. A `useSelector` in StepContainer subscribes
-                    // every visible row to the flag, and flipping it then
-                    // re-renders the whole window — 160 markdown leaves on a
-                    // restored transcript, which is precisely what memoising
-                    // that component prevents. As a prop it changes for the one
-                    // row that is actually streaming and for nobody else.
-                    isSettling={
-                      isStreaming && historyIndex === history.length - 1
-                    }
-                    item={item}
-                    latestSummaryIndex={latestSummaryIndex}
-                  />
-                </div>,
-              )}
-            </div>,
-          );
+            rows.push(
+              <div
+                key={`${message.id}-text`}
+                className={`cukii-assistant-row shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              >
+                {errorBoundary(
+                  <div className="thread-message">
+                    <StepContainer
+                      index={historyIndex}
+                      isLast={historyIndex === history.length - 1}
+                      // 🔴 Folded in here, not read from the store inside the
+                      // capsule. A `useSelector` in StepContainer subscribes
+                      // every visible row to the flag, and flipping it then
+                      // re-renders the whole window — 160 markdown leaves on a
+                      // restored transcript, which is precisely what memoising
+                      // that component prevents. As a prop it changes for the one
+                      // row that is actually streaming and for nobody else.
+                      isSettling={
+                        isStreaming && historyIndex === history.length - 1
+                      }
+                      item={item}
+                      latestSummaryIndex={latestSummaryIndex}
+                    />
+                  </div>,
+                )}
+              </div>,
+            );
           }
         }
 

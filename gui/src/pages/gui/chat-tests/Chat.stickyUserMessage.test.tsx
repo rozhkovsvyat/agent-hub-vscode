@@ -7,6 +7,7 @@ import {
   CukiiStickyUserMessage,
   isStickyRowPinned,
   resolveStickyCollapseGeometry,
+  resolveStickyFlowSpacerHeight,
 } from "../../../components/cukii/CukiiStickyUserMessage";
 import { Chat } from "../Chat";
 
@@ -57,6 +58,7 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(turns[1].textContent).toContain("Second answer");
   for (const turn of Array.from(turns)) {
     expect(turn.querySelector(".cukii-user-row--sticky")).not.toBeNull();
+    expect(turn.querySelector(".cukii-user-row-flow-spacer")).not.toBeNull();
   }
 
   const css = canonicalCss();
@@ -180,6 +182,23 @@ test("pins a row only while its painted top sits on the sticky edge (ID-234)", (
   expect(isStickyRowPinned({ rowTopFromScrollport: 0, scrollTop: 0 })).toBe(
     false,
   );
+});
+
+test("reserves clipped flow outside the sticky collision box", () => {
+  const stableFlowHeight = 1592;
+  for (const paintedRowHeight of [1592, 1493, 52]) {
+    const spacer = resolveStickyFlowSpacerHeight({
+      stableFlowHeight,
+      paintedRowHeight,
+    });
+    expect(paintedRowHeight + spacer).toBe(stableFlowHeight);
+  }
+  expect(
+    resolveStickyFlowSpacerHeight({
+      stableFlowHeight: 52,
+      paintedRowHeight: 53,
+    }),
+  ).toBe(0);
 });
 
 test("collapses when streamed markdown becomes long after the row sticks", async () => {
@@ -467,11 +486,12 @@ test("collapses a restored long prompt that mounts already sticky", async () => 
     );
     expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
 
-    // Reversing the wheel unfolds the capsule symmetrically, pixel by pixel.
+    // Once fully folded, reverse scrolling cannot reopen the capsule. The
+    // explicit chevron is now the only opening control in sticky mode.
     transcriptScrollTop = 280;
     act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("0.5000");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
+    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
   } finally {
     if (scrollHeightDescriptor) {
       Object.defineProperty(
@@ -576,6 +596,8 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     const transcript =
       container.querySelector<HTMLElement>(".cukii-transcript")!;
     const row = bubble?.closest<HTMLElement>(".cukii-user-row--sticky")!;
+    const flowSpacer = row.nextElementSibling as HTMLElement;
+    expect(flowSpacer).toHaveClass("cukii-user-row-flow-spacer");
     const content = bubble?.querySelector<HTMLElement>(
       ".cukii-user-message-content",
     )!;
@@ -604,12 +626,11 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     expect(
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("");
-    const stableFlowHeight = row.style.getPropertyValue(
-      "--cukii-sticky-flow-height",
-    );
-    // The row's document-flow box keeps the full measured height for the whole
-    // fold: only the painted clip shrinks, so scroll anchoring never fires.
-    expect(Number.parseFloat(stableFlowHeight)).toBe(140);
+    // The painted sticky row remains full-height at contact, so its inverse
+    // flow spacer starts at zero.
+    expect(
+      flowSpacer.style.getPropertyValue("--cukii-sticky-flow-spacer-height"),
+    ).toBe("0px");
 
     // Every consumed scroll pixel removes exactly one painted pixel.
     transcript.scrollTop = 160;
@@ -620,9 +641,9 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("80px");
     expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
-      stableFlowHeight,
-    );
+    expect(
+      flowSpacer.style.getPropertyValue("--cukii-sticky-flow-spacer-height"),
+    ).toBe("60px");
 
     // ...down to one line once the whole fold distance is consumed.
     transcript.scrollTop = 220;
@@ -653,9 +674,9 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
     );
     expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
-    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
-      stableFlowHeight,
-    );
+    expect(
+      flowSpacer.style.getPropertyValue("--cukii-sticky-flow-spacer-height"),
+    ).toBe("120px");
     expect(receipt?.textContent).toBe("01:13");
     expect(clippedContent?.contains(receipt ?? null)).toBe(false);
     expect(
@@ -708,19 +729,18 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
 
-    // Reversing the wheel unfolds the capsule pixel by pixel: 90 consumed
-    // pixels out of 120 restore a quarter of the prompt, and the row's
-    // document-flow height never moves.
+    // Once the automatic fold reaches one row it latches. Reverse scrolling
+    // cannot reopen it behind the reader's back; the chevron owns that choice.
     transcript.scrollTop = 190;
     act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("0.7500");
+    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
     expect(
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("50px");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row.style.getPropertyValue("--cukii-sticky-flow-height")).toBe(
-      stableFlowHeight,
-    );
+    ).toBe("20px");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(
+      flowSpacer.style.getPropertyValue("--cukii-sticky-flow-spacer-height"),
+    ).toBe("120px");
 
     // Scrolling forward folds the capsule back to one line...
     transcript.scrollTop = 240;
@@ -738,6 +758,20 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     );
     expect(container.querySelector('[aria-label="Show more"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Show less"]')).toBeNull();
+
+    // Even a newer turn that arrives before the fold distance is consumed
+    // pushes the old, non-expanded capsule out as one quiet row.
+    rowTop = 40;
+    transcript.scrollTop = 60;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    rowTop = 0;
+    transcript.scrollTop = 100;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    rowTop = -2;
+    transcript.scrollTop = 101;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
     // A capsule the reader expanded with the chevron keeps that state while
     // the next turn pushes it out: scroll never resets the user's choice, so
@@ -774,6 +808,9 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     );
     expect(css).not.toContain("transition: max-height");
     expect(css).toMatch(
+      /\.cukii-user-row-flow-spacer\s*\{[^}]*height:\s*var\(--cukii-sticky-flow-spacer-height/s,
+    );
+    expect(css).not.toMatch(
       /\.cukii-user-row--sticky\s*\{[^}]*min-height:\s*var\(--cukii-sticky-flow-height/s,
     );
     expect(css).toMatch(
@@ -792,8 +829,8 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
     );
     // Layout never keys off the collapse-progress attribute: the fold changes
-    // only the painted clip, never the row's document-flow box. The attribute
-    // remains for debugging and tests only.
+    // the painted row and its inverse spacer by opposite amounts. The
+    // attribute remains for debugging and tests only.
     expect(css).not.toMatch(
       /\.cukii-user-row--sticky\[data-cukii-collapse-progress/s,
     );
@@ -1042,7 +1079,6 @@ test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-24
         data-testid="sticky-collapsed-row"
         style={
           {
-            "--cukii-sticky-flow-height": "46px",
             "--cukii-sticky-mask-height": "46px",
           } as CSSProperties
         }
@@ -1064,6 +1100,12 @@ test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-24
           </div>
         </div>
       </div>
+      <div
+        className="cukii-user-row-flow-spacer"
+        style={
+          { "--cukii-sticky-flow-spacer-height": "120px" } as CSSProperties
+        }
+      />
       <div className="cukii-assistant-row" data-testid="sticky-next-row">
         Next turn
       </div>
@@ -1080,9 +1122,9 @@ test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-24
   expect(css).toMatch(
     /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
   );
-  // Layout no longer reads the collapse-progress attribute: the row keeps its
-  // full document-flow box for the whole fold and only the painted clip
-  // shrinks. The attribute remains on the markup for debugging only.
+  // Layout no longer reads the collapse-progress attribute: the painted row
+  // shrinks while its ordinary sibling reserves the inverse flow delta. The
+  // attribute remains on the markup for debugging only.
   expect(css).not.toMatch(
     /\.cukii-user-row--sticky\[data-cukii-collapse-progress/s,
   );
