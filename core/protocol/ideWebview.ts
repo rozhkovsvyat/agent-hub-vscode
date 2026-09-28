@@ -126,6 +126,12 @@ export type CukiiVendorUsageWindow = {
   utilization: number;
   /** Unix seconds; absent when the vendor does not disclose a reset. */
   resetsAt?: number;
+  /**
+   * Which channel reported the window: the vendor CLI stream ("cli") or the
+   * vendor-bridge API poller ("api"). Absent for windows observed before the
+   * poller existed; renderers must not branch on it.
+   */
+  source?: "cli" | "api";
 };
 
 export type CukiiVendorUsageSnapshot = {

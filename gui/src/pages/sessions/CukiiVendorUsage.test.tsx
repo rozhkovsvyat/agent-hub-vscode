@@ -6,6 +6,7 @@ import { renderWithProviders } from "../../util/test/render";
 import {
   CukiiVendorUsageDetails,
   CukiiVendorUsageSection,
+  observedCopy,
   resetCopy,
 } from "./CukiiVendorUsage";
 
@@ -211,6 +212,147 @@ describe("Cukii vendor usage Claude parity", () => {
     );
   });
 
+  it("renders model-scoped and arbitrary windows for any vendor, not just Claude", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({
+        vendor,
+        windows: [
+          {
+            id: "five_hour",
+            label: "Session (5hr)",
+            utilization: 0.2,
+            source: "cli" as const,
+          },
+          {
+            id: "model_scoped",
+            label: "Fable limit",
+            utilization: 0.12,
+            source: "api" as const,
+          },
+          {
+            id: "secondary:120",
+            label: "2 hour limit",
+            utilization: 0.99,
+          },
+        ],
+      }),
+    );
+
+    await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="kimi-k3" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    expect(await screen.findByText("Fable limit")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("2 hour limit")).toBeInTheDocument();
+    expect(screen.getByText("99%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "Fable limit" }),
+    ).toHaveAttribute("aria-valuenow", "12");
+  });
+
+  it("shows a stable explicit empty state instead of vanishing with no data", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({ vendor, windows: [] }),
+    );
+
+    const { container } = await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="grok-4-6" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    expect(
+      await screen.findByTestId("cukii-vendor-usage-empty"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-testid="cukii-vendor-usage"]'),
+    ).toHaveAttribute("data-vendor", "grok");
+    expect(
+      container.querySelector('[data-testid="cukii-vendor-usage-body"]'),
+    ).not.toBeNull();
+  });
+
+  it("repaints the last-known windows from cache while the host re-probes", async () => {
+    const first = new MockIdeMessenger();
+    first.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({
+        vendor,
+        observedAt: Math.floor(Date.now() / 1_000),
+        windows: [
+          { id: "five_hour", label: "Session (5hr)", utilization: 0.48 },
+        ],
+      }),
+    );
+    const initial = await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="codex-5-6-sol" />,
+      { mockIdeMessenger: first },
+    );
+    expect(await screen.findByText("Session (5hr)")).toBeInTheDocument();
+    expect(
+      localStorage.getItem("cukii.vendor-usage.snapshot.v1.codex"),
+    ).toContain("five_hour");
+    initial.unmount();
+
+    // A webview restart whose request is stuck behind the account CLI probe
+    // must still paint the previous run's windows immediately.
+    const stuck = deferred<{
+      vendor: "codex";
+      windows: { id: string; label: string; utilization: number }[];
+    }>();
+    const restarted = new MockIdeMessenger();
+    restarted.responseHandlers["cukii/getVendorUsage"] = (() =>
+      stuck.promise) as never;
+    await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="codex-5-6-sol" />,
+      { mockIdeMessenger: restarted },
+    );
+    expect(screen.getByText("Session (5hr)")).toBeInTheDocument();
+    expect(screen.getByText("48%")).toBeInTheDocument();
+
+    // Fresh data replaces the stale paint once the host finally answers.
+    await act(async () => {
+      stuck.resolve({
+        vendor: "codex",
+        windows: [
+          { id: "five_hour", label: "Session (5hr)", utilization: 0.9 },
+        ],
+      });
+      await stuck.promise;
+    });
+    expect(await screen.findByText("90%")).toBeInTheDocument();
+    expect(screen.queryByText("48%")).toBeNull();
+  });
+
+  it("keeps cached snapshots isolated per vendor", async () => {
+    localStorage.setItem(
+      "cukii.vendor-usage.snapshot.v1.kimi",
+      JSON.stringify({
+        vendor: "kimi",
+        windows: [
+          { id: "five_hour", label: "Session (5hr)", utilization: 0.77 },
+        ],
+      }),
+    );
+    const messenger = new MockIdeMessenger();
+    const pending = deferred<{
+      vendor: "claude";
+      windows: [];
+    }>();
+    messenger.responseHandlers["cukii/getVendorUsage"] = (() =>
+      pending.promise) as never;
+
+    await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="opus-5" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    expect(screen.queryByText("77%")).toBeNull();
+    expect(screen.getByTestId("cukii-vendor-usage-empty")).toBeInTheDocument();
+  });
+
   it("formats reset times with the same compact Claude copy", () => {
     const now = Date.parse("2026-09-15T20:00:00Z");
     expect(resetCopy(Math.floor(now / 1_000) + 7_200, now)).toBe(
@@ -220,5 +362,15 @@ describe("Cukii vendor usage Claude parity", () => {
       "Resets in 3d",
     );
     expect(resetCopy(undefined, now)).toBeNull();
+  });
+
+  it("describes the snapshot age with compact copy", () => {
+    const now = Date.parse("2026-09-15T20:00:00Z");
+    const at = Math.floor(now / 1_000);
+    expect(observedCopy(at, now)).toBe("Updated just now");
+    expect(observedCopy(at - 45 * 60, now)).toBe("Updated 45m ago");
+    expect(observedCopy(at - 3 * 3_600, now)).toBe("Updated 3h ago");
+    expect(observedCopy(at - 3 * 86_400, now)).toBe("Updated 3d ago");
+    expect(observedCopy(undefined, now)).toBeNull();
   });
 });

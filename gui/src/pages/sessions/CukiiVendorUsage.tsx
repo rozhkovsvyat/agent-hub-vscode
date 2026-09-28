@@ -22,6 +22,44 @@ import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useWebviewListener } from "../../hooks/useWebviewListener";
 
 const COLLAPSED_KEY = "cukii.vendor-usage.collapsed.v1";
+const SNAPSHOT_KEY_PREFIX = "cukii.vendor-usage.snapshot.v1";
+
+function snapshotStorageKey(vendor: BrokerVendorId): string {
+  return `${SNAPSHOT_KEY_PREFIX}.${vendor}`;
+}
+
+/**
+ * Last-known snapshot per vendor, kept beside the collapse flag so the drawer
+ * repaints the previous run's limits instantly instead of blinking empty
+ * while the extension host re-probes the account CLI. The extension's own
+ * globalState copy stays the source of truth; this is paint-ahead only.
+ */
+function readCachedSnapshot(
+  vendor: BrokerVendorId,
+): CukiiVendorUsageSnapshot | null {
+  try {
+    const raw = localStorage.getItem(snapshotStorageKey(vendor));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CukiiVendorUsageSnapshot | null;
+    if (parsed?.vendor !== vendor || !Array.isArray(parsed.windows)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSnapshot(snapshot: CukiiVendorUsageSnapshot): void {
+  try {
+    localStorage.setItem(
+      snapshotStorageKey(snapshot.vendor),
+      JSON.stringify(snapshot),
+    );
+  } catch {
+    // Quota or private-mode failures are fine: the cache is best-effort.
+  }
+}
 
 const Section = styled.section`
   color: var(--vscode-foreground);
@@ -236,10 +274,24 @@ export function resetCopy(resetsAt?: number, now = Date.now()): string | null {
   return `Resets in ${Math.max(1, Math.ceil(remaining / 60_000))}m`;
 }
 
+export function observedCopy(
+  observedAt?: number,
+  now = Date.now(),
+): string | null {
+  if (!observedAt) return null;
+  const elapsed = Math.max(0, now - observedAt * 1_000);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Updated just now";
+  if (minutes < 60) return `Updated ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `Updated ${hours}h ago`;
+  return `Updated ${Math.floor(hours / 24)}d ago`;
+}
+
 function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
   const showAccount = Boolean(snapshot.accountLabel);
   const showUsage = snapshot.windows.length > 0;
-  if (!showAccount && !showUsage) return null;
+  const observed = observedCopy(snapshot.observedAt);
   return (
     <Body data-testid="cukii-vendor-usage-body">
       {showAccount && (
@@ -255,7 +307,7 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
           </AccountInfo>
         </BodySection>
       )}
-      {showUsage && (
+      {showUsage ? (
         <BodySection>
           <BodyTitle>Usage</BodyTitle>
           <UsageBars>
@@ -287,6 +339,15 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
             })}
           </UsageBars>
         </BodySection>
+      ) : (
+        <ResetText data-testid="cukii-vendor-usage-empty">
+          No usage data yet — limits appear here after the next agent run.
+        </ResetText>
+      )}
+      {observed && (
+        <ResetText data-testid="cukii-vendor-usage-observed">
+          {observed}
+        </ResetText>
       )}
     </Body>
   );
@@ -295,7 +356,7 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
 function useVendorUsage(vendor: BrokerVendorId | undefined) {
   const messenger = useContext(IdeMessengerContext);
   const [snapshot, setSnapshot] = useState<CukiiVendorUsageSnapshot | null>(
-    null,
+    () => (vendor ? readCachedSnapshot(vendor) : null),
   );
   const requestSequence = useRef(0);
   const load = useCallback(async () => {
@@ -310,16 +371,19 @@ function useVendorUsage(vendor: BrokerVendorId | undefined) {
       result.status === "success" &&
       result.content.vendor === vendor
     ) {
+      writeCachedSnapshot(result.content);
       setSnapshot(result.content);
     }
   }, [messenger, vendor]);
   useEffect(() => {
-    setSnapshot(null);
+    // Swap to the newly active vendor's last-known snapshot (never to a
+    // blank one) so the bars stay put while the fresh request is in flight.
+    setSnapshot(vendor ? readCachedSnapshot(vendor) : null);
     void load();
     return () => {
       requestSequence.current += 1;
     };
-  }, [load]);
+  }, [load, vendor]);
   useWebviewListener(
     "cukii/vendorUsageChanged",
     async (next) => {
