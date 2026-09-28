@@ -126,6 +126,7 @@ import { terminalCloseAfterAuthGrace } from "./authTerminalGrace";
 import {
   cukiiMemoryAccountForContext,
   isCukiiMemoryAccountId,
+  type CukiiMemoryLaunchBinding,
 } from "./cukiiMemoryAccount";
 import {
   CUKII_MANAGED_AUTO_UPDATE_VENDORS,
@@ -1711,11 +1712,20 @@ export class VsCodeMessenger {
         await vendorCliUpdateRun;
         // Memory is additive and fail-open: an unavailable Box must not block
         // the vendor run, but a connected account is wired before the CLI is
-        // spawned so its MCP discovery sees the current loopback relay.
-        await memoryAccount
-          .ensureForModel(msg.data.brokerModel)
-          .catch(() => false);
-        return yield* streamBridgeChat(msg.data, permissionTransport);
+        // spawned so its MCP child inherits the current direct edge binding.
+        const memoryBinding = await memoryAccount
+          .prepareForModel(msg.data.brokerModel)
+          .catch((): CukiiMemoryLaunchBinding => ({ configured: false }));
+        return yield* streamBridgeChat(
+          {
+            ...msg.data,
+            // The bearer is inherited by the native process and its MCP child
+            // only. It is never serialized into the transcript, command line,
+            // or persistent vendor config.
+            spawnEnv: memoryBinding.spawnEnv,
+          },
+          permissionTransport,
+        );
       })();
       const messenger = this;
       const wrapped = (async function* () {

@@ -134,6 +134,17 @@ describe("VsCodeMessenger native bridge run contract", () => {
     );
   });
 
+  it("passes the ephemeral memory edge binding only through the native spawn environment", () => {
+    expect(source).toContain(".prepareForModel(msg.data.brokerModel)");
+    expect(source).toContain("spawnEnv: memoryBinding.spawnEnv");
+    expect(adapterSource).toMatch(
+      /mergeBridgeSpawnEnvironment\([\s\S]*?bridgeEnv\(brokerModel, brokerSubagent\)[\s\S]*?vendorEnv,[\s\S]*?spawnEnv/,
+    );
+    expect(adapterSource).not.toMatch(
+      /describeBridgeLaunch\([^)]*CUKII_MEMORY_RELAY_TOKEN/,
+    );
+  });
+
   it("releases permission and prompt resources even when Stop wins before spawn", () => {
     expect(adapterSource).toMatch(
       /const releasePreparedResources = async \(\) => \{[\s\S]*?removeBridgeScratchFile\(route\.promptFile\)[\s\S]*?await permissionBroker\.dispose\(\)[\s\S]*?try \{[\s\S]*?await permissionBroker\.start\(\)[\s\S]*?finally \{\s*await releasePreparedResources\(\)/,

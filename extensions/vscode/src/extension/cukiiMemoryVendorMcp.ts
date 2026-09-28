@@ -13,11 +13,14 @@ import {
 
 export const CUKII_MEMORY_MCP_NAME = "cukii-memory";
 
-export type CukiiMemoryRelayDescriptor = {
-  url: string;
-  capability: string;
+export type CukiiMemoryProxyDescriptor = {
   proxyPath: string;
   nodePath: string;
+};
+
+export type CukiiMemoryRelayDescriptor = CukiiMemoryProxyDescriptor & {
+  url: string;
+  capability: string;
 };
 
 type MemoryMcpOptions = {
@@ -30,12 +33,14 @@ function home(options?: MemoryMcpOptions): string {
   return options?.userHome ?? os.homedir();
 }
 
-function relayEnvironment(descriptor: CukiiMemoryRelayDescriptor) {
+function managedProxyEnvironment(_descriptor: CukiiMemoryProxyDescriptor) {
   return {
     ELECTRON_RUN_AS_NODE: "1",
-    CUKII_MEMORY_MANAGED: "1",
-    CUKII_MEMORY_RELAY_URL: descriptor.url,
-    CUKII_MEMORY_RELAY_TOKEN: descriptor.capability,
+    // The endpoint and bearer are injected only into the native vendor process
+    // immediately before spawn. Persisting either a random loopback port or a
+    // bearer here made the config stale after the VS Code window closed and
+    // would leak a long-lived Box credential into owner files.
+    CUKII_MEMORY_MANAGED: "2",
   };
 }
 
@@ -65,6 +70,7 @@ function isManagedJsonEntry(value: unknown): boolean {
   const hasProxy = stringParts(entry).some(isCukiiMemoryProxyPath);
   const hasManagedEnv =
     env.CUKII_MEMORY_MANAGED === "1" ||
+    env.CUKII_MEMORY_MANAGED === "2" ||
     typeof env.CUKII_MEMORY_RELAY_URL === "string" ||
     typeof env.AGENT_HUB_MEMORY_URL === "string";
   return hasProxy && hasManagedEnv;
@@ -81,17 +87,17 @@ function readJsonOwnerConfig(configPath: string): {
   return parsed as { mcpServers?: Record<string, unknown> };
 }
 
-export function memoryMcpEntry(descriptor: CukiiMemoryRelayDescriptor) {
+export function memoryMcpEntry(descriptor: CukiiMemoryProxyDescriptor) {
   return {
     command: descriptor.nodePath,
     args: [descriptor.proxyPath],
-    env: relayEnvironment(descriptor),
+    env: managedProxyEnvironment(descriptor),
   };
 }
 
 function setJsonMemoryServer(
   configPath: string,
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
   options: { trust?: boolean } = {},
 ): void {
   withOwnerFileLock(configPath, () => {
@@ -156,7 +162,7 @@ function isManagedTomlConfig(body: string): boolean {
 
 function configureCliVendor(
   vendor: "codex" | "grok",
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
   addArgs: string[],
   options?: MemoryMcpOptions,
 ): boolean {
@@ -217,15 +223,15 @@ function configureCliVendor(
 }
 
 function commandEnvironmentArgs(
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
 ): string[] {
-  return Object.entries(relayEnvironment(descriptor)).flatMap(
+  return Object.entries(managedProxyEnvironment(descriptor)).flatMap(
     ([key, value]) => ["--env", `${key}=${value}`],
   );
 }
 
 function configureCodex(
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
   return configureCliVendor(
@@ -245,10 +251,10 @@ function configureCodex(
 }
 
 function configureGrok(
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
-  const envArgs = Object.entries(relayEnvironment(descriptor)).flatMap(
+  const envArgs = Object.entries(managedProxyEnvironment(descriptor)).flatMap(
     ([key, value]) => ["-e", `${key}=${value}`],
   );
   return configureCliVendor(
@@ -270,7 +276,7 @@ function configureGrok(
 
 export function ensureCukiiMemoryVendorMcp(
   vendor: BrokerVendorId,
-  descriptor: CukiiMemoryRelayDescriptor,
+  descriptor: CukiiMemoryProxyDescriptor,
   options?: MemoryMcpOptions,
 ): boolean {
   try {

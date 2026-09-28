@@ -7,6 +7,7 @@
  * contain only that local capability and are refreshed on every activation.
  */
 import http from "node:http";
+import https from "node:https";
 import readline from "node:readline";
 
 const MAX_LINE_BYTES = 2 * 1024 * 1024;
@@ -23,11 +24,16 @@ function relayTarget(): { url: URL; token: string } {
   const rawUrl = (process.env.CUKII_MEMORY_RELAY_URL ?? "").trim();
   const token = (process.env.CUKII_MEMORY_RELAY_TOKEN ?? "").trim();
   const url = new URL(rawUrl);
-  if (
-    url.protocol !== "http:" ||
-    !["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname)
-  ) {
-    throw new Error("Cukii memory relay must be a loopback HTTP endpoint");
+  const isLoopback = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(
+    url.hostname,
+  );
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+    throw new Error(
+      "Cukii memory endpoint must use HTTPS (HTTP is allowed only on loopback)",
+    );
+  }
+  if (url.username || url.password || url.hash) {
+    throw new Error("Cukii memory endpoint contains forbidden URL credentials");
   }
   if (token.length < 32 || token.length > 256) {
     throw new Error("Cukii memory relay capability is unavailable");
@@ -46,7 +52,8 @@ async function forward(line: string): Promise<string | undefined> {
     const { url, token } = relayTarget();
     const body = Buffer.from(line, "utf8");
     return await new Promise<string | undefined>((resolve, reject) => {
-      const outgoing = http.request(
+      const request = url.protocol === "https:" ? https.request : http.request;
+      const outgoing = request(
         url,
         {
           method: "POST",

@@ -82,7 +82,7 @@ describe("Cukii Box account", () => {
     expect(httpFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("stores the remote bearer only in SecretStorage and gives vendors a loopback capability", async () => {
+  it("stores the bearer in SecretStorage and injects the direct edge only at spawn", async () => {
     const store = new MemoryStore();
     const descriptors: unknown[] = [];
     const boxToken = "box-secret-" + "x".repeat(40);
@@ -90,6 +90,9 @@ describe("Cukii Box account", () => {
       async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/healthz")) return new Response('{"ok":true}');
+        if (url === "http://127.0.0.1:8780/mcp") {
+          return new Response("unauthorized", { status: 401 });
+        }
         const authorization = (
           init?.headers as Record<string, string> | undefined
         )?.authorization;
@@ -125,25 +128,58 @@ describe("Cukii Box account", () => {
     expect(result.message).toContain("6 vendor CLIs");
     expect(store.values.get(CUKII_MEMORY_SECRET_KEY)).toContain(boxToken);
     expect(JSON.stringify(descriptors)).not.toContain(boxToken);
-    const descriptor = descriptors[0] as {
-      url: string;
-      capability: string;
-    };
-    expect(descriptor.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
-    expect(descriptor.capability).toHaveLength(43);
-
-    const relayed = await fetch(descriptor.url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${descriptor.capability}`,
-        "content-type": "application/json",
+    expect(descriptors[0]).toEqual({
+      proxyPath: expect.stringMatching(/cukiiMemoryProxy\.js$/),
+      nodePath: process.execPath,
+    });
+    expect(JSON.stringify(descriptors)).not.toContain("127.0.0.1");
+    expect(JSON.stringify(descriptors)).not.toContain(
+      "https://box.example.test/mcp",
+    );
+    const launch = await controller.prepareForModel("gpt-5.6-sol");
+    expect(launch).toEqual({
+      configured: true,
+      spawnEnv: {
+        CUKII_MEMORY_RELAY_URL: "https://box.example.test/mcp",
+        CUKII_MEMORY_RELAY_TOKEN: boxToken,
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
     });
-    expect(relayed.status).toBe(200);
-    expect(await relayed.json()).toMatchObject({
-      result: { serverInfo: { name: "cukii-memory" } },
-    });
+    controller.dispose();
+  });
+
+  it("heals every vendor MCP entry on activation without another login", async () => {
+    const store = new MemoryStore();
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({
+        endpoint: "https://box.example.test/mcp",
+        token: "r".repeat(43),
+      }),
+    );
+    const ensured: string[] = [];
+    const controller = new CukiiMemoryAccountController(
+      store,
+      extensionRoot(),
+      process.execPath,
+      vi.fn() as unknown as typeof fetch,
+      {
+        ensure: (vendor) => {
+          ensured.push(vendor);
+          return true;
+        },
+        remove: vi.fn(),
+      },
+    );
+
+    expect(await controller.refreshVendorMcp()).toBe(6);
+    expect(ensured).toEqual([
+      "claude",
+      "codex",
+      "cursor",
+      "grok",
+      "kimi",
+      "qwen",
+    ]);
     controller.dispose();
   });
 

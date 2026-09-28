@@ -21,6 +21,7 @@ import {
 import {
   ensureCukiiMemoryVendorMcp,
   removeCukiiMemoryVendorMcp,
+  type CukiiMemoryProxyDescriptor,
   type CukiiMemoryRelayDescriptor,
 } from "./cukiiMemoryVendorMcp";
 
@@ -62,6 +63,12 @@ const ALL_MEMORY_VENDORS: BrokerVendorId[] = [
 
 type MemoryConnection = { endpoint: string; token: string };
 
+export type CukiiMemoryLaunchBinding = {
+  configured: boolean;
+  /** Present only in memory for the lifetime of one native vendor process. */
+  spawnEnv?: NodeJS.ProcessEnv;
+};
+
 export type CukiiMemoryAuthHost = {
   promptEndpoint(defaultValue: string): PromiseLike<string | undefined>;
   promptToken(): PromiseLike<string | undefined>;
@@ -70,7 +77,7 @@ export type CukiiMemoryAuthHost = {
 type MemoryVendorMcp = {
   ensure(
     vendor: BrokerVendorId,
-    descriptor: CukiiMemoryRelayDescriptor,
+    descriptor: CukiiMemoryProxyDescriptor,
   ): boolean;
   remove(vendor: BrokerVendorId): void;
 };
@@ -503,8 +510,8 @@ export class CukiiMemoryRelay {
 }
 
 export class CukiiMemoryAccountController {
-  private relay?: CukiiMemoryRelay;
-  private relayConnection?: string;
+  private directUpstream?: CukiiMemoryUpstream;
+  private directUpstreamConnection?: string;
   private disciplineRun?: Promise<DisciplineOutcome>;
   private disciplineOutcome?: DisciplineOutcome;
   private disciplineRetryAfter?: number;
@@ -644,21 +651,22 @@ export class CukiiMemoryAccountController {
     return parseConnection(await this.store.get(CUKII_MEMORY_SECRET_KEY));
   }
 
-  private async descriptor(): Promise<CukiiMemoryRelayDescriptor | undefined> {
+  private async descriptor(): Promise<CukiiMemoryProxyDescriptor | undefined> {
     const connection = await this.connection();
     if (!connection) return undefined;
+    return {
+      proxyPath: path.join(this.extensionPath, "out", "cukiiMemoryProxy.js"),
+      nodePath: this.nodePath,
+    };
+  }
+
+  private async directEndpoint(connection: MemoryConnection): Promise<string> {
     const identity = `${connection.endpoint}\n${connection.token}`;
-    if (!this.relay || this.relayConnection !== identity) {
-      this.relay?.dispose();
-      this.relay = new CukiiMemoryRelay(
-        connection,
-        path.join(this.extensionPath, "out", "cukiiMemoryProxy.js"),
-        this.nodePath,
-        this.httpFetch,
-      );
-      this.relayConnection = identity;
+    if (!this.directUpstream || this.directUpstreamConnection !== identity) {
+      this.directUpstream = new CukiiMemoryUpstream(connection, this.httpFetch);
+      this.directUpstreamConnection = identity;
     }
-    return this.relay.start();
+    return this.directUpstream.choose();
   }
 
   async status(): Promise<BrokerVendorAuthStatus> {
@@ -707,9 +715,8 @@ export class CukiiMemoryAccountController {
   ): Promise<{ opened: boolean; message: string }> {
     if (action === "logout") {
       await this.store.delete(CUKII_MEMORY_SECRET_KEY);
-      this.relay?.dispose();
-      this.relay = undefined;
-      this.relayConnection = undefined;
+      this.directUpstream = undefined;
+      this.directUpstreamConnection = undefined;
       this.disciplineRun = undefined;
       this.disciplineRetryAfter = undefined;
       for (const vendor of ALL_MEMORY_VENDORS) this.vendorMcp.remove(vendor);
@@ -732,9 +739,8 @@ export class CukiiMemoryAccountController {
     };
     await probeCukiiMemory(connection, this.httpFetch);
     await this.store.store(CUKII_MEMORY_SECRET_KEY, JSON.stringify(connection));
-    this.relay?.dispose();
-    this.relay = undefined;
-    this.relayConnection = undefined;
+    this.directUpstream = undefined;
+    this.directUpstreamConnection = undefined;
     const descriptor = await this.descriptor();
     if (!descriptor) throw new Error("Cukii Box connection was not stored.");
     const configured = ALL_MEMORY_VENDORS.filter((vendor) =>
@@ -763,8 +769,23 @@ export class CukiiMemoryAccountController {
   }
 
   async ensureForModel(model: string): Promise<boolean> {
+    return (await this.prepareForModel(model)).configured;
+  }
+
+  /**
+   * Wire the selected CLI and return its ephemeral direct Box binding.
+   *
+   * The owner config contains only the bundled proxy command. The remote edge
+   * endpoint and bearer exist in SecretStorage and are inherited by the native
+   * process at spawn, so a long-lived worker is independent of a random
+   * Extension Host loopback port without writing the bearer to disk.
+   */
+  async prepareForModel(model: string): Promise<CukiiMemoryLaunchBinding> {
+    const connection = await this.connection();
+    if (!connection) return { configured: false };
+    const endpoint = await this.directEndpoint(connection);
     const descriptor = await this.descriptor();
-    if (!descriptor) return false;
+    if (!descriptor) return { configured: false };
     const vendor = brokerVendorForModel(model);
     const configured = this.vendorMcp.ensure(vendor, descriptor);
     // Fail-open: a CLI must still start when the discipline cannot be written —
@@ -773,11 +794,32 @@ export class CukiiMemoryAccountController {
     await this.ensureDiscipline().catch((error: unknown) => {
       this.log(`discipline skipped for this spawn: ${errorText(error)}`);
     });
-    return configured;
+    return {
+      configured,
+      spawnEnv: {
+        CUKII_MEMORY_RELAY_URL: endpoint,
+        CUKII_MEMORY_RELAY_TOKEN: connection.token,
+      },
+    };
+  }
+
+  /**
+   * Heal every managed vendor entry on activation. This is essential for
+   * upgraded installations: the owner connected Box once on an older build
+   * and will not press Log in again merely to make a newly installed CLI (or
+   * an Astra/Codex subagent selected by another vendor) discover memory.
+   */
+  async refreshVendorMcp(): Promise<number> {
+    const descriptor = await this.descriptor();
+    if (!descriptor) return 0;
+    return ALL_MEMORY_VENDORS.filter((vendor) =>
+      this.vendorMcp.ensure(vendor, descriptor),
+    ).length;
   }
 
   dispose(): void {
-    this.relay?.dispose();
+    // The per-run direct proxy is a child of the native vendor process. The
+    // account controller no longer owns a random loopback listener.
   }
 }
 
@@ -813,5 +855,8 @@ export function cukiiMemoryAccountForContext(
   // the single trigger sat behind a chat spawn, so any machine where that path
   // did not reach the installer stayed without the contract and said nothing.
   void controller.installDisciplineNow().catch(() => undefined);
+  void controller.refreshVendorMcp().catch((error: unknown) => {
+    log?.(`memory MCP refresh failed: ${errorText(error)}`);
+  });
   return controller;
 }

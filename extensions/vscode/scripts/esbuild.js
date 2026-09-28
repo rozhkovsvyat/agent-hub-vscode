@@ -285,9 +285,10 @@ const claudePermissionMcpWorkerEsbuildConfig = {
   plugins: [],
 };
 
-// Vendor CLIs start this as a standalone stdio MCP child. It speaks only to
-// the activation-scoped loopback relay owned by the extension host; the real
-// Cukii Box bearer token therefore never appears in a vendor config file.
+// Vendor CLIs start this as a standalone stdio MCP child. The owner config
+// stores only this command; the active Cukii run injects the authenticated
+// HTTPS Box edge binding into the process environment at spawn, so neither a
+// bearer nor a random Extension Host loopback port is persisted there.
 const cukiiMemoryProxyEsbuildConfig = {
   ...esbuildConfig,
   entryPoints: ["src/extension/cukiiMemoryProxy.ts"],

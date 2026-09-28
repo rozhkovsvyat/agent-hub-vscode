@@ -30,7 +30,7 @@ function fixture() {
 }
 
 describe("Cukii memory vendor MCP registration", () => {
-  it("uses the bundled runtime and only the loopback capability", () => {
+  it("persists only the bundled runtime marker, never an endpoint or bearer", () => {
     const { descriptor } = fixture();
     const entry = memoryMcpEntry(descriptor);
     expect(entry).toEqual({
@@ -38,12 +38,11 @@ describe("Cukii memory vendor MCP registration", () => {
       args: [descriptor.proxyPath],
       env: {
         ELECTRON_RUN_AS_NODE: "1",
-        CUKII_MEMORY_MANAGED: "1",
-        CUKII_MEMORY_RELAY_URL: descriptor.url,
-        CUKII_MEMORY_RELAY_TOKEN: descriptor.capability,
+        CUKII_MEMORY_MANAGED: "2",
       },
     });
-    expect(JSON.stringify(entry)).not.toContain("remote-box-token");
+    expect(JSON.stringify(entry)).not.toContain(descriptor.url);
+    expect(JSON.stringify(entry)).not.toContain(descriptor.capability);
   });
 
   it.each([
@@ -91,7 +90,8 @@ describe("Cukii memory vendor MCP registration", () => {
       const addArguments = calls.at(-1)?.[1] as string[];
       expect(addArguments).toContain("cukii-memory");
       expect(addArguments).toContain(descriptor.proxyPath);
-      expect(JSON.stringify(calls)).not.toContain("remote-box-token");
+      expect(JSON.stringify(calls)).not.toContain(descriptor.url);
+      expect(JSON.stringify(calls)).not.toContain(descriptor.capability);
     },
   );
 
@@ -126,7 +126,7 @@ describe("Cukii memory vendor MCP registration", () => {
     expect(fs.readFileSync(target, "utf8")).toBe('{"mcpServers":');
   });
 
-  it("replaces a previous Cukii Box python memory proxy so Kimi sees the live relay", () => {
+  it("replaces a stale Cukii Box proxy without persisting its old loopback route", () => {
     const { root, descriptor } = fixture();
     const target = path.join(root, ".kimi-code", "mcp.json");
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -156,12 +156,14 @@ describe("Cukii memory vendor MCP registration", () => {
       command: descriptor.nodePath,
       args: [descriptor.proxyPath],
       env: {
-        CUKII_MEMORY_MANAGED: "1",
-        CUKII_MEMORY_RELAY_URL: descriptor.url,
+        CUKII_MEMORY_MANAGED: "2",
       },
     });
     expect(JSON.stringify(config.mcpServers["cukii-memory"])).not.toContain(
       "AGENT_HUB_MEMORY_URL",
+    );
+    expect(JSON.stringify(config.mcpServers["cukii-memory"])).not.toContain(
+      "127.0.0.1",
     );
   });
 
