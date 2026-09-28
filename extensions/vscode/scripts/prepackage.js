@@ -387,25 +387,27 @@ void (async () => {
   // npm may deliberately skip sqlite3's install script in the build shell.
   // Use the target-specific binary already prepared in core, but place it
   // under the externalized package root where `bindings` resolves it.
-  await new Promise((resolve, reject) => {
-    ncp(
-      path.join(__dirname, "../../../core/node_modules/sqlite3/build"),
-      path.join(__dirname, "../out/node_modules/sqlite3/build"),
-      { dereference: true },
-      (error) => {
-        if (error) {
-          console.error(
-            "[error] Error copying external sqlite3 binding",
-            error,
-          );
-          reject(error);
-        } else {
-          console.log("[info] Copied external sqlite3 binding");
-          resolve();
-        }
-      },
-    );
-  });
+  //
+  // Do not use `ncp` for this one file. On a Windows cross-target build the
+  // parallel sqlite3 package copy creates `build/Release` first; ncp then
+  // reports success while leaving that existing directory empty. The legacy
+  // `out/build` copy above still contains the correct binary, which made the
+  // defect platform-specific and easy to miss on macOS. A direct file copy is
+  // atomic at this boundary and has an explicit non-empty postcondition.
+  const externalSqliteSource = path.join(
+    __dirname,
+    "../../../core/node_modules/sqlite3/build/Release/node_sqlite3.node",
+  );
+  const externalSqliteTarget = path.join(
+    __dirname,
+    "../out/node_modules/sqlite3/build/Release/node_sqlite3.node",
+  );
+  fs.mkdirSync(path.dirname(externalSqliteTarget), { recursive: true });
+  fs.copyFileSync(externalSqliteSource, externalSqliteTarget);
+  if (fs.statSync(externalSqliteTarget).size <= 0) {
+    throw new Error("External sqlite3 binding copy produced an empty file");
+  }
+  console.log("[info] Copied external sqlite3 binding");
 
   if (packageDirName && expectedPackagePath) {
     const expectedOutPackagePath = path.join(

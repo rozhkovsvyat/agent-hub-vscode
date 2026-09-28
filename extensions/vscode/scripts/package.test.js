@@ -255,6 +255,14 @@ test("sqlite3 stays external and its complete native runtime is packaged", () =>
   );
 
   assert.match(esbuildSource, /external:\s*\[[\s\S]*["']sqlite3["']/);
+  assert.match(
+    prepackageSource,
+    /fs\.copyFileSync\(externalSqliteSource, externalSqliteTarget\)/,
+  );
+  assert.match(
+    prepackageSource,
+    /fs\.statSync\(externalSqliteTarget\)\.size <= 0/,
+  );
   for (const runtimePath of [
     "out/node_modules/sqlite3/lib/sqlite3.js",
     "out/node_modules/sqlite3/build/Release/node_sqlite3.node",
