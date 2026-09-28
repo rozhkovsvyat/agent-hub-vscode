@@ -76,6 +76,7 @@ import {
   queuedFollowUpEchoMessageId,
   BROKER_PROMPT_PREAMBLE,
   isOwnPromptEcho,
+  shouldSuppressLeadingAssistantPromptEcho,
   readableFailureReason,
   routeForModel,
   settleBridgeChildError,
@@ -514,6 +515,24 @@ describe("native bridge argv", () => {
     expect(isOwnPromptEcho(BROKER_PROMPT_PREAMBLE, "продолжи")).toBe(false);
     expect(isOwnPromptEcho("", prompt)).toBe(false);
     expect(isOwnPromptEcho(prompt, "")).toBe(false);
+  });
+
+  it("drops only a leading assistant replay of the Claude resume prompt", () => {
+    const prompt =
+      "Continue this native CLI session. Effort: xhigh.\n\nготовоПроверяю валидацию.";
+    expect(
+      shouldSuppressLeadingAssistantPromptEcho(prompt, prompt, false),
+    ).toBe(true);
+    expect(shouldSuppressLeadingAssistantPromptEcho(prompt, prompt, true)).toBe(
+      false,
+    );
+    expect(
+      shouldSuppressLeadingAssistantPromptEcho(
+        "Проверяю валидацию.",
+        prompt,
+        false,
+      ),
+    ).toBe(false);
   });
 
   it("drops the own-prompt echo instead of rendering it as a user capsule", () => {
