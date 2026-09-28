@@ -229,6 +229,7 @@ const esbuildConfig = {
           } else {
             try {
               copyVoiceRuntime();
+              fs.mkdirSync("./build", { recursive: true });
               fs.writeFileSync(
                 "./build/meta.json",
                 JSON.stringify(result.metafile, null, 2),

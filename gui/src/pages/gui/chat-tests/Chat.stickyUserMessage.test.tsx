@@ -1087,16 +1087,13 @@ test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-24
     /\.cukii-user-row--sticky\[data-cukii-collapse-progress/s,
   );
 
-  const artifactDir = join(
-    "D:",
-    "Scratch",
-    "cukii-2.0.137-results",
-    "gui-artifacts",
-  );
-  mkdirSync(artifactDir, { recursive: true });
-  writeFileSync(
-    join(artifactDir, "id249-270-275-sticky-collapse.html"),
-    `<!doctype html><meta charset="utf-8"><title>ID-249/270/275 sticky collapse</title><style>${css}</style>${container.innerHTML}`,
-    "utf8",
-  );
+  const artifactDir = process.env.CUKII_GUI_ARTIFACT_DIR;
+  if (artifactDir) {
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(
+      join(artifactDir, "id249-270-275-sticky-collapse.html"),
+      `<!doctype html><meta charset="utf-8"><title>ID-249/270/275 sticky collapse</title><style>${css}</style>${container.innerHTML}`,
+      "utf8",
+    );
+  }
 });

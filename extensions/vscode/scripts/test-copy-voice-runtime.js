@@ -2,15 +2,18 @@ const assert = require("assert");
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const { createRequire } = require("module");
+const os = require("os");
 const path = require("path");
 
 const { copySharpRuntime, getSharpNativeBindingPath } = require("./esbuild");
 
 async function exerciseCopiedSharp(packageJson) {
-  const copiedModules = path.dirname(path.dirname(packageJson));
+  const copiedModules = fs.realpathSync(
+    path.dirname(path.dirname(packageJson)),
+  );
   const copiedRequire = createRequire(packageJson);
   const sharp = copiedRequire("sharp");
-  const sharpPath = copiedRequire.resolve("sharp");
+  const sharpPath = fs.realpathSync(copiedRequire.resolve("sharp"));
   const relativeSharpPath = path.relative(copiedModules, sharpPath);
   assert.ok(
     !path.isAbsolute(relativeSharpPath) && !relativeSharpPath.startsWith(".."),
@@ -38,7 +41,7 @@ async function main() {
   }
 
   const fixtureRoot = fs.mkdtempSync(
-    path.join("D:\\Scratch", "cukii-sharp-runtime-test-"),
+    path.join(os.tmpdir(), "cukii-sharp-runtime-test-"),
   );
   try {
     const sourceModules = path.join(fixtureRoot, "source", "node_modules");

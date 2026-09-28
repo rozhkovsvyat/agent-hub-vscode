@@ -24,6 +24,7 @@ import type {
   CukiiPermissionMode,
   CukiiSteerReceipt,
   CukiiVendorUsageSnapshot,
+  CukiiVendorUsageWindow,
 } from "core/protocol/ideWebview";
 import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
 import {
@@ -89,6 +90,10 @@ import {
 } from "@cukii/vendor-bridge";
 import { retryBridgeTeardownOnDispose } from "@cukii/vendor-bridge";
 import {
+  createUsagePoller,
+  type VendorUsagePoller,
+} from "@cukii/vendor-bridge";
+import {
   BridgeRunCoordinator,
   bridgeRunAcceptsSteer,
   type BridgeRunIdentity,
@@ -127,6 +132,20 @@ function vendorUsageStorageKey(vendor: BrokerVendorId): string {
   return `cukii.vendorUsage.${vendor}`;
 }
 
+const CUKII_USAGE_POLLER_VENDORS = [
+  "claude",
+  "codex",
+  "grok",
+  "kimi",
+  "qwen",
+] as const;
+
+function isUsagePollerVendor(
+  vendor: BrokerVendorId,
+): vendor is (typeof CUKII_USAGE_POLLER_VENDORS)[number] {
+  return (CUKII_USAGE_POLLER_VENDORS as readonly string[]).includes(vendor);
+}
+
 function sourceProtocol(
   message: Message,
   fallback: VsCodeWebviewProtocol,
@@ -157,6 +176,8 @@ type OwnedPermissionBroker = {
  * so we don't have to rewrite some of the handlers
  */
 export class VsCodeMessenger {
+  private readonly usageLog: vscode.OutputChannel;
+  private readonly usagePoller: VendorUsagePoller;
   /** Brokers are scoped to the exact webview protocol that created the run. */
   private readonly claudePermissionBrokers = new Map<
     VsCodeWebviewProtocol,
@@ -176,6 +197,30 @@ export class VsCodeMessenger {
   private nextBridgeRunId = 0;
   /** Preserve click order when two panels rename the same session together. */
   private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
+
+  private publishVendorUsage(
+    vendor: BrokerVendorId,
+    windows: CukiiVendorUsageWindow[],
+  ): void {
+    const snapshot: CukiiVendorUsageSnapshot = {
+      vendor,
+      windows,
+      observedAt: Math.floor(Date.now() / 1_000),
+    };
+    void Promise.resolve(
+      this.context.globalState.update(vendorUsageStorageKey(vendor), snapshot),
+    )
+      .then(() => {
+        this.webviewProtocol.send("cukii/vendorUsageChanged", snapshot);
+      })
+      .catch((error) => {
+        this.usageLog.appendLine(
+          `[${new Date().toISOString()}] ${vendor}: failed to persist usage snapshot: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  }
 
   private enqueueSessionRename<T>(sessionId: string, work: () => Promise<T>) {
     const previous =
@@ -499,6 +544,22 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     const issueReporter = yougileIssueReporterForContext(context);
+    this.usageLog = vscode.window.createOutputChannel("Cukii · usage");
+    context.subscriptions.push(this.usageLog);
+    this.usagePoller = createUsagePoller({
+      vendors: CUKII_USAGE_POLLER_VENDORS,
+      onUsage: (vendor, windows) => {
+        // Gemini is supported by the reusable bridge poller for clients that
+        // expose it as a first-class vendor. Cukii currently routes Gemini
+        // models through Cursor, so it is deliberately not started here.
+        if (vendor === "gemini") return;
+        this.publishVendorUsage(vendor, windows);
+      },
+      log: (line) =>
+        this.usageLog.appendLine(`[${new Date().toISOString()}] ${line}`),
+    });
+    this.usagePoller.start();
+    context.subscriptions.push({ dispose: () => this.usagePoller.stop() });
     // Every discipline attempt lands here, success or failure. Without it the
     // only way to learn why a machine has no contract was to read the source.
     const memoryLog = vscode.window.createOutputChannel("Cukii · memory");
@@ -564,17 +625,33 @@ export class VsCodeMessenger {
       // The sidebar follows one active vendor. Probing every installed CLI on
       // each tab switch makes this decorative surface contend with the real
       // chat process and can hold the sidebar for multiple command timeouts.
-      const account =
+      const accountPromise =
         data.vendor === "deepseek"
-          ? undefined
-          : await probeBrokerVendorAccount(data.vendor);
+          ? Promise.resolve(undefined)
+          : probeBrokerVendorAccount(data.vendor);
+      const polledPromise = isUsagePollerVendor(data.vendor)
+        ? this.usagePoller.pollOnce(data.vendor)
+        : Promise.resolve([]);
+      const [account, polledWindows] = await Promise.all([
+        accountPromise,
+        polledPromise,
+      ]);
+      const hasFreshUsage = polledWindows.length > 0;
       return {
         vendor: data.vendor,
         ...(account?.accountLabel
           ? { accountLabel: account.accountLabel }
           : {}),
-        windows: cached?.vendor === data.vendor ? cached.windows : [],
-        ...(cached?.observedAt ? { observedAt: cached.observedAt } : {}),
+        windows: hasFreshUsage
+          ? polledWindows
+          : cached?.vendor === data.vendor
+            ? cached.windows
+            : [],
+        ...(hasFreshUsage
+          ? { observedAt: Math.floor(Date.now() / 1_000) }
+          : cached?.observedAt
+            ? { observedAt: cached.observedAt }
+            : {}),
       };
     });
     this.onWebview("cukii/openVendorUsageDetails", async ({ data }) => {
@@ -1433,16 +1510,7 @@ export class VsCodeMessenger {
         },
         onUsage: (windows) => {
           const vendor = brokerVendorForModel(msg.data.brokerModel);
-          const snapshot: CukiiVendorUsageSnapshot = {
-            vendor,
-            windows,
-            observedAt: Math.floor(Date.now() / 1_000),
-          };
-          void this.context.globalState
-            .update(vendorUsageStorageKey(vendor), snapshot)
-            .then(() => {
-              this.webviewProtocol.send("cukii/vendorUsageChanged", snapshot);
-            });
+          this.publishVendorUsage(vendor, windows);
         },
         // This is deliberately sent over the active extension/webview channel.
         // The local canary controller watches this iframe over CDP; a Remote-SSH
