@@ -12,6 +12,10 @@ const TARGETS = [
 ];
 const EXTENSION_ID = "cukii.cukii-vscode";
 const VSCE_PACKAGE = "@vscode/vsce@4.0.0";
+const MARKETPLACE_URL = "https://marketplace.visualstudio.com";
+const MARKETPLACE_TOKEN_API_VERSION = "7.2-preview.1";
+const OIDC_AUDIENCE = "marketplace.visualstudio.com";
+const PUBLISHER_NAME = "cukii";
 const DUPLICATE_PATTERN = /already exists(?: and cannot be modified)?\.?/i;
 
 function parseArgs(args) {
@@ -43,7 +47,9 @@ function collectTargetVsix(vsixDir, version) {
   const missing = expected.filter(({ filePath }) => !fs.existsSync(filePath));
   if (missing.length > 0) {
     throw new Error(
-      `Missing target VSIX files: ${missing.map(({ target }) => target).join(", ")}`,
+      `Missing target VSIX files: ${missing
+        .map(({ target }) => target)
+        .join(", ")}`,
     );
   }
   return expected;
@@ -54,7 +60,6 @@ function getVscePublishArgs({ filePath, preRelease }) {
     "--yes",
     VSCE_PACKAGE,
     "publish",
-    "--oidc",
     "--skip-duplicate",
     "--no-dependencies",
     "--packagePath",
@@ -64,14 +69,109 @@ function getVscePublishArgs({ filePath, preRelease }) {
   return args;
 }
 
-function runVscePublish({ filePath, preRelease }) {
+function getVscePublishEnv(credential, environment = process.env) {
+  if (typeof credential !== "string" || credential.length === 0) {
+    throw new Error("Marketplace credential is required");
+  }
+  const childEnvironment = { ...environment, VSCE_PAT: credential };
+  delete childEnvironment.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  delete childEnvironment.ACTIONS_ID_TOKEN_REQUEST_URL;
+  return childEnvironment;
+}
+
+function runVscePublish({
+  filePath,
+  preRelease,
+  credential,
+  environment = process.env,
+  runCommand = spawnSync,
+}) {
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
   const args = getVscePublishArgs({ filePath, preRelease });
-  const result = spawnSync(npx, args, { encoding: "utf8", env: process.env });
+  const result = runCommand(npx, args, {
+    encoding: "utf8",
+    env: getVscePublishEnv(credential, environment),
+  });
   return {
     status: result.status ?? 1,
     output: `${result.stdout || ""}\n${result.stderr || ""}`,
   };
+}
+
+async function readJsonResponse(operation, response) {
+  if (!response.ok) {
+    throw new Error(`${operation} failed with HTTP ${response.status}`);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(`${operation} returned invalid JSON`);
+  }
+  if (!payload || typeof payload !== "object") {
+    throw new Error(`${operation} returned an invalid response`);
+  }
+  return payload;
+}
+
+async function getMarketplaceCredential({
+  environment = process.env,
+  fetchImpl = fetch,
+} = {}) {
+  if (String(environment.GITHUB_ACTIONS).toLowerCase() !== "true") {
+    throw new Error("Marketplace OIDC publishing requires GitHub Actions");
+  }
+  const requestUrl = environment.ACTIONS_ID_TOKEN_REQUEST_URL;
+  const requestToken = environment.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  if (!requestUrl || !requestToken) {
+    throw new Error(
+      "GitHub Actions OIDC variables are missing; grant id-token: write",
+    );
+  }
+
+  let oidcUrl;
+  try {
+    oidcUrl = new URL(requestUrl);
+  } catch {
+    throw new Error("GitHub Actions provided an invalid OIDC request URL");
+  }
+  oidcUrl.searchParams.set("audience", OIDC_AUDIENCE);
+  const oidcPayload = await readJsonResponse(
+    "GitHub Actions OIDC token request",
+    await fetchImpl(oidcUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${requestToken}`,
+      },
+    }),
+  );
+  if (typeof oidcPayload.value !== "string" || oidcPayload.value.length === 0) {
+    throw new Error("GitHub Actions OIDC token request returned no token");
+  }
+
+  const exchangeUrl = new URL("/_apis/gallery/token", MARKETPLACE_URL);
+  exchangeUrl.searchParams.set("api-version", MARKETPLACE_TOKEN_API_VERSION);
+  const marketplacePayload = await readJsonResponse(
+    "Marketplace OIDC token exchange",
+    await fetchImpl(exchangeUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${oidcPayload.value}`,
+        "Content-Type": "application/json",
+        "User-Agent": "cukii-marketplace-publisher",
+      },
+      body: JSON.stringify({ publisherName: PUBLISHER_NAME }),
+    }),
+  );
+  if (
+    typeof marketplacePayload.credential !== "string" ||
+    marketplacePayload.credential.length === 0
+  ) {
+    throw new Error("Marketplace OIDC token exchange returned no credential");
+  }
+  return marketplacePayload.credential;
 }
 
 const delay = (milliseconds) =>
@@ -80,6 +180,7 @@ const delay = (milliseconds) =>
 async function publishEveryTarget({
   packages,
   preRelease = false,
+  credential,
   maxAttempts = 3,
   runPublish = runVscePublish,
   wait = delay,
@@ -93,6 +194,7 @@ async function publishEveryTarget({
         filePath: pkg.filePath,
         target: pkg.target,
         preRelease,
+        credential,
         attempt,
       });
       lastOutput = result.output || "";
@@ -175,7 +277,9 @@ async function waitForValidatedTargets({
     );
     const missing = TARGETS.filter((target) => !validated.has(target));
     const channel = preRelease ? "preview" : "stable";
-    const state = `channel=${channel} validated=${validated.size}/5 missing=${missing.join(",")}`;
+    const state = `channel=${channel} validated=${
+      validated.size
+    }/5 missing=${missing.join(",")}`;
     if (state !== lastState) console.log(state);
     lastState = state;
     consecutive = missing.length === 0 ? consecutive + 1 : 0;
@@ -190,12 +294,17 @@ async function waitForValidatedTargets({
 }
 
 function sha256File(filePath) {
-  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(filePath))
+    .digest("hex");
 }
 
 async function sha256Response(response) {
   if (!response.ok) {
-    throw new Error(`Marketplace carrier download failed: HTTP ${response.status}`);
+    throw new Error(
+      `Marketplace carrier download failed: HTTP ${response.status}`,
+    );
   }
   const hash = crypto.createHash("sha256");
   if (response.body?.[Symbol.asyncIterator]) {
@@ -248,7 +357,12 @@ async function verifyPublishedCarrierHashes({
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const packages = collectTargetVsix(options.vsixDir, options.version);
-  await publishEveryTarget({ packages, preRelease: options.preRelease });
+  const credential = await getMarketplaceCredential();
+  await publishEveryTarget({
+    packages,
+    preRelease: options.preRelease,
+    credential,
+  });
   await waitForValidatedTargets({
     version: options.version,
     preRelease: options.preRelease,
@@ -271,10 +385,13 @@ module.exports = {
   DUPLICATE_PATTERN,
   TARGETS,
   collectTargetVsix,
+  getMarketplaceCredential,
   getVscePublishArgs,
+  getVscePublishEnv,
   isPreReleaseVersion,
   parseArgs,
   publishEveryTarget,
+  runVscePublish,
   verifyPublishedCarrierHashes,
   waitForValidatedTargets,
 };

@@ -29,8 +29,11 @@ const {
 const {
   TARGETS,
   collectTargetVsix,
+  getMarketplaceCredential,
   getVscePublishArgs,
+  getVscePublishEnv,
   publishEveryTarget,
+  runVscePublish,
   verifyPublishedCarrierHashes,
   waitForValidatedTargets,
 } = require("./publish-marketplace");
@@ -387,14 +390,13 @@ test("marketplace publisher is resumable after a partial failure", async () => {
   assert.deepEqual(accepted, new Set(TARGETS));
 });
 
-test("marketplace publisher delegates duplicate handling to vsce", () => {
+test("marketplace publisher passes the short-lived credential outside argv", () => {
   assert.deepEqual(
     getVscePublishArgs({ filePath: "linux-x64.vsix", preRelease: false }),
     [
       "--yes",
       "@vscode/vsce@4.0.0",
       "publish",
-      "--oidc",
       "--skip-duplicate",
       "--no-dependencies",
       "--packagePath",
@@ -408,13 +410,123 @@ test("marketplace publisher delegates duplicate handling to vsce", () => {
       "@vscode/vsce@4.0.0",
       "publish",
       "--pre-release",
-      "--oidc",
       "--skip-duplicate",
       "--no-dependencies",
       "--packagePath",
       "darwin-arm64.vsix",
     ],
   );
+
+  const childEnvironment = getVscePublishEnv("marketplace-secret", {
+    SAFE_VALUE: "preserved",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "github-secret",
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example/oidc",
+  });
+  assert.equal(childEnvironment.SAFE_VALUE, "preserved");
+  assert.equal(childEnvironment.VSCE_PAT, "marketplace-secret");
+  assert.equal(childEnvironment.ACTIONS_ID_TOKEN_REQUEST_TOKEN, undefined);
+  assert.equal(childEnvironment.ACTIONS_ID_TOKEN_REQUEST_URL, undefined);
+
+  let invocation;
+  const result = runVscePublish({
+    filePath: "linux-x64.vsix",
+    preRelease: false,
+    credential: "marketplace-secret",
+    environment: {
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "github-secret",
+      ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example/oidc",
+    },
+    runCommand(command, args, options) {
+      invocation = { command, args, options };
+      return { status: 0, stdout: "published", stderr: "" };
+    },
+  });
+  assert.equal(result.status, 0);
+  assert.equal(invocation.options.env.VSCE_PAT, "marketplace-secret");
+  assert.equal(
+    invocation.options.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+    undefined,
+  );
+  assert.equal(invocation.options.env.ACTIONS_ID_TOKEN_REQUEST_URL, undefined);
+  assert.doesNotMatch(
+    JSON.stringify(invocation.args),
+    /marketplace-secret|github-secret/,
+  );
+});
+
+test("marketplace OIDC exchange supplies the required API version", async () => {
+  const calls = [];
+  const credential = await getMarketplaceCredential({
+    environment: {
+      GITHUB_ACTIONS: "true",
+      ACTIONS_ID_TOKEN_REQUEST_URL:
+        "https://token.actions.example/oidc?api-version=2.0",
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "github-secret",
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), options });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ value: "oidc-secret" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response(JSON.stringify({ credential: "marketplace-secret" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+    },
+  });
+
+  assert.equal(credential, "marketplace-secret");
+  const githubUrl = new URL(calls[0].url);
+  assert.equal(githubUrl.searchParams.get("api-version"), "2.0");
+  assert.equal(
+    githubUrl.searchParams.get("audience"),
+    "marketplace.visualstudio.com",
+  );
+  assert.equal(calls[0].options.headers.Authorization, "Bearer github-secret");
+
+  const marketplaceUrl = new URL(calls[1].url);
+  assert.equal(marketplaceUrl.pathname, "/_apis/gallery/token");
+  assert.equal(marketplaceUrl.searchParams.get("api-version"), "7.2-preview.1");
+  assert.equal(calls[1].options.headers.Authorization, "Bearer oidc-secret");
+  assert.equal(
+    calls[1].options.body,
+    JSON.stringify({ publisherName: "cukii" }),
+  );
+});
+
+test("marketplace OIDC failures never echo credentials", async () => {
+  let requestCount = 0;
+  let failure;
+  try {
+    await getMarketplaceCredential({
+      environment: {
+        GITHUB_ACTIONS: "true",
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example/oidc",
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "github-secret",
+      },
+      fetchImpl: async () => {
+        requestCount += 1;
+        return requestCount === 1
+          ? new Response(JSON.stringify({ value: "oidc-secret" }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            })
+          : new Response(
+              JSON.stringify({ message: "github-secret oidc-secret" }),
+              { status: 400, headers: { "Content-Type": "application/json" } },
+            );
+      },
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.match(
+    failure.message,
+    /Marketplace OIDC token exchange failed with HTTP 400/,
+  );
+  assert.doesNotMatch(failure.message, /github-secret|oidc-secret/);
 });
 
 test("marketplace completion requires two consecutive complete gallery snapshots", async () => {
