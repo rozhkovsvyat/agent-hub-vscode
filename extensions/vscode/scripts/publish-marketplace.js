@@ -98,9 +98,44 @@ function runVscePublish({
   };
 }
 
-async function readJsonResponse(operation, response) {
+function redactSensitiveText(value, secrets = []) {
+  let redacted = String(value);
+  for (const secret of secrets) {
+    if (typeof secret === "string" && secret.length > 0) {
+      redacted = redacted.split(secret).join("[REDACTED]");
+    }
+  }
+  return redacted
+    .replace(
+      /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "[REDACTED]",
+    )
+    .slice(0, 500);
+}
+
+async function readJsonResponse(operation, response, secrets = []) {
   if (!response.ok) {
-    throw new Error(`${operation} failed with HTTP ${response.status}`);
+    let detail = "";
+    try {
+      const body = await response.json();
+      const typeKey =
+        typeof body?.typeKey === "string" ? body.typeKey.trim() : "";
+      const message = [
+        body?.message,
+        body?.error_description,
+        body?.error,
+      ].find((value) => typeof value === "string" && value.trim().length > 0);
+      detail = [typeKey, message].filter(Boolean).join(": ");
+    } catch {
+      // Authentication errors can contain attacker-controlled text. Do not echo
+      // unstructured response bodies into the Actions log.
+    }
+    const safeDetail = redactSensitiveText(detail, secrets);
+    throw new Error(
+      `${operation} failed with HTTP ${response.status}${
+        safeDetail ? `: ${safeDetail}` : ""
+      }`,
+    );
   }
   let payload;
   try {
@@ -145,6 +180,7 @@ async function getMarketplaceCredential({
         Authorization: `Bearer ${requestToken}`,
       },
     }),
+    [requestToken],
   );
   if (typeof oidcPayload.value !== "string" || oidcPayload.value.length === 0) {
     throw new Error("GitHub Actions OIDC token request returned no token");
@@ -164,6 +200,7 @@ async function getMarketplaceCredential({
       },
       body: JSON.stringify({ publisherName: PUBLISHER_NAME }),
     }),
+    [requestToken, oidcPayload.value],
   );
   if (
     typeof marketplacePayload.credential !== "string" ||

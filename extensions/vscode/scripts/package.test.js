@@ -332,6 +332,9 @@ test("tag release packages, verifies, and publishes every supported target", () 
   );
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: read/);
+  assert.match(workflow, /marketplace_resume_version/);
+  assert.match(workflow, /gh release download "v\$VERSION"/);
+  assert.match(workflow, /Resume VS Code Marketplace publication/);
   assert.doesNotMatch(workflow, /VSCE_PAT/);
   assert.doesNotMatch(workflow, /uses:\s+[^\s#]+@(v\d+|main|master)(?:\s|$)/);
   for (const target of [
@@ -514,7 +517,10 @@ test("marketplace OIDC failures never echo credentials", async () => {
               headers: { "Content-Type": "application/json" },
             })
           : new Response(
-              JSON.stringify({ message: "github-secret oidc-secret" }),
+              JSON.stringify({
+                typeKey: "TrustedPublishingPolicyMismatch",
+                message: "github-secret oidc-secret safe-detail",
+              }),
               { status: 400, headers: { "Content-Type": "application/json" } },
             );
       },
@@ -526,6 +532,8 @@ test("marketplace OIDC failures never echo credentials", async () => {
     failure.message,
     /Marketplace OIDC token exchange failed with HTTP 400/,
   );
+  assert.match(failure.message, /TrustedPublishingPolicyMismatch/);
+  assert.match(failure.message, /safe-detail/);
   assert.doesNotMatch(failure.message, /github-secret|oidc-secret/);
 });
 

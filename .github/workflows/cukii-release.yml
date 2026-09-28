@@ -5,6 +5,11 @@ name: cukii-release
 #   vX.Y.Z    -> stable VSIX, GitHub release, Marketplace stable (manual gate)
 on:
   workflow_dispatch:
+    inputs:
+      marketplace_resume_version:
+        description: "Existing stable GitHub Release version to publish to Marketplace"
+        required: false
+        type: string
   push:
     branches:
       - "cukii/release-smoke/**"
@@ -14,6 +19,7 @@ on:
 
 jobs:
   checks:
+    if: inputs.marketplace_resume_version == ''
     uses: ./.github/workflows/cukii-ci.yml
     # A called workflow only sees the secrets listed here; cukii-ci.yml needs the
     # read-only deploy key to fetch the private vendor-bridge library.
@@ -303,3 +309,41 @@ jobs:
           node "${ARGS[@]}"
         env:
           PRE: ${{ startsWith(github.ref_name, 'rc-') }}
+
+  resume-marketplace:
+    if: github.event_name == 'workflow_dispatch' && inputs.marketplace_resume_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: marketplace
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Download immutable GitHub Release carriers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.marketplace_resume_version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid stable release version"
+            exit 1
+          fi
+          mkdir -p vsix
+          gh release download "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "cukii-vscode-*-$VERSION.vsix" \
+            --dir vsix
+
+      - name: Resume VS Code Marketplace publication
+        working-directory: extensions/vscode
+        shell: bash
+        env:
+          VERSION: ${{ inputs.marketplace_resume_version }}
+        run: node scripts/publish-marketplace.js --vsix-dir ../../vsix --version "$VERSION"
