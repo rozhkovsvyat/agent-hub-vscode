@@ -430,6 +430,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           brokerPermissionMode: state.session.brokerPermissionMode,
           queuedFollowUpMessageId,
           queuedFollowUpMessageIds,
+          currentSubmitMessageId: currentSubmitId,
           steerInterrupt,
           forceColdStart,
         },
@@ -518,13 +519,10 @@ export const streamBrokerBridgeInput = createAsyncThunk<
               continue;
             }
             if (message.cukiiVendorActivity) {
-              if (queuedFollowUpMessageIds.length > 0) {
-                await markAcceptedAndPersist(queuedFollowUpMessageIds);
-                if (!ownsBridgeRun()) {
-                  await gen.return(undefined);
-                  break streamLoop;
-                }
-              }
+              // Queued follow-ups require their exact private receipt. A
+              // generic activity frame may belong only to the ordinary current
+              // submit while another queued id is still owned by a foreign
+              // inbox reader; marking the whole requested batch here loses it.
               if (initialUserReceiptId) {
                 dispatch(markSteerRead({ messageId: initialUserReceiptId }));
               }

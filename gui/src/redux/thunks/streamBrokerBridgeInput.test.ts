@@ -132,7 +132,7 @@ describe("streamBrokerBridgeInput controls", () => {
     expect(store.getState().session.history.at(-1)?.promptLogs).toBeUndefined();
   });
 
-  it("keeps a queued follow-up pending until factual vendor activity, then persists read", async () => {
+  it("keeps a queued follow-up pending until its exact receipt, then persists read", async () => {
     const ideMessenger = new MockIdeMessenger();
     const request = vi.spyOn(ideMessenger, "request");
     let release!: () => void;
@@ -143,6 +143,13 @@ describe("streamBrokerBridgeInput controls", () => {
       yield [{ role: "thinking", content: "Launching native command" }];
       localConsumed();
       await blocked;
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: "activity-follow-up",
+        },
+      ];
       yield [
         {
           role: "thinking",
@@ -478,11 +485,147 @@ describe("streamBrokerBridgeInput controls", () => {
     ).toBe("read");
   });
 
+  it("marks only the exact queued receipt when another inbox reader owns the rest", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    ideMessenger.streamRequest = vi.fn(async function* () {
+      yield [
+        {
+          role: "assistant",
+          content: "",
+          cukiiSteerReadMessageId: "direct-follow-up",
+        },
+      ];
+      yield [
+        {
+          role: "thinking",
+          content: "ordinary vendor activity",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "direct" },
+          "direct-follow-up",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 1,
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "foreign reader owns this" },
+          "foreign-follow-up",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 2,
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "partial-inbox-receipt",
+        title: "Partial inbox receipt",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        mode: "broker",
+        brokerModel: "fable-5",
+      }),
+    );
+
+    await store.dispatch(
+      streamBrokerBridgeInput({
+        queuedFollowUpMessageIds: ["direct-follow-up", "foreign-follow-up"],
+      }),
+    );
+
+    const byId = new Map(
+      store
+        .getState()
+        .session.history.map((item) => [item.message.id, item.steerStatus]),
+    );
+    expect(byId.get("direct-follow-up")).toBe("read");
+    expect(byId.get("foreign-follow-up")).toBe("deferred");
+  });
+
+  it("accepts an ordinary recovered submit without claiming a foreign follow-up", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: any[] = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data);
+      yield [
+        {
+          role: "thinking",
+          content: "accepted only the ordinary submit",
+          cukiiVendorActivity: true,
+        },
+      ];
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: messageWithId(
+          { role: "user", content: "foreign pending" },
+          "foreign-follow-up",
+        ),
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "deferred",
+        steerSentAt: 1,
+      },
+      {
+        message: messageWithId(
+          { role: "user", content: "new ordinary submit" },
+          "new-submit",
+        ),
+        contextItems: [],
+        messageReceipt: { status: "queued", sentAt: 2 },
+      },
+    ];
+    const store = setupStore({ ideMessenger });
+    store.dispatch(
+      newSession({
+        sessionId: "implicit-current-with-foreign",
+        title: "Implicit current submit",
+        workspaceDirectory: "D:/Brain/vault",
+        history,
+        mode: "broker",
+        brokerModel: "fable-5",
+      }),
+    );
+
+    await store.dispatch(streamBrokerBridgeInput());
+
+    expect(captured[0].currentSubmitMessageId).toBe("new-submit");
+    expect(
+      store
+        .getState()
+        .session.history.find((item) => item.message.id === "foreign-follow-up")
+        ?.steerStatus,
+    ).toBe("deferred");
+    expect(
+      store
+        .getState()
+        .session.history.find((item) => item.message.id === "new-submit")
+        ?.messageReceipt?.status,
+    ).toBe("read");
+  });
+
   it("adopts every pending follow-up on a normal submit after session restore", async () => {
     const ideMessenger = new MockIdeMessenger();
     const captured: any[] = [];
     ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
       captured.push(data);
+      yield data.queuedFollowUpMessageIds.map((messageId: string) => ({
+        role: "assistant",
+        content: "",
+        cukiiSteerReadMessageId: messageId,
+      }));
       yield [
         {
           role: "thinking",
@@ -579,6 +722,7 @@ describe("streamBrokerBridgeInput controls", () => {
       "pending-text",
       "pending-image",
     ]);
+    expect(captured[0].currentSubmitMessageId).toBe("new-submit");
     expect(
       captured[0].messages.map(
         (message: ChatMessage & { id?: string }) => message.id,

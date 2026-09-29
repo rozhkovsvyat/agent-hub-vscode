@@ -453,6 +453,9 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       queuedFollowUpMessageId?: string;
       /** All durable follow-ups dispatched together in this fresh vendor turn. */
       queuedFollowUpMessageIds?: string[];
+      /** Ordinary user submit appended after an implicitly recovered follow-up
+       * batch. It must still launch even if every recovered id resolved read. */
+      currentSubmitMessageId?: string;
       /** The follow-up above interrupted an in-flight turn because the vendor
        * cannot accept live steering. The broker must resume the prior task. */
       steerInterrupt?: boolean;

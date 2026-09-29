@@ -200,6 +200,44 @@ describe("hasTrailingSteerMessage", () => {
     expect(store.getState().session.history[0].steerStatus).toBe("read");
   });
 
+  it("reconciles an inbox ack that races a pure trailing no-op", async () => {
+    const messenger = new MockIdeMessenger();
+    const dispatched: string[][] = [];
+    messenger.streamRequest = vi.fn(async function* (_messageType, data: any) {
+      dispatched.push(queuedIds(data));
+      yield [{ role: "assistant", content: "", cukiiTerminal: true }];
+    }) as typeof messenger.streamRequest;
+    let receiptChecks = 0;
+    messenger.responseHandlers["cukii/steerInboxReceipt"] = vi.fn(
+      async (data) => ({
+        sessionId: data.sessionId,
+        messageId: data.messageId,
+        status: (receiptChecks++ === 0 ? "pending" : "read") as
+          | "pending"
+          | "read",
+      }),
+    );
+    const raced = item("user", "acked during no-op", true);
+    raced.steerStatus = "deferred";
+    const store = setupStore({ ideMessenger: messenger });
+    store.dispatch(
+      newSession({
+        sessionId: "post-stream-inbox-reconcile",
+        title: "Post-stream inbox reconcile",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [raced],
+        mode: "broker",
+        brokerModel: "fable-5",
+      }),
+    );
+
+    await store.dispatch(continueIfTrailingSteer());
+
+    expect(dispatched).toEqual([[raced.message.id]]);
+    expect(receiptChecks).toBe(2);
+    expect(store.getState().session.history[0].steerStatus).toBe("read");
+  });
+
   it("drains the whole FIFO batch in one vendor turn once per live session gate", async () => {
     const messenger = new MockIdeMessenger();
     const dispatched: string[][] = [];

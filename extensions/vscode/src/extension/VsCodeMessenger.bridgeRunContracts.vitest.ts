@@ -69,6 +69,21 @@ describe("VsCodeMessenger native bridge run contract", () => {
     expect(source).toContain("bridgeRunAcceptsSteer(candidate, request)");
   });
 
+  it("uses one durable inbox path for Claude instead of duplicating through stdin", () => {
+    expect(source).toContain(
+      "const usesBrokerInbox = supportsBrokerInbox(run.brokerModel);",
+    );
+    expect(source).toMatch(
+      /const inboxWatch =\s*supportsBrokerInbox\(msg\.data\.brokerModel\)/,
+    );
+    expect(source).not.toMatch(
+      /const inboxWatch =\s*!isClaudeNativeModel\(msg\.data\.brokerModel\)/,
+    );
+    expect(source).toMatch(
+      /const receipt: CukiiSteerReceipt = usesBrokerInbox[\s\S]*?status: "deferred"[\s\S]*?: await run\.steering\.deliver\(msg\.data\)/,
+    );
+  });
+
   it("invalidates pending replacements when their webview is disposed", () => {
     expect(source).toMatch(
       /onDispose\(\(protocol\) => \{[\s\S]*?const run = this\.bridgeRuns\.activeFor\(protocol\);[\s\S]*?this\.bridgeRuns\.forget\(protocol\);[\s\S]*?this\.cancelBridgeRun\((protocol, )?run/,

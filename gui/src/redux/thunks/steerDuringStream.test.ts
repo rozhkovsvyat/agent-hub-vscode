@@ -43,6 +43,17 @@ function sessionOf(store: ReturnType<typeof createMockStore>) {
   return (store.getState() as RootState).session;
 }
 
+function exactReadReceipts(data: any) {
+  const messageIds: string[] =
+    data.queuedFollowUpMessageIds ??
+    (data.queuedFollowUpMessageId ? [data.queuedFollowUpMessageId] : []);
+  return messageIds.map((messageId) => ({
+    role: "assistant" as const,
+    content: "",
+    cukiiSteerReadMessageId: messageId,
+  }));
+}
+
 function createStoreWithChatModel(
   title = "Claude before handoff",
   brokerModel: RootState["session"]["brokerModel"] = "qwen-3-8-max",
@@ -261,6 +272,7 @@ describe("steerDuringStream", () => {
       data: any,
     ) {
       redelivered.push(data.queuedFollowUpMessageId);
+      yield exactReadReceipts(data);
       yield [
         {
           role: "thinking",
@@ -324,6 +336,7 @@ describe("steerDuringStream during an edit run", () => {
       data: any,
     ) {
       redelivered.push(data.queuedFollowUpMessageId);
+      yield exactReadReceipts(data);
       yield [
         {
           role: "thinking",
@@ -421,6 +434,7 @@ describe("steerDuringStream during an edit run", () => {
       data: any,
     ) {
       streams.push(data);
+      yield exactReadReceipts(data);
       yield [
         {
           role: "thinking",

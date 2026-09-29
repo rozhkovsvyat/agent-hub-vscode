@@ -1602,20 +1602,19 @@ export class VsCodeMessenger {
                 protocol.send("cukii/userMessageReaction", reaction),
             )
           : undefined;
-      // Vendors without a live stdin channel can still pull follow-ups from
-      // the broker inbox mid-run; the watch surfaces the vendor's claim as a
-      // read receipt instead of leaving the bubble "queued" until turn end.
-      const inboxWatch =
-        !isClaudeNativeModel(msg.data.brokerModel) &&
-        supportsBrokerInbox(msg.data.brokerModel)
-          ? new BridgeInboxWatch(msg.data.sessionId, (messageId) => {
-              reactionBroker?.setTargetMessage(messageId);
-              protocol.send("cukii/steerInboxRead", {
-                sessionId: msg.data.sessionId,
-                messageId,
-              });
-            })
-          : undefined;
+      // Every MCP-capable vendor pulls follow-ups from the same durable FIFO.
+      // This includes Claude: native stdin can only surface a steer as a later
+      // ordinary turn and has no inbox message id to acknowledge. The watch
+      // turns the vendor's exact FIFO claim into the GUI read receipt.
+      const inboxWatch = supportsBrokerInbox(msg.data.brokerModel)
+        ? new BridgeInboxWatch(msg.data.sessionId, (messageId) => {
+            reactionBroker?.setTargetMessage(messageId);
+            protocol.send("cukii/steerInboxRead", {
+              sessionId: msg.data.sessionId,
+              messageId,
+            });
+          })
+        : undefined;
       inboxWatch?.start();
       const cancellation = new BridgeRunCancellation(
         () => controller.abort(),
@@ -1818,10 +1817,13 @@ export class VsCodeMessenger {
             status: "deferred",
           };
         }
-        if (!run.steering.supportsLiveSteering) {
-          // Fast path for stdin-less vendors: the agent can claim this mid-run
-          // through broker_inbox. The durable GUI outbox stays the fallback and
-          // dedups itself against the inbox read mark at the turn boundary.
+        const usesBrokerInbox = supportsBrokerInbox(run.brokerModel);
+        if (usesBrokerInbox) {
+          // The agent claims this mid-run through broker_inbox. The durable GUI
+          // outbox stays the fallback and dedups itself against the inbox read
+          // mark at the turn boundary. Do not also inject the same payload via
+          // Claude stdin: that path has no message id and would create a second
+          // ordinary user turn after the acknowledged FIFO delivery.
           run.imageScope.persistInboxMessage(
             msg.data.content,
             (materializedContent, metadata) =>
@@ -1834,7 +1836,13 @@ export class VsCodeMessenger {
             { sessionId: run.sessionId, messageId: msg.data.messageId },
           );
         }
-        const receipt = await run.steering.deliver(msg.data);
+        const receipt: CukiiSteerReceipt = usesBrokerInbox
+          ? {
+              messageId: msg.data.messageId,
+              sessionId: msg.data.sessionId,
+              status: "deferred",
+            }
+          : await run.steering.deliver(msg.data);
         if (receipt.status === "delivered") {
           run.reactionBroker?.setTargetMessage(msg.data.messageId);
         }

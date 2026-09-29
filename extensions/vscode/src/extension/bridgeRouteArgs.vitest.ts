@@ -1787,12 +1787,8 @@ describe("native bridge argv", () => {
       "imageScope.materializeMessages(transportMessages)",
     );
     expect(transportBlock).toContain("hasImageAttachment(transportMessages)");
-    expect(transportBlock).toContain(
-      `routeForModel(
-    args.brokerModel,
-    cwd,
-    prompt,
-    transportMessages,`,
+    expect(transportBlock).toMatch(
+      /routeForModel\(\s*args\.brokerModel,\s*cwd,\s*prompt,\s*transportMessages,/,
     );
     expect(transportBlock).toContain("messages: transportMessages");
     expect(transportBlock).not.toContain(
@@ -1807,13 +1803,13 @@ describe("native bridge argv", () => {
     const persistInboxAt = messengerSource.indexOf(
       "run.imageScope.persistInboxMessage(",
     );
-    const deliverAt = messengerSource.indexOf(
-      "const receipt = await run.steering.deliver(msg.data);",
+    const receiptAt = messengerSource.indexOf(
+      "const receipt: CukiiSteerReceipt",
       persistInboxAt,
     );
     expect(persistInboxAt).toBeGreaterThan(-1);
-    expect(deliverAt).toBeGreaterThan(persistInboxAt);
-    const persistInboxBlock = messengerSource.slice(persistInboxAt, deliverAt);
+    expect(receiptAt).toBeGreaterThan(persistInboxAt);
+    const persistInboxBlock = messengerSource.slice(persistInboxAt, receiptAt);
     expect(persistInboxBlock).toContain("(materializedContent, metadata) =>");
     expect(persistInboxBlock).toContain("writeBridgeInboxMessageWithReceipt(");
     expect(persistInboxBlock).toContain("materializedContent,");

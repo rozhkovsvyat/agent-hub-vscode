@@ -160,6 +160,36 @@ export const continueIfTrailingSteer = createAsyncThunk<
       }
 
       if (getState().session.id !== sessionId) return;
+      // The inbox ack can race the pre-dispatch check and a no-spawn drain can
+      // finish before the run-scoped 2s watcher ticks. Reconcile the exact
+      // batch once more before deciding that a one-check bubble is still
+      // pending; never infer acceptance from generic vendor activity.
+      for (const messageId of pendingMessageIds) {
+        const item = getState().session.history.find(
+          (entry) => entry.message.id === messageId,
+        );
+        if (
+          !item ||
+          (item.steerStatus !== "queued" && item.steerStatus !== "deferred")
+        ) {
+          continue;
+        }
+        try {
+          const inboxReceipt = await extra.ideMessenger.request(
+            "cukii/steerInboxReceipt",
+            { sessionId, messageId },
+          );
+          if (
+            inboxReceipt.status === "success" &&
+            inboxReceipt.content.status === "read"
+          ) {
+            dispatch(setSteerStatus({ messageId, status: "read" }));
+          }
+        } catch {
+          // Keep the durable bubble pending; the next drain/reload retries it.
+        }
+      }
+      if (getState().session.id !== sessionId) return;
       unwrapResult(
         await dispatch(
           saveCurrentSession({
