@@ -2380,19 +2380,63 @@ button.cukii-submit-button--stop:active {
   margin-left: auto;
 }
 
-/* MAX Web reaction geometry: the pill straddles the lower bubble edge instead
-   of becoming a second message row. The 14px offset is exactly half the 28px
-   pill, leaving the existing row margin to protect the next turn without
-   changing transcript/sticky geometry. */
-.cukii-user-reactions {
-  position: absolute;
+/* MAX Web reaction placement has two distinct modes. Text messages own their
+   reaction inside the painted message body. Only media without text uses a
+   separate standalone pill below the media bubble. */
+.cukii-message-reactions {
   z-index: 2;
-  inset-inline-start: 8px;
-  bottom: -14px;
   display: flex;
+  width: fit-content;
   flex-flow: row wrap;
   gap: 4px;
   pointer-events: none;
+}
+
+.cukii-message-reactions--embedded {
+  position: static;
+  min-height: 28px;
+  margin: 0 -10px -10px;
+  padding: 8px 10px;
+}
+
+/* MAX keeps an embedded reaction and the delivery metadata in one bottom
+   band. The reaction stays in normal flow; an inline flex item reserves the
+   exact measured width of the absolutely painted time/checks. This mode is
+   enabled only when metadata exists, so reaction-only bubbles do not acquire
+   a phantom empty slot. */
+.cukii-user-bubble--reaction-with-meta
+  .cukii-message-reactions--embedded::after {
+  content: "";
+  display: block;
+  flex: 0 0 var(--cukii-meta-reserve, 31px);
+  width: var(--cukii-meta-reserve, 31px);
+  height: 14px;
+  align-self: flex-end;
+}
+
+.cukii-user-bubble--reaction-with-meta > .cukii-user-metadata,
+.cukii-user-bubble--reaction-with-meta > .cukii-user-fold-footer {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+/* A long sticky prompt's footer also owns the 14px chevron and its 2px gap.
+   Reserve those pixels in the same bottom row while the reaction is visible;
+   the terminal one-line sticky clip still hides the body/reaction together. */
+.cukii-user-bubble--reaction-with-meta[data-cukii-long-prompt="true"]
+  .cukii-message-reactions--embedded::after {
+  flex-basis: calc(var(--cukii-meta-reserve, 31px) + 16px);
+  width: calc(var(--cukii-meta-reserve, 31px) + 16px);
+}
+
+.cukii-message-reactions--standalone {
+  position: static;
+  width: 100%;
+  min-height: 28px;
+  justify-content: flex-end;
+  padding: 4px 0 8px;
 }
 
 .cukii-message-reaction {
@@ -2403,15 +2447,29 @@ button.cukii-submit-button--stop:active {
   gap: 4px;
   padding: 4px 10px;
   overflow: visible;
-  color: var(--cukii-text, var(--vscode-foreground));
-  background: color-mix(
-    in srgb,
-    var(--cukii-primary-action-background, #e3a867) 24%,
-    var(--vscode-editor-background) 76%
-  );
   border: 0;
-  border-radius: 999px;
+  border-radius: 20px;
   animation: cukii-reaction-pill-in 180ms ease-out both;
+}
+
+/* The reaction surface is intentionally the opposite participant's capsule:
+   agent-on-user is slate with the user's orange count; user-on-agent is
+   orange with the agent's white count. This mirrors the MAX side distinction
+   while preserving Cukii's established palette. */
+.cukii-message-reactions--user .cukii-message-reaction {
+  color: var(--cukii-primary-action-background, #e3a867);
+  background: var(--vscode-input-background, var(--cukii-shell));
+  --cukii-reaction-ripple: color-mix(
+    in srgb,
+    var(--cukii-primary-action-background, #e3a867) 38%,
+    transparent
+  );
+}
+
+.cukii-message-reactions--assistant .cukii-message-reaction {
+  color: #ffffff;
+  background: var(--cukii-primary-action-background, #e3a867);
+  --cukii-reaction-ripple: color-mix(in srgb, #ffffff 38%, transparent);
 }
 
 .cukii-message-reaction::after {
@@ -2421,11 +2479,7 @@ button.cukii-submit-button--stop:active {
   width: 20px;
   height: 20px;
   pointer-events: none;
-  background: color-mix(
-    in srgb,
-    var(--cukii-primary-action-background, #e3a867) 38%,
-    transparent
-  );
+  background: var(--cukii-reaction-ripple);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0.25);
   animation: cukii-reaction-ripple-in 360ms ease-out both;
@@ -2459,10 +2513,18 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-message-reaction-counter {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 16px;
-  letter-spacing: 0;
+  line-height: 18px;
+  letter-spacing: 0.15px;
+}
+
+.cukii-message-reactions--user .cukii-message-reaction-counter {
+  color: var(--cukii-primary-action-background, #e3a867);
+}
+
+.cukii-message-reactions--assistant .cukii-message-reaction-counter {
+  color: #ffffff;
 }
 
 @keyframes cukii-reaction-pill-in {
@@ -2553,6 +2615,10 @@ button.cukii-submit-button--stop:active {
   overflow-y: hidden;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.cukii-user-message-body {
+  min-width: 0;
 }
 
 .cukii-user-message-content[data-cukii-scroll-folding="true"] {

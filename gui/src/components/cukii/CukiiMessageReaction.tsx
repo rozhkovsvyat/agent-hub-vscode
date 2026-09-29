@@ -1,4 +1,6 @@
+import type { MessageContent } from "core";
 import type { CukiiUserReactionEmoji } from "core/protocol/ideWebview";
+import { hasImageAttachments, stripImages } from "core/util/messageContent";
 import { MAX_REACTION_EMOJI_DATA_URL } from "./maxReactionEmojiData";
 
 const AGENT_REACTION_EMOJIS = new Set<CukiiUserReactionEmoji>([
@@ -18,6 +20,22 @@ export type CukiiAgentReaction = {
   reactedAt: number;
   source: "agent";
 };
+
+export type CukiiReactionPlacement = "embedded" | "standalone";
+export type CukiiReactionSurface = "user" | "assistant";
+
+/**
+ * MAX keeps reactions inside a text bubble. A standalone reaction pill is
+ * reserved for media that has no text surface of its own.
+ */
+export function reactionPlacementForMessage(
+  content: MessageContent,
+): CukiiReactionPlacement {
+  return stripImages(content).trim().length === 0 &&
+    hasImageAttachments(content)
+    ? "standalone"
+    : "embedded";
+}
 
 export function readCukiiAgentReaction(
   metadata: Record<string, unknown> | undefined,
@@ -39,15 +57,21 @@ export function readCukiiAgentReaction(
 }
 
 export function CukiiMessageReaction({
+  placement,
   reaction,
+  surface,
 }: {
+  placement: CukiiReactionPlacement;
   reaction: CukiiAgentReaction;
+  surface: CukiiReactionSurface;
 }) {
   return (
-    <div
+    <span
       aria-label={`Agent reacted ${reaction.emoji}`}
-      className="cukii-user-reactions"
+      className={`cukii-message-reactions cukii-message-reactions--${placement} cukii-message-reactions--${surface}`}
       data-cukii-reaction-id={reaction.reactionId}
+      data-cukii-reaction-placement={placement}
+      data-cukii-reaction-surface={surface}
       data-testid={`cukii-user-reaction-${reaction.reactionId}`}
       role="img"
     >
@@ -71,6 +95,6 @@ export function CukiiMessageReaction({
           1
         </span>
       </span>
-    </div>
+    </span>
   );
 }

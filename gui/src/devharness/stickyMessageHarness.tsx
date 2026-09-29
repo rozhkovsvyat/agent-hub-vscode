@@ -10,6 +10,7 @@ import { IdeMessengerProvider } from "../context/IdeMessenger";
 import { MockIdeMessenger } from "../context/MockIdeMessenger";
 import { Chat } from "../pages/gui/Chat";
 import { setupStore } from "../redux/store";
+import { CukiiMessageReaction } from "../components/cukii/CukiiMessageReaction";
 import "../index.css";
 
 const ideMessenger = new MockIdeMessenger();
@@ -135,6 +136,23 @@ const HISTORY = [
   },
   {
     message: {
+      id: "image-only-reaction",
+      role: "user",
+      content: [{ type: "imageUrl", imageUrl: { url: IMAGE } }],
+      metadata: {
+        cukiiReaction: {
+          reactionId: "reaction-image-only",
+          emoji: "❤️",
+          reactedAt: SENT_AT + 95_000,
+          source: "agent",
+        },
+      },
+    },
+    contextItems: [],
+    messageReceipt: { sentAt: SENT_AT + 95_000, status: "read" },
+  },
+  {
+    message: {
       id: "answer-attachments",
       role: "assistant",
       content: LONG_ANSWER,
@@ -165,6 +183,50 @@ const HISTORY = [
   },
 ];
 
+const REACTION_REFERENCE = {
+  reactionId: "reaction-reference",
+  emoji: "❤️" as const,
+  reactedAt: SENT_AT,
+  source: "agent" as const,
+};
+
+function ReactionParityReference() {
+  return (
+    <div
+      data-testid="reaction-parity-reference"
+      style={{
+        position: "fixed",
+        top: 12,
+        left: 12,
+        zIndex: 1000,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div className="cukii-user-message-bubble">
+        User message
+        <CukiiMessageReaction
+          placement="embedded"
+          reaction={{ ...REACTION_REFERENCE, reactionId: "reference-user" }}
+          surface="user"
+        />
+      </div>
+      <div className="cukii-assistant-bubble">
+        Agent message
+        <CukiiMessageReaction
+          placement="embedded"
+          reaction={{
+            ...REACTION_REFERENCE,
+            reactionId: "reference-assistant",
+          }}
+          surface="assistant"
+        />
+      </div>
+    </div>
+  );
+}
+
 function Harness() {
   useEffect(() => {
     store.dispatch({
@@ -191,6 +253,7 @@ function Harness() {
       }}
     >
       <Chat />
+      <ReactionParityReference />
     </div>
   );
 }

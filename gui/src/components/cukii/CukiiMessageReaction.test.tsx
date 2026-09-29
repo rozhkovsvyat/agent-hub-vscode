@@ -20,24 +20,83 @@ describe("CukiiMessageReaction", () => {
       },
     });
     expect(reaction).toBeDefined();
-    render(<CukiiMessageReaction reaction={reaction!} />);
-    const rendered = screen.getByRole("img", { name: "Agent reacted 😂" });
-    expect(rendered).toHaveTextContent("😂1");
-    expect(rendered.querySelector("img")).toHaveAttribute(
+    render(
+      <>
+        <CukiiMessageReaction
+          placement="embedded"
+          reaction={reaction!}
+          surface="user"
+        />
+        <CukiiMessageReaction
+          placement="embedded"
+          reaction={{ ...reaction!, reactionId: "reaction-assistant" }}
+          surface="assistant"
+        />
+      </>,
+    );
+    const rendered = screen.getAllByRole("img", { name: "Agent reacted 😂" });
+    expect(rendered[0]).toHaveTextContent("😂1");
+    expect(rendered[0]).toHaveClass(
+      "cukii-message-reactions--embedded",
+      "cukii-message-reactions--user",
+    );
+    expect(rendered[1]).toHaveClass(
+      "cukii-message-reactions--embedded",
+      "cukii-message-reactions--assistant",
+    );
+    expect(rendered[0].querySelector("img")).toHaveAttribute(
       "src",
       MAX_REACTION_EMOJI_DATA_URL["😂"],
     );
   });
 
-  it("overlaps the bubble edge like MAX without reserving a second row", () => {
+  it("embeds text-message reactions and reserves a standalone pill for media-only messages", () => {
     const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
-    const container =
-      css.match(/\.cukii-user-reactions\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(container).toContain("position: absolute");
-    expect(container).toContain("inset-inline-start: 8px");
-    expect(container).toContain("bottom: -14px");
-    expect(container).not.toContain("min-height");
-    expect(container).not.toContain("padding:");
+    const embedded =
+      css.match(/\.cukii-message-reactions--embedded\s*\{([^}]*)\}/)?.[1] ?? "";
+    const standalone =
+      css.match(/\.cukii-message-reactions--standalone\s*\{([^}]*)\}/)?.[1] ??
+      "";
+    expect(embedded).toContain("position: static");
+    expect(embedded).toContain("padding: 8px 10px");
+    expect(embedded).not.toContain("bottom:");
+    expect(standalone).toContain("position: static");
+    expect(standalone).toContain("padding: 4px 0 8px");
+    expect(standalone).not.toContain("bottom:");
+  });
+
+  it("uses the opposite message surface and the owner-requested counter colors", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    const userPill =
+      css.match(/\.cukii-message-reactions--user[^\{]*\{([^}]*)\}/)?.[1] ?? "";
+    const assistantPill =
+      css.match(/\.cukii-message-reactions--assistant[^\{]*\{([^}]*)\}/)?.[1] ??
+      "";
+    const userCounter =
+      css.match(
+        /\.cukii-message-reactions--user \.cukii-message-reaction-counter\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+    const assistantCounter =
+      css.match(
+        /\.cukii-message-reactions--assistant \.cukii-message-reaction-counter\s*\{([^}]*)\}/,
+      )?.[1] ?? "";
+
+    expect(userPill).toContain("var(--vscode-input-background");
+    expect(assistantPill).toContain("var(--cukii-primary-action-background");
+    expect(userCounter).toContain(
+      "var(--cukii-primary-action-background, #e3a867)",
+    );
+    expect(assistantCounter).toContain("#ffffff");
+  });
+
+  it("keeps the reaction and delivery metadata on the same MAX bottom row", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    expect(css).toMatch(
+      /\.cukii-user-bubble--reaction-with-meta[\s\S]*?\.cukii-message-reactions--embedded::after\s*\{[^}]*content:\s*"";[^}]*width:\s*var\(--cukii-meta-reserve/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-bubble--reaction-with-meta\s*>\s*\.cukii-user-metadata,[\s\S]*?\.cukii-user-bubble--reaction-with-meta\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute;[^}]*right:\s*10px;[^}]*bottom:\s*4px/s,
+    );
   });
 
   it("embeds all supported MAX emoji artwork as valid WebP data", () => {

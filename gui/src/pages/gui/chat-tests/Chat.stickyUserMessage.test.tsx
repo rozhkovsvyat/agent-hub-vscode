@@ -263,7 +263,7 @@ test("collapses when streamed markdown becomes long after the row sticks", async
     get() {
       return (this as HTMLElement).classList?.contains(
         "cukii-user-message-content",
-      )
+      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
         ? contentHeight
         : 0;
     },
@@ -288,7 +288,10 @@ test("collapses when streamed markdown becomes long after the row sticks", async
     if (this.classList.contains("cukii-user-row--sticky")) {
       return { top: rowTop, height: contentHeight + 46 } as DOMRect;
     }
-    if (this.classList.contains("cukii-user-message-content")) {
+    if (
+      this.classList.contains("cukii-user-message-content") ||
+      this.classList.contains("cukii-user-message-body")
+    ) {
       return { top: rowTop + 14, height: contentHeight } as DOMRect;
     }
     if (this.classList.contains("cukii-user-message-bubble")) {
@@ -425,7 +428,7 @@ test("collapses a restored long prompt that mounts already sticky", async () => 
     get() {
       return (this as HTMLElement).classList?.contains(
         "cukii-user-message-content",
-      )
+      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
         ? contentHeight
         : 0;
     },
@@ -450,7 +453,10 @@ test("collapses a restored long prompt that mounts already sticky", async () => 
     if (this.classList.contains("cukii-user-row--sticky")) {
       return { top: 0, height: contentHeight + 46 } as DOMRect;
     }
-    if (this.classList.contains("cukii-user-message-content")) {
+    if (
+      this.classList.contains("cukii-user-message-content") ||
+      this.classList.contains("cukii-user-message-body")
+    ) {
       return { top: 14, height: contentHeight } as DOMRect;
     }
     if (this.classList.contains("cukii-user-message-bubble")) {
@@ -561,6 +567,7 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     configurable: true,
     get() {
       const element = this as HTMLElement;
+      if (element.classList?.contains("cukii-user-message-body")) return 140;
       if (!element.classList?.contains("cukii-user-message-content")) return 0;
       return element.classList.contains("cukii-user-message-content--collapsed")
         ? 20
@@ -585,6 +592,14 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
                   "A long prompt that exceeds Claude's folded height. ".repeat(
                     12,
                   ),
+                metadata: {
+                  cukiiReaction: {
+                    reactionId: "long-user-reaction",
+                    emoji: "❤️",
+                    reactedAt: 1_700_000_000_000,
+                    source: "agent",
+                  },
+                },
               },
               contextItems: [],
               isSteer: true,
@@ -619,6 +634,15 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     const content = bubble?.querySelector<HTMLElement>(
       ".cukii-user-message-content",
     )!;
+    const embeddedReaction = bubble?.querySelector(
+      '[data-cukii-reaction-id="long-user-reaction"]',
+    );
+    expect(embeddedReaction).not.toBeNull();
+    expect(content).toContainElement(embeddedReaction as HTMLElement);
+    expect(embeddedReaction).toHaveAttribute(
+      "data-cukii-reaction-placement",
+      "embedded",
+    );
     Object.defineProperty(transcript, "scrollTop", {
       configurable: true,
       value: 100,
@@ -675,6 +699,7 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       '[data-testid="cukii-message-receipt-long-user"]',
     );
     expect(clippedContent).not.toBeNull();
+    expect(clippedContent?.contains(embeddedReaction ?? null)).toBe(true);
     expect(
       content.style.getPropertyValue("--cukii-sticky-visible-height"),
     ).toBe("20px");
@@ -932,18 +957,77 @@ test("marks an attachment capsule as foldable while preserving it in normal flow
   }
 });
 
+test("does not classify a short text message as long because of its embedded reaction", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      if (this.classList?.contains("cukii-user-message-body")) return 20;
+      if (this.classList?.contains("cukii-user-message-content")) return 64;
+      return 0;
+    },
+  });
+
+  try {
+    const { container } = render(
+      <CukiiStickyUserMessage
+        bubbleClassName="cukii-user-message-bubble"
+        messageId="short-reaction-prompt"
+        reaction={
+          <span className="cukii-message-reactions--embedded">reaction</span>
+        }
+      >
+        Short text
+      </CukiiStickyUserMessage>,
+    );
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-short-reaction-prompt"]',
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+    expect(
+      bubble?.querySelector(".cukii-user-message-content"),
+    ).toContainElement(
+      bubble?.querySelector(".cukii-message-reactions--embedded") ?? null,
+    );
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+  }
+});
+
 test("re-measures a long capsule after the first browser paint", async () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
   );
   let contentReads = 0;
+  let measuredHeight = 0;
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
-      if (!this.classList?.contains("cukii-user-message-content")) return 0;
-      contentReads += 1;
-      return contentReads === 1 ? 0 : 140;
+      if (this.classList?.contains("cukii-user-message-content")) {
+        contentReads += 1;
+        measuredHeight = contentReads === 1 ? 0 : 140;
+        return measuredHeight;
+      }
+      if (this.classList?.contains("cukii-user-message-body")) {
+        return measuredHeight;
+      }
+      return 0;
     },
   });
 
@@ -988,7 +1072,12 @@ test("re-measures delayed Markdown content after its DOM mutation", async () => 
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
-      if (!this.classList?.contains("cukii-user-message-content")) return 0;
+      if (
+        !this.classList?.contains("cukii-user-message-content") &&
+        !this.classList?.contains("cukii-user-message-body")
+      ) {
+        return 0;
+      }
       return markdownReady ? 140 : 0;
     },
   });

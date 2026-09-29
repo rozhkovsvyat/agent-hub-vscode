@@ -67,6 +67,7 @@ import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
 import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
 import {
   CukiiMessageReaction,
+  reactionPlacementForMessage,
   readCukiiAgentReaction,
 } from "../../components/cukii/CukiiMessageReaction";
 import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
@@ -609,6 +610,9 @@ export function Chat() {
 
       if (message.role === "user") {
         const agentReaction = readCukiiAgentReaction(message.metadata);
+        const reactionPlacement = agentReaction
+          ? reactionPlacementForMessage(message.content)
+          : undefined;
         const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
         const receiptStatus = item.messageReceipt?.status;
         const visualReceiptStatus =
@@ -684,8 +688,25 @@ export function Chat() {
               <CukiiStickyUserMessage
                 bubbleClassName={`cukii-user-message-bubble ${groupClass} ${
                   sentTime ? "cukii-user-bubble--with-receipt" : ""
-                } ${visualReceiptStatus ? "cukii-user-bubble--receipt-checks" : ""}`}
+                } ${visualReceiptStatus ? "cukii-user-bubble--receipt-checks" : ""} ${
+                  reactionPlacement === "embedded"
+                    ? "cukii-user-bubble--with-reaction"
+                    : ""
+                } ${
+                  reactionPlacement === "embedded" && sentTime
+                    ? "cukii-user-bubble--reaction-with-meta"
+                    : ""
+                }`}
                 messageId={message.id}
+                reaction={
+                  agentReaction && reactionPlacement === "embedded" ? (
+                    <CukiiMessageReaction
+                      placement="embedded"
+                      reaction={agentReaction}
+                      surface="user"
+                    />
+                  ) : undefined
+                }
                 metadata={
                   sentTime ? (
                     <span
@@ -725,8 +746,12 @@ export function Chat() {
                   />,
                 )}
               </CukiiStickyUserMessage>
-              {agentReaction && (
-                <CukiiMessageReaction reaction={agentReaction} />
+              {agentReaction && reactionPlacement === "standalone" && (
+                <CukiiMessageReaction
+                  placement="standalone"
+                  reaction={agentReaction}
+                  surface="user"
+                />
               )}
             </div>
           </div>,

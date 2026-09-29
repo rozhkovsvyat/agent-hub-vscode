@@ -446,6 +446,115 @@ test("short, multiline and image user turns stay in the right bubble lane while 
   expect(container.textContent).toContain("Answer");
 });
 
+test("keeps text reactions inside the message and uses a separate pill only for image-only turns", async () => {
+  const { store, container } = await renderWithProviders(<Chat />);
+  const reaction = (reactionId: string) => ({
+    cukiiReaction: {
+      reactionId,
+      emoji: "❤️",
+      reactedAt: 1_700_000_000_000,
+      source: "agent",
+    },
+  });
+
+  await act(async () => {
+    store.dispatch({
+      type: "session/newSession",
+      payload: {
+        sessionId: "reaction-placement",
+        title: "Reaction placement",
+        history: [
+          {
+            message: {
+              id: "reaction-text",
+              role: "user",
+              content: "Text message",
+              metadata: reaction("reaction-text-id"),
+            },
+            contextItems: [],
+            messageReceipt: {
+              sentAt: 1_700_000_000_000,
+              status: "read",
+            },
+          },
+          {
+            message: {
+              id: "reaction-text-image",
+              role: "user",
+              content: [
+                { type: "text", text: "Text and image" },
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+                },
+              ],
+              metadata: reaction("reaction-text-image-id"),
+            },
+            contextItems: [],
+            messageReceipt: {
+              sentAt: 1_700_000_000_000,
+              status: "read",
+            },
+          },
+          {
+            message: {
+              id: "reaction-image-only",
+              role: "user",
+              content: [
+                {
+                  type: "imageUrl",
+                  imageUrl: { url: "data:image/png;base64,aW1hZ2U=" },
+                },
+              ],
+              metadata: reaction("reaction-image-only-id"),
+            },
+            contextItems: [],
+          },
+        ],
+      },
+    });
+  });
+
+  const textBubble = container.querySelector(
+    '[data-testid="cukii-user-bubble-reaction-text"]',
+  );
+  const textImageBubble = container.querySelector(
+    '[data-testid="cukii-user-bubble-reaction-text-image"]',
+  );
+  const imageOnlyBubble = container.querySelector(
+    '[data-testid="cukii-user-bubble-reaction-image-only"]',
+  );
+  const textReaction = container.querySelector(
+    '[data-testid="cukii-user-reaction-reaction-text-id"]',
+  );
+  const textImageReaction = container.querySelector(
+    '[data-testid="cukii-user-reaction-reaction-text-image-id"]',
+  );
+  const imageOnlyReaction = container.querySelector(
+    '[data-testid="cukii-user-reaction-reaction-image-only-id"]',
+  );
+
+  expect(textBubble).toContainElement(textReaction as HTMLElement);
+  expect(textImageBubble).toContainElement(textImageReaction as HTMLElement);
+  expect(textBubble).toHaveClass("cukii-user-bubble--with-reaction");
+  expect(textImageBubble).toHaveClass("cukii-user-bubble--with-reaction");
+  expect(textBubble).toHaveClass("cukii-user-bubble--reaction-with-meta");
+  expect(textImageBubble).toHaveClass("cukii-user-bubble--reaction-with-meta");
+  expect(textReaction).toHaveClass("cukii-message-reactions--embedded");
+  expect(textImageReaction).toHaveClass("cukii-message-reactions--embedded");
+  expect(
+    textBubble?.querySelector(
+      ':scope > [data-testid="cukii-message-receipt-reaction-text"]',
+    ),
+  ).not.toBeNull();
+  expect(imageOnlyBubble).not.toContainElement(
+    imageOnlyReaction as HTMLElement,
+  );
+  expect(imageOnlyBubble).not.toHaveClass("cukii-user-bubble--with-reaction");
+  expect(imageOnlyReaction).toHaveClass("cukii-message-reactions--standalone");
+  expect(imageOnlyReaction?.parentElement).toHaveClass("cukii-user-message");
+});
+
 test("groups visually adjacent user capsules across hidden transport entries", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
   await act(async () => {

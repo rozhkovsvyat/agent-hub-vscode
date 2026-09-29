@@ -82,6 +82,7 @@ interface CukiiStickyUserMessageProps {
   children: ReactNode;
   messageId: string;
   metadata?: ReactNode;
+  reaction?: ReactNode;
 }
 
 /**
@@ -102,8 +103,10 @@ export function CukiiStickyUserMessage({
   children,
   messageId,
   metadata,
+  reaction,
 }: CukiiStickyUserMessageProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const messageBodyRef = useRef<HTMLDivElement>(null);
   const [isLongPrompt, setIsLongPrompt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const isExpandedRef = useRef(isExpanded);
@@ -120,16 +123,28 @@ export function CukiiStickyUserMessage({
     setIsExpanded(false);
     naturalContentHeightRef.current = 0;
     const measure = () => {
+      const measuredContentHeight = content.scrollHeight;
       naturalContentHeightRef.current = resolveStickyNaturalHeight({
-        measuredHeight: content.scrollHeight,
+        measuredHeight: measuredContentHeight,
         previousHeight: naturalContentHeightRef.current,
         terminallyCollapsed: content.classList.contains(
           "cukii-user-message-content--collapsed",
         ),
       });
-      const next =
-        naturalContentHeightRef.current >
-        CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
+      const body = messageBodyRef.current;
+      const measuredBodyHeight = body
+        ? Math.max(
+            body.scrollHeight,
+            Math.ceil(body.getBoundingClientRect().height),
+          )
+        : 0;
+      // An embedded MAX reaction belongs to the painted message, but it is
+      // not prompt text and must not turn a one-line message into a foldable
+      // sticky capsule. In layout-less tests the body measures zero, so keep
+      // the historical outer-height fallback used by the geometry fixtures.
+      const promptBodyHeight =
+        measuredBodyHeight > 0 ? measuredBodyHeight : measuredContentHeight;
+      const next = promptBodyHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
       setIsLongPrompt(next);
       if (!next) setIsExpanded(false);
     };
@@ -277,9 +292,9 @@ export function CukiiStickyUserMessage({
         bubble.getBoundingClientRect().height,
         messageFrame?.getBoundingClientRect().height ?? 0,
       );
-      // The MAX-style reaction overlaps the bubble edge absolutely and must
-      // not inflate this geometry; frameHeight therefore remains equal to the
-      // painted message frame rather than reserving a second reaction row.
+      // Text reactions are part of contentHeight and fold together with the
+      // prompt. The only reaction outside this frame is the media-only sibling,
+      // so it cannot inflate sticky geometry or leave an invisible spacer.
       const bubbleOverhead = Math.max(0, frameHeight - contentHeight);
       const rowStyle = getComputedStyle(row);
       const rowPaddingTop = Number.parseFloat(rowStyle.paddingTop) || 0;
@@ -389,7 +404,10 @@ export function CukiiStickyUserMessage({
           the attachment pills open a preview. */}
       <div className="cukii-user-content-shell">
         <div className="cukii-user-message-content" ref={contentRef}>
-          {children}
+          <div className="cukii-user-message-body" ref={messageBodyRef}>
+            {children}
+          </div>
+          {reaction}
         </div>
         {isLongPrompt && (
           <div aria-hidden="true" className="cukii-user-truncation-gradient" />
