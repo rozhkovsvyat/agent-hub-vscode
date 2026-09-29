@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -25,6 +27,17 @@ describe("CukiiMessageReaction", () => {
       "src",
       MAX_REACTION_EMOJI_DATA_URL["😂"],
     );
+  });
+
+  it("overlaps the bubble edge like MAX without reserving a second row", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    const container =
+      css.match(/\.cukii-user-reactions\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(container).toContain("position: absolute");
+    expect(container).toContain("inset-inline-start: 8px");
+    expect(container).toContain("bottom: -14px");
+    expect(container).not.toContain("min-height");
+    expect(container).not.toContain("padding:");
   });
 
   it("embeds all supported MAX emoji artwork as valid WebP data", () => {

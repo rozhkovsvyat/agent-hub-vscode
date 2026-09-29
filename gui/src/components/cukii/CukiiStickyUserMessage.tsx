@@ -277,9 +277,9 @@ export function CukiiStickyUserMessage({
         bubble.getBoundingClientRect().height,
         messageFrame?.getBoundingClientRect().height ?? 0,
       );
-      // An outside MAX-style reaction is a sibling of the orange bubble but
-      // still part of this user turn. Measure the whole message frame so the
-      // sticky mask/collision geometry includes its 28px reaction row.
+      // The MAX-style reaction overlaps the bubble edge absolutely and must
+      // not inflate this geometry; frameHeight therefore remains equal to the
+      // painted message frame rather than reserving a second reaction row.
       const bubbleOverhead = Math.max(0, frameHeight - contentHeight);
       const rowStyle = getComputedStyle(row);
       const rowPaddingTop = Number.parseFloat(rowStyle.paddingTop) || 0;

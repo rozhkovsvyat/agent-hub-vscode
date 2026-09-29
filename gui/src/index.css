@@ -2371,6 +2371,7 @@ button.cukii-submit-button--stop:active {
    for assistant/tool/thinking remains untouched on the left. MAX measures
    the sent bubble at 70% of the chat column. */
 .cukii-user-message {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2379,18 +2380,19 @@ button.cukii-submit-button--stop:active {
   margin-left: auto;
 }
 
-/* MAX Web reaction geometry (desktop, measured from the live web bundle):
-   outside the outgoing bubble, right-aligned; 4px row gap, 4x10px pill
-   padding, 20px emoji and 13/16 counter typography. The agent owns this
-   reaction, so it is a status surface rather than a user-toggle button. */
+/* MAX Web reaction geometry: the pill straddles the lower bubble edge instead
+   of becoming a second message row. The 14px offset is exactly half the 28px
+   pill, leaving the existing row margin to protect the next turn without
+   changing transcript/sticky geometry. */
 .cukii-user-reactions {
+  position: absolute;
+  z-index: 2;
+  inset-inline-start: 8px;
+  bottom: -14px;
   display: flex;
-  min-height: 28px;
-  align-self: flex-end;
-  justify-content: flex-end;
   flex-flow: row wrap;
   gap: 4px;
-  padding: 4px 0 8px;
+  pointer-events: none;
 }
 
 .cukii-message-reaction {
