@@ -111,6 +111,31 @@ describe("CukiiMessageReaction", () => {
     );
   });
 
+  it("keeps the embedded reaction outside the bubble clip chain", () => {
+    const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+    const flatCss = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const bubble =
+      flatCss.match(/^\.cukii-user-message-bubble\s*\{[^}]*\}/m)?.[0] ?? "";
+    const foldedContent =
+      flatCss.match(/^\.cukii-user-message-content\s*\{[^}]*\}/m)?.[0] ?? "";
+    const activeFold =
+      flatCss.match(
+        /^\.cukii-user-message-content\[data-cukii-scroll-folding="true"\]\s*\{[^}]*\}/m,
+      )?.[0] ?? "";
+
+    // The reaction pop/ripple is part of the painted message, but it can
+    // briefly extend beyond its final bounds. Neither the painted bubble nor
+    // the idle content frame may cut that artwork. Only an active sticky fold
+    // owns a clip; the reaction then folds away with the prompt by design.
+    expect(bubble).toContain("overflow: visible;");
+    expect(bubble).not.toContain("overflow: hidden;");
+    expect(foldedContent).toContain("overflow: visible;");
+    expect(foldedContent).not.toContain("overflow-x: hidden;");
+    expect(foldedContent).not.toContain("overflow-y: hidden;");
+    expect(activeFold).toContain("overflow-x: hidden;");
+    expect(activeFold).toContain("overflow-y: hidden;");
+  });
+
   it("embeds all supported MAX emoji artwork as valid WebP data", () => {
     expect(Object.keys(MAX_REACTION_EMOJI_DATA_URL)).toHaveLength(8);
     expect(new Set(Object.values(MAX_REACTION_EMOJI_DATA_URL)).size).toBe(8);

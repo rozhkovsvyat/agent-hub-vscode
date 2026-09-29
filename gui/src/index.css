@@ -2578,7 +2578,10 @@ button.cukii-submit-button--stop:active {
   width: fit-content;
   min-width: 54px;
   max-width: 100%;
-  overflow: hidden;
+  /* Folding is clipped by `.cukii-user-message-content`, not by the painted
+     bubble. The outer clip cut the embedded reaction's pop/ripple against the
+     orange capsule even though the reaction was correctly nested in the DOM. */
+  overflow: visible;
   /* Measured MAX bubble inset: 8px top, 10px sides, 10px bottom. The bottom
      band doubles as the home of the absolutely positioned receipt. */
   padding: 8px 10px 10px;
@@ -2611,8 +2614,11 @@ button.cukii-submit-button--stop:active {
 }
 
 .cukii-user-message-content {
-  overflow-x: hidden;
-  overflow-y: hidden;
+  /* Idle text reactions share this frame so their height participates in the
+     bubble and sticky measurements. Keep it paint-visible until an actual
+     fold starts; otherwise the 44px reaction row is clipped at the text
+     frame's pre-reaction height. */
+  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2624,6 +2630,8 @@ button.cukii-submit-button--stop:active {
 .cukii-user-message-content[data-cukii-scroll-folding="true"] {
   position: relative;
   max-height: var(--cukii-sticky-visible-height);
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 .cukii-user-truncation-gradient {
