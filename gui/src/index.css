@@ -2172,6 +2172,11 @@ button.cukii-submit-button--stop:active {
    spacer scrolls away, so a sticky turn can reach the true top of the page. */
 .cukii-transcript {
   isolation: isolate;
+  /* A sticky capsule deliberately shrinks its own flow box pixel by pixel.
+     Native scroll anchoring would compensate that shrink and make the viewport
+     oscillate; Cukii owns transcript anchoring explicitly when history is
+     prepended, so disable the browser's competing adjustment here. */
+  overflow-anchor: none;
   padding: 0 20px 40px;
 }
 
@@ -2285,23 +2290,12 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
 }
 
-/* The sticky row's own border box always matches the painted capsule so the
-   next turn displaces it only when the two visible surfaces meet. This plain
-   flow sibling reserves the clipped-away height, preserving scroll geometry
-   and preventing Chromium scroll anchoring from bouncing the transcript. */
-.cukii-user-row-flow-spacer {
-  flex: 0 0 auto;
-  width: 100%;
-  height: var(--cukii-sticky-flow-spacer-height, 0px);
-  pointer-events: none;
-}
-
 /* The fold is pixel-synchronous with scroll: every consumed scroll pixel
    removes exactly one painted pixel through `--cukii-sticky-visible-height`.
-   The sibling flow spacer below grows by the same amount in the same frame,
-   so content remains anchored while the sticky border box stays honest for
-   collision with the next turn. The collapse-progress attribute remains for
-   debugging and tests; layout never reads it. */
+   The row's flow box shrinks with the painted capsule, so the following answer
+   occupies the released space instead of sitting below an invisible prompt-
+   sized gap. The collapse-progress attribute remains for debugging and tests;
+   layout never reads it. */
 
 /* The sticky mask must equal whatever actually paints behind the transcript.
    Naming a token twice is what kept breaking this: `sideBar-background` was

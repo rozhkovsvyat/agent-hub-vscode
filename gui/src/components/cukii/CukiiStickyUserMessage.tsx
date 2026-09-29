@@ -27,9 +27,9 @@ export function isStickyRowPinned({
  * The fold is a pure function of how far the transcript scrolled past the
  * point where the row first touched the sticky edge: every consumed scroll
  * pixel removes exactly one painted pixel, down to one line. Before that
- * terminal state, reversing the wheel restores the same pixels. Only an
- * explicit click on the chevron latches the closed state; reaching one line
- * through scrolling must stay reversible pixel-for-pixel.
+ * terminal state, reversing the wheel restores the same pixels. Once the row
+ * reaches one line, that terminal state latches until the row leaves sticky
+ * mode or the reader explicitly opens it with the chevron.
  */
 export function resolveStickyCollapseGeometry({
   fullHeight,
@@ -55,16 +55,6 @@ export function resolveStickyCollapseGeometry({
     progress,
     visibleHeight: naturalHeight - progress * collapseDistance,
   };
-}
-
-export function resolveStickyFlowSpacerHeight({
-  stableFlowHeight,
-  paintedRowHeight,
-}: {
-  stableFlowHeight: number;
-  paintedRowHeight: number;
-}): number {
-  return Math.max(0, Math.ceil(stableFlowHeight - paintedRowHeight));
 }
 
 export function resolveStickyNaturalHeight({
@@ -96,17 +86,16 @@ interface CukiiStickyUserMessageProps {
 
 /**
  * Long prompts pin at the transcript top, then fold line by line as the
- * reader scrolls past them. Reversing the scroll restores the same pixels in
- * the opposite order, including after the capsule reached one row; otherwise
- * the first unpinned frame would jump straight from one row to full height. A
- * newer sticky turn displaces the old row upward one-line-closed unless the
- * reader explicitly expanded it. Only the chevron owns a persistent closed or
- * expanded choice.
+ * reader scrolls past them. Once a capsule reaches one row, that closed state
+ * latches for the rest of its sticky visit; reverse scrolling cannot make it
+ * oscillate. A newer sticky turn displaces the old row upward one-line-closed
+ * unless the reader explicitly expanded it. The chevron owns the persistent
+ * closed or expanded choice.
  *
- * The row's visible border box follows the painted clip while an adjacent
- * normal-flow spacer grows by the inverse delta. Their total stays constant,
- * preventing scroll anchoring without making CSS treat a one-line sticky as
- * a full-height collision box. Scroll handlers here never write `scrollTop`.
+ * The row's flow box follows the painted clip. The transcript disables native
+ * scroll anchoring, so shrinking the row cannot make Chromium compensate the
+ * scroll position; no invisible full-prompt spacer remains between the sticky
+ * capsule and its answer. Scroll handlers here never write `scrollTop`.
  */
 export function CukiiStickyUserMessage({
   bubbleClassName,
@@ -118,7 +107,7 @@ export function CukiiStickyUserMessage({
   const [isLongPrompt, setIsLongPrompt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const isExpandedRef = useRef(isExpanded);
-  const isManuallyCollapsedRef = useRef(false);
+  const isCollapsedLatchedRef = useRef(false);
   const naturalContentHeightRef = useRef(0);
   const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
   isExpandedRef.current = isExpanded;
@@ -127,7 +116,7 @@ export function CukiiStickyUserMessage({
     const content = contentRef.current;
     if (!content) return;
 
-    isManuallyCollapsedRef.current = false;
+    isCollapsedLatchedRef.current = false;
     setIsExpanded(false);
     naturalContentHeightRef.current = 0;
     const measure = () => {
@@ -186,14 +175,7 @@ export function CukiiStickyUserMessage({
     const bubble = content?.closest<HTMLElement>(".cukii-user-message-bubble");
     const messageFrame = bubble?.closest<HTMLElement>(".cukii-user-message");
     if (!content || !row || !transcript || !bubble) return;
-    const flowSpacer = row.nextElementSibling?.classList.contains(
-      "cukii-user-row-flow-spacer",
-    )
-      ? (row.nextElementSibling as HTMLElement)
-      : undefined;
-
-    let stableFlowHeight = 0;
-    isManuallyCollapsedRef.current = false;
+    isCollapsedLatchedRef.current = false;
     // Scroll position at the first pinned frame. It then freezes so progress
     // measures only scroll consumed after the pin. Blink's painted sticky
     // offset tracks live scrollTop, so re-deriving the origin from the pinned
@@ -229,7 +211,6 @@ export function CukiiStickyUserMessage({
         toggle.removeAttribute("aria-label");
       }
       row.style.removeProperty("--cukii-sticky-mask-height");
-      flowSpacer?.style.removeProperty("--cukii-sticky-flow-spacer-height");
       row.removeAttribute("data-cukii-collapse-progress");
     };
 
@@ -263,7 +244,7 @@ export function CukiiStickyUserMessage({
         // the distinct full-height pin frame promised by the interaction.
         // The user's expanded choice is untouched — unpinning never flips it.
         stickyStart = null;
-        isManuallyCollapsedRef.current = false;
+        isCollapsedLatchedRef.current = false;
         clearFold();
         return;
       }
@@ -276,13 +257,18 @@ export function CukiiStickyUserMessage({
         consumedScroll: scrollTop - stickyStart,
       });
       const displacedByNewerSticky = rowTopFromScrollport < -STICKY_PIN_EDGE_PX;
-      const forcedClosed =
-        isManuallyCollapsedRef.current ||
-        (displacedByNewerSticky && !isExpandedRef.current);
-      const collapseProgress = forcedClosed ? 1 : geometry.progress;
+      if (
+        geometry.progress >= 1 ||
+        (displacedByNewerSticky && !isExpandedRef.current)
+      ) {
+        isCollapsedLatchedRef.current = true;
+      }
+      const collapseProgress = isCollapsedLatchedRef.current
+        ? 1
+        : geometry.progress;
       const paintedVisibleHeight = isExpandedRef.current
         ? fullHeight
-        : forcedClosed
+        : isCollapsedLatchedRef.current
           ? CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX
           : geometry.visibleHeight;
 
@@ -298,12 +284,6 @@ export function CukiiStickyUserMessage({
       const rowStyle = getComputedStyle(row);
       const rowPaddingTop = Number.parseFloat(rowStyle.paddingTop) || 0;
       const rowPaddingBottom = Number.parseFloat(rowStyle.paddingBottom) || 0;
-      const measuredFlowHeight =
-        rowPaddingTop + rowPaddingBottom + bubbleOverhead + fullHeight;
-      // Receipt layout can still change when the inline-fit observer runs.
-      // Keep the largest total turn contribution, then split that invariant
-      // between the visible sticky row and its inverse flow spacer.
-      stableFlowHeight = Math.max(stableFlowHeight, measuredFlowHeight);
       const paintedRowHeight =
         rowPaddingTop +
         rowPaddingBottom +
@@ -312,17 +292,6 @@ export function CukiiStickyUserMessage({
       row.style.setProperty(
         "--cukii-sticky-mask-height",
         `${Math.ceil(paintedRowHeight)}px`,
-      );
-      // The sticky border box must equal what is visibly painted; otherwise
-      // CSS starts pushing a one-line capsule away by its hidden full prompt
-      // height. A normal-flow sibling reserves the inverse delta, keeping the
-      // turn's total layout height constant without polluting sticky geometry.
-      flowSpacer?.style.setProperty(
-        "--cukii-sticky-flow-spacer-height",
-        `${resolveStickyFlowSpacerHeight({
-          stableFlowHeight,
-          paintedRowHeight,
-        })}px`,
       );
       row.setAttribute(
         "data-cukii-collapse-progress",
@@ -402,9 +371,9 @@ export function CukiiStickyUserMessage({
   const expand = useCallback(() => setIsExpanded(true), []);
   const collapse = useCallback(() => {
     // The chevron is an explicit close command, not a request to return to an
-    // incidental mid-scroll height. Scroll-created closure is reversible;
-    // this explicit closure remains latched until the chevron opens it again.
-    isManuallyCollapsedRef.current = true;
+    // incidental mid-scroll height. The closed state remains latched until the
+    // chevron opens it again or the row leaves sticky mode.
+    isCollapsedLatchedRef.current = true;
     setIsExpanded(false);
   }, []);
 

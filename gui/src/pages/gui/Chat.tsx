@@ -730,12 +730,6 @@ export function Chat() {
               )}
             </div>
           </div>,
-          <div
-            aria-hidden="true"
-            className="cukii-user-row-flow-spacer shrink-0"
-            data-cukii-sticky-spacer-for={message.id}
-            key={`${message.id}-sticky-flow-spacer`}
-          />,
         ];
       }
 
