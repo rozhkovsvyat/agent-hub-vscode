@@ -2794,7 +2794,9 @@ button.cukii-submit-button--stop:active {
   --cukii-meta-reserve: 0px;
 }
 
-.cukii-user-bubble--meta-inline .ProseMirror p:last-child::after {
+.cukii-user-bubble--meta-inline:not(.cukii-user-bubble--reaction-with-meta)
+  .ProseMirror
+  p:last-child::after {
   content: "";
   display: inline-block;
   width: calc(var(--cukii-meta-reserve) + 4px);
@@ -2850,7 +2852,9 @@ button.cukii-submit-button--stop:active {
    and pin the receipt in the same visual row. Non-sticky transcript bubbles
    keep the ordinary measured MAX fallback. */
 .cukii-user-row--sticky
-  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]:not(
+    .cukii-user-bubble--reaction-with-meta
+  )
   > .cukii-user-content-shell
   .ProseMirror
   p:last-child::after {

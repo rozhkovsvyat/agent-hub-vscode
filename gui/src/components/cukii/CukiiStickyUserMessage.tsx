@@ -28,8 +28,8 @@ export function isStickyRowPinned({
  * point where the row first touched the sticky edge: every consumed scroll
  * pixel removes exactly one painted pixel, down to one line. Before that
  * terminal state, reversing the wheel restores the same pixels. Once the row
- * reaches one line, that terminal state latches until the row leaves sticky
- * mode or the reader explicitly opens it with the chevron.
+ * reaches one line, that terminal state stays latched even if sticky geometry
+ * briefly crosses the natural pin edge; only the chevron opens it again.
  */
 export function resolveStickyCollapseGeometry({
   fullHeight,
@@ -80,6 +80,7 @@ export function resolveStickyNaturalHeight({
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
   children: ReactNode;
+  foldableText?: boolean;
   messageId: string;
   metadata?: ReactNode;
   reaction?: ReactNode;
@@ -88,10 +89,10 @@ interface CukiiStickyUserMessageProps {
 /**
  * Long prompts pin at the transcript top, then fold line by line as the
  * reader scrolls past them. Once a capsule reaches one row, that closed state
- * latches for the rest of its sticky visit; reverse scrolling cannot make it
- * oscillate. A newer sticky turn displaces the old row upward one-line-closed
- * unless the reader explicitly expanded it. The chevron owns the persistent
- * closed or expanded choice.
+ * latches for the lifetime of that rendered turn; reverse scrolling cannot
+ * make it oscillate. A newer sticky turn displaces the old row upward one-line
+ * closed unless the reader explicitly expanded it. The chevron owns the
+ * persistent closed or expanded choice.
  *
  * The row's flow box follows the painted clip. The transcript disables native
  * scroll anchoring, so shrinking the row cannot make Chromium compensate the
@@ -101,6 +102,7 @@ interface CukiiStickyUserMessageProps {
 export function CukiiStickyUserMessage({
   bubbleClassName,
   children,
+  foldableText = true,
   messageId,
   metadata,
   reaction,
@@ -112,6 +114,7 @@ export function CukiiStickyUserMessage({
   const isExpandedRef = useRef(isExpanded);
   const isCollapsedLatchedRef = useRef(false);
   const naturalContentHeightRef = useRef(0);
+  const naturalBodyHeightRef = useRef(0);
   const syncFoldWithScrollRef = useRef<(() => void) | undefined>();
   isExpandedRef.current = isExpanded;
 
@@ -122,14 +125,16 @@ export function CukiiStickyUserMessage({
     isCollapsedLatchedRef.current = false;
     setIsExpanded(false);
     naturalContentHeightRef.current = 0;
+    naturalBodyHeightRef.current = 0;
     const measure = () => {
       const measuredContentHeight = content.scrollHeight;
+      const terminallyCollapsed = content.classList.contains(
+        "cukii-user-message-content--collapsed",
+      );
       naturalContentHeightRef.current = resolveStickyNaturalHeight({
         measuredHeight: measuredContentHeight,
         previousHeight: naturalContentHeightRef.current,
-        terminallyCollapsed: content.classList.contains(
-          "cukii-user-message-content--collapsed",
-        ),
+        terminallyCollapsed,
       });
       const body = messageBodyRef.current;
       const measuredBodyHeight = body
@@ -138,13 +143,31 @@ export function CukiiStickyUserMessage({
             Math.ceil(body.getBoundingClientRect().height),
           )
         : 0;
+      if (measuredBodyHeight > 0) {
+        naturalBodyHeightRef.current = resolveStickyNaturalHeight({
+          measuredHeight: measuredBodyHeight,
+          previousHeight: naturalBodyHeightRef.current,
+          terminallyCollapsed,
+        });
+      }
       // An embedded MAX reaction belongs to the painted message, but it is
       // not prompt text and must not turn a one-line message into a foldable
-      // sticky capsule. In layout-less tests the body measures zero, so keep
-      // the historical outer-height fallback used by the geometry fixtures.
+      // sticky capsule. At the terminal fold CSS also makes the body report
+      // 20px; preserve its last natural measurement just as we do for the
+      // outer content or ResizeObserver will alternate long -> short -> long
+      // and flash the full prompt. In layout-less tests the body measures
+      // zero, so keep the historical outer-height fallback used by fixtures.
       const promptBodyHeight =
-        measuredBodyHeight > 0 ? measuredBodyHeight : measuredContentHeight;
-      const next = promptBodyHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
+        measuredBodyHeight > 0
+          ? naturalBodyHeightRef.current
+          : measuredContentHeight;
+      // Media-only messages have no meaningful terminal text row. Folding
+      // one used to hide the thumbnail strip and leave an empty orange
+      // capsule containing only a chevron/receipt. Keep that compact media
+      // card intact; text+media messages still fold to their text line.
+      const next =
+        foldableText &&
+        promptBodyHeight > CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX;
       setIsLongPrompt(next);
       if (!next) setIsExpanded(false);
     };
@@ -181,7 +204,7 @@ export function CukiiStickyUserMessage({
       content.removeEventListener("load", measure, true);
       resizeObserver?.disconnect();
     };
-  }, [messageId]);
+  }, [foldableText, messageId]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -252,25 +275,38 @@ export function CukiiStickyUserMessage({
       const rowTopFromScrollport = rowRect.top - transcriptRect.top;
       const scrollTop = transcript.scrollTop;
 
-      if (!isStickyRowPinned({ rowTopFromScrollport, scrollTop })) {
+      const rowIsPinned = isStickyRowPinned({
+        rowTopFromScrollport,
+        scrollTop,
+      });
+      if (!rowIsPinned) {
         // Plain flow: the capsule paints at its natural height. Capture the
         // fold origin only on the first pinned frame below; otherwise a
         // fractional flow top can consume a sub-pixel at contact and violate
-        // the distinct full-height pin frame promised by the interaction.
-        // The user's expanded choice is untouched — unpinning never flips it.
+        // the distinct full-height pin frame promised by the interaction. A
+        // terminally closed capsule is the exception: clearing that state at
+        // the pin edge made the recorded UI alternate between a full-screen
+        // prompt and one row as sticky/ResizeObserver geometry fed back into
+        // itself. Keep the closed paint until the chevron explicitly opens it.
         stickyStart = null;
-        isCollapsedLatchedRef.current = false;
-        clearFold();
-        return;
+        if (!isCollapsedLatchedRef.current || isExpandedRef.current) {
+          clearFold();
+          return;
+        }
       }
-      if (stickyStart === null) {
+      if (rowIsPinned && stickyStart === null) {
         stickyStart = scrollTop;
       }
 
-      const geometry = resolveStickyCollapseGeometry({
-        fullHeight,
-        consumedScroll: scrollTop - stickyStart,
-      });
+      const geometry = rowIsPinned
+        ? resolveStickyCollapseGeometry({
+            fullHeight,
+            consumedScroll: scrollTop - (stickyStart ?? scrollTop),
+          })
+        : {
+            progress: 1,
+            visibleHeight: CLAUDE_USER_MESSAGE_COLLAPSED_HEIGHT_PX,
+          };
       const displacedByNewerSticky = rowTopFromScrollport < -STICKY_PIN_EDGE_PX;
       if (
         geometry.progress >= 1 ||
@@ -387,7 +423,7 @@ export function CukiiStickyUserMessage({
   const collapse = useCallback(() => {
     // The chevron is an explicit close command, not a request to return to an
     // incidental mid-scroll height. The closed state remains latched until the
-    // chevron opens it again or the row leaves sticky mode.
+    // chevron opens it again or this rendered message is replaced.
     isCollapsedLatchedRef.current = true;
     setIsExpanded(false);
   }, []);

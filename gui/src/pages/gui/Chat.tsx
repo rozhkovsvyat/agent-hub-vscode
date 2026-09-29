@@ -1,7 +1,7 @@
 import { Editor, JSONContent } from "@tiptap/react";
 import { ChatHistoryItem, InputModifiers } from "core";
 import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
-import { renderChatMessage } from "core/util/messageContent";
+import { renderChatMessage, stripImages } from "core/util/messageContent";
 import {
   useCallback,
   useContext,
@@ -697,6 +697,7 @@ export function Chat() {
                     ? "cukii-user-bubble--reaction-with-meta"
                     : ""
                 }`}
+                foldableText={stripImages(message.content).trim().length > 0}
                 messageId={message.id}
                 reaction={
                   agentReaction && reactionPlacement === "embedded" ? (

@@ -119,7 +119,10 @@ describe("Cukii GUI contracts", () => {
       css.indexOf("}", composerStart) + 1,
     );
     const submitStart = css.lastIndexOf("button.cukii-submit-button,");
-    const submitRule = css.slice(submitStart, css.indexOf("}", submitStart) + 1);
+    const submitRule = css.slice(
+      submitStart,
+      css.indexOf("}", submitStart) + 1,
+    );
 
     expect(assistantRule).toContain("border-radius: 16px;");
     expect(composerRule).toContain("border-radius: 16px !important;");
@@ -283,7 +286,7 @@ describe("Cukii GUI contracts", () => {
     // drops below the text when it does not.
     expect(bubbleContract).toContain("--cukii-meta-reserve: 0px;");
     expect(bubbleContract).toContain(
-      ".cukii-user-bubble--meta-inline .ProseMirror p:last-child::after",
+      ".cukii-user-bubble--meta-inline:not(.cukii-user-bubble--reaction-with-meta)",
     );
     expect(bubbleContract).toContain("display: inline-block;");
     expect(bubbleContract).toContain("height: 14px;");

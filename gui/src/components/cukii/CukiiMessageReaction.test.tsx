@@ -97,6 +97,18 @@ describe("CukiiMessageReaction", () => {
     expect(css).toMatch(
       /\.cukii-user-bubble--reaction-with-meta\s*>\s*\.cukii-user-metadata,[\s\S]*?\.cukii-user-bubble--reaction-with-meta\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute;[^}]*right:\s*10px;[^}]*bottom:\s*4px/s,
     );
+    // A text reaction already reserves the receipt in its own bottom row.
+    // Reusing the ordinary prose spacer as well makes a short narrow message
+    // wrap to two lines and falsely enter the sticky-fold state.
+    expect(css).toMatch(
+      /\.cukii-user-bubble--meta-inline:not\(\.cukii-user-bubble--reaction-with-meta\)[\s\S]*?\.ProseMirror[\s\S]*?p:last-child::after\s*\{/s,
+    );
+    expect(css).not.toMatch(
+      /\.cukii-user-bubble--meta-inline\s+\.ProseMirror\s+p:last-child::after\s*\{/s,
+    );
+    expect(css).toMatch(
+      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]:not\(\s*\.cukii-user-bubble--reaction-with-meta\s*\)[\s\S]*?p:last-child::after\s*\{/s,
+    );
   });
 
   it("embeds all supported MAX emoji artwork as valid WebP data", () => {

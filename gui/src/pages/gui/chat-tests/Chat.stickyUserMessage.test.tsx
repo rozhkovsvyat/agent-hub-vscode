@@ -567,7 +567,11 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     configurable: true,
     get() {
       const element = this as HTMLElement;
-      if (element.classList?.contains("cukii-user-message-body")) return 140;
+      if (element.classList?.contains("cukii-user-message-body")) {
+        return element.closest(".cukii-user-message-content--collapsed")
+          ? 20
+          : 140;
+      }
       if (!element.classList?.contains("cukii-user-message-content")) return 0;
       return element.classList.contains("cukii-user-message-content--collapsed")
         ? 20
@@ -707,10 +711,21 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     // A real browser emits ResizeObserver after the collapsed CSS changes
     // scrollHeight to 20. That painted height must not reclassify the immutable
     // long prompt as short and clear the fold.
-    act(() => resizeCallbacks.forEach((callback) => callback()));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
+    const body = bubble?.querySelector<HTMLElement>(".cukii-user-message-body");
+    expect(body?.scrollHeight).toBe(20);
+    // The screen recording exposed a ResizeObserver feedback loop: the first
+    // terminal measurement classified the now-single-line body as a short
+    // message, reopened it, then the expanded measurement classified it as
+    // long again. Repeated observer turns must never alternate the capsule.
+    for (let observerTurn = 0; observerTurn < 4; observerTurn += 1) {
+      await act(async () => {
+        resizeCallbacks.forEach((callback) => callback());
+        await Promise.resolve();
+      });
+      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+      expect(body?.scrollHeight).toBe(20);
+    }
     expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
     expect(receipt?.textContent).toBe("01:13");
     expect(clippedContent?.contains(receipt ?? null)).toBe(false);
@@ -742,6 +757,19 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     ).toBe("20px");
     expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
 
+    // Crossing back over the natural pin edge must not reopen a terminally
+    // closed capsule. The screen recording caught this exact state bouncing
+    // between a full-screen prompt and one row as ResizeObserver/sticky
+    // geometry alternated around the edge. Once terminally closed, only the
+    // chevron or a newer capsule may change that choice.
+    rowTop = 20;
+    transcript.scrollTop = 190;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+    expect(container.querySelector('[aria-label="Show more"]')).not.toBeNull();
+
+    rowTop = 0;
     transcript.scrollTop = 220;
     act(() => transcript.dispatchEvent(new Event("scroll")));
     await waitFor(() =>
@@ -944,6 +972,52 @@ test("marks an attachment capsule as foldable while preserving it in normal flow
     expect(bubble?.querySelector(".cukii-user-metadata")?.textContent).toBe(
       "01:15",
     );
+  } finally {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+  }
+});
+
+test("keeps a media-only capsule intact instead of folding it to an empty row", async () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => 80,
+  });
+
+  try {
+    const { container } = render(
+      <CukiiStickyUserMessage
+        bubbleClassName="cukii-user-message-bubble"
+        foldableText={false}
+        messageId="media-only-prompt"
+        metadata={<span className="cukii-user-metadata">01:15</span>}
+      >
+        <img alt="Original attachment" src="data:image/png;base64,aW1hZ2U=" />
+      </CukiiStickyUserMessage>,
+    );
+
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-media-only-prompt"]',
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+    expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
+    expect(bubble?.querySelector("img")).not.toBeNull();
+    expect(bubble?.querySelector(".cukii-user-fold-toggle")).toBeNull();
   } finally {
     if (scrollHeightDescriptor) {
       Object.defineProperty(
