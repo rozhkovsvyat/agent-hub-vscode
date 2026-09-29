@@ -52,7 +52,7 @@ describe("Cukii global data directory", () => {
     expect(env.CONTINUE_GLOBAL_DIR).toBe(path.join(home, ".cukii"));
   });
 
-  test("preserves an explicit relative CONTINUE_GLOBAL_DIR", () => {
+  test("canonicalizes an explicit relative CONTINUE_GLOBAL_DIR for MCP children", () => {
     const home = temporaryHome();
     const cwd = path.join(home, "workspace");
     const env: NodeJS.ProcessEnv = { CONTINUE_GLOBAL_DIR: "custom-state" };
@@ -60,7 +60,7 @@ describe("Cukii global data directory", () => {
 
     expect(selected.globalDir).toBe(path.join(cwd, "custom-state"));
     expect(selected.usesCukiiDefault).toBe(false);
-    expect(env.CONTINUE_GLOBAL_DIR).toBe("custom-state");
+    expect(env.CONTINUE_GLOBAL_DIR).toBe(path.join(cwd, "custom-state"));
   });
 
   test("copies missing state and snapshots rows that only exist in WAL", async () => {

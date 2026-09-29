@@ -29,10 +29,15 @@ export function configureCukiiGlobalDir(
 ): CukiiGlobalDirSelection {
   const configured = env.CONTINUE_GLOBAL_DIR?.trim();
   if (configured) {
+    const globalDir = path.isAbsolute(configured)
+      ? configured
+      : path.resolve(cwd, configured);
+    // MCP children may start in different working directories. Preserve the
+    // owner's explicit choice, but export its canonical absolute form so the
+    // bridge, bundled tools and Python broker cannot resolve three roots.
+    env.CONTINUE_GLOBAL_DIR = globalDir;
     return {
-      globalDir: path.isAbsolute(configured)
-        ? configured
-        : path.resolve(cwd, configured),
+      globalDir,
       legacyDir: path.join(homeDir, LEGACY_DIR_NAME),
       usesCukiiDefault: false,
     };
