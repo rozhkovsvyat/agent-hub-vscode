@@ -744,6 +744,7 @@ export function Chat() {
                     editorState={
                       editorState ?? messageContentToEditorDoc(message.content)
                     }
+                    messageContent={message.content}
                     contextItems={contextItems}
                     appliedRules={appliedRules}
                     inputId={message.id}

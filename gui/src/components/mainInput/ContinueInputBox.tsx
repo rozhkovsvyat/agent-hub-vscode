@@ -39,6 +39,9 @@ interface ContinueInputBoxProps {
     editor: Editor,
   ) => void;
   editorState?: JSONContent;
+  /** Raw message content for transcript bubbles: history items without a
+   * saved editor state keep their image parts only here. */
+  messageContent?: unknown;
   contextItems?: ContextItemWithId[];
   appliedRules?: RuleMetadata[];
   hidden?: boolean;
@@ -224,6 +227,7 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
         <CukiiUserAttachmentStrip
           contextItems={contextItems}
           editorState={props.editorState}
+          messageContent={props.messageContent}
         />
       )}
       <div className="relative flex flex-col">

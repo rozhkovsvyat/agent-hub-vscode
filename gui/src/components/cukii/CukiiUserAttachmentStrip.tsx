@@ -188,8 +188,21 @@ function collectEditorAttachments(value: unknown): UserAttachment[] {
 function mergeAttachments(
   editorState: unknown,
   contextItems: ContextItemWithId[],
+  messageContent?: unknown,
 ): UserAttachment[] {
   const merged = collectEditorAttachments(editorState);
+  const seen = new Set(merged.map((item) => item.key));
+  // History items without a saved editor state (broker-injected, migrated,
+  // other devices) carry their images only in raw message.content; the
+  // newline-preserving doc conversion keeps text only, so collect the raw
+  // parts as well and dedupe by key when both sources exist.
+  if (messageContent !== undefined) {
+    for (const item of collectEditorAttachments(messageContent)) {
+      if (seen.has(item.key)) continue;
+      seen.add(item.key);
+      merged.push(item);
+    }
+  }
   const fileKeys = new Set(
     merged
       .filter((item): item is FileAttachment => item.kind === "file")
@@ -208,14 +221,16 @@ function mergeAttachments(
 export function CukiiUserAttachmentStrip({
   contextItems,
   editorState,
+  messageContent,
 }: {
   contextItems: ContextItemWithId[];
   editorState: unknown;
+  messageContent?: unknown;
 }) {
   const ideMessenger = useContext(IdeMessengerContext);
   const attachments = useMemo(
-    () => mergeAttachments(editorState, contextItems),
-    [contextItems, editorState],
+    () => mergeAttachments(editorState, contextItems, messageContent),
+    [contextItems, editorState, messageContent],
   );
   const [preview, setPreview] = useState<ImageAttachment>();
   const openerRef = useRef<HTMLButtonElement | null>(null);
