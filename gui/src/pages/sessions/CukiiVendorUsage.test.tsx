@@ -275,6 +275,25 @@ describe("Cukii vendor usage Claude parity", () => {
     ).not.toBeNull();
   });
 
+  it("says honestly when the vendor publishes no usage endpoint", async () => {
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({ vendor, windows: [] }),
+    );
+
+    await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="qwen-3-8-max" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    const honest = await screen.findByTestId("cukii-vendor-usage-no-endpoint");
+    expect(honest).toBeInTheDocument();
+    expect(honest.textContent).toContain("Alibaba");
+    expect(
+      screen.queryByTestId("cukii-vendor-usage-empty"),
+    ).not.toBeInTheDocument();
+  });
+
   it("repaints the last-known windows from cache while the host re-probes", async () => {
     const first = new MockIdeMessenger();
     first.responseHandlers["cukii/getVendorUsage"] = vi.fn(

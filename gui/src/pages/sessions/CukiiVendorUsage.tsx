@@ -2,6 +2,7 @@ import { ChevronRightIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import { brokerVendorForModel } from "core/cukiiPermissionModes";
 import {
   cukiiVendorLabel,
+  CUKII_VENDORS_WITHOUT_USAGE_ENDPOINT,
   type BrokerVendorId,
 } from "core/cukiiVendorRegistry";
 import type {
@@ -339,6 +340,11 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
             })}
           </UsageBars>
         </BodySection>
+      ) : CUKII_VENDORS_WITHOUT_USAGE_ENDPOINT.includes(snapshot.vendor) ? (
+        <ResetText data-testid="cukii-vendor-usage-no-endpoint">
+          {cukiiVendorLabel(snapshot.vendor)} exposes no public usage endpoint,
+          so there are no limits to poll for this vendor.
+        </ResetText>
       ) : (
         <ResetText data-testid="cukii-vendor-usage-empty">
           No usage data yet — limits appear here after the next agent run.

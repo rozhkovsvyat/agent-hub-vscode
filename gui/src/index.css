@@ -645,11 +645,14 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   max-height: min(60vh, calc(100vh - 140px));
   margin-inline: auto;
   overflow: auto;
-  border: 1px solid var(--vscode-widget-border, #454545);
+  /* Plugin-dark sheet, not the cream pill surface: --cukii-surface is the
+     brand accent for model pills (dark text on cream), and reusing it here
+     left menu-foreground gray unreadable on cream (owner screenshot). */
+  border: 1px solid var(--cukii-line, #5a5550);
   border-radius: 16px;
-  background: var(--cukii-surface, var(--vscode-menu-background, #252526));
-  color: var(--vscode-menu-foreground, #cccccc);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background: var(--cukii-shell-raised, #42403c);
+  color: var(--cukii-on-dark, #eee9df);
+  box-shadow: var(--cukii-shadow, 0 16px 38px rgba(0, 0, 0, 0.32));
   padding: 12px 14px;
 }
 
@@ -659,6 +662,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
+  color: var(--cukii-on-dark, #eee9df);
   font-size: 14px;
   font-weight: 650;
   cursor: move;
@@ -667,10 +671,10 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-user-question-count {
-  border: 1px solid var(--vscode-widget-border, #454545);
+  border: 1px solid var(--cukii-line, #5a5550);
   border-radius: 10px;
   padding: 1px 8px;
-  color: var(--vscode-descriptionForeground, #a0a0a0);
+  color: var(--cukii-muted, #a6a6a6);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -690,7 +694,7 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 }
 
 .cukii-user-question-list fieldset + fieldset {
-  border-top: 1px solid var(--vscode-widget-border, #454545);
+  border-top: 1px solid var(--cukii-line, #5a5550);
   padding-top: 12px;
 }
 
@@ -703,22 +707,23 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-user-question legend span,
 .cukii-user-question-option small {
-  color: var(--vscode-descriptionForeground, #a0a0a0);
+  color: var(--cukii-muted, #a6a6a6);
   font-size: 11px;
 }
 
 .cukii-user-question legend strong {
   margin: 2px 0 6px;
+  color: var(--cukii-on-dark, #eee9df);
   font-size: 13px;
 }
 
 .cukii-user-question legend span strong.cukii-user-question-step {
   display: inline-block;
   margin: 0 6px 0 0;
-  border: 1px solid var(--vscode-widget-border, #454545);
+  border: 1px solid var(--cukii-line, #5a5550);
   border-radius: 8px;
   padding: 0 6px;
-  color: var(--vscode-descriptionForeground, #a0a0a0);
+  color: var(--cukii-muted, #a6a6a6);
   font-size: 10px;
   font-weight: 600;
 }
@@ -730,22 +735,36 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   border: 1px solid transparent;
   border-radius: 10px;
   padding: 6px 10px;
+  color: var(--cukii-on-dark, #eee9df);
   cursor: pointer;
 }
 
+.cukii-user-question-option:hover {
+  background: rgba(227, 168, 103, 0.08);
+}
+
+.cukii-user-question-option input[type="radio"] {
+  accent-color: var(--cukii-accent-strong, #c9873f);
+}
+
 .cukii-user-question-option:has(input:checked) {
-  border-color: var(--vscode-focusBorder, #007fd4);
-  background: var(--vscode-list-activeSelectionBackground, #094771);
+  border-color: var(--cukii-accent-strong, #c9873f);
+  background: rgba(227, 168, 103, 0.16);
 }
 
 .cukii-user-question-other {
   box-sizing: border-box;
   width: 100%;
-  border: 1px solid var(--vscode-input-border, #454545);
+  border: 1px solid var(--cukii-line, #5a5550);
   border-radius: 4px;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #cccccc);
+  background: var(--cukii-shell, #3a3835);
+  color: var(--cukii-on-dark, #eee9df);
   padding: 6px 8px;
+}
+
+.cukii-user-question-other:focus {
+  border-color: var(--cukii-accent-strong, #c9873f);
+  outline: none;
 }
 
 .cukii-user-question-actions {
@@ -757,13 +776,26 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
 
 .cukii-user-question-actions button {
   min-width: 78px;
+  border: 1px solid var(--cukii-line, #5a5550);
   border-radius: 16px;
+  background: transparent;
+  color: var(--cukii-on-dark, #eee9df);
   padding: 5px 12px;
 }
 
 .cukii-user-question-actions button[type="submit"] {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #ffffff);
+  border-color: transparent;
+  background: var(--cukii-primary-action-background, #e3a867);
+  color: var(--cukii-primary-action-icon, #5c3a28);
+  font-weight: 600;
+}
+
+.cukii-user-question-actions button[type="submit"]:hover:not(:disabled) {
+  background: var(--cukii-primary-action-background-hover, #c9873f);
+}
+
+.cukii-user-question-actions button[type="submit"]:disabled {
+  opacity: 0.45;
 }
 
 .cukii-footer-icon {
@@ -2651,7 +2683,7 @@ button.cukii-submit-button--stop:active {
 
 .cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
     .cukii-user-bubble--expanded
-  )
+  ):not(.cukii-user-bubble--collapsed)
   .cukii-user-truncation-gradient {
   display: block;
 }

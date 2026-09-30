@@ -71,6 +71,7 @@ import {
   readCukiiAgentReaction,
 } from "../../components/cukii/CukiiMessageReaction";
 import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
+import { messageContentToEditorDoc } from "../../components/cukii/userMessageEditorDoc";
 import { useMeasuredCanvasBackground } from "../../components/cukii/useMeasuredCanvasBackground";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
 import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
@@ -740,7 +741,9 @@ export function Chat() {
                     }
                     isLastUserInput={isLastUserInput(historyIndex)}
                     isMainInput={false}
-                    editorState={editorState ?? message.content}
+                    editorState={
+                      editorState ?? messageContentToEditorDoc(message.content)
+                    }
                     contextItems={contextItems}
                     appliedRules={appliedRules}
                     inputId={message.id}

@@ -108,9 +108,11 @@ import {
 import { runAlibabaAuthAction } from "@cukii/vendor-bridge";
 import {
   clearBrokerVendorAccountCache,
+  deviceAuthLoginArgs,
   extractAuthFlowAssist,
   logoutNativeKimiAccount,
   probeBrokerVendorAccount,
+  runDeviceAuthLogin,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
   watchVendorAuthTransition,
@@ -1367,11 +1369,57 @@ export class VsCodeMessenger {
               vscode.window.showInputBox({
                 password: true,
                 ignoreFocusOut: true,
-                title: "Alibaba",
+                title: "Sign in to Qwen (Alibaba Token Plan)",
+                prompt:
+                  "Paste the API key from the Alibaba Cloud console (starts with sk-)",
+                placeHolder: "sk-…",
               }),
           },
         });
         if (result) return result;
+      }
+      // Codex device-auth prints a URL and a one-time code but never opens a
+      // browser itself, and the terminal assist needed VS Code shell
+      // integration (card 4139fac0). The managed spawn makes the browser and
+      // clipboard assist unconditional; its output stays visible in a
+      // dedicated Output channel.
+      if (
+        vendor === "codex" &&
+        action === "login" &&
+        deviceAuthLoginArgs(vendor)
+      ) {
+        const output = vscode.window.createOutputChannel("Cukii · codex login");
+        output.clear();
+        output.show(true);
+        const managed = await runDeviceAuthLogin({
+          vendor: "codex",
+          host: {
+            openExternal: (url) =>
+              vscode.env.openExternal(vscode.Uri.parse(url)),
+            writeClipboard: (code) => vscode.env.clipboard.writeText(code),
+          },
+          onOutput: (chunk) => output.append(chunk),
+        });
+        if (managed.outcome !== "unavailable") {
+          clearBrokerVendorAccountCache();
+          const notes: string[] = [];
+          if (managed.assisted.includes("url")) {
+            notes.push("The sign-in page opened in your browser.");
+          }
+          if (managed.assisted.includes("code")) {
+            notes.push("The one-time code was copied to the clipboard.");
+          }
+          const summary =
+            managed.outcome === "authenticated"
+              ? "Signed in; the account status was refreshed."
+              : managed.outcome === "timeout"
+                ? "The sign-in flow timed out. Select Log in again."
+                : "The sign-in flow finished without a completed browser confirmation. Check the Cukii codex login output, then select Log in again.";
+          return {
+            opened: true,
+            message: [...notes, summary].join(" "),
+          };
+        }
       }
       const spec = vendorAuthTerminalCommand(vendor, action);
       if (!spec) {

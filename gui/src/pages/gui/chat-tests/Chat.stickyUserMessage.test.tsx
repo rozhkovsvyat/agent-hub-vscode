@@ -882,6 +882,13 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
     expect(css).toMatch(
       /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*20px/s,
     );
+    // Owner video on 2.0.152: at the terminal fold the fade hint painted a
+    // transparent->orange 20px band exactly over the only remaining 20px text
+    // row, so the capsule read as an empty orange strip. The hint is only
+    // meaningful mid-fold; the terminally collapsed bubble must not paint it.
+    expect(css).toMatch(
+      /\.cukii-user-message-bubble\[data-cukii-collapsible="true"\]:not\(\s*\.cukii-user-bubble--expanded\s*\):not\(\s*\.cukii-user-bubble--collapsed\s*\)\s+\.cukii-user-truncation-gradient\s*\{[^}]*display:\s*block/s,
+    );
     expect(css).not.toContain("transition: max-height");
     expect(css).not.toContain(".cukii-user-row-flow-spacer");
     expect(css).not.toMatch(
