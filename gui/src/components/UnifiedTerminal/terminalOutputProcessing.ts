@@ -108,9 +108,10 @@ export function processTerminalOutput(
       continue;
     }
     const keptSegments = line.slice(-budget * TERMINAL_MAX_LINE_CHARS);
-    // A cut can land inside an SGR sequence and leave an orphan "94m" prefix
-    // on screen; drop a leading parameter run without its escape introducer.
-    kept.unshift(keptSegments.replace(/^[0-9;]*m/, ""));
+    // A cut can land inside an SGR sequence: either the introducer stays
+    // before the cut (orphan "94m" prefix) or the cut lands right after ESC
+    // (orphan "[0;94m" prefix). Drop both shapes (Fable review M6a).
+    kept.unshift(keptSegments.replace(/^(\x1b\[[0-9;]*|\x1b)?[0-9;]*m/, ""));
     budget = 0;
   }
 

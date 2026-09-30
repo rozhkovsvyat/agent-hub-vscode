@@ -106,6 +106,8 @@ import {
   vendorPermissionCapabilities,
 } from "@cukii/vendor-bridge";
 import { runAlibabaAuthAction } from "@cukii/vendor-bridge";
+import type { DeviceAuthLoginResult } from "@cukii/vendor-bridge";
+import type { ChildProcess } from "child_process";
 import {
   clearBrokerVendorAccountCache,
   deviceAuthLoginArgs,
@@ -113,8 +115,10 @@ import {
   logoutNativeKimiAccount,
   probeBrokerVendorAccount,
   runDeviceAuthLogin,
+  terminateDeviceAuthChild,
   vendorAuthTerminalCommand,
   vendorInstallTerminalOutcome,
+  vendorUsageEndpointSupported,
   watchVendorAuthTransition,
 } from "@cukii/vendor-bridge";
 import { listCukiiAccounts } from "./cukiiAccounts";
@@ -223,6 +227,9 @@ export class VsCodeMessenger {
   private nextBridgeRunId = 0;
   /** One shared panel for managed codex device-auth output (Fable MINOR-5). */
   private codexLoginOutput: vscode.OutputChannel | undefined;
+  private codexLoginInFlight = false;
+  /** Detached login children must die with the window (Fable M6c). */
+  private readonly codexLoginChildren = new Set<ChildProcess>();
   /** Preserve click order when two panels rename the same session together. */
   private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
 
@@ -688,6 +695,16 @@ export class VsCodeMessenger {
     });
     this.usagePoller.start();
     context.subscriptions.push({ dispose: () => this.usagePoller.stop() });
+    context.subscriptions.push({
+      dispose: () => {
+        // A detached device-auth child would otherwise outlive the window
+        // and keep polling the vendor endpoint for up to 15 minutes.
+        for (const child of this.codexLoginChildren) {
+          terminateDeviceAuthChild(child);
+        }
+        this.codexLoginChildren.clear();
+      },
+    });
     this.scheduleManagedVendorCliUpdates();
     context.subscriptions.push({
       dispose: () => {
@@ -774,7 +791,11 @@ export class VsCodeMessenger {
         accountPromise,
         polledPromise,
       ]);
-      const hasFreshUsage = polledWindows.length > 0;
+      // For vendors with no usage endpoint an empty poll is the final answer;
+      // falling back to the cache there resurrected stale quota windows
+      // (Fable review M3).
+      const hasFreshUsage =
+        polledWindows.length > 0 || !vendorUsageEndpointSupported(data.vendor);
       return {
         vendor: data.vendor,
         ...(account?.accountLabel
@@ -1390,6 +1411,15 @@ export class VsCodeMessenger {
         action === "login" &&
         deviceAuthLoginArgs(vendor)
       ) {
+        // A second Log in click must not start a competing device flow that
+        // overwrites the clipboard code and shares the output panel (M6b).
+        if (this.codexLoginInFlight) {
+          return {
+            opened: true,
+            message: "A Codex sign-in is already in progress in this window.",
+          };
+        }
+        this.codexLoginInFlight = true;
         // Reuse one channel: VS Code persists Output panels under logs/, and
         // a fresh channel per login both accumulated duplicates and spread
         // the one-time code across more log files (Fable review MINOR-5).
@@ -1400,23 +1430,33 @@ export class VsCodeMessenger {
         output.clear();
         output.show(true);
         let observedCode: string | undefined;
-        const managed = await runDeviceAuthLogin({
-          vendor: "codex",
-          host: {
-            openExternal: (url) =>
-              vscode.env.openExternal(vscode.Uri.parse(url)),
-            writeClipboard: (code) => {
-              observedCode = code;
-              return vscode.env.clipboard.writeText(code);
+        let managed: DeviceAuthLoginResult;
+        try {
+          managed = await runDeviceAuthLogin({
+            vendor: "codex",
+            host: {
+              openExternal: async (url) => {
+                await vscode.env.openExternal(vscode.Uri.parse(url));
+              },
+              writeClipboard: async (code) => {
+                observedCode = code;
+                await vscode.env.clipboard.writeText(code);
+              },
             },
-          },
-          onOutput: (chunk) =>
-            output.append(
-              observedCode
-                ? chunk.split(observedCode).join("[code copied to clipboard]")
-                : chunk,
-            ),
-        });
+            onOutput: (chunk) =>
+              output.append(
+                observedCode
+                  ? chunk.split(observedCode).join("[code copied to clipboard]")
+                  : chunk,
+              ),
+            onChild: (child) => {
+              this.codexLoginChildren.add(child);
+              child.once("exit", () => this.codexLoginChildren.delete(child));
+            },
+          });
+        } finally {
+          this.codexLoginInFlight = false;
+        }
         if (managed.outcome !== "unavailable") {
           clearBrokerVendorAccountCache();
           const notes: string[] = [];

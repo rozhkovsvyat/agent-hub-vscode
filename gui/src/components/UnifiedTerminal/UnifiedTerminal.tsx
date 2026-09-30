@@ -467,8 +467,13 @@ export function UnifiedTerminalCommand({
                         />
                       ) : (
                         <div>
+                          {/* limitedContent is the shaped view (blank runs
+                              collapsed); fullContent is the verbatim vendor
+                              bytes reserved for Copy and the expanded card,
+                              so painting it here would repaint thousand-line
+                              blank bands (Fable review M1). */}
                           <AnsiRenderer linkify>
-                            {processedTerminalContent.fullContent}
+                            {processedTerminalContent.limitedContent}
                           </AnsiRenderer>
                         </div>
                       )}

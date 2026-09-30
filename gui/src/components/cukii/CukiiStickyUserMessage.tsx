@@ -235,6 +235,9 @@ export function CukiiStickyUserMessage({
     const clearFold = () => {
       delete content.dataset.cukiiScrollFolding;
       content.style.removeProperty("--cukii-sticky-visible-height");
+      content.parentElement?.style.removeProperty(
+        "--cukii-sticky-visible-height",
+      );
       content.classList.remove("cukii-user-message-content--collapsed");
       bubble.removeAttribute("data-cukii-collapsible");
       bubble.classList.remove("cukii-user-bubble--collapsed");
@@ -357,9 +360,19 @@ export function CukiiStickyUserMessage({
           "--cukii-sticky-visible-height",
           `${paintedVisibleHeight}px`,
         );
+        // The truncation gradient is a sibling of the clipped content inside
+        // the shell; custom properties do not cross that boundary, so the
+        // fade reads the remaining painted height from the shell (M2).
+        content.parentElement?.style.setProperty(
+          "--cukii-sticky-visible-height",
+          `${paintedVisibleHeight}px`,
+        );
       } else {
         delete content.dataset.cukiiScrollFolding;
         content.style.removeProperty("--cukii-sticky-visible-height");
+        content.parentElement?.style.removeProperty(
+          "--cukii-sticky-visible-height",
+        );
       }
 
       const isCollapsible = folded || isExpandedRef.current;
