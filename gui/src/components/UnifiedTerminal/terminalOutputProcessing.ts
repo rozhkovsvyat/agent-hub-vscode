@@ -109,9 +109,11 @@ export function processTerminalOutput(
     }
     const keptSegments = line.slice(-budget * TERMINAL_MAX_LINE_CHARS);
     // A cut can land inside an SGR sequence: either the introducer stays
-    // before the cut (orphan "94m" prefix) or the cut lands right after ESC
-    // (orphan "[0;94m" prefix). Drop both shapes (Fable review M6a).
-    kept.unshift(keptSegments.replace(/^(\x1b\[[0-9;]*|\x1b)?[0-9;]*m/, ""));
+    // before the cut (orphan "94m" prefix) or right after ESC (orphan
+    // "[0;94m" prefix). Drop exactly those two shapes; a line that merely
+    // starts with the letter m (e.g. "make …") keeps its first character
+    // (Fable review M6a/R2).
+    kept.unshift(keptSegments.replace(/^(?:\x1b?\[[0-9;]*m|[0-9;]+m)/, ""));
     budget = 0;
   }
 

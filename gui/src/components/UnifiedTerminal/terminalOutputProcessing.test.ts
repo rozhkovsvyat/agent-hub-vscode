@@ -105,6 +105,26 @@ describe("processTerminalOutput", () => {
     expect(result.limitedContent).toContain("\u001b[0m");
   });
 
+  test("giant-line cuts drop both orphan SGR shapes and keep plain m", () => {
+    // Cut right after ESC: the slice starts with the orphan "[0;94m" form.
+    const afterEsc = "x".repeat(490) + "\u001b" + "[0;94m" + "y".repeat(494);
+    expect(afterEsc).toHaveLength(991);
+    const cutAfterEsc = processTerminalOutput(afterEsc, 1);
+    expect(cutAfterEsc.limitedContent.startsWith("[0;94m")).toBe(false);
+    expect(cutAfterEsc.limitedContent).not.toContain("[0;94m");
+    // Cut between "[" and the parameters: orphan "0;94m" form.
+    const orphanParams =
+      "x".repeat(489) + "\u001b[" + "0;94m" + "y".repeat(495);
+    expect(orphanParams).toHaveLength(991);
+    const cutParams = processTerminalOutput(orphanParams, 1);
+    expect(cutParams.limitedContent).not.toContain("0;94m");
+    // A line merely starting with the letter m keeps every character.
+    const makeLine = "x".repeat(500) + "make ok";
+    const cutMake = processTerminalOutput(makeLine, 1);
+    expect(cutMake.limitedContent.endsWith("make ok")).toBe(true);
+    expect(cutMake.limitedContent.startsWith("ake ok")).toBe(false);
+  });
+
   test("hiddenLinesCount reports virtual rows, not logical lines", () => {
     const output = ["x".repeat(TERMINAL_MAX_LINE_CHARS * 5), "plain"].join(
       "\n",
