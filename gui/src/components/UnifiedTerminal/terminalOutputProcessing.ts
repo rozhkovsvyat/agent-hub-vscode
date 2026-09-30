@@ -14,6 +14,9 @@ export const TERMINAL_BLANK_RUN_COLLAPSE = 3;
 const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
 
 function isBlankLine(line: string): boolean {
+  // A line carrying only control sequences is NOT blank: collapsing it would
+  // drop the SGR state that colours the following output (Fable review).
+  if (line.includes("\u001b")) return false;
   return line.replace(ANSI_PATTERN, "").trim().length === 0;
 }
 
@@ -72,6 +75,8 @@ export function processTerminalOutput(
   };
   if (!rawOutput) return empty;
 
+  // The limited view is shaped; Copy and the expanded card keep the vendor's
+  // bytes verbatim so colour state and blank stretches survive (Fable review).
   const output = collapseTerminalBlankRuns(rawOutput);
   const lines = output.split("\n");
   const virtualTotal = lines.reduce(
@@ -81,7 +86,7 @@ export function processTerminalOutput(
 
   if (virtualTotal <= displayLines) {
     return {
-      fullContent: output,
+      fullContent: rawOutput,
       limitedContent: output,
       totalLines: virtualTotal,
       isLimited: false,
@@ -103,12 +108,14 @@ export function processTerminalOutput(
       continue;
     }
     const keptSegments = line.slice(-budget * TERMINAL_MAX_LINE_CHARS);
-    kept.unshift(keptSegments);
+    // A cut can land inside an SGR sequence and leave an orphan "94m" prefix
+    // on screen; drop a leading parameter run without its escape introducer.
+    kept.unshift(keptSegments.replace(/^[0-9;]*m/, ""));
     budget = 0;
   }
 
   return {
-    fullContent: output,
+    fullContent: rawOutput,
     limitedContent: kept.join("\n"),
     totalLines: virtualTotal,
     isLimited: true,

@@ -2672,7 +2672,14 @@ button.cukii-submit-button--stop:active {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 20px;
+  /* The fade may never eat the last visible text row: near the terminal fold
+     the remaining painted height approaches one row, so the band shrinks
+     with it instead of covering the only line (Fable review MINOR-4). */
+  height: clamp(
+    0px,
+    calc(var(--cukii-sticky-visible-height, 40px) - 20px),
+    20px
+  );
   pointer-events: none;
   background: linear-gradient(
     to bottom,

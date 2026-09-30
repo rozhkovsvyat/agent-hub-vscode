@@ -17,9 +17,13 @@ describe("collapseTerminalBlankRuns", () => {
     expect(collapseTerminalBlankRuns(output)).toBe(output);
   });
 
-  test("treats ANSI-only lines as blank", () => {
-    const output = ["a", "", "[32m[0m", "", "", "b"].join("\n");
-    expect(collapseTerminalBlankRuns(output)).toBe(["a", "", "b"].join("\n"));
+  test("keeps ANSI-only lines so colour state survives collapsing", () => {
+    // An SGR-only line carries the colour state of the following output;
+    // collapsing it as blank made the next line repaint in the wrong colour
+    // (Fable review MINOR-8).
+    const output = ["a", "", "\u001b[32m\u001b[0m", "", "", "b"].join("\n");
+    // The SGR-only line splits the blank run and is itself preserved.
+    expect(collapseTerminalBlankRuns(output)).toBe(output);
   });
 
   test("leaves single-line output untouched", () => {
@@ -88,7 +92,17 @@ describe("processTerminalOutput", () => {
     const result = processTerminalOutput(output, 15);
     // After collapsing, content fits the budget: no limit engaged at all.
     expect(result.isLimited).toBe(false);
-    expect(result.fullContent).not.toContain("\n\n\n");
+    expect(result.limitedContent).not.toContain("\n\n\n");
+    // Copy and the expanded card keep the vendor bytes verbatim.
+    expect(result.fullContent).toBe(output);
+  });
+
+  test("keeps ANSI-only lines so colour state survives collapsing", () => {
+    const output = ["red", "\u001b[0m", "\u001b[0m", "\u001b[0m", "after"].join(
+      "\n",
+    );
+    const result = processTerminalOutput(output, 10);
+    expect(result.limitedContent).toContain("\u001b[0m");
   });
 
   test("hiddenLinesCount reports virtual rows, not logical lines", () => {

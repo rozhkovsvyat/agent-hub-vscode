@@ -221,6 +221,8 @@ export class VsCodeMessenger {
     ActiveBridgeRun
   >(22_000, { isPidAlive: (pid) => isBridgeProcessTreeAlive(pid) });
   private nextBridgeRunId = 0;
+  /** One shared panel for managed codex device-auth output (Fable MINOR-5). */
+  private codexLoginOutput: vscode.OutputChannel | undefined;
   /** Preserve click order when two panels rename the same session together. */
   private readonly sessionRenameQueues = new Map<string, Promise<unknown>>();
 
@@ -1388,17 +1390,32 @@ export class VsCodeMessenger {
         action === "login" &&
         deviceAuthLoginArgs(vendor)
       ) {
-        const output = vscode.window.createOutputChannel("Cukii · codex login");
+        // Reuse one channel: VS Code persists Output panels under logs/, and
+        // a fresh channel per login both accumulated duplicates and spread
+        // the one-time code across more log files (Fable review MINOR-5).
+        this.codexLoginOutput ??= vscode.window.createOutputChannel(
+          "Cukii · codex login",
+        );
+        const output = this.codexLoginOutput;
         output.clear();
         output.show(true);
+        let observedCode: string | undefined;
         const managed = await runDeviceAuthLogin({
           vendor: "codex",
           host: {
             openExternal: (url) =>
               vscode.env.openExternal(vscode.Uri.parse(url)),
-            writeClipboard: (code) => vscode.env.clipboard.writeText(code),
+            writeClipboard: (code) => {
+              observedCode = code;
+              return vscode.env.clipboard.writeText(code);
+            },
           },
-          onOutput: (chunk) => output.append(chunk),
+          onOutput: (chunk) =>
+            output.append(
+              observedCode
+                ? chunk.split(observedCode).join("[code copied to clipboard]")
+                : chunk,
+            ),
         });
         if (managed.outcome !== "unavailable") {
           clearBrokerVendorAccountCache();

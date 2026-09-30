@@ -419,6 +419,21 @@ export function CukiiStickyUserMessage({
     syncFoldWithScrollRef.current?.();
   }, [isExpanded]);
 
+  // React rewrites the bubble's className whenever the transcript adds a
+  // modifier (for example an agent reaction), which silently dropped the
+  // imperatively latched --collapsed class and let the truncation gradient
+  // repaint over the single terminal row until the next scroll (Fable review).
+  useLayoutEffect(() => {
+    const bubble = contentRef.current?.closest<HTMLElement>(
+      ".cukii-user-message-bubble",
+    );
+    if (!bubble) return;
+    bubble.classList.toggle(
+      "cukii-user-bubble--collapsed",
+      isCollapsedLatchedRef.current && !isExpandedRef.current,
+    );
+  });
+
   const expand = useCallback(() => setIsExpanded(true), []);
   const collapse = useCallback(() => {
     // The chevron is an explicit close command, not a request to return to an

@@ -880,7 +880,7 @@ test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold
       /\.cukii-user-message-content\[data-cukii-scroll-folding="true"\]\s*\{[^}]*max-height:\s*var\(--cukii-sticky-visible-height\)/s,
     );
     expect(css).toMatch(
-      /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*20px/s,
+      /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*clamp\(\s*0px,\s*calc\(var\(--cukii-sticky-visible-height,\s*40px\)\s*-\s*20px\),\s*20px\s*\)/s,
     );
     // Owner video on 2.0.152: at the terminal fold the fade hint painted a
     // transparent->orange 20px band exactly over the only remaining 20px text
@@ -1322,5 +1322,161 @@ test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-24
       `<!doctype html><meta charset="utf-8"><title>ID-249/270/275 sticky collapse</title><style>${css}</style>${container.innerHTML}`,
       "utf8",
     );
+  }
+});
+
+test("a transcript re-render cannot drop the latched terminal collapse class", async () => {
+  // Fable review MINOR-3: React rewrites the bubble className when a modifier
+  // (agent reaction) arrives; the imperative --collapsed latch must survive
+  // or the truncation gradient repaints over the single terminal row.
+  let contentHeight = 0;
+  let transcriptScrollTop = 60;
+  let rowTop = 40;
+  const mutationCallbacks: Array<() => void> = [];
+  const originalGetBoundingClientRect =
+    HTMLElement.prototype.getBoundingClientRect;
+  const originalScrollHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  const originalScrollTop = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollTop",
+  );
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCaf = globalThis.cancelAnimationFrame;
+  const OriginalMutationObserver = globalThis.MutationObserver;
+  const OriginalResizeObserver = globalThis.ResizeObserver;
+  class TestMutationObserver {
+    constructor(callback: () => void) {
+      mutationCallbacks.push(callback);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  class TestResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains(
+        "cukii-user-message-content",
+      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
+        ? contentHeight
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get() {
+      return (this as HTMLElement).classList?.contains("cukii-transcript")
+        ? transcriptScrollTop
+        : 0;
+    },
+    set(value: number) {
+      if ((this as HTMLElement).classList?.contains("cukii-transcript")) {
+        transcriptScrollTop = value;
+      }
+    },
+  });
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains("cukii-transcript")) {
+      return { top: 0, height: 500 } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-row--sticky")) {
+      return { top: rowTop, height: contentHeight + 46 } as DOMRect;
+    }
+    if (
+      this.classList.contains("cukii-user-message-content") ||
+      this.classList.contains("cukii-user-message-body")
+    ) {
+      return { top: rowTop + 14, height: contentHeight } as DOMRect;
+    }
+    if (this.classList.contains("cukii-user-message-bubble")) {
+      return { top: rowTop + 14, height: contentHeight + 20 } as DOMRect;
+    }
+    return originalGetBoundingClientRect.call(this);
+  };
+  globalThis.MutationObserver =
+    TestMutationObserver as unknown as typeof MutationObserver;
+  globalThis.ResizeObserver =
+    TestResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => undefined;
+
+  try {
+    const view = render(
+      <div className="cukii-transcript">
+        <div className="cukii-user-row--sticky">
+          <CukiiStickyUserMessage
+            bubbleClassName="cukii-user-message-bubble"
+            messageId="rerender-latch"
+          >
+            Prompt that folds to one row
+          </CukiiStickyUserMessage>
+        </div>
+      </div>,
+    );
+    const bubble = view.container.querySelector(
+      '[data-testid="cukii-user-bubble-rerender-latch"]',
+    );
+    contentHeight = 140;
+    transcriptScrollTop = 220;
+    rowTop = 0;
+    act(() => mutationCallbacks.forEach((callback) => callback()));
+    await waitFor(() =>
+      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
+    );
+    const transcript = view.container.querySelector(".cukii-transcript")!;
+    transcriptScrollTop = 400;
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    await waitFor(() =>
+      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
+    );
+
+    // An agent reaction arrives: React repaints the bubble className without
+    // the imperative class. The latch must come back in the same commit.
+    view.rerender(
+      <div className="cukii-transcript">
+        <div className="cukii-user-row--sticky">
+          <CukiiStickyUserMessage
+            bubbleClassName="cukii-user-message-bubble cukii-user-bubble--with-reaction"
+            messageId="rerender-latch"
+          >
+            Prompt that folds to one row
+          </CukiiStickyUserMessage>
+        </div>
+      </div>,
+    );
+    expect(bubble).toHaveClass("cukii-user-bubble--with-reaction");
+    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
+  } finally {
+    if (originalScrollHeight) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        originalScrollHeight,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    }
+    if (originalScrollTop) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollTop",
+        originalScrollTop,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+    }
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    globalThis.MutationObserver = OriginalMutationObserver;
+    globalThis.ResizeObserver = OriginalResizeObserver;
+    globalThis.requestAnimationFrame = originalRaf;
+    globalThis.cancelAnimationFrame = originalCaf;
   }
 });
