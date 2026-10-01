@@ -5,11 +5,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  cancelQuestionForRpc,
   dropOutstandingRequests,
   finalizeCancelled,
   mcpResponseForMessage,
   outstandingRequests,
   reactionsRoot,
+  rpcQuestionRequests,
   waitForAnswer,
   waitTimeoutMs,
 } from "./cukiiQuestionMcp";
@@ -250,5 +252,124 @@ describe("cukiiQuestionMcp", () => {
         method: "notifications/cancelled",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("request_user_input progress heartbeat (card 20933fd6)", () => {
+  // Qwen Code aborts an MCP call that stays silent for mcp.toolIdleTimeoutMs
+  // (300 000 ms by default) no matter what the per-server timeout says; a
+  // progress notification is the only thing that resets that timer.
+  const call = (meta?: Record<string, unknown>) => ({
+    jsonrpc: "2.0",
+    id: 42,
+    method: "tools/call",
+    params: {
+      name: "request_user_input",
+      arguments: {},
+      ...(meta ? { _meta: meta } : {}),
+    },
+  });
+
+  it("reports monotonic progress with the client's token while the user thinks, then stops", async () => {
+    const frames: Record<string, unknown>[] = [];
+    let answer: (value: unknown) => void = () => undefined;
+    const pending = mcpResponseForMessage(
+      call({ progressToken: "tok-7" }),
+      () => new Promise((resolve) => (answer = resolve)),
+      undefined,
+      undefined,
+      undefined,
+      { notify: (frame) => frames.push(frame), intervalMs: 15 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    answer({ requestId: "question-a", answers: { go: "Да" } });
+    const response = await pending;
+    const countAtAnswer = frames.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(countAtAnswer).toBeGreaterThanOrEqual(3);
+    expect(frames.length).toBe(countAtAnswer);
+    expect(frames.every((f) => f.method === "notifications/progress")).toBe(
+      true,
+    );
+    const progress = frames.map(
+      (f) => f.params as { progressToken: string; progress: number },
+    );
+    expect(progress.every((p) => p.progressToken === "tok-7")).toBe(true);
+    expect(progress.map((p) => p.progress)).toEqual(
+      progress.map((_, index) => index + 1),
+    );
+    expect((response?.result as { isError: boolean }).isError).toBe(false);
+  });
+
+  it("stays silent when the client asked for no progress", async () => {
+    const frames: unknown[] = [];
+    await mcpResponseForMessage(
+      call(),
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ answers: {} }), 60),
+        ),
+      undefined,
+      undefined,
+      undefined,
+      { notify: (frame) => frames.push(frame), intervalMs: 10 },
+    );
+    expect(frames).toEqual([]);
+  });
+
+  it("stops reporting when the question is rejected", async () => {
+    const frames: unknown[] = [];
+    await mcpResponseForMessage(
+      call({ progressToken: 9 }),
+      () =>
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("x")), 40),
+        ),
+      undefined,
+      undefined,
+      undefined,
+      { notify: (frame) => frames.push(frame), intervalMs: 10 },
+    );
+    const settled = frames.length;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(frames.length).toBe(settled);
+  });
+});
+
+describe("client cancellation retires the question sheet", () => {
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-question-cancel-"));
+    process.env.CUKII_QUESTIONS_DIR = root;
+  });
+  afterEach(() => {
+    outstandingRequests.clear();
+    rpcQuestionRequests.clear();
+    delete process.env.CUKII_QUESTIONS_DIR;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("cancels exactly the abandoned call's question and nothing else", async () => {
+    const abandoned = writeRequest("question-a");
+    const live = writeRequest("question-b");
+    outstandingRequests.set("question-a", abandoned);
+    outstandingRequests.set("question-b", live);
+    rpcQuestionRequests.set("7", "question-a");
+    rpcQuestionRequests.set("8", "question-b");
+
+    await mcpResponseForMessage({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: 7, reason: "idle timeout" },
+    });
+
+    const read = (file: string) =>
+      JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(read(abandoned)).toMatchObject({
+      status: "cancelled",
+      reason: "client cancelled the call",
+    });
+    expect(read(live).status).toBe("pending");
+    expect(cancelQuestionForRpc(99, "x")).toBe(false);
   });
 });

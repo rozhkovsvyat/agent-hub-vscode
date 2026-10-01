@@ -493,6 +493,21 @@ export async function waitForAnswer(
 /** requestId → record file for every tools/call still waiting on the user. */
 export const outstandingRequests = new Map<string, string>();
 
+/** JSON-RPC id of the tools/call → its question requestId. */
+export const rpcQuestionRequests = new Map<string, string>();
+
+/**
+ * The client abandoned one call (`notifications/cancelled`, e.g. Qwen's idle
+ * timeout). Retire exactly that question, or its sheet stays on screen and
+ * the user answers a call nobody waits for (2.0.157 acceptance).
+ */
+export function cancelQuestionForRpc(rpcId: unknown, reason: string): boolean {
+  const requestId = rpcQuestionRequests.get(String(rpcId));
+  if (!requestId) return false;
+  const file = outstandingRequests.get(requestId);
+  return file ? finalizeCancelled(file, requestId, reason) : false;
+}
+
 /**
  * The vendor went away (stdin closed). Converge every outstanding wait so no
  * panel sheet or broker slot hangs behind a dead agent.
@@ -504,7 +519,7 @@ export function dropOutstandingRequests(reason: string): void {
   outstandingRequests.clear();
 }
 
-async function requestUserInput(argumentsValue: unknown) {
+async function requestUserInput(argumentsValue: unknown, rpcId?: unknown) {
   // The vendor can launch its MCP child a few milliseconds before the host's
   // post-spawn CIM/proc lookup publishes the run binding. Treat that as a
   // bounded startup race, not a terminal user-question failure.
@@ -534,6 +549,7 @@ async function requestUserInput(argumentsValue: unknown) {
   );
   writeExclusive(file, JSON.stringify(record));
   outstandingRequests.set(requestId, file);
+  if (rpcId !== undefined) rpcQuestionRequests.set(String(rpcId), requestId);
   try {
     const response = await waitForAnswer(file, requestId);
     return response.status === "answered"
@@ -545,6 +561,7 @@ async function requestUserInput(argumentsValue: unknown) {
         };
   } finally {
     outstandingRequests.delete(requestId);
+    if (rpcId !== undefined) rpcQuestionRequests.delete(String(rpcId));
   }
 }
 
@@ -681,10 +698,52 @@ const BROKER_INBOX_ACK_TOOL = {
   },
 };
 
+/**
+ * How often a waiting request_user_input reports progress. MCP clients abort
+ * tool calls that stay silent: Qwen Code's `mcp.toolIdleTimeoutMs` (300s by
+ * default, 1h at most) ignores the per-server `timeout` and is reset only by a
+ * response or a progress notification (card 20933fd6, live run: three
+ * questions aborted at exactly 300 000 ms while the owner was still deciding).
+ */
+export const QUESTION_PROGRESS_INTERVAL_MS = 30_000;
+
+export type QuestionProgressHeartbeat = {
+  notify: (frame: Record<string, unknown>) => void;
+  intervalMs: number;
+};
+
+/** Progress notifications while the human thinks; off without a token. */
+function startQuestionProgress(
+  params: Record<string, unknown>,
+  heartbeat: QuestionProgressHeartbeat,
+): () => void {
+  const meta = params._meta as Record<string, unknown> | undefined;
+  const token = meta?.progressToken;
+  if (typeof token !== "string" && typeof token !== "number") {
+    return () => undefined;
+  }
+  let progress = 0;
+  const timer = setInterval(() => {
+    progress += 1;
+    heartbeat.notify({
+      jsonrpc: "2.0",
+      method: "notifications/progress",
+      params: {
+        progressToken: token,
+        progress,
+        message: "Waiting for the user's answer",
+      },
+    });
+  }, heartbeat.intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 export async function mcpResponseForMessage(
   message: unknown,
   callQuestionTool: (
     argumentsValue: unknown,
+    rpcId?: unknown,
   ) => Promise<unknown> = requestUserInput,
   callReactionTool: (
     argumentsValue: unknown,
@@ -693,17 +752,21 @@ export async function mcpResponseForMessage(
   callInboxAckTool: (
     argumentsValue: unknown,
   ) => Promise<unknown> = brokerInboxAck,
+  questionHeartbeat: QuestionProgressHeartbeat = {
+    notify: send,
+    intervalMs: QUESTION_PROGRESS_INTERVAL_MS,
+  },
 ): Promise<Record<string, unknown> | undefined> {
   if (typeof message !== "object" || message === null) return undefined;
   const frame = message as Record<string, unknown>;
   const id = frame.id;
   const method = frame.method;
   const params = (frame.params || {}) as Record<string, unknown>;
-  if (
-    method === "notifications/initialized" ||
-    method === "notifications/cancelled"
-  )
+  if (method === "notifications/cancelled") {
+    cancelQuestionForRpc(params.requestId, "client cancelled the call");
     return undefined;
+  }
+  if (method === "notifications/initialized") return undefined;
   if (method === "initialize") {
     return {
       jsonrpc: "2.0",
@@ -734,8 +797,9 @@ export async function mcpResponseForMessage(
     };
   }
   if (method === "tools/call" && params.name === "request_user_input") {
+    const stopProgress = startQuestionProgress(params, questionHeartbeat);
     try {
-      const result = await callQuestionTool(params.arguments);
+      const result = await callQuestionTool(params.arguments, id);
       return {
         jsonrpc: "2.0",
         id,
@@ -753,6 +817,8 @@ export async function mcpResponseForMessage(
           isError: true,
         },
       };
+    } finally {
+      stopProgress();
     }
   }
   if (method === "tools/call" && params.name === "react_to_user_message") {
