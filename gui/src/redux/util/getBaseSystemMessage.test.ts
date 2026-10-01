@@ -95,3 +95,20 @@ test("getBaseSystemMessage should append no-tools warning for agent/plan modes w
       NO_TOOL_WARNING,
   );
 });
+
+test("names Opus 5.5 and routes it to the claude agent (card a84d2dda)", () => {
+  const message = getBaseSystemMessage(
+    "broker",
+    {
+      title: "m",
+      provider: "x",
+      model: "m",
+      underlyingProviderName: "x",
+    } as any,
+    [{ type: "function", function: { name: "t" } } as any],
+    "opus-5-5",
+    "opus-5-5",
+  );
+  expect(message).toContain("Broker model intent: Opus 5.5.");
+  expect(message).toContain('agent="claude" and model="Opus 5.5"');
+});

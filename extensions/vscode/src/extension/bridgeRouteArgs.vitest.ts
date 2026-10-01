@@ -1142,7 +1142,8 @@ describe("native bridge argv", () => {
       "--effort",
       "high",
       "--settings",
-      '{"fastMode":false}',
+      // Opus 5.5 now carries its native Thinking toggle (card a84d2dda).
+      '{"fastMode":false,"alwaysThinkingEnabled":true}',
       "--dangerously-skip-permissions",
       "-p",
       "--input-format",

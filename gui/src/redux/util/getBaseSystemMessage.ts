@@ -10,6 +10,7 @@ export const NO_TOOL_WARNING =
 
 export const BROKER_MODEL_LABELS: Record<string, string> = {
   "opus-5": "Opus 5",
+  "opus-5-5": "Opus 5.5",
   "sonnet-5": "Sonnet 5",
   "fable-5": "Fable 5",
   "fable-5-1": "Fable 5.1",
@@ -52,7 +53,14 @@ function brokerModelLabel(value?: string): string | undefined {
 function brokerModelAgent(value?: string): string | undefined {
   if (!value) return undefined;
   if (
-    ["opus-5", "sonnet-5", "fable-5", "fable-5-1", "haiku-4-5"].includes(value)
+    [
+      "opus-5",
+      "opus-5-5",
+      "sonnet-5",
+      "fable-5",
+      "fable-5-1",
+      "haiku-4-5",
+    ].includes(value)
   ) {
     return "claude";
   }
