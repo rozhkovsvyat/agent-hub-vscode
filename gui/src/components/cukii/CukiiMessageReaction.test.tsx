@@ -118,9 +118,9 @@ describe("CukiiMessageReaction", () => {
       flatCss.match(/^\.cukii-user-message-bubble\s*\{[^}]*\}/m)?.[0] ?? "";
     const foldedContent =
       flatCss.match(/^\.cukii-user-message-content\s*\{[^}]*\}/m)?.[0] ?? "";
-    const activeFold =
+    const stickyClip =
       flatCss.match(
-        /^\.cukii-user-message-content\[data-cukii-scroll-folding="true"\]\s*\{[^}]*\}/m,
+        /^\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*\{[^}]*\}/m,
       )?.[0] ?? "";
 
     // The reaction pop/ripple is part of the painted message, but it can
@@ -132,8 +132,10 @@ describe("CukiiMessageReaction", () => {
     expect(foldedContent).toContain("overflow: visible;");
     expect(foldedContent).not.toContain("overflow-x: hidden;");
     expect(foldedContent).not.toContain("overflow-y: hidden;");
-    expect(activeFold).toContain("overflow-x: hidden;");
-    expect(activeFold).toContain("overflow-y: hidden;");
+    // The sticky fold is a paint-only clip-path on the bubble (CSS
+    // scroll-driven), never an overflow clip on the content frame.
+    expect(stickyClip).toContain("clip-path: inset(");
+    expect(stickyClip).not.toContain("overflow");
   });
 
   it("embeds all supported MAX emoji artwork as valid WebP data", () => {

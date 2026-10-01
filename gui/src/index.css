@@ -2300,6 +2300,53 @@ button.cukii-submit-button--stop:active {
   flex-direction: column;
   flex-shrink: 0;
   min-width: 0;
+  /* The sentinel's named view timeline is hoisted to the turn so the sticky
+     row (a sibling, not a descendant) can animate against it. */
+  timeline-scope: --cukii-turn;
+  /* Eviction slack lives inside the turn's box (so the sticky row keeps its
+     containing block until the next capsule reaches the one-line row) and
+     is pulled back out of the flow here, so it is never visible. */
+  margin-bottom: calc(-1 * var(--cukii-turn-slack, 0px));
+}
+
+/* Scroll-driven fold (owner videos 29.09/01.10). The previous JavaScript
+   fold tracked `scrollTop`, a pin edge and a terminal latch, and every one of
+   those became a feedback loop once streamed content, auto-scroll or scroll
+   clamping moved the transcript under the pinned capsule: the row jumped
+   between one line and full height several times a second. Now the fold is
+   a pure function of scroll position evaluated by the compositor: a 1px
+   sentinel at the top of each turn is the view-timeline subject, and the
+   sticky row animates `--cukii-fold-px` from 0 to 4000px over the 4000px of
+   scroll that follow the sentinel crossing the scrollport top. Nothing here
+   changes layout; the capsule is clipped with `clip-path`, which cannot move
+   the content below it. */
+@property --cukii-fold-px {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@keyframes cukii-sticky-fold {
+  from {
+    --cukii-fold-px: 0px;
+  }
+  to {
+    --cukii-fold-px: 4000px;
+  }
+}
+
+.cukii-turn-sentinel {
+  flex: 0 0 1px;
+  height: 1px;
+  margin-bottom: -1px;
+  view-timeline: --cukii-turn block;
+  pointer-events: none;
+}
+
+.cukii-turn-slack {
+  flex: 0 0 auto;
+  height: var(--cukii-turn-slack, 0px);
+  pointer-events: none;
 }
 
 /* Transcript layer scale. Upstream code-block and tool-call headers ship as
@@ -2320,14 +2367,50 @@ button.cukii-submit-button--stop:active {
   padding-top: var(--cukii-user-row-padding-top);
   padding-bottom: var(--cukii-user-row-padding-bottom);
   pointer-events: none;
+  /* `exit 100%` of the 1px sentinel is the frame its bottom edge meets the
+     scrollport top; minus 1px that is the row's own top edge: the pin. */
+  animation: cukii-sticky-fold linear both;
+  animation-timeline: --cukii-turn;
+  animation-range: exit calc(100% - 1px) exit calc(100% + 3999px);
 }
 
-/* The fold is pixel-synchronous with scroll: every consumed scroll pixel
-   removes exactly one painted pixel through `--cukii-sticky-visible-height`.
-   The row's flow box shrinks with the painted capsule, so the following answer
-   occupies the released space instead of sitting below an invisible prompt-
-   sized gap. The collapse-progress attribute remains for debugging and tests;
-   layout never reads it. */
+/* Short prompts have no fold and expanded capsules keep their full paint
+   until the chevron closes them again. */
+.cukii-user-row--sticky:not(:has([data-cukii-long-prompt="true"])),
+.cukii-user-row--sticky.cukii-user-row--expanded {
+  animation: none;
+}
+
+/* Remaining painted height of the capsule: the fold removes one pixel per
+   scrolled pixel down to the single 20px text row plus the bubble inset. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px;
+  clip-path: inset(
+    0 0 min(var(--cukii-fold-px), calc(100% - 38px)) 0 round
+      var(--cukii-bubble-radius)
+  );
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-start[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 16px 6px 16px;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-middle[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 6px 6px 16px;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-end[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 6px 16px 16px;
+}
+
+/* The fold is pixel-synchronous with scroll: every scrolled pixel past the
+   pin removes exactly one painted pixel (`--cukii-fold-px`, declared on the
+   turn above). The row keeps its natural flow box; only the paint is clipped,
+   so the following answer never moves because of the fold itself. */
 
 /* The sticky mask must equal whatever actually paints behind the transcript.
    Naming a token twice is what kept breaking this: `sideBar-background` was
@@ -2345,7 +2428,16 @@ button.cukii-submit-button--stop:active {
   position: absolute;
   z-index: -1;
   inset: 0 0 auto;
-  height: var(--cukii-sticky-mask-height, 100%);
+  height: calc(
+    100% -
+      min(
+        var(--cukii-fold-px),
+        calc(
+          100% - var(--cukii-user-row-padding-top) -
+            var(--cukii-user-row-padding-bottom) - 38px
+        )
+      )
+  );
   background-color: var(--cukii-canvas, var(--cukii-chat-background));
   pointer-events: none;
   -webkit-mask-image: linear-gradient(
@@ -2659,27 +2751,17 @@ button.cukii-submit-button--stop:active {
   min-width: 0;
 }
 
-.cukii-user-message-content[data-cukii-scroll-folding="true"] {
-  position: relative;
-  max-height: var(--cukii-sticky-visible-height);
-  overflow-x: hidden;
-  overflow-y: hidden;
-}
-
+/* The fade rides the painted bottom edge of the clipped text and shrinks
+   to nothing as the remaining height approaches one row, so it never eats
+   the last visible line. It is hidden while nothing is folded (fold = 0) and
+   while the chevron holds the capsule open. */
 .cukii-user-truncation-gradient {
-  display: none;
+  display: block;
   position: absolute;
   right: 0;
-  bottom: 0;
+  bottom: min(var(--cukii-fold-px), calc(100% - 20px));
   left: 0;
-  /* The fade may never eat the last visible text row: near the terminal fold
-     the remaining painted height approaches one row, so the band shrinks
-     with it instead of covering the only line (Fable review MINOR-4). */
-  height: clamp(
-    0px,
-    calc(var(--cukii-sticky-visible-height, 40px) - 20px),
-    20px
-  );
+  height: clamp(0px, calc(100% - 20px - var(--cukii-fold-px)), 20px);
   pointer-events: none;
   background: linear-gradient(
     to bottom,
@@ -2688,11 +2770,44 @@ button.cukii-submit-button--stop:active {
   );
 }
 
-.cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
-    .cukii-user-bubble--expanded
-  ):not(.cukii-user-bubble--collapsed)
+@container style(--cukii-fold-px: 0px) {
   .cukii-user-truncation-gradient {
-  display: block;
+    display: none;
+  }
+
+  .cukii-user-fold-toggle {
+    visibility: hidden;
+  }
+}
+
+.cukii-user-bubble--expanded .cukii-user-truncation-gradient {
+  display: none;
+}
+
+.cukii-user-bubble--expanded .cukii-user-fold-toggle {
+  visibility: visible;
+}
+
+/* With attachments the thumbnail strip paints below the text inside a sticky
+   capsule, so the single terminal row is always the first line of text. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-bubble {
+  display: flex;
+  flex-direction: column;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-attachment-strip {
+  order: 2;
+}
+
+/* The receipt row stays out from under the text at every fold position. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .ProseMirror {
+  padding-right: calc(var(--cukii-meta-reserve, 31px) + 20px) !important;
 }
 
 .cukii-user-fold-footer {
@@ -2756,64 +2871,8 @@ button.cukii-submit-button--stop:active {
   > .cukii-user-fold-footer {
   position: absolute;
   right: 10px;
-  bottom: 4px;
+  bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)));
   margin: 0;
-}
-
-/* The terminal sticky state is one visual row, including chevron, timestamp
-   and delivery ticks. Paragraphs remain semantic in the document but paint
-   inline inside the clipped row; the right padding keeps text out from under
-   the absolute footer. */
-/* Collapsed wrapping must match a single visual line, not the expanded
-   pre-wrap layout. URLs, hard breaks and extra paragraphs all join the same
-   row; the chevron restores the original wrapping. */
-.cukii-user-message-content--collapsed {
-  max-height: 20px;
-  overflow: hidden;
-  white-space: nowrap !important;
-  word-break: normal;
-  text-overflow: ellipsis;
-}
-
-.cukii-user-message-content--collapsed,
-.cukii-user-message-content--collapsed * {
-  white-space: nowrap !important;
-}
-
-.cukii-user-message-content--collapsed br {
-  display: none !important;
-}
-
-.cukii-user-message-content--collapsed .ProseMirror {
-  box-sizing: border-box;
-  height: 20px;
-  overflow: hidden;
-  padding-right: calc(var(--cukii-meta-reserve, 31px) + 20px) !important;
-  white-space: nowrap;
-}
-
-.cukii-user-message-content--collapsed .ProseMirror p {
-  display: inline;
-  white-space: nowrap;
-}
-
-.cukii-user-message-content--collapsed .ProseMirror p + p::before {
-  content: " ";
-}
-
-/* A sticky capsule is always one text row at its terminal fold, even when the
-   original message carried attachments. The chevron restores the full strip;
-   ordinary in-flow and manually expanded messages remain unchanged. */
-.cukii-user-message-content--collapsed .cukii-user-attachment-strip {
-  display: none;
-}
-
-.cukii-user-message-bubble[data-cukii-collapsible="true"]:not(
-    .cukii-user-bubble--expanded
-  )
-  .ProseMirror
-  p:last-child::after {
-  display: none;
 }
 
 .cukii-user-bubble--group-start {
@@ -2916,7 +2975,7 @@ button.cukii-submit-button--stop:active {
   > .cukii-user-metadata {
   position: absolute;
   right: 10px;
-  bottom: 4px;
+  bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)));
   margin: 0;
 }
 

@@ -1,18 +1,118 @@
 import { act, render, waitFor } from "@testing-library/react";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import { join } from "path";
-import type { CSSProperties } from "react";
 import { renderWithProviders } from "../../../util/test/render";
 import {
   CukiiStickyUserMessage,
-  isStickyRowPinned,
-  resolveStickyCollapseGeometry,
-  resolveStickyNaturalHeight,
+  resolveStickyTurnSlack,
+  STICKY_BUBBLE_TERMINAL_HEIGHT_PX,
 } from "../../../components/cukii/CukiiStickyUserMessage";
 import { Chat } from "../Chat";
 
 const canonicalCss = () =>
   readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+
+const ruleBody = (css: string, selector: RegExp): string | undefined =>
+  css.match(new RegExp(`${selector.source}\\s*\\{([^}]*)\\}`, "s"))?.[1];
+
+/**
+ * Layout stubs for jsdom: the body reports the given natural prompt height
+ * and the sticky row reports the given natural row height. Neither depends
+ * on scroll position, which is the whole point of the CSS-driven fold.
+ */
+function stubStickyGeometry({
+  bodyHeight,
+  rowHeight,
+}: {
+  bodyHeight: number;
+  rowHeight: number;
+}) {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  const rectDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "getBoundingClientRect",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      const element = this as HTMLElement;
+      return element.classList?.contains("cukii-user-message-body")
+        ? bodyHeight
+        : 0;
+    },
+  });
+  Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: Element) {
+      const height = this.classList?.contains("cukii-user-row--sticky")
+        ? rowHeight
+        : this.classList?.contains("cukii-user-message-body")
+          ? bodyHeight
+          : 0;
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: height,
+        width: 0,
+        height,
+        toJSON: () => ({}),
+      } as DOMRect;
+    },
+  });
+  return () => {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollHeight",
+        scrollHeightDescriptor,
+      );
+    } else {
+      delete (HTMLElement.prototype as any).scrollHeight;
+    }
+    if (rectDescriptor) {
+      Object.defineProperty(
+        Element.prototype,
+        "getBoundingClientRect",
+        rectDescriptor,
+      );
+    }
+  };
+}
+
+function renderStickyTurn(
+  props: Partial<Parameters<typeof CukiiStickyUserMessage>[0]> = {},
+) {
+  return render(
+    <div className="cukii-transcript">
+      <div className="cukii-turn" data-testid="turn">
+        <div aria-hidden="true" className="cukii-turn-sentinel" />
+        <div
+          className="cukii-user-row cukii-user-row--sticky"
+          data-testid="row"
+        >
+          <div className="cukii-user-message">
+            <CukiiStickyUserMessage
+              bubbleClassName="cukii-user-message-bubble"
+              messageId="m1"
+              metadata={<span className="cukii-user-metadata">12:00</span>}
+              {...props}
+            >
+              <p>prompt</p>
+            </CukiiStickyUserMessage>
+          </div>
+        </div>
+        <div className="cukii-assistant-row">answer</div>
+        <div aria-hidden="true" className="cukii-turn-slack" />
+      </div>
+    </div>,
+  );
+}
 
 test("groups every user prompt with its response so the next sticky turn displaces it", async () => {
   const { store, container } = await renderWithProviders(<Chat />);
@@ -58,6 +158,11 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(turns[1].textContent).toContain("Second answer");
   for (const turn of Array.from(turns)) {
     expect(turn.querySelector(".cukii-user-row--sticky")).not.toBeNull();
+    // The 1px view-timeline subject opens the turn, the eviction slack
+    // closes it; both are inert for assistive tech.
+    expect(turn.firstElementChild).toHaveClass("cukii-turn-sentinel");
+    expect(turn.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(turn.lastElementChild).toHaveClass("cukii-turn-slack");
     expect(turn.querySelector(".cukii-user-row-flow-spacer")).toBeNull();
   }
 
@@ -74,29 +179,15 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(css).toMatch(
     /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*width:\s*fit-content/s,
   );
-  expect(css).not.toMatch(
-    /\.cukii-user-row--sticky \.cukii-user-message\s*\{[^}]*width:\s*100%/s,
-  );
-  expect(css).not.toMatch(
-    /\.cukii-user-row--sticky \.cukii-user-message[^}]*max-width:\s*none/s,
-  );
   expect(css).toMatch(
     /\.cukii-user-row--group-start,[^}]*--cukii-user-row-padding-bottom:\s*0px/s,
   );
   expect(css).toMatch(
     /\.cukii-user-row--group-middle,[^}]*\.cukii-user-row--group-end[^}]*--cukii-user-row-padding-top:\s*0px/s,
   );
-  // The mask moved to ::before and now paints the measured canvas rather than
-  // re-declaring a surface token: `--cukii-chat-background` describes
-  // html/body/#root, which a styled-component repaints before the transcript
-  // ever sees it, so binding the mask to it produced a dark strip.
-  const stickyRowRule = css.match(
-    /\.cukii-user-row--sticky\s*\{([^}]*)\}/s,
-  )?.[1];
+  const stickyRowRule = ruleBody(css, /\.cukii-user-row--sticky/);
   expect(stickyRowRule).not.toContain("linear-gradient");
-  const stickyMaskRule = css.match(
-    /\.cukii-user-row--sticky::before\s*\{([^}]*)\}/s,
-  )?.[1];
+  const stickyMaskRule = ruleBody(css, /\.cukii-user-row--sticky::before/);
   expect(stickyMaskRule).toContain(
     "var(--cukii-canvas, var(--cukii-chat-background))",
   );
@@ -104,1379 +195,342 @@ test("groups every user prompt with its response so the next sticky turn displac
   expect(stickyMaskRule).not.toContain("--vscode-sideBar-background");
 });
 
-test("folds line by line as scroll is consumed past the pin", () => {
-  const fullHeight = 140;
-  const collapseDistance = fullHeight - 20;
-
-  // The moment the row touches the sticky edge nothing has folded yet: the
-  // capsule first pins at its full height.
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight, consumedScroll: 0 }),
-  ).toEqual({ progress: 0, visibleHeight: 140 });
-
-  // Scrolling back above the pin point cannot produce negative progress.
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight, consumedScroll: -15 }),
-  ).toEqual({ progress: 0, visibleHeight: 140 });
-
-  // Every consumed scroll pixel removes exactly one painted pixel before the
-  // terminal one-line state.
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight, consumedScroll: 60 }),
-  ).toEqual({ progress: 0.5, visibleHeight: 80 });
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight, consumedScroll: 30 }),
-  ).toEqual({ progress: 0.25, visibleHeight: 110 });
-
-  // The fold bottoms out at one line and never shrinks past it, however far
-  // the transcript scrolls on.
-  expect(
-    resolveStickyCollapseGeometry({
-      fullHeight,
-      consumedScroll: collapseDistance,
-    }),
-  ).toEqual({ progress: 1, visibleHeight: 20 });
-  expect(
-    resolveStickyCollapseGeometry({
-      fullHeight,
-      consumedScroll: collapseDistance + 500,
-    }),
-  ).toEqual({ progress: 1, visibleHeight: 20 });
-
-  // A one-line message has no fold distance and keeps its geometry at any
-  // scroll position.
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight: 20, consumedScroll: 100 }),
-  ).toEqual({ progress: 0, visibleHeight: 20 });
-
-  // Attachment strips are content height, not a special exception: once the
-  // combined capsule is taller than one line it follows the same fold rule.
-  expect(
-    resolveStickyCollapseGeometry({ fullHeight: 60, consumedScroll: 40 }),
-  ).toEqual({ progress: 1, visibleHeight: 20 });
-});
-
-test("reflows to the current expanded height but ignores the terminal 20px clip", () => {
-  expect(
-    resolveStickyNaturalHeight({
-      measuredHeight: 449,
-      previousHeight: 0,
-      terminallyCollapsed: false,
-    }),
-  ).toBe(449);
-  // The owner widened the window while the capsule was not terminally folded.
-  // Historical-max logic kept 449 here and made reverse scroll overshoot to
-  // 448px before jumping to the actual 332px expanded layout.
-  expect(
-    resolveStickyNaturalHeight({
-      measuredHeight: 332,
-      previousHeight: 449,
-      terminallyCollapsed: false,
-    }),
-  ).toBe(332);
-  // Once CSS has reduced the real descendant to one row, keep that fresh
-  // expanded baseline until the first reverse pixel removes the terminal class.
-  expect(
-    resolveStickyNaturalHeight({
-      measuredHeight: 20,
-      previousHeight: 332,
-      terminallyCollapsed: true,
-    }),
-  ).toBe(332);
-});
-
-test("pins a row only while its painted top sits on the sticky edge (ID-234)", () => {
-  // At the edge with scroll consumed: pinned.
-  expect(isStickyRowPinned({ rowTopFromScrollport: 0, scrollTop: 40 })).toBe(
-    true,
-  );
-  // A one-pixel tolerance absorbs sub-pixel rounding at the edge.
-  expect(isStickyRowPinned({ rowTopFromScrollport: 1, scrollTop: 40 })).toBe(
-    true,
-  );
-  expect(isStickyRowPinned({ rowTopFromScrollport: 2, scrollTop: 40 })).toBe(
-    false,
-  );
-  // Still in flow above the edge.
-  expect(isStickyRowPinned({ rowTopFromScrollport: 20, scrollTop: 40 })).toBe(
-    false,
-  );
-  // A row pushed above the edge by the next sticky turn keeps its pin, so the
-  // capsule leaves the window folded instead of re-expanding on the way out.
-  expect(isStickyRowPinned({ rowTopFromScrollport: -20, scrollTop: 40 })).toBe(
-    true,
-  );
-  // At the very top of the transcript no scroll has been consumed yet: the
-  // capsule rests at the edge unpinned and unfolds only once scrolling starts.
-  expect(isStickyRowPinned({ rowTopFromScrollport: 0, scrollTop: 0 })).toBe(
-    false,
-  );
-});
-
-test("does not reserve the clipped prompt as an invisible flow gap", () => {
+test("the fold is a CSS scroll-driven animation, not JavaScript state (owner videos 29.09 / 01.10)", () => {
   const css = canonicalCss();
-  expect(css).not.toContain(".cukii-user-row-flow-spacer");
-  expect(css).not.toContain("--cukii-sticky-flow-spacer-height");
-  expect(css).toMatch(/\.cukii-transcript\s*\{[^}]*overflow-anchor:\s*none/s);
+  // Registered length so the compositor can interpolate it and descendants
+  // inherit the animated value.
+  expect(css).toMatch(
+    /@property --cukii-fold-px\s*\{[^}]*syntax:\s*"<length>"[^}]*inherits:\s*true[^}]*initial-value:\s*0px/s,
+  );
+  expect(css).toMatch(
+    /@keyframes cukii-sticky-fold\s*\{\s*from\s*\{\s*--cukii-fold-px:\s*0px;?\s*\}\s*to\s*\{\s*--cukii-fold-px:\s*4000px;?\s*\}\s*\}/s,
+  );
+  // The turn hoists the sentinel's timeline and pulls the eviction slack
+  // back out of the flow.
+  const turnRule = ruleBody(css, /\.cukii-turn/);
+  expect(turnRule).toContain("timeline-scope: --cukii-turn");
+  expect(turnRule).toContain(
+    "margin-bottom: calc(-1 * var(--cukii-turn-slack, 0px))",
+  );
+  const sentinelRule = ruleBody(css, /\.cukii-turn-sentinel/);
+  expect(sentinelRule).toContain("height: 1px");
+  expect(sentinelRule).toContain("margin-bottom: -1px");
+  expect(sentinelRule).toContain("view-timeline: --cukii-turn block");
+  expect(ruleBody(css, /\.cukii-turn-slack/)).toContain(
+    "height: var(--cukii-turn-slack, 0px)",
+  );
+  // One scrolled pixel past the pin = one animated pixel: the range starts
+  // at the row's own top edge (sentinel bottom minus its 1px) and spans
+  // exactly 4000 scroll pixels for the 0→4000px keyframes.
+  const stickyRowRule = ruleBody(css, /\.cukii-user-row--sticky/);
+  expect(stickyRowRule).toContain("animation: cukii-sticky-fold linear both");
+  expect(stickyRowRule).toContain("animation-timeline: --cukii-turn");
+  expect(stickyRowRule).toContain(
+    "animation-range: exit calc(100% - 1px) exit calc(100% + 3999px)",
+  );
+  // Short prompts never fold; the chevron's expanded state switches the
+  // animation off instead of fighting it with JavaScript.
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky:not\(:has\(\[data-cukii-long-prompt="true"\]\)\),\s*\.cukii-user-row--sticky\.cukii-user-row--expanded\s*\{\s*animation:\s*none;?\s*\}/s,
+  );
+  // Paint-only clip: layout never changes with the fold, so nothing below
+  // the capsule can move because of it, and the clip stops at one text row
+  // plus the bubble inset (38px).
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*\{[^}]*clip-path:\s*inset\(\s*0 0 min\(var\(--cukii-fold-px\), calc\(100% - 38px\)\) 0 round\s+var\(--cukii-bubble-radius\)\s*\)/s,
+  );
+  // No remnants of the scroll-tracking implementation may stay behind.
+  expect(css).not.toContain("--cukii-sticky-visible-height");
+  expect(css).not.toContain("--cukii-sticky-mask-height");
+  expect(css).not.toContain("data-cukii-scroll-folding");
+  expect(css).not.toContain("cukii-user-message-content--collapsed");
+  expect(css).not.toContain("data-cukii-collapsible");
+  expect(css).not.toContain("cukii-user-bubble--collapsed");
 });
 
-test("collapses when streamed markdown becomes long after the row sticks", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
+test("the canvas mask, receipt row and fade ride the clipped edge; the fade never eats the last line", () => {
+  const css = canonicalCss();
+  const maskRule = ruleBody(css, /\.cukii-user-row--sticky::before/)!;
+  expect(maskRule.replace(/\s+/g, " ")).toContain(
+    "height: calc( 100% - min( var(--cukii-fold-px), calc( 100% - var(--cukii-user-row-padding-top) - var(--cukii-user-row-padding-bottom) - 38px ) ) )",
   );
-  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollTop",
+  expect(
+    ruleBody(
+      css,
+      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-fold-footer/,
+    ),
+  ).toContain(
+    "bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)))",
   );
-  const originalGetBoundingClientRect =
-    HTMLElement.prototype.getBoundingClientRect;
-  const originalMutationObserver = globalThis.MutationObserver;
-  const originalResizeObserver = globalThis.ResizeObserver;
-  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
-  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
-  const mutationCallbacks: Array<() => void> = [];
-  let contentHeight = 0;
-  let transcriptScrollTop = 60;
-  let rowTop = 40;
-
-  class TestMutationObserver {
-    constructor(callback: MutationCallback) {
-      mutationCallbacks.push(() =>
-        callback([], this as unknown as MutationObserver),
-      );
-    }
-    observe() {}
-    disconnect() {}
-    takeRecords() {
-      return [];
-    }
-  }
-  class TestResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains(
-        "cukii-user-message-content",
-      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
-        ? contentHeight
-        : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains("cukii-transcript")
-        ? transcriptScrollTop
-        : 0;
-    },
-    set(value: number) {
-      if ((this as HTMLElement).classList?.contains("cukii-transcript")) {
-        transcriptScrollTop = value;
-      }
-    },
-  });
-  HTMLElement.prototype.getBoundingClientRect = function () {
-    if (this.classList.contains("cukii-transcript")) {
-      return { top: 0, height: 500 } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-row--sticky")) {
-      return { top: rowTop, height: contentHeight + 46 } as DOMRect;
-    }
-    if (
-      this.classList.contains("cukii-user-message-content") ||
-      this.classList.contains("cukii-user-message-body")
-    ) {
-      return { top: rowTop + 14, height: contentHeight } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-message-bubble")) {
-      return { top: rowTop + 14, height: contentHeight + 20 } as DOMRect;
-    }
-    return originalGetBoundingClientRect.call(this);
-  };
-  globalThis.MutationObserver =
-    TestMutationObserver as unknown as typeof MutationObserver;
-  globalThis.ResizeObserver =
-    TestResizeObserver as unknown as typeof ResizeObserver;
-  globalThis.requestAnimationFrame = () => 1;
-  globalThis.cancelAnimationFrame = () => undefined;
-
-  try {
-    const { container } = render(
-      <div className="cukii-transcript">
-        <div className="cukii-user-row--sticky">
-          <CukiiStickyUserMessage
-            bubbleClassName="cukii-user-message-bubble"
-            messageId="late-markdown"
-          >
-            Streamed prompt
-          </CukiiStickyUserMessage>
-        </div>
-      </div>,
-    );
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-late-markdown"]',
-    );
-
-    // The first layout pass sees no Markdown height yet, while the row is in
-    // normal flow at scrollTop 60 + top 40 = document offset 100.
-    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
-
-    // Streaming finishes after auto-scroll has already pinned the row. Blink's
-    // sticky offset now equals the current scrollTop, so the fold origin can
-    // only be adopted from here on: the capsule pins at full height and folds
-    // as more scroll is consumed.
-    contentHeight = 140;
-    transcriptScrollTop = 220;
-    rowTop = 0;
-    act(() => mutationCallbacks.forEach((callback) => callback()));
-
-    await waitFor(() =>
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
-    );
-    const row = bubble?.closest(".cukii-user-row--sticky");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("0.0000");
-
-    // Half the fold distance collapses exactly half the capsule...
-    const transcript = container.querySelector(".cukii-transcript")!;
-    transcriptScrollTop = 280;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("0.5000");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-
-    // ...and the full distance folds it to one line.
-    transcriptScrollTop = 340;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-  } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
-        .scrollHeight;
-    }
-    if (scrollTopDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollTop",
-        scrollTopDescriptor,
-      );
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
-        .scrollTop;
-    }
-    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
-    globalThis.MutationObserver = originalMutationObserver;
-    globalThis.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
-    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
-  }
+  expect(
+    ruleBody(
+      css,
+      /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-metadata/,
+    ),
+  ).toContain(
+    "bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)))",
+  );
+  const gradientRule = ruleBody(css, /\.cukii-user-truncation-gradient/)!;
+  expect(gradientRule).toContain(
+    "bottom: min(var(--cukii-fold-px), calc(100% - 20px))",
+  );
+  expect(gradientRule).toContain(
+    "height: clamp(0px, calc(100% - 20px - var(--cukii-fold-px)), 20px)",
+  );
+  // Nothing folded yet → no fade, no chevron. Expanded → chevron stays.
+  expect(css).toMatch(
+    /@container style\(--cukii-fold-px: 0px\)\s*\{\s*\.cukii-user-truncation-gradient\s*\{\s*display:\s*none;?\s*\}\s*\.cukii-user-fold-toggle\s*\{\s*visibility:\s*hidden;?\s*\}\s*\}/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-bubble--expanded \.cukii-user-fold-toggle\s*\{\s*visibility:\s*visible/s,
+  );
+  // Attachments paint below the text inside a sticky capsule so the terminal
+  // row is always the first text line; the receipt reserve keeps the text
+  // out from under the footer at every fold position.
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.cukii-user-attachment-strip\s*\{\s*order:\s*2/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*\{\s*padding-right:\s*calc\(var\(--cukii-meta-reserve, 31px\) \+ 20px\) !important/s,
+  );
 });
 
-test("collapses a restored long prompt that mounts already sticky", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollTop",
-  );
-  const originalGetBoundingClientRect =
-    HTMLElement.prototype.getBoundingClientRect;
-  const originalMutationObserver = globalThis.MutationObserver;
-  const originalResizeObserver = globalThis.ResizeObserver;
-  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
-  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
-  const mutationCallbacks: Array<() => void> = [];
-  let contentHeight = 0;
-  let transcriptScrollTop = 220;
-
-  class TestMutationObserver {
-    constructor(callback: MutationCallback) {
-      mutationCallbacks.push(() =>
-        callback([], this as unknown as MutationObserver),
-      );
-    }
-    observe() {}
-    disconnect() {}
-    takeRecords() {
-      return [];
-    }
-  }
-  class TestResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains(
-        "cukii-user-message-content",
-      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
-        ? contentHeight
-        : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains("cukii-transcript")
-        ? transcriptScrollTop
-        : 0;
-    },
-    set(value: number) {
-      if ((this as HTMLElement).classList?.contains("cukii-transcript")) {
-        transcriptScrollTop = value;
-      }
-    },
-  });
-  HTMLElement.prototype.getBoundingClientRect = function () {
-    if (this.classList.contains("cukii-transcript")) {
-      return { top: 0, height: 500 } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-row--sticky")) {
-      return { top: 0, height: contentHeight + 46 } as DOMRect;
-    }
-    if (
-      this.classList.contains("cukii-user-message-content") ||
-      this.classList.contains("cukii-user-message-body")
-    ) {
-      return { top: 14, height: contentHeight } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-message-bubble")) {
-      return { top: 14, height: contentHeight + 20 } as DOMRect;
-    }
-    return originalGetBoundingClientRect.call(this);
-  };
-  globalThis.MutationObserver =
-    TestMutationObserver as unknown as typeof MutationObserver;
-  globalThis.ResizeObserver =
-    TestResizeObserver as unknown as typeof ResizeObserver;
-  globalThis.requestAnimationFrame = () => 1;
-  globalThis.cancelAnimationFrame = () => undefined;
-
-  try {
-    const { container } = render(
-      <div className="cukii-transcript">
-        <div className="cukii-turn">
-          <div className="cukii-user-row--sticky">
-            <CukiiStickyUserMessage
-              bubbleClassName="cukii-user-message-bubble"
-              messageId="restored-at-bottom"
-            >
-              Restored prompt
-            </CukiiStickyUserMessage>
-          </div>
-        </div>
-      </div>,
-    );
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-restored-at-bottom"]',
-    );
-    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
-
-    contentHeight = 140;
-    act(() => mutationCallbacks.forEach((callback) => callback()));
-
-    // Mounting already pinned adopts the current scroll position as the fold
-    // origin: the capsule pins at full height and folds as scroll continues.
-    await waitFor(() =>
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
-    );
-    const row = bubble?.closest(".cukii-user-row--sticky");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("0.0000");
-
-    const transcript = container.querySelector(".cukii-transcript")!;
-    transcriptScrollTop = 340;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-
-    // Once fully folded, reverse scrolling cannot reopen the capsule. The
-    // explicit chevron is the only opening control while it remains sticky.
-    transcriptScrollTop = 280;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row?.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-  } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
-    if (scrollTopDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollTop",
-        scrollTopDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
-    }
-    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
-    globalThis.MutationObserver = originalMutationObserver;
-    globalThis.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
-    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
-  }
+test("resolveStickyTurnSlack reserves exactly the hidden part of a long row", () => {
+  // 14 + 12 row padding around a 332px bubble: the next turn may push the
+  // row out only once the one-line row (38px + paddings) is all that shows.
+  expect(
+    resolveStickyTurnSlack({
+      rowHeight: 358,
+      rowPaddingTop: 14,
+      rowPaddingBottom: 12,
+      longPrompt: true,
+      expanded: false,
+    }),
+  ).toBe(358 - 14 - 12 - STICKY_BUBBLE_TERMINAL_HEIGHT_PX);
+  expect(
+    resolveStickyTurnSlack({
+      rowHeight: 358,
+      rowPaddingTop: 14,
+      rowPaddingBottom: 12,
+      longPrompt: true,
+      expanded: true,
+    }),
+  ).toBe(0);
+  expect(
+    resolveStickyTurnSlack({
+      rowHeight: 53.5,
+      rowPaddingTop: 14,
+      rowPaddingBottom: 12,
+      longPrompt: false,
+      expanded: false,
+    }),
+  ).toBe(0);
+  // A one-line row is never negative slack.
+  expect(
+    resolveStickyTurnSlack({
+      rowHeight: 60,
+      rowPaddingTop: 14,
+      rowPaddingBottom: 12,
+      longPrompt: true,
+      expanded: false,
+    }),
+  ).toBe(0);
 });
 
-test("folds a long prompt pixel by pixel past the sticky edge and keeps the fold while displaced", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  const originalResizeObserver = globalThis.ResizeObserver;
-  const resizeCallbacks: Array<() => void> = [];
-  class TestResizeObserver {
-    constructor(callback: ResizeObserverCallback) {
-      resizeCallbacks.push(() =>
-        callback([], this as unknown as ResizeObserver),
-      );
-    }
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  globalThis.ResizeObserver =
-    TestResizeObserver as unknown as typeof ResizeObserver;
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      const element = this as HTMLElement;
-      if (element.classList?.contains("cukii-user-message-body")) {
-        return element.closest(".cukii-user-message-content--collapsed")
-          ? 20
-          : 140;
-      }
-      if (!element.classList?.contains("cukii-user-message-content")) return 0;
-      return element.classList.contains("cukii-user-message-content--collapsed")
-        ? 20
-        : 140;
-    },
-  });
-
+test("a long prompt is marked foldable and reserves eviction slack on its turn", async () => {
+  const restore = stubStickyGeometry({ bodyHeight: 140, rowHeight: 192 });
   try {
-    const { store, container, user } = await renderWithProviders(<Chat />);
-    await act(async () => {
-      store.dispatch({
-        type: "session/newSession",
-        payload: {
-          sessionId: "long-sticky-prompt",
-          title: "Long sticky prompt",
-          history: [
-            {
-              message: {
-                id: "long-user",
-                role: "user",
-                content:
-                  "A long prompt that exceeds Claude's folded height. ".repeat(
-                    12,
-                  ),
-                metadata: {
-                  cukiiReaction: {
-                    reactionId: "long-user-reaction",
-                    emoji: "❤️",
-                    reactedAt: 1_700_000_000_000,
-                    source: "agent",
-                  },
-                },
-              },
-              contextItems: [],
-              isSteer: true,
-              steerStatus: "read",
-              steerSentAt: 1_700_000_000_000,
-            },
-            {
-              message: {
-                id: "answer",
-                role: "assistant",
-                content: "Answer",
-              },
-              contextItems: [],
-            },
-          ],
-        },
-      });
-    });
-
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-long-user"]',
+    const { container, getByTestId } = renderStickyTurn();
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-testid="cukii-user-bubble-m1"]'),
+      ).toHaveAttribute("data-cukii-long-prompt", "true"),
     );
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(container.querySelector('[aria-label="Show more"]')).toBeNull();
-    const stableFooter = bubble?.querySelector(".cukii-user-fold-footer");
-    expect(stableFooter).not.toBeNull();
-
-    const transcript =
-      container.querySelector<HTMLElement>(".cukii-transcript")!;
-    const row = bubble?.closest<HTMLElement>(".cukii-user-row--sticky")!;
-    expect(row.nextElementSibling).toHaveClass("cukii-assistant-row");
-    const content = bubble?.querySelector<HTMLElement>(
-      ".cukii-user-message-content",
+    // 192 - 14/12 paddings are 0 in jsdom (no computed padding) → 192 - 38.
+    await waitFor(() =>
+      expect(
+        getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+      ).toBe(`${192 - STICKY_BUBBLE_TERMINAL_HEIGHT_PX}px`),
+    );
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".cukii-user-fold-toggle",
     )!;
-    const embeddedReaction = bubble?.querySelector(
-      '[data-cukii-reaction-id="long-user-reaction"]',
-    );
-    expect(embeddedReaction).not.toBeNull();
-    expect(content).toContainElement(embeddedReaction as HTMLElement);
-    expect(embeddedReaction).toHaveAttribute(
-      "data-cukii-reaction-placement",
-      "embedded",
-    );
-    Object.defineProperty(transcript, "scrollTop", {
-      configurable: true,
-      value: 100,
-      writable: true,
-    });
-    transcript.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
-    let rowTop = 40;
-    row.getBoundingClientRect = () => ({ top: rowTop }) as DOMRect;
-
-    // In flow the capsule paints at its natural height and exposes no fold.
-    transcript.scrollTop = 60;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row.hasAttribute("data-cukii-collapse-progress")).toBe(false);
-
-    // Touching the sticky edge only pins the capsule: contact alone folds
-    // nothing, the fold starts from zero progress.
-    rowTop = 0;
-    transcript.scrollTop = 100;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("0.0000");
+    expect(toggle).toHaveAttribute("aria-label", "Show more");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.disabled).toBe(false);
     expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("");
-    // The painted sticky row remains full-height at contact; there is no
-    // invisible sibling reserving the future clipped height.
-    expect(container.querySelector(".cukii-user-row-flow-spacer")).toBeNull();
-
-    // Every consumed scroll pixel removes exactly one painted pixel.
-    transcript.scrollTop = 160;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("0.5000");
-    expect(content).toHaveAttribute("data-cukii-scroll-folding", "true");
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("80px");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-
-    // ...down to one line once the whole fold distance is consumed.
-    transcript.scrollTop = 220;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-    const clippedContent = bubble?.querySelector(
-      ".cukii-user-message-content--collapsed",
-    );
-    const receipt = bubble?.querySelector(
-      '[data-testid="cukii-message-receipt-long-user"]',
-    );
-    expect(clippedContent).not.toBeNull();
-    expect(clippedContent?.contains(embeddedReaction ?? null)).toBe(true);
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-
-    // A real browser emits ResizeObserver after the collapsed CSS changes
-    // scrollHeight to 20. That painted height must not reclassify the immutable
-    // long prompt as short and clear the fold.
-    const body = bubble?.querySelector<HTMLElement>(".cukii-user-message-body");
-    expect(body?.scrollHeight).toBe(20);
-    // The screen recording exposed a ResizeObserver feedback loop: the first
-    // terminal measurement classified the now-single-line body as a short
-    // message, reopened it, then the expanded measurement classified it as
-    // long again. Repeated observer turns must never alternate the capsule.
-    for (let observerTurn = 0; observerTurn < 4; observerTurn += 1) {
-      await act(async () => {
-        resizeCallbacks.forEach((callback) => callback());
-        await Promise.resolve();
-      });
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-      expect(body?.scrollHeight).toBe(20);
-    }
-    expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true");
-    expect(receipt?.textContent).toBe("01:13");
-    expect(clippedContent?.contains(receipt ?? null)).toBe(false);
-    expect(
-      receipt?.querySelector(
-        '[data-testid="cukii-message-receipt-status-read"]',
-      ),
+      container.querySelector(".cukii-user-truncation-gradient"),
     ).not.toBeNull();
-
-    // Chromium now exposes the clipped 20px descendant as scrollHeight. A
-    // second event must not reinterpret that painted height as the prompt's
-    // natural height and bounce the capsule open again.
-    transcript.scrollTop = 221;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
+    // The receipt sits inside the fold footer so it rides the clipped edge.
     expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-
-    // The terminal one-line state is latched. Reverse scrolling cannot reopen
-    // it behind the reader's back; only the chevron changes that choice.
-    transcript.scrollTop = 219;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-
-    // Crossing back over the natural pin edge must not reopen a terminally
-    // closed capsule. The screen recording caught this exact state bouncing
-    // between a full-screen prompt and one row as ResizeObserver/sticky
-    // geometry alternated around the edge. Once terminally closed, only the
-    // chevron or a newer capsule may change that choice.
-    rowTop = 20;
-    transcript.scrollTop = 190;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-    expect(container.querySelector('[aria-label="Show more"]')).not.toBeNull();
-
-    rowTop = 0;
-    transcript.scrollTop = 220;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-
-    const collapsedToggle = container.querySelector('[aria-label="Show more"]');
-    const footer = bubble?.querySelector(".cukii-user-fold-footer");
-    expect(footer).not.toBeNull();
-    expect(footer).toBe(stableFooter);
-    expect(collapsedToggle?.parentElement).toBe(footer);
-    expect(receipt?.parentElement).toBe(footer);
-    expect(footer?.firstElementChild).toBe(collapsedToggle);
-    expect(footer?.lastElementChild).toBe(receipt);
-    expect(collapsedToggle?.textContent).toBe("");
-    expect(
-      bubble?.querySelector(".cukii-user-expand-button-container"),
-    ).toBeNull();
-    expect(
-      bubble?.querySelector(".cukii-user-collapse-button-container"),
-    ).toBeNull();
-
-    await user.click(collapsedToggle!);
-    expect(bubble).toHaveClass("cukii-user-bubble--expanded");
-    expect(
-      bubble?.querySelector(".cukii-user-message-content--collapsed"),
-    ).toBeNull();
-    expect(receipt?.parentElement).toBe(footer);
-    const expandedToggle = container.querySelector('[aria-label="Show less"]');
-    expect(expandedToggle?.parentElement).toBe(footer);
-    expect(expandedToggle?.getAttribute("aria-expanded")).toBe("true");
-
-    await user.click(expandedToggle!);
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-
-    // The explicit Show less click above, unlike scroll-created closure,
-    // latches the one-line state until the chevron opens it again.
-    transcript.scrollTop = 190;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(
-      content.style.getPropertyValue("--cukii-sticky-visible-height"),
-    ).toBe("20px");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-
-    // Scrolling forward folds the capsule back to one line...
-    transcript.scrollTop = 240;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-
-    // ...and the next sticky turn can push this row above the viewport. It
-    // leaves folded instead of expanding into a large block on the way out.
-    rowTop = -20;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-    expect(container.querySelector('[aria-label="Show more"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="Show less"]')).toBeNull();
-
-    // Even a newer turn that arrives before the fold distance is consumed
-    // pushes the old, non-expanded capsule out as one quiet row.
-    rowTop = 40;
-    transcript.scrollTop = 60;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    rowTop = 0;
-    transcript.scrollTop = 100;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    rowTop = -2;
-    transcript.scrollTop = 101;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(row.getAttribute("data-cukii-collapse-progress")).toBe("1.0000");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-
-    // A capsule the reader expanded with the chevron keeps that state while
-    // the next turn pushes it out: scroll never resets the user's choice, so
-    // it leaves expanded — and stays expanded until the reader folds it back.
-    rowTop = 0;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await user.click(container.querySelector('[aria-label="Show more"]')!);
-    expect(bubble).toHaveClass("cukii-user-bubble--expanded");
-    rowTop = -30;
-    transcript.scrollTop = 400;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    expect(bubble).toHaveClass("cukii-user-bubble--expanded");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--collapsed");
-    await user.click(container.querySelector('[aria-label="Show less"]')!);
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-
-    // The prompt body is text, not a control. Clicking it cannot expand the
-    // displaced sticky message; only the chevron controls that state.
-    await user.click(
-      bubble?.querySelector(".cukii-user-message-content") as HTMLElement,
-    );
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-    expect(bubble).not.toHaveClass("cukii-user-bubble--expanded");
-    expect(canonicalCss()).toMatch(
-      /\.cukii-user-content-shell\s*\{[^}]*cursor:\s*default/s,
-    );
-
-    const css = canonicalCss();
-    expect(css).toMatch(
-      /\.cukii-user-message-content\[data-cukii-scroll-folding="true"\]\s*\{[^}]*max-height:\s*var\(--cukii-sticky-visible-height\)/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-truncation-gradient\s*\{[^}]*height:\s*clamp\(\s*0px,\s*calc\(var\(--cukii-sticky-visible-height,\s*40px\)\s*-\s*20px\),\s*20px\s*\)/s,
-    );
-    // Owner video on 2.0.152: at the terminal fold the fade hint painted a
-    // transparent->orange 20px band exactly over the only remaining 20px text
-    // row, so the capsule read as an empty orange strip. The hint is only
-    // meaningful mid-fold; the terminally collapsed bubble must not paint it.
-    expect(css).toMatch(
-      /\.cukii-user-message-bubble\[data-cukii-collapsible="true"\]:not\(\s*\.cukii-user-bubble--expanded\s*\):not\(\s*\.cukii-user-bubble--collapsed\s*\)\s+\.cukii-user-truncation-gradient\s*\{[^}]*display:\s*block/s,
-    );
-    expect(css).not.toContain("transition: max-height");
-    expect(css).not.toContain(".cukii-user-row-flow-spacer");
-    expect(css).not.toMatch(
-      /\.cukii-user-row--sticky\s*\{[^}]*min-height:\s*var\(--cukii-sticky-flow-height/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-fold-footer\s*\{[^}]*display:\s*flex;[^}]*line-height:\s*14px/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-fold-footer\s*\{[^}]*margin:\s*2px 0 -6px auto/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute;[^}]*right:\s*10px;[^}]*bottom:\s*4px;[^}]*margin:\s*0/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-message-content--collapsed\s+\.ProseMirror\s*\{[^}]*height:\s*20px;[^}]*white-space:\s*nowrap/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
-    );
-    // Layout never keys off the collapse-progress attribute: the fold changes
-    // the painted row and its inverse spacer by opposite amounts. The
-    // attribute remains for debugging and tests only.
-    expect(css).not.toMatch(
-      /\.cukii-user-row--sticky\[data-cukii-collapse-progress/s,
-    );
-    expect(css).not.toMatch(
-      /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\][^}]*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*static/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-fold-toggle\s*\{[^}]*width:\s*14px;[^}]*height:\s*14px;[^}]*padding:\s*0;[^}]*background:\s*transparent/s,
-    );
-    expect(css).not.toContain(".cukii-user-expand-button-container");
-    expect(css).not.toContain(".cukii-user-collapse-button-container");
-    expect(css).toMatch(
-      /\.cukii-user-bubble--meta-inline\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*position:\s*absolute/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-row--sticky[^}]*\.cukii-user-message-bubble[^}]*>\s*\.cukii-user-metadata\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*4px/s,
-    );
-    expect(css).toMatch(
-      /\.cukii-user-row--sticky[^}]*\.cukii-user-content-shell[^}]*\.ProseMirror[^}]*p:last-child::after\s*\{[^}]*width:\s*calc\(var\(--cukii-meta-reserve\) \+ 4px\)/s,
-    );
+      container.querySelector(".cukii-user-fold-footer .cukii-user-metadata"),
+    ).not.toBeNull();
   } finally {
-    globalThis.ResizeObserver = originalResizeObserver;
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
+    restore();
   }
 });
 
-test("marks an attachment capsule as foldable while preserving it in normal flow", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get: () => 140,
-  });
-
+test("the chevron owns the expanded state: it switches the row animation off and releases the slack", async () => {
+  const restore = stubStickyGeometry({ bodyHeight: 140, rowHeight: 192 });
   try {
-    const { container } = render(
-      <CukiiStickyUserMessage
-        bubbleClassName="cukii-user-message-bubble"
-        messageId="image-prompt"
-        metadata={<span className="cukii-user-metadata">01:15</span>}
-      >
-        <img alt="Original attachment" src="data:image/png;base64,aW1hZ2U=" />
-        <p>Text after the attachment</p>
-      </CukiiStickyUserMessage>,
-    );
-
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-image-prompt"]',
-    );
+    const { container, getByTestId } = renderStickyTurn();
     await waitFor(() =>
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
+      expect(
+        getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+      ).not.toBe(""),
     );
-    expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
-    expect(bubble?.querySelector("img")).not.toBeNull();
-    expect(bubble?.querySelector(".cukii-user-metadata")?.textContent).toBe(
-      "01:15",
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".cukii-user-fold-toggle",
+    )!;
+    await act(async () => {
+      toggle.click();
+    });
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-m1"]',
+    )!;
+    expect(bubble).toHaveClass("cukii-user-bubble--expanded");
+    expect(getByTestId("row")).toHaveClass("cukii-user-row--expanded");
+    expect(
+      getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+    ).toBe("");
+    expect(toggle).toHaveAttribute("aria-label", "Show less");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await act(async () => {
+      toggle.click();
+    });
+    expect(bubble).not.toHaveClass("cukii-user-bubble--expanded");
+    expect(getByTestId("row")).not.toHaveClass("cukii-user-row--expanded");
+    await waitFor(() =>
+      expect(
+        getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+      ).toBe(`${192 - STICKY_BUBBLE_TERMINAL_HEIGHT_PX}px`),
     );
   } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
+    restore();
+  }
+});
+
+test("a short prompt exposes no fold controls and reserves no slack", async () => {
+  const restore = stubStickyGeometry({ bodyHeight: 20, rowHeight: 64 });
+  try {
+    const { container, getByTestId } = renderStickyTurn();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const bubble = container.querySelector(
+      '[data-testid="cukii-user-bubble-m1"]',
+    )!;
+    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+    expect(container.querySelector(".cukii-user-fold-toggle")).toBeNull();
+    expect(
+      container.querySelector(".cukii-user-truncation-gradient"),
+    ).toBeNull();
+    expect(
+      getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+    ).toBe("");
+    // Metadata is rendered directly when there is no fold footer.
+    expect(container.querySelector(".cukii-user-metadata")).not.toBeNull();
+  } finally {
+    restore();
   }
 });
 
 test("keeps a media-only capsule intact instead of folding it to an empty row", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get: () => 80,
-  });
-
+  const restore = stubStickyGeometry({ bodyHeight: 80, rowHeight: 120 });
   try {
-    const { container } = render(
-      <CukiiStickyUserMessage
-        bubbleClassName="cukii-user-message-bubble"
-        foldableText={false}
-        messageId="media-only-prompt"
-        metadata={<span className="cukii-user-metadata">01:15</span>}
-      >
-        <img alt="Original attachment" src="data:image/png;base64,aW1hZ2U=" />
-      </CukiiStickyUserMessage>,
-    );
-
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-media-only-prompt"]',
-    );
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
-
-    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
-    expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
-    expect(bubble?.querySelector("img")).not.toBeNull();
-    expect(bubble?.querySelector(".cukii-user-fold-toggle")).toBeNull();
+    const { container, getByTestId } = renderStickyTurn({
+      foldableText: false,
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(
+      container.querySelector('[data-testid="cukii-user-bubble-m1"]'),
+    ).not.toHaveAttribute("data-cukii-long-prompt");
+    expect(container.querySelector(".cukii-user-fold-toggle")).toBeNull();
+    expect(
+      getByTestId("turn").style.getPropertyValue("--cukii-turn-slack"),
+    ).toBe("");
   } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
+    restore();
   }
 });
 
 test("does not classify a short text message as long because of its embedded reaction", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      if (this.classList?.contains("cukii-user-message-body")) return 20;
-      if (this.classList?.contains("cukii-user-message-content")) return 64;
-      return 0;
-    },
-  });
-
+  // The body (text) is one line; the reaction row lives outside the body.
+  const restore = stubStickyGeometry({ bodyHeight: 20, rowHeight: 108 });
   try {
-    const { container } = render(
-      <CukiiStickyUserMessage
-        bubbleClassName="cukii-user-message-bubble"
-        messageId="short-reaction-prompt"
-        reaction={
-          <span className="cukii-message-reactions--embedded">reaction</span>
-        }
-      >
-        Short text
-      </CukiiStickyUserMessage>,
-    );
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-short-reaction-prompt"]',
-    );
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
-
-    expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
+    const { container } = renderStickyTurn({
+      reaction: (
+        <div className="cukii-message-reactions" style={{ height: 44 }}>
+          ❤️
+        </div>
+      ),
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(
-      bubble?.querySelector(".cukii-user-message-content"),
-    ).toContainElement(
-      bubble?.querySelector(".cukii-message-reactions--embedded") ?? null,
-    );
+      container.querySelector('[data-testid="cukii-user-bubble-m1"]'),
+    ).not.toHaveAttribute("data-cukii-long-prompt");
+    expect(container.querySelector(".cukii-message-reactions")).not.toBeNull();
   } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
+    restore();
   }
 });
 
-test("re-measures a long capsule after the first browser paint", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+test("re-measures a capsule whose Markdown finishes layout after mount", async () => {
+  let bodyHeight = 0;
+  const restoreScroll = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "scrollHeight",
   );
-  let contentReads = 0;
-  let measuredHeight = 0;
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
-      if (this.classList?.contains("cukii-user-message-content")) {
-        contentReads += 1;
-        measuredHeight = contentReads === 1 ? 0 : 140;
-        return measuredHeight;
-      }
-      if (this.classList?.contains("cukii-user-message-body")) {
-        return measuredHeight;
-      }
-      return 0;
+      return (this as HTMLElement).classList?.contains(
+        "cukii-user-message-body",
+      )
+        ? bodyHeight
+        : 0;
     },
   });
-
   try {
-    const { container } = render(
-      <CukiiStickyUserMessage
-        bubbleClassName="cukii-user-message-bubble"
-        messageId="post-paint-prompt"
-        metadata={<span className="cukii-user-metadata">01:16</span>}
-      >
-        <p>{"Long after layout ".repeat(12)}</p>
-      </CukiiStickyUserMessage>,
-    );
+    const { container } = renderStickyTurn();
     const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-post-paint-prompt"]',
-    );
-
-    await waitFor(() =>
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
-    );
-    expect(contentReads).toBeGreaterThanOrEqual(2);
-    expect(bubble?.querySelector(".cukii-user-fold-footer")).not.toBeNull();
-  } finally {
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        scrollHeightDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
-  }
-});
-
-test("re-measures delayed Markdown content after its DOM mutation", async () => {
-  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  let markdownReady = false;
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      if (
-        !this.classList?.contains("cukii-user-message-content") &&
-        !this.classList?.contains("cukii-user-message-body")
-      ) {
-        return 0;
-      }
-      return markdownReady ? 140 : 0;
-    },
-  });
-
-  try {
-    const { container } = render(
-      <CukiiStickyUserMessage
-        bubbleClassName="cukii-user-message-bubble"
-        messageId="delayed-markdown-prompt"
-        metadata={<span className="cukii-user-metadata">01:17</span>}
-      >
-        <div />
-      </CukiiStickyUserMessage>,
-    );
-    const bubble = container.querySelector(
-      '[data-testid="cukii-user-bubble-delayed-markdown-prompt"]',
-    );
-    const content = bubble?.querySelector<HTMLElement>(
-      ".cukii-user-message-content",
-    );
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    );
+      '[data-testid="cukii-user-bubble-m1"]',
+    )!;
     expect(bubble).not.toHaveAttribute("data-cukii-long-prompt");
-
-    markdownReady = true;
-    act(() => content?.appendChild(document.createTextNode("rendered")));
+    bodyHeight = 140;
+    // Delayed content arrives as a DOM mutation inside the content frame.
+    await act(async () => {
+      container
+        .querySelector(".cukii-user-message-body p")!
+        .append(document.createTextNode(" more"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     await waitFor(() =>
       expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
     );
   } finally {
-    if (scrollHeightDescriptor) {
+    if (restoreScroll) {
       Object.defineProperty(
         HTMLElement.prototype,
         "scrollHeight",
-        scrollHeightDescriptor,
+        restoreScroll,
       );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
     }
   }
 });
 
 test("keeps attachments in one horizontally scrolling micro-preview row", () => {
   const css = canonicalCss();
-  expect(css).toMatch(
-    /\.cukii-user-attachment-strip\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*4px;[^}]*overflow-x:\s*auto;[^}]*padding:\s*0 0 6px;[^}]*scrollbar-width:\s*thin/s,
-  );
-  expect(css).toMatch(
-    /\.cukii-composer-attachment-strip\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*0;[^}]*width:\s*auto;[^}]*margin:\s*0;[^}]*padding:\s*6px 4px 4px 8px/s,
-  );
-  expect(css).toMatch(/\.cukii-input-footer\s*\{[^}]*z-index:\s*3/s);
-  expect(css).toMatch(
-    /\.cukii-user-attachment-card\s*\{[^}]*max-width:\s*180px;[^}]*height:\s*24px/s,
-  );
-  expect(css).toMatch(
-    /\.cukii-user-attachment-card > img\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px/s,
-  );
-  expect(css).toMatch(
-    /\.cukii-user-attachment-card--image\s*\{[^}]*--cukii-attachment-pill-background:\s*var\(\s*--vscode-input-background/s,
-  );
-  expect(css).toMatch(
-    /\.cukii-user-bubble \.ProseMirror img,\s*\.cukii-user-bubble \.cukii-file-attachment-node-view\s*\{[^}]*display:\s*none !important/s,
-  );
-  expect(css).not.toContain(".cukii-code-block-node-view");
-  expect(css).toContain(".cukii-image-lightbox");
-  expect(css).toMatch(
-    /\.cukii-user-message-content--collapsed\s+\.cukii-user-attachment-strip\s*\{[^}]*display:\s*none/s,
-  );
-});
-
-test("does not render fold controls for a short prompt", async () => {
-  const { store, container } = await renderWithProviders(<Chat />);
-  await act(async () => {
-    store.dispatch({
-      type: "session/newSession",
-      payload: {
-        sessionId: "short-sticky-prompt",
-        title: "Short sticky prompt",
-        history: [
-          {
-            message: { id: "short-user", role: "user", content: "Short" },
-            contextItems: [],
-          },
-          {
-            message: { id: "short-answer", role: "assistant", content: "OK" },
-            contextItems: [],
-          },
-        ],
-      },
-    });
-  });
-
-  const bubble = container.querySelector(
-    '[data-testid="cukii-user-bubble-short-user"]',
-  );
-  expect(bubble).not.toHaveAttribute("data-cukii-collapsible");
-  expect(bubble?.querySelector('[aria-label="Show more"]')).toBeNull();
-  expect(bubble?.querySelector('[aria-label="Show less"]')).toBeNull();
-});
-
-test("collapsed sticky wrapping is one nowrap line, not the expanded wrap (ID-249)", () => {
-  const css = canonicalCss();
-  const { container } = render(
-    <div className="cukii-transcript">
-      <div
-        className="cukii-user-row cukii-user-row--sticky"
-        data-cukii-collapse-progress="1.0000"
-        data-testid="sticky-collapsed-row"
-        style={
-          {
-            "--cukii-sticky-mask-height": "46px",
-          } as CSSProperties
-        }
-      >
-        <div className="cukii-user-message">
-          <div className="cukii-user-message-bubble cukii-user-bubble--collapsed">
-            <div className="cukii-user-content-shell">
-              <div className="cukii-user-message-content cukii-user-message-content--collapsed">
-                <div className="ProseMirror">
-                  <p>https://getbb.app/</p>
-                  <p>
-                    посмотри, что это такое
-                    <br />
-                    extra wrap
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="cukii-assistant-row" data-testid="sticky-next-row">
-        Next turn
-      </div>
-    </div>,
-  );
-
-  const collapsed = container.querySelector(
-    ".cukii-user-message-content--collapsed",
-  );
-  expect(collapsed).not.toBeNull();
-  expect(css).toMatch(
-    /\.cukii-user-message-content--collapsed\s*\{[^}]*white-space:\s*nowrap/s,
-  );
-  expect(css).toMatch(
-    /\.cukii-user-message-content--collapsed br\s*\{[^}]*display:\s*none/s,
-  );
-  // Layout no longer reads the collapse-progress attribute; the painted row
-  // is the flow box, so no invisible sibling can leave a prompt-sized gap.
-  // The attribute remains on the markup for debugging only.
-  expect(css).not.toMatch(
-    /\.cukii-user-row--sticky\[data-cukii-collapse-progress/s,
-  );
-
-  const artifactDir = process.env.CUKII_GUI_ARTIFACT_DIR;
-  if (artifactDir) {
-    mkdirSync(artifactDir, { recursive: true });
-    writeFileSync(
-      join(artifactDir, "id249-270-275-sticky-collapse.html"),
-      `<!doctype html><meta charset="utf-8"><title>ID-249/270/275 sticky collapse</title><style>${css}</style>${container.innerHTML}`,
-      "utf8",
-    );
-  }
-});
-
-test("a transcript re-render cannot drop the latched terminal collapse class", async () => {
-  // Fable review MINOR-3: React rewrites the bubble className when a modifier
-  // (agent reaction) arrives; the imperative --collapsed latch must survive
-  // or the truncation gradient repaints over the single terminal row.
-  let contentHeight = 0;
-  let transcriptScrollTop = 60;
-  let rowTop = 40;
-  const mutationCallbacks: Array<() => void> = [];
-  const originalGetBoundingClientRect =
-    HTMLElement.prototype.getBoundingClientRect;
-  const originalScrollHeight = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollHeight",
-  );
-  const originalScrollTop = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    "scrollTop",
-  );
-  const originalRaf = globalThis.requestAnimationFrame;
-  const originalCaf = globalThis.cancelAnimationFrame;
-  const OriginalMutationObserver = globalThis.MutationObserver;
-  const OriginalResizeObserver = globalThis.ResizeObserver;
-  class TestMutationObserver {
-    constructor(callback: () => void) {
-      mutationCallbacks.push(callback);
-    }
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  class TestResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains(
-        "cukii-user-message-content",
-      ) || (this as HTMLElement).classList?.contains("cukii-user-message-body")
-        ? contentHeight
-        : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
-    configurable: true,
-    get() {
-      return (this as HTMLElement).classList?.contains("cukii-transcript")
-        ? transcriptScrollTop
-        : 0;
-    },
-    set(value: number) {
-      if ((this as HTMLElement).classList?.contains("cukii-transcript")) {
-        transcriptScrollTop = value;
-      }
-    },
-  });
-  HTMLElement.prototype.getBoundingClientRect = function () {
-    if (this.classList.contains("cukii-transcript")) {
-      return { top: 0, height: 500 } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-row--sticky")) {
-      return { top: rowTop, height: contentHeight + 46 } as DOMRect;
-    }
-    if (
-      this.classList.contains("cukii-user-message-content") ||
-      this.classList.contains("cukii-user-message-body")
-    ) {
-      return { top: rowTop + 14, height: contentHeight } as DOMRect;
-    }
-    if (this.classList.contains("cukii-user-message-bubble")) {
-      return { top: rowTop + 14, height: contentHeight + 20 } as DOMRect;
-    }
-    return originalGetBoundingClientRect.call(this);
-  };
-  globalThis.MutationObserver =
-    TestMutationObserver as unknown as typeof MutationObserver;
-  globalThis.ResizeObserver =
-    TestResizeObserver as unknown as typeof ResizeObserver;
-  globalThis.requestAnimationFrame = () => 1;
-  globalThis.cancelAnimationFrame = () => undefined;
-
-  try {
-    const view = render(
-      <div className="cukii-transcript">
-        <div className="cukii-user-row--sticky">
-          <CukiiStickyUserMessage
-            bubbleClassName="cukii-user-message-bubble"
-            messageId="rerender-latch"
-          >
-            Prompt that folds to one row
-          </CukiiStickyUserMessage>
-        </div>
-      </div>,
-    );
-    const bubble = view.container.querySelector(
-      '[data-testid="cukii-user-bubble-rerender-latch"]',
-    );
-    contentHeight = 140;
-    transcriptScrollTop = 220;
-    rowTop = 0;
-    act(() => mutationCallbacks.forEach((callback) => callback()));
-    await waitFor(() =>
-      expect(bubble).toHaveAttribute("data-cukii-long-prompt", "true"),
-    );
-    const transcript = view.container.querySelector(".cukii-transcript")!;
-    transcriptScrollTop = 400;
-    act(() => transcript.dispatchEvent(new Event("scroll")));
-    await waitFor(() =>
-      expect(bubble).toHaveClass("cukii-user-bubble--collapsed"),
-    );
-
-    // An agent reaction arrives: React repaints the bubble className without
-    // the imperative class. The latch must come back in the same commit.
-    view.rerender(
-      <div className="cukii-transcript">
-        <div className="cukii-user-row--sticky">
-          <CukiiStickyUserMessage
-            bubbleClassName="cukii-user-message-bubble cukii-user-bubble--with-reaction"
-            messageId="rerender-latch"
-          >
-            Prompt that folds to one row
-          </CukiiStickyUserMessage>
-        </div>
-      </div>,
-    );
-    expect(bubble).toHaveClass("cukii-user-bubble--with-reaction");
-    expect(bubble).toHaveClass("cukii-user-bubble--collapsed");
-  } finally {
-    if (originalScrollHeight) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollHeight",
-        originalScrollHeight,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-    }
-    if (originalScrollTop) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        "scrollTop",
-        originalScrollTop,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
-    }
-    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
-    globalThis.MutationObserver = OriginalMutationObserver;
-    globalThis.ResizeObserver = OriginalResizeObserver;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCaf;
-  }
+  // The base rule, not the sticky `order` override declared earlier.
+  const stripRule = css.match(
+    /\n\.cukii-user-attachment-strip\s*\{([^}]*)\}/s,
+  )?.[1];
+  expect(stripRule).toBeDefined();
+  expect(stripRule).toMatch(/overflow-x:\s*auto/);
+  expect(stripRule).toMatch(/flex-wrap:\s*nowrap/);
 });

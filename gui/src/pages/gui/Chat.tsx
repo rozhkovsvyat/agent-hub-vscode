@@ -951,7 +951,14 @@ export function Chat() {
 
     return turns.map(({ key, rows }) => (
       <div className="cukii-turn" data-testid={`cukii-turn-${key}`} key={key}>
+        {/* 1px view-timeline subject: the sticky row's fold is a CSS
+            scroll-driven animation measured from this sentinel reaching the
+            scrollport top (see `.cukii-turn-sentinel` in index.css). */}
+        <div aria-hidden="true" className="cukii-turn-sentinel" />
         {rows}
+        {/* Eviction slack: lets the next turn push the one-line capsule out
+            exactly when it reaches the painted row (`--cukii-turn-slack`). */}
+        <div aria-hidden="true" className="cukii-turn-slack" />
       </div>
     ));
   }, [
