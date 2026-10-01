@@ -4,6 +4,7 @@ import { join } from "path";
 import { renderWithProviders } from "../../../util/test/render";
 import {
   CukiiStickyUserMessage,
+  resolveStickyFoldCap,
   resolveStickyTurnSlack,
   STICKY_BUBBLE_TERMINAL_HEIGHT_PX,
 } from "../../../components/cukii/CukiiStickyUserMessage";
@@ -23,9 +24,11 @@ const ruleBody = (css: string, selector: RegExp): string | undefined =>
 function stubStickyGeometry({
   bodyHeight,
   rowHeight,
+  turnHeight = 0,
 }: {
   bodyHeight: number;
   rowHeight: number;
+  turnHeight?: number;
 }) {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -51,7 +54,9 @@ function stubStickyGeometry({
         ? rowHeight
         : this.classList?.contains("cukii-user-message-body")
           ? bodyHeight
-          : 0;
+          : this.classList?.contains("cukii-turn")
+            ? turnHeight
+            : 0;
       return {
         x: 0,
         y: 0,
@@ -228,6 +233,12 @@ test("the fold is a CSS scroll-driven animation, not JavaScript state (owner vid
   expect(stickyRowRule).toContain(
     "animation-range: exit calc(100% - 1px) exit calc(100% + 3999px)",
   );
+  // The painted fold is capped by the distance the row stays pinned, so a
+  // row riding up with the end of its turn never opens a blank above the
+  // content that follows (2.0.155 acceptance: long last prompt).
+  expect(stickyRowRule).toContain(
+    "--cukii-fold: min(var(--cukii-fold-px), var(--cukii-fold-cap, 100000px))",
+  );
   // Short prompts never fold; the chevron's expanded state switches the
   // animation off instead of fighting it with JavaScript.
   expect(css).toMatch(
@@ -237,7 +248,7 @@ test("the fold is a CSS scroll-driven animation, not JavaScript state (owner vid
   // the capsule can move because of it, and the clip stops at one text row
   // plus the bubble inset (38px).
   expect(css).toMatch(
-    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*\{[^}]*clip-path:\s*inset\(\s*0 0 min\(var\(--cukii-fold-px\), calc\(100% - 38px\)\) 0 round\s+var\(--cukii-bubble-radius\)\s*\)/s,
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*\{[^}]*clip-path:\s*inset\(\s*0 0 min\(var\(--cukii-fold, 0px\), calc\(100% - 38px\)\) 0 round\s+var\(--cukii-bubble-radius\)\s*\)/s,
   );
   // No remnants of the scroll-tracking implementation may stay behind.
   expect(css).not.toContain("--cukii-sticky-visible-height");
@@ -252,7 +263,7 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   const css = canonicalCss();
   const maskRule = ruleBody(css, /\.cukii-user-row--sticky::before/)!;
   expect(maskRule.replace(/\s+/g, " ")).toContain(
-    "height: calc( 100% - min( var(--cukii-fold-px), calc( 100% - var(--cukii-user-row-padding-top) - var(--cukii-user-row-padding-bottom) - 38px ) ) )",
+    "height: calc( 100% - min( var(--cukii-fold, 0px), calc( 100% - var(--cukii-user-row-padding-top) - var(--cukii-user-row-padding-bottom) - 38px ) ) )",
   );
   expect(
     ruleBody(
@@ -260,7 +271,7 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
       /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-fold-footer/,
     ),
   ).toContain(
-    "bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)))",
+    "bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)))",
   );
   expect(
     ruleBody(
@@ -268,14 +279,14 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
       /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-metadata/,
     ),
   ).toContain(
-    "bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)))",
+    "bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)))",
   );
   const gradientRule = ruleBody(css, /\.cukii-user-truncation-gradient/)!;
   expect(gradientRule).toContain(
-    "bottom: min(var(--cukii-fold-px), calc(100% - 20px))",
+    "bottom: min(var(--cukii-fold, 0px), calc(100% - 20px))",
   );
   expect(gradientRule).toContain(
-    "height: clamp(0px, calc(100% - 20px - var(--cukii-fold-px)), 20px)",
+    "height: clamp(0px, calc(100% - 20px - var(--cukii-fold, 0px)), 20px)",
   );
   // Nothing folded yet → no fade, no chevron. Expanded → chevron stays.
   expect(css).toMatch(
@@ -290,9 +301,48 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   expect(css).toMatch(
     /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.cukii-user-attachment-strip\s*\{\s*order:\s*2/s,
   );
+  // Only the first visual line (the terminal row) reserves the receipt
+  // width. Padding the whole editor narrowed every line: in a 207px panel the
+  // text column was 32px and a 41-line prompt grew to 11 193px.
   expect(css).toMatch(
-    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*\{\s*padding-right:\s*calc\(var\(--cukii-meta-reserve, 31px\) \+ 20px\) !important/s,
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*>\s*:first-child::before\s*\{[^}]*float:\s*right;[^}]*width:\s*calc\(var\(--cukii-meta-reserve, 31px\) \+ 20px\);[^}]*height:\s*1lh/s,
   );
+  expect(css).not.toMatch(
+    /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*\{[^}]*padding-right/s,
+  );
+});
+
+test("the last turn reserves no eviction slack, so the transcript never scrolls into a blank", () => {
+  const css = canonicalCss();
+  expect(css).toMatch(
+    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*\{\s*margin-bottom:\s*0;?\s*\}/s,
+  );
+  expect(css).toMatch(
+    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*>\s*\.cukii-turn-slack\s*\{\s*display:\s*none;?\s*\}/s,
+  );
+});
+
+test("resolveStickyFoldCap is the part of the turn below the row", () => {
+  expect(resolveStickyFoldCap({ turnHeight: 500, rowHeight: 192 })).toBe(308);
+  expect(resolveStickyFoldCap({ turnHeight: 100, rowHeight: 192 })).toBe(0);
+});
+
+test("the pinned row carries its fold cap: the distance it stays pinned", async () => {
+  const restore = stubStickyGeometry({
+    bodyHeight: 140,
+    rowHeight: 192,
+    turnHeight: 232,
+  });
+  try {
+    const { getByTestId } = renderStickyTurn();
+    await waitFor(() =>
+      expect(
+        getByTestId("row").style.getPropertyValue("--cukii-fold-cap"),
+      ).toBe("40px"),
+    );
+  } finally {
+    restore();
+  }
 });
 
 test("resolveStickyTurnSlack reserves exactly the hidden part of a long row", () => {

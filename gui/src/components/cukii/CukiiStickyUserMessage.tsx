@@ -42,6 +42,22 @@ export function resolveStickyTurnSlack({
   );
 }
 
+/**
+ * Largest fold the pinned row may show: the distance it stays pinned, i.e.
+ * the part of its turn below the row's natural box. Past that point the row
+ * rides up with the end of its turn, and folding further would open a blank
+ * between the painted capsule and the content that follows it.
+ */
+export function resolveStickyFoldCap({
+  turnHeight,
+  rowHeight,
+}: {
+  turnHeight: number;
+  rowHeight: number;
+}): number {
+  return Math.max(0, Math.floor(turnHeight - rowHeight));
+}
+
 interface CukiiStickyUserMessageProps {
   bubbleClassName: string;
   children: ReactNode;
@@ -153,6 +169,18 @@ export function CukiiStickyUserMessage({
       } else {
         turn.style.removeProperty("--cukii-turn-slack");
       }
+      // The row is pinned only while the rest of its turn (answer plus the
+      // eviction slack, which CSS drops on the last turn) is below it, so
+      // that distance is the most the capsule may fold. Paint-only: the cap
+      // feeds clip-path and absolute offsets, never a box this observer
+      // measures.
+      row.style.setProperty(
+        "--cukii-fold-cap",
+        `${resolveStickyFoldCap({
+          turnHeight: turn.getBoundingClientRect().height,
+          rowHeight: row.getBoundingClientRect().height,
+        })}px`,
+      );
     };
     applySlack();
     const resizeObserver =
@@ -160,9 +188,13 @@ export function CukiiStickyUserMessage({
         ? undefined
         : new ResizeObserver(applySlack);
     resizeObserver?.observe(row);
+    // Streamed answers and a follow-up turn (which restores the slack of a
+    // formerly last turn) both change the turn box, not the row.
+    resizeObserver?.observe(turn);
     return () => {
       resizeObserver?.disconnect();
       row.classList.remove("cukii-user-row--expanded");
+      row.style.removeProperty("--cukii-fold-cap");
       turn.style.removeProperty("--cukii-turn-slack");
     };
   }, [isExpanded, isLongPrompt, messageId]);

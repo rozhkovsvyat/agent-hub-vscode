@@ -2349,6 +2349,19 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
 }
 
+/* The last turn has no next capsule to evict its row, and a slack box that
+   outlives its turn's negative margin becomes real scrollable overflow: the
+   transcript grew by a prompt-sized blank and auto-scroll parked the answer
+   far above the viewport (2.0.155 acceptance). The fold cap keeps the last
+   capsule honest without it. */
+.cukii-turn:not(:has(~ .cukii-turn)) {
+  margin-bottom: 0;
+}
+
+.cukii-turn:not(:has(~ .cukii-turn)) > .cukii-turn-slack {
+  display: none;
+}
+
 /* Transcript layer scale. Upstream code-block and tool-call headers ship as
    `sticky -top-2 z-10`, so a capsule at the old z-index 2 was painted over by
    the answer's own `Apply` toolbar as it scrolled underneath. The capsule must
@@ -2372,6 +2385,14 @@ button.cukii-submit-button--stop:active {
   animation: cukii-sticky-fold linear both;
   animation-timeline: --cukii-turn;
   animation-range: exit calc(100% - 1px) exit calc(100% + 3999px);
+  /* Effective fold. The row is only pinned while the rest of its turn is
+     still below it; `--cukii-fold-cap` (measured by CukiiStickyUserMessage)
+     is exactly that distance, so once the row starts riding up with the end
+     of its turn the clip stops growing and the painted edge stays glued to
+     the content that follows. Without the cap a long last prompt kept
+     folding while it scrolled away and left a prompt-sized blank above the
+     answer. */
+  --cukii-fold: min(var(--cukii-fold-px), var(--cukii-fold-cap, 100000px));
 }
 
 /* Short prompts have no fold and expanded capsules keep their full paint
@@ -2387,7 +2408,7 @@ button.cukii-submit-button--stop:active {
   .cukii-user-message-bubble[data-cukii-long-prompt="true"] {
   --cukii-bubble-radius: 16px;
   clip-path: inset(
-    0 0 min(var(--cukii-fold-px), calc(100% - 38px)) 0 round
+    0 0 min(var(--cukii-fold, 0px), calc(100% - 38px)) 0 round
       var(--cukii-bubble-radius)
   );
 }
@@ -2431,7 +2452,7 @@ button.cukii-submit-button--stop:active {
   height: calc(
     100% -
       min(
-        var(--cukii-fold-px),
+        var(--cukii-fold, 0px),
         calc(
           100% - var(--cukii-user-row-padding-top) -
             var(--cukii-user-row-padding-bottom) - 38px
@@ -2759,9 +2780,9 @@ button.cukii-submit-button--stop:active {
   display: block;
   position: absolute;
   right: 0;
-  bottom: min(var(--cukii-fold-px), calc(100% - 20px));
+  bottom: min(var(--cukii-fold, 0px), calc(100% - 20px));
   left: 0;
-  height: clamp(0px, calc(100% - 20px - var(--cukii-fold-px)), 20px);
+  height: clamp(0px, calc(100% - 20px - var(--cukii-fold, 0px)), 20px);
   pointer-events: none;
   background: linear-gradient(
     to bottom,
@@ -2803,11 +2824,19 @@ button.cukii-submit-button--stop:active {
   order: 2;
 }
 
-/* The receipt row stays out from under the text at every fold position. */
+/* At the terminal fold the receipt (chevron, time, ticks) rides the single
+   remaining text row, which is always the FIRST visual line. Only that line
+   reserves the receipt width, through a one-line float; padding the whole
+   editor instead narrowed every line of the prompt and, in a narrow panel,
+   left a letter-per-line column tens of thousands of pixels tall. */
 .cukii-user-row--sticky
   .cukii-user-message-bubble[data-cukii-long-prompt="true"]
-  .ProseMirror {
-  padding-right: calc(var(--cukii-meta-reserve, 31px) + 20px) !important;
+  .ProseMirror
+  > :first-child::before {
+  content: "";
+  float: right;
+  width: calc(var(--cukii-meta-reserve, 31px) + 20px);
+  height: 1lh;
 }
 
 .cukii-user-fold-footer {
@@ -2871,7 +2900,7 @@ button.cukii-submit-button--stop:active {
   > .cukii-user-fold-footer {
   position: absolute;
   right: 10px;
-  bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)));
+  bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)));
   margin: 0;
 }
 
@@ -2975,7 +3004,7 @@ button.cukii-submit-button--stop:active {
   > .cukii-user-metadata {
   position: absolute;
   right: 10px;
-  bottom: calc(4px + min(var(--cukii-fold-px), calc(100% - 38px)));
+  bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)));
   margin: 0;
 }
 
