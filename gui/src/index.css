@@ -2349,6 +2349,24 @@ button.cukii-submit-button--stop:active {
   pointer-events: none;
 }
 
+/* Eviction slack keeps a turn's box tall enough for its sticky row to stay
+   pinned until the next capsule reaches the one-line row, and the negative
+   margin hides it from the flow. When everything after a turn is shorter than
+   its slack (long prompt, short answer, short follow-up), that box still
+   reached past the real end of the transcript and the reader could scroll
+   into a prompt-sized blank. `overflow-y: clip` is not a scroll container,
+   so sticky pinning and the view timeline still resolve against the
+   transcript, but the clipped slack no longer counts as scrollable overflow.
+   The x axis stays visible for capsule shadows. */
+.cukii-turns {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
 /* The last turn has no next capsule to evict its row, and a slack box that
    outlives its turn's negative margin becomes real scrollable overflow: the
    transcript grew by a prompt-sized blank and auto-scroll parked the answer

@@ -170,6 +170,9 @@ test("groups every user prompt with its response so the next sticky turn displac
     expect(turn.lastElementChild).toHaveClass("cukii-turn-slack");
     expect(turn.querySelector(".cukii-user-row-flow-spacer")).toBeNull();
   }
+  // Every turn sits in the one clip box that keeps slack out of the scroll.
+  expect(turns[0].parentElement).toHaveClass("cukii-turns");
+  expect(turns[1].parentElement).toBe(turns[0].parentElement);
 
   const css = canonicalCss();
   expect(css).toMatch(/\.cukii-user-row--sticky\s*\{[^}]*position:\s*sticky/s);
@@ -320,6 +323,17 @@ test("the last turn reserves no eviction slack, so the transcript never scrolls 
   expect(css).toMatch(
     /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*>\s*\.cukii-turn-slack\s*\{\s*display:\s*none;?\s*\}/s,
   );
+});
+
+test("turns live in a clip box so eviction slack is never scrollable", () => {
+  // Long prompt, short answer, short last follow-up: the long turn's slack
+  // reached past the transcript's real end and the reader could scroll into
+  // a 1442px blank (headless red control, 2.0.155). `clip` is not a scroll
+  // container, so sticky pinning and the view timeline are unaffected.
+  const turnsRule = ruleBody(canonicalCss(), /\.cukii-turns/)!;
+  expect(turnsRule).toContain("overflow-y: clip");
+  expect(turnsRule).toContain("overflow-x: visible");
+  expect(turnsRule).not.toMatch(/overflow(-y)?:\s*(hidden|auto|scroll)/);
 });
 
 test("resolveStickyFoldCap is the part of the turn below the row", () => {

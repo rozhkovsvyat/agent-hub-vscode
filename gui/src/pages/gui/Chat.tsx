@@ -559,7 +559,7 @@ export function Chat() {
   // Right-click on capsules uses the native webview context menu; session
   // commands reach it through the extension's webview/context contribution.
 
-  const renderTranscriptRows = useCallback((): JSX.Element[] => {
+  const renderTranscriptRows = useCallback((): JSX.Element => {
     const transcriptHistory = history.slice(transcriptStart);
     const renderTranscriptEntry = (
       item: ChatHistoryItemWithMessageId,
@@ -949,18 +949,29 @@ export function Chat() {
       turns.push({ key: currentKey, rows: currentRows });
     }
 
-    return turns.map(({ key, rows }) => (
-      <div className="cukii-turn" data-testid={`cukii-turn-${key}`} key={key}>
-        {/* 1px view-timeline subject: the sticky row's fold is a CSS
+    // `.cukii-turns` clips the turns' eviction slack out of the scrollable
+    // overflow: a long prompt followed by less content than its slack would
+    // otherwise let the transcript scroll into a blank (see index.css).
+    return (
+      <div className="cukii-turns">
+        {turns.map(({ key, rows }) => (
+          <div
+            className="cukii-turn"
+            data-testid={`cukii-turn-${key}`}
+            key={key}
+          >
+            {/* 1px view-timeline subject: the sticky row's fold is a CSS
             scroll-driven animation measured from this sentinel reaching the
             scrollport top (see `.cukii-turn-sentinel` in index.css). */}
-        <div aria-hidden="true" className="cukii-turn-sentinel" />
-        {rows}
-        {/* Eviction slack: lets the next turn push the one-line capsule out
+            <div aria-hidden="true" className="cukii-turn-sentinel" />
+            {rows}
+            {/* Eviction slack: lets the next turn push the one-line capsule out
             exactly when it reaches the painted row (`--cukii-turn-slack`). */}
-        <div aria-hidden="true" className="cukii-turn-slack" />
+            <div aria-hidden="true" className="cukii-turn-slack" />
+          </div>
+        ))}
       </div>
-    ));
+    );
   }, [
     dispatch,
     history,
