@@ -65,8 +65,13 @@ describe("VsCodeMessenger native bridge run contract", () => {
   it("routes steering through the model-bound active-run identity", () => {
     expect(source).toContain("brokerModel: msg.data.brokerModel");
     expect(source).toContain("this.bridgeRunForSteer(protocol, msg.data)");
-    expect(source).toContain("bridgeRunAcceptsSteer(active, request)");
-    expect(source).toContain("bridgeRunAcceptsSteer(candidate, request)");
+    // Exact session+model first, then the same session from any panel: a
+    // picker switch mid-turn or a second view of the session must still
+    // reach the run that owns the FIFO/stdin (cards 6aef19da, c20375e9).
+    expect(source).toContain(
+      "const selected = selectBridgeRunForSteer(request, active, groups);",
+    );
+    expect(source).toContain("otherActive?.sessionId === request.sessionId");
   });
 
   it("uses one durable inbox path for Claude instead of duplicating through stdin", () => {

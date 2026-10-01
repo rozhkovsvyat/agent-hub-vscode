@@ -98,7 +98,9 @@ import {
 } from "@cukii/vendor-bridge";
 import {
   BridgeRunCoordinator,
+  bridgeInboxNudgeText,
   bridgeRunAcceptsSteer,
+  selectBridgeRunForSteer,
   type BridgeRunIdentity,
 } from "@cukii/vendor-bridge";
 import {
@@ -520,12 +522,23 @@ export class VsCodeMessenger {
     protocol: VsCodeWebviewProtocol,
     request: { sessionId: string; brokerModel?: BrokerModel },
   ): ActiveBridgeRun | undefined {
+    // Same panel first, then every other panel: a follow-up typed into a
+    // second view of the same session, or after the picker model changed
+    // mid-turn, must still reach the run that owns the FIFO/stdin (cards
+    // 6aef19da, c20375e9).
+    const own = this.bridgeRunCandidates.get(protocol);
+    const groups: Iterable<ActiveBridgeRun>[] = [];
+    if (own) groups.push(own.values());
+    for (const [other, candidates] of this.bridgeRunCandidates) {
+      if (other !== protocol) groups.push(candidates.values());
+    }
     const active = this.bridgeRuns.activeFor(protocol);
-    if (bridgeRunAcceptsSteer(active, request)) return active;
-    const candidates = this.bridgeRunCandidates.get(protocol);
-    if (!candidates) return undefined;
-    for (const candidate of [...candidates.values()].reverse()) {
-      if (bridgeRunAcceptsSteer(candidate, request)) return candidate;
+    const selected = selectBridgeRunForSteer(request, active, groups);
+    if (selected) return selected;
+    for (const [other] of this.bridgeRunCandidates) {
+      if (other === protocol) continue;
+      const otherActive = this.bridgeRuns.activeFor(other);
+      if (otherActive?.sessionId === request.sessionId) return otherActive;
     }
     return undefined;
   }
@@ -1940,6 +1953,14 @@ export class VsCodeMessenger {
               ),
             { sessionId: run.sessionId, messageId: msg.data.messageId },
           );
+          if (brokerVendorForModel(run.brokerModel) === "claude") {
+            // Claude has no hook gate in its strict MCP config, and Opus kept
+            // working through multi-minute tool chains without ever polling
+            // (card c20375e9). Its stdin steering lands at the next tool
+            // boundary, so a content-free hint there makes it poll the FIFO
+            // now instead of at the end of the turn.
+            run.steering.nudge(bridgeInboxNudgeText(msg.data.messageId));
+          }
         }
         const receipt: CukiiSteerReceipt = usesBrokerInbox
           ? {
