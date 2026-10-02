@@ -15,6 +15,10 @@
 //    "Cursor"; pick by group, or the run silently spends Cursor quota.
 //  - Screenshot the smoke window only (Page.captureScreenshot), never the
 //    owner's screen.
+//  - The profile is isolated, the vendor CLIs are NOT: their configs (incl. the
+//    Cukii Box memory MCP) are the owner's. Never ask an agent to "remember"
+//    in a test prompt — Kimi stored a test codeword in the owner's memory —
+//    and memory_grep your test markers afterwards.
 //
 // Usage (all commands print one JSON line):
 //   node cukii-smoke.mjs launch --vsix <file.vsix> [--profile /tmp/cukii-smoke-x]
@@ -187,7 +191,14 @@ if (cmd === "launch") {
   }
   await sleep(6000);
   const panel = await openPanel(cdp);
-  out({ port: cdp, profile, panel: panel ?? null });
+  // First activation of a fresh profile takes a while; wait until the Cukii
+  // webview has actually rendered its session list before handing over.
+  let ready = false;
+  for (let i = 0; i < 45 && !ready; i++) {
+    ready = !!(await sidebarEval(cdp, `/New session/.test(document.body?.innerText || "") ? "ready" : null`).catch(() => undefined));
+    if (!ready) await sleep(1000);
+  }
+  out({ port: cdp, profile, panel: panel ?? null, ready });
 }
 
 if (cmd === "close") {
