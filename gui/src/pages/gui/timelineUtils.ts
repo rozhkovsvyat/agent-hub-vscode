@@ -9,7 +9,9 @@ const CUKII_SERVICE_TOOLS = new Set([
   "broker_inbox_ack",
   "react_to_user_message",
 ]);
-const CUKII_SERVER = /(?:^|[^a-z])cukii-question(?:[_.:/]+|__)(\w+)$/i;
+// Both the bundled question server and the full Python broker serve the inbox.
+const CUKII_SERVER =
+  /(?:^|[^a-z])cukii-(?:question|broker)(?:[_.:/]+|__)(\w+)$/i;
 
 export function isCukiiServiceToolName(name: string | undefined): boolean {
   const match = name ? CUKII_SERVER.exec(name) : null;

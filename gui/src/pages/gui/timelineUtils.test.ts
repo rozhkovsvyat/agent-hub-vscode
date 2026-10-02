@@ -130,6 +130,8 @@ describe("Cukii service tools stay out of the transcript", () => {
       "mcp__cukii-question__react_to_user_message",
       "cukii-question.broker_inbox",
       "cukii-question/react_to_user_message",
+      "mcp__cukii-broker__broker_inbox",
+      "mcp__cukii-broker__broker_inbox_ack",
     ]) {
       expect(isCukiiServiceToolCall(call(name)), name).toBe(true);
     }
@@ -138,6 +140,7 @@ describe("Cukii service tools stay out of the transcript", () => {
   it("keeps the user's question sheet and every other tool visible", () => {
     for (const name of [
       "mcp__cukii-question__request_user_input",
+      "mcp__cukii-broker__broker_delegate",
       "Bash",
       "mcp__other__broker_inbox",
       "broker_inbox",
