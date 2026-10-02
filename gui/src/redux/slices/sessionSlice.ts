@@ -537,9 +537,34 @@ export const sessionSlice = createSlice({
           // cleanup/provider errors pass undefined and must not add OR erase
           // a real user cancellation. A tool receipt suppresses the general
           // marker because the tool card carries its own interruption state.
-          if (action.payload === "turn") message.interrupted = true;
-          if (action.payload === "tool" && hasToolCalls) {
-            message.interrupted = false;
+          // The marker belongs to the turn's last assistant answer, not to a
+          // trailing "thinking" status line (which never paints it), so a
+          // Stop after a background tool still shows Interrupted.
+          let markIdx = i;
+          for (let j = i; j > lastUserOrToolIdx; j--) {
+            if (state.history[j].message.role === "assistant") {
+              markIdx = j;
+              break;
+            }
+          }
+          const markTarget = state.history[markIdx];
+          const hadInFlightTool = (markTarget.toolCallStates ?? []).some(
+            (tool) =>
+              tool.status === "generated" ||
+              tool.status === "generating" ||
+              tool.status === "calling",
+          );
+          if (action.payload === "turn") markTarget.interrupted = true;
+          // A tool receipt hands the label to an interrupted tool card; tools
+          // that already finished (a CLI's background task) carry no label.
+          if (
+            action.payload === "tool" &&
+            (hadInFlightTool ||
+              markTarget.toolCallStates?.some(
+                (tool) => tool.status === "canceled",
+              ))
+          ) {
+            markTarget.interrupted = false;
           }
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
