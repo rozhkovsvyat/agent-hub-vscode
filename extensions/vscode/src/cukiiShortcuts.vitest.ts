@@ -109,4 +109,34 @@ describe("Cukii Chat shortcuts and palette (2026-10-02)", () => {
     expect(tip).toContain('chatLabel: "Cukii Chat"');
     expect(tip).not.toContain("SVG_CONFIG.editLabel,");
   });
+
+  it("keeps inherited Continue switches for dead features out of Settings", () => {
+    const props = Object.keys(
+      (
+        JSON.parse(
+          readFileSync(join(__dirname, "..", "package.json"), "utf8"),
+        ) as {
+          contributes: {
+            configuration: { properties: Record<string, unknown> };
+          };
+        }
+      ).contributes.configuration.properties,
+    );
+    for (const dead of [
+      "continue.disableQuickFix",
+      "continue.enableQuickActions",
+      "continue.enableTabAutocomplete",
+      "continue.enableNextEdit",
+      "continue.pauseTabAutocompleteOnBattery",
+      "continue.enableConsole",
+      "continue.remoteConfigServerUrl",
+      "continue.userToken",
+      "continue.remoteConfigSyncPeriod",
+    ]) {
+      expect(props, dead).not.toContain(dead);
+    }
+    // Defaults the code relies on: indexing must stay paused on start.
+    expect(props).toContain("continue.pauseCodebaseIndexOnStart");
+    expect(props).toContain("cukii.usage.directVendorApi");
+  });
 });

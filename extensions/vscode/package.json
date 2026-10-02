@@ -99,55 +99,10 @@
           "default": true,
           "description": "Show inline suggestion to use the Cukii keyboard shortcuts (e.g. \"Cmd/Ctrl L to select code, Cmd/Ctrl I to edit\")."
         },
-        "continue.disableQuickFix": {
-          "type": "boolean",
-          "default": false,
-          "description": "Disable the quick fix feature."
-        },
-        "continue.enableQuickActions": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable the experimental Quick Actions feature."
-        },
-        "continue.enableTabAutocomplete": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable Cukii's tab autocomplete feature."
-        },
-        "continue.enableNextEdit": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable Cukii's next edit feature."
-        },
-        "continue.pauseTabAutocompleteOnBattery": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Pause Cukii's tab autocomplete feature when your battery is low."
-        },
         "continue.pauseCodebaseIndexOnStart": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Pause Cukii's codebase index on start."
-        },
-        "continue.enableConsole": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable a console to log and explore model inputs and outputs. It can be found in the bottom panel."
-        },
-        "continue.remoteConfigServerUrl": {
-          "type": "string",
-          "default": null,
-          "markdownDescription": "If your team is set up to use shared configuration, enter the server URL here and your user token below to enable automatic syncing."
-        },
-        "continue.userToken": {
-          "type": "string",
-          "default": null,
-          "markdownDescription": "If your team is set up to use shared configuration, enter your user token here and your server URL above to enable automatic syncing."
-        },
-        "continue.remoteConfigSyncPeriod": {
-          "type": "number",
-          "default": 60,
-          "description": "The period of time in minutes between automatic syncs."
         },
         "cukii.usage.directVendorApi": {
           "type": "boolean",
