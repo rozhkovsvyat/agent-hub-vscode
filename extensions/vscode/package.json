@@ -23,6 +23,13 @@
     "vscode": "^1.70.0",
     "node": ">=20.20.1"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Cukii Chat runs the vendor CLIs as agents that read and change files in this folder, so it works only in a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
   "engine-strict": true,
   "galleryBanner": {
     "color": "#1E1E1E",

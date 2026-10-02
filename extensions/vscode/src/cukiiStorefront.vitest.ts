@@ -123,4 +123,16 @@ describe("cukii storefront card", () => {
       new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"),
     );
   });
+
+  it("explains why it is off in Restricted Mode instead of leaving blank tabs", () => {
+    const caps = (
+      manifest as unknown as {
+        capabilities?: {
+          untrustedWorkspaces?: { supported: unknown; description?: string };
+        };
+      }
+    ).capabilities;
+    expect(caps?.untrustedWorkspaces?.supported).toBe(false);
+    expect(caps?.untrustedWorkspaces?.description).toMatch(/trusted workspace/);
+  });
 });
