@@ -2853,7 +2853,10 @@ button.cukii-submit-button--stop:active {
   > :first-child::before {
   content: "";
   float: right;
-  width: calc(var(--cukii-meta-reserve, 31px) + 20px);
+  /* Never wider than the line minus a few characters: in a narrow column the
+     full reserve left no room beside it, the first line wrapped under the
+     float and the folded capsule showed only the receipt (card 526b6026). */
+  width: min(calc(var(--cukii-meta-reserve, 31px) + 20px), calc(100% - 3em));
   height: 1lh;
 }
 
@@ -2920,6 +2923,12 @@ button.cukii-submit-button--stop:active {
   right: 10px;
   bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)));
   margin: 0;
+  /* When the capped first-line reserve is narrower than the receipt, the
+     receipt covers the end of that line; paint it on the bubble colour so
+     the hidden letters do not show through the time and ticks. */
+  background-color: inherit;
+  padding-left: 4px;
+  border-radius: 6px;
 }
 
 .cukii-user-bubble--group-start {

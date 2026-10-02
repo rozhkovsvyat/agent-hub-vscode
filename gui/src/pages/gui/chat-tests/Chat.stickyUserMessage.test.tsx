@@ -308,7 +308,13 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   // width. Padding the whole editor narrowed every line: in a 207px panel the
   // text column was 32px and a 41-line prompt grew to 11 193px.
   expect(css).toMatch(
-    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*>\s*:first-child::before\s*\{[^}]*float:\s*right;[^}]*width:\s*calc\(var\(--cukii-meta-reserve, 31px\) \+ 20px\);[^}]*height:\s*1lh/s,
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*>\s*:first-child::before\s*\{[^}]*float:\s*right;[^}]*width:\s*min\(calc\(var\(--cukii-meta-reserve, 31px\) \+ 20px\), calc\(100% - 3em\)\);[^}]*height:\s*1lh/s,
+  );
+  // In a ~180px column the full reserve left no room on the first line, so the
+  // folded capsule showed only the receipt (card 526b6026): the reserve is
+  // capped and the receipt paints on the bubble colour over the line's end.
+  expect(css).toMatch(
+    /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*background-color:\s*inherit/s,
   );
   expect(css).not.toMatch(
     /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*\{[^}]*padding-right/s,
