@@ -319,6 +319,12 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   expect(css).not.toMatch(
     /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.ProseMirror\s*\{[^}]*padding-right/s,
   );
+  // The folded strip shows exactly one text line: the text clips with the
+  // fold but never below 1lh, so the second line cannot peek in the strip's
+  // bottom padding (card 526b6026).
+  expect(css).toMatch(
+    /\.cukii-user-row--sticky\s+\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s+\.cukii-user-content-shell\s*\{[^}]*clip-path:\s*inset\(0 0 min\(var\(--cukii-fold, 0px\), calc\(100% - 1lh\)\) 0\)/s,
+  );
 });
 
 test("the last turn reserves no eviction slack, so the transcript never scrolls into a blank", () => {

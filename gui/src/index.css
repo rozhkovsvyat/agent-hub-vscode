@@ -2827,6 +2827,16 @@ button.cukii-submit-button--stop:active {
   visibility: visible;
 }
 
+/* The text clips with the same fold, but never below its first line. The
+   bubble keeps 38px (padding + one row + padding), and its bottom padding
+   sits at the real bottom far below the painted strip, so without this the
+   strip's last 10px showed the top half of the second line. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-content-shell {
+  clip-path: inset(0 0 min(var(--cukii-fold, 0px), calc(100% - 1lh)) 0);
+}
+
 /* With attachments the thumbnail strip paints below the text inside a sticky
    capsule, so the single terminal row is always the first line of text. */
 .cukii-user-row--sticky
