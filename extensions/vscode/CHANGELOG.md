@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.167
+## 2.0.168
 
 - **Cukii Chat.** The extension is now called Cukii Chat, with a new logo: the cookie cut out of a chat bubble.
 - **Usage limits without your logins.** Claude and Codex limits now come from the CLIs themselves. Reading your stored login for them is an opt-in setting (`cukii.usage.directVendorApi`).
@@ -14,6 +14,8 @@
 - **You can see the route.** When you pick Opus, Fable, Kimi or Grok through Cursor, the model pill and run errors say “· Cursor”.
 - **Cleaner transcript.** A reaction shows only its emoji, and Cukii’s own inbox and reaction calls no longer appear as raw tool cards.
 - **Narrow panels.** A pinned message folded to one line keeps its text visible next to the time and ticks.
+- The pinned message of the last turn stays at the top as a single line until the end of the answer.
+- Settings no longer list switches for features inherited from Continue that Cukii Chat does not use.
 - In an untrusted folder VS Code now explains that Cukii Chat needs a trusted workspace, instead of showing empty tabs.
 
 ## 2.0.158
