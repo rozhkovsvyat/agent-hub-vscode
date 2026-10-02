@@ -289,6 +289,55 @@ describe("Cukii Claude-parity input toolbar", () => {
     expect(name.className).not.toContain("descriptionForeground");
   });
 
+  it("says when the selected model runs through Cursor (card 6f333f93)", async () => {
+    for (const [model, viaCursor] of [
+      ["cursor:claude-opus-5-5", true],
+      ["opus-5-5", false],
+    ] as const) {
+      const mockIdeMessenger = new MockIdeMessenger();
+      mockIdeMessenger.responseHandlers["cukii/listBrokerModelCatalog"] =
+        async () => [
+          {
+            id: "claude",
+            label: "Anthropic",
+            models: [
+              {
+                value: "opus-5-5",
+                label: "Opus 5.5",
+                contextWindowLabel: "1M",
+              },
+            ],
+          },
+          {
+            id: "cursor",
+            label: "Cursor",
+            models: [
+              {
+                value: "cursor:claude-opus-5-5",
+                label: "Opus 5.5",
+                contextWindowLabel: "1M",
+              },
+            ],
+          },
+        ];
+      const store = setupStore({ ideMessenger: mockIdeMessenger });
+      await act(async () => {
+        store.dispatch(setBrokerModel(model));
+      });
+      const { unmount } = await renderWithProviders(
+        <InputToolbar {...props} />,
+        { store, mockIdeMessenger },
+      );
+      await waitFor(() =>
+        expect(store.getState().session.brokerModel).toBe(model),
+      );
+      const pill = await getElementByTestId("cukii-model-pill");
+      const name = (pill.firstElementChild as HTMLElement).textContent ?? "";
+      expect(name.endsWith(" · Cursor"), model).toBe(viaCursor);
+      unmount();
+    }
+  });
+
   it("drops Fast when the route has no accelerated tier and drops autocompact at Default", async () => {
     const store = setupStore({ ideMessenger: new MockIdeMessenger() });
     await act(async () => {

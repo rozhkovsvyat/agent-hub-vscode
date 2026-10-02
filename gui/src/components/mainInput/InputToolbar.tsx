@@ -494,9 +494,12 @@ function InputToolbar(props: InputToolbarProps) {
   const hasLiveBrokerModel = modelCatalogAvailability === "available";
   const currentModel = brokerModel ?? "opus-5";
   const currentModelInfo = modelInfo(currentModel);
-  const currentLabel = currentModelInfo
-    ? displayModelLabel(currentModelInfo)
-    : "Opus 5 (1M)";
+  // Cursor re-serves Anthropic/Moonshot/xAI models under the same names; the
+  // pill must say which route runs, or a Cursor quota error reads as a broken
+  // Opus (card 6f333f93).
+  const currentLabel =
+    (currentModelInfo ? displayModelLabel(currentModelInfo) : "Opus 5 (1M)") +
+    (currentModel.startsWith("cursor:") ? " · Cursor" : "");
   const nativeFastAvailable = supportsNativeSpeed(currentModel);
   const nativeThinkingAvailable = supportsNativeThinking(currentModel);
   /**
@@ -789,66 +792,66 @@ function InputToolbar(props: InputToolbarProps) {
                     {hasLiveBrokerModel &&
                       nativeThinkingAvailable &&
                       showAction("Thinking") && (
-                      <button
-                        data-testid="cukii-thinking-toggle"
-                        {...commandActionProps("Thinking")}
-                        type="button"
-                        role="switch"
-                        aria-checked={hasReasoningEnabled}
-                        title="Enable or disable the vendor's native reasoning mode"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          updateBrokerPreferences(
-                            currentModel,
-                            brokerSubagent ?? "auto",
-                            brokerEffort,
-                            brokerSpeed,
-                            !hasReasoningEnabled,
-                          );
-                        }}
-                      >
-                        <span>Thinking</span>
-                        <span
-                          data-testid="cukii-thinking-track"
-                          className={`cukii-toggle-track ${hasReasoningEnabled ? "cukii-toggle-track-on" : ""}`}
+                        <button
+                          data-testid="cukii-thinking-toggle"
+                          {...commandActionProps("Thinking")}
+                          type="button"
+                          role="switch"
+                          aria-checked={hasReasoningEnabled}
+                          title="Enable or disable the vendor's native reasoning mode"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateBrokerPreferences(
+                              currentModel,
+                              brokerSubagent ?? "auto",
+                              brokerEffort,
+                              brokerSpeed,
+                              !hasReasoningEnabled,
+                            );
+                          }}
                         >
-                          <span className="cukii-toggle-thumb" />
-                        </span>
-                      </button>
-                    )}
+                          <span>Thinking</span>
+                          <span
+                            data-testid="cukii-thinking-track"
+                            className={`cukii-toggle-track ${hasReasoningEnabled ? "cukii-toggle-track-on" : ""}`}
+                          >
+                            <span className="cukii-toggle-thumb" />
+                          </span>
+                        </button>
+                      )}
                     {/* A route without a native accelerated tier shows no row
                         at all instead of a permanently disabled one. */}
                     {hasLiveBrokerModel &&
                       nativeFastAvailable &&
                       showAction("Fast mode") && (
-                      <button
-                        data-testid="cukii-speed-toggle"
-                        {...commandActionProps("Fast mode")}
-                        type="button"
-                        role="switch"
-                        aria-checked={brokerSpeed === "fast"}
-                        title="Use the vendor's native accelerated service tier"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          updateBrokerPreferences(
-                            currentModel,
-                            brokerSubagent ?? "auto",
-                            brokerEffort,
-                            brokerSpeed === "fast" ? "standard" : "fast",
-                          );
-                        }}
-                      >
-                        <span>Fast mode</span>
-                        <span
-                          data-testid="cukii-speed-track"
-                          className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                        <button
+                          data-testid="cukii-speed-toggle"
+                          {...commandActionProps("Fast mode")}
+                          type="button"
+                          role="switch"
+                          aria-checked={brokerSpeed === "fast"}
+                          title="Use the vendor's native accelerated service tier"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateBrokerPreferences(
+                              currentModel,
+                              brokerSubagent ?? "auto",
+                              brokerEffort,
+                              brokerSpeed === "fast" ? "standard" : "fast",
+                            );
+                          }}
                         >
-                          <span className="cukii-toggle-thumb" />
-                        </span>
-                      </button>
-                    )}
+                          <span>Fast mode</span>
+                          <span
+                            data-testid="cukii-speed-track"
+                            className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                          >
+                            <span className="cukii-toggle-thumb" />
+                          </span>
+                        </button>
+                      )}
                     {showAction("Manage accounts") && (
                       <button
                         {...commandActionProps("Manage accounts")}
