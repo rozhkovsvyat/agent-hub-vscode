@@ -35,7 +35,7 @@ describe("CukiiMessageReaction", () => {
       </>,
     );
     const rendered = screen.getAllByRole("img", { name: "Agent reacted 😂" });
-    expect(rendered[0]).toHaveTextContent("😂1");
+    expect(rendered[0].textContent).toBe("😂");
     expect(rendered[0]).toHaveClass(
       "cukii-message-reactions--embedded",
       "cukii-message-reactions--user",
@@ -63,6 +63,20 @@ describe("CukiiMessageReaction", () => {
     expect(standalone).toContain("position: static");
     expect(standalone).toContain("padding: 4px 0 8px");
     expect(standalone).not.toContain("bottom:");
+  });
+
+  it("shows only the emoji for a single reactor, without a 1 counter", () => {
+    const { container } = render(
+      <CukiiMessageReaction
+        placement="embedded"
+        reaction={{ reactionId: "r1", emoji: "❤️" } as any}
+        surface="user"
+      />,
+    );
+    expect(
+      container.querySelector(".cukii-message-reaction-counter"),
+    ).toBeNull();
+    expect(container.textContent?.includes("1")).toBe(false);
   });
 
   it("uses the opposite message surface and the owner-requested counter colors", () => {

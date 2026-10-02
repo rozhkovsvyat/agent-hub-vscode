@@ -74,7 +74,11 @@ import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMe
 import { messageContentToEditorDoc } from "../../components/cukii/userMessageEditorDoc";
 import { useMeasuredCanvasBackground } from "../../components/cukii/useMeasuredCanvasBackground";
 import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
-import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
+import {
+  getActiveTimelineToolId,
+  getToolTimelineClass,
+  isCukiiServiceToolCall,
+} from "./timelineUtils";
 import { dispatchResponseEscape } from "./chatEscape";
 import { shouldInterruptFromEscape } from "./interruptShortcut";
 import { userMetaFitsOnLastLine, userMetaWidth } from "./userMetaMode";
@@ -909,6 +913,7 @@ export function Chat() {
         }
 
         toolCallStates?.forEach((toolCallState) => {
+          if (isCukiiServiceToolCall(toolCallState)) return;
           rows.push(
             <div
               key={toolCallState.toolCallId}

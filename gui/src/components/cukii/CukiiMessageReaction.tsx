@@ -91,9 +91,9 @@ export function CukiiMessageReaction({
             {reaction.emoji}
           </span>
         </span>
-        <span aria-hidden="true" className="cukii-message-reaction-counter">
-          1
-        </span>
+        {/* One agent reacts in a 1:1 chat, so a "1" says nothing (owner,
+            2026-10-01). The counter styles stay for a multi-agent chat, where
+            it will render only for count > 1. */}
       </span>
     </span>
   );

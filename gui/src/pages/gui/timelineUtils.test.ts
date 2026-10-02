@@ -1,6 +1,10 @@
 import { ChatHistoryItem } from "core";
 import { describe, expect, it } from "vitest";
-import { getActiveTimelineToolId, getToolTimelineClass } from "./timelineUtils";
+import {
+  getActiveTimelineToolId,
+  getToolTimelineClass,
+  isCukiiServiceToolCall,
+} from "./timelineUtils";
 
 describe("getToolTimelineClass", () => {
   it("maps Claude-style rail colors from tool status", () => {
@@ -112,5 +116,57 @@ describe("getToolTimelineClass", () => {
     history[0].toolCallStates![2].status = "done";
     expect(getActiveTimelineToolId(history)).toBe("powershell-1");
     expect(activeRows().at(-1)).toBe("loader-idle");
+  });
+});
+
+describe("Cukii service tools stay out of the transcript", () => {
+  const call = (name: string, args = "{}") =>
+    ({ toolCall: { function: { name, arguments: args } } }) as any;
+
+  it("hides inbox, ack and reaction calls under every vendor's naming", () => {
+    for (const name of [
+      "mcp__cukii-question__broker_inbox",
+      "mcp__cukii-question__broker_inbox_ack",
+      "mcp__cukii-question__react_to_user_message",
+      "cukii-question.broker_inbox",
+      "cukii-question/react_to_user_message",
+    ]) {
+      expect(isCukiiServiceToolCall(call(name)), name).toBe(true);
+    }
+  });
+
+  it("keeps the user's question sheet and every other tool visible", () => {
+    for (const name of [
+      "mcp__cukii-question__request_user_input",
+      "Bash",
+      "mcp__other__broker_inbox",
+      "broker_inbox",
+    ]) {
+      expect(isCukiiServiceToolCall(call(name)), name).toBe(false);
+    }
+  });
+
+  it("hides Claude's tool loader only when it loads nothing but those tools", () => {
+    expect(
+      isCukiiServiceToolCall(
+        call(
+          "ToolSearch",
+          JSON.stringify({
+            query:
+              "select:mcp__cukii-question__broker_inbox,mcp__cukii-question__broker_inbox_ack",
+          }),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isCukiiServiceToolCall(
+        call("ToolSearch", JSON.stringify({ query: "select:Monitor" })),
+      ),
+    ).toBe(false);
+    expect(
+      isCukiiServiceToolCall(
+        call("ToolSearch", JSON.stringify({ query: "notebook jupyter" })),
+      ),
+    ).toBe(false);
   });
 });
