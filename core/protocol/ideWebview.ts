@@ -462,6 +462,8 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
       /** The user pressed Stop on the previous turn; the agent must not redo
        * the stopped work unless asked again. */
       previousTurnStopped?: boolean;
+      /** Recent user requests whose turns the user stopped (newest last). */
+      stoppedRequests?: string[];
       /** A model switch crossed a native-vendor boundary. Ignore any stale
        * vendor resume id and carry the complete shared Cukii transcript. */
       forceColdStart?: boolean;

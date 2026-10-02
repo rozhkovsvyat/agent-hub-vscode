@@ -30,6 +30,7 @@ import {
   type ChatHistoryItemWithMessageId,
 } from "../slices/sessionSlice";
 import { RootState, ThunkApiType } from "../store";
+import { stoppedRequestTexts } from "../util/stoppedRequests";
 
 type CukiiBridgeMessage = ChatMessage & {
   cukiiBridgeWait?: {
@@ -294,6 +295,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
       dispatch(clearSteerInterrupt());
     }
     const previousTurnStopped = Boolean(state.session.userStopPending);
+    const stoppedRequests = stoppedRequestTexts(state.session.history);
     if (previousTurnStopped) dispatch(clearUserStop());
     const currentSubmitId = hasImplicitRecovery
       ? initialUserReceiptId
@@ -436,6 +438,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           currentSubmitMessageId: currentSubmitId,
           steerInterrupt,
           previousTurnStopped,
+          ...(stoppedRequests.length > 0 ? { stoppedRequests } : {}),
           forceColdStart,
         },
         streamAborter.signal,
