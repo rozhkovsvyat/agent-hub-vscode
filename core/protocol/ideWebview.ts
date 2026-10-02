@@ -60,6 +60,11 @@ export type BrokerModelCatalogEntry = {
   contextWindowLabel: string;
   description?: string;
   disabled?: boolean;
+  /**
+   * The route has a native accelerated tier. Set from the live catalog where
+   * it differs per family (Cursor sells `-fast` ids for some families only).
+   */
+  nativeFast?: boolean;
 };
 
 export type BrokerVendorModelCatalog = {

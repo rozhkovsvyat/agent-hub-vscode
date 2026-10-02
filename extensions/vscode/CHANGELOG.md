@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.170
+
+- **No raw service lines.** When Kimi stops before answering (for example, out of quota), the chat no longer shows a raw `{"role":"meta",…}` line next to the error.
+- **Fast only where it is real.** For models through Cursor, the Fast switch now appears exactly when Cursor offers a Fast version of that model (Opus, GPT-5.6, Grok 4.7 — yes; Sonnet — no).
+
 ## 2.0.169
 
 - **Kimi limits are back.** The Kimi Account & Usage panel finds the login of Kimi CLI 2.x again and shows your 5-hour window.

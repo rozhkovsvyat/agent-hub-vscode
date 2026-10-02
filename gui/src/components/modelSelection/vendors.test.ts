@@ -136,9 +136,9 @@ describe("Cukii model context labels", () => {
     expect(isBestModel({ value: "sonnet-5", label: "Sonnet 5" })).toBe(false);
     expect(isBestModel({ value: "opus-5", label: "Opus 5" })).toBe(false);
     expect(isBestModel({ value: "grok-4-6", label: "Grok 4.6" })).toBe(false);
-    expect(isBestModel({ value: "codex-5-6-terra", label: "GPT-5.6 Terra" })).toBe(
-      false,
-    );
+    expect(
+      isBestModel({ value: "codex-5-6-terra", label: "GPT-5.6 Terra" }),
+    ).toBe(false);
   });
 
   it("does not put Alibaba image/audio/video capabilities in the chat picker", () => {
@@ -290,12 +290,54 @@ describe("Cukii model context labels", () => {
     expect(supportsNativeThinking("cursor:gpt-5.6-luna")).toBe(false);
   });
 
-  it("exposes Anthropic Fast mode only for the verified Opus 5 route", () => {
+  it("exposes Fast only where a native accelerated tier is actually sent", () => {
     expect(supportsNativeSpeed("opus-5")).toBe(true);
+    expect(supportsNativeSpeed("opus-5-5")).toBe(true);
     expect(supportsNativeSpeed("sonnet-5")).toBe(false);
     expect(supportsNativeSpeed("fable-5-1")).toBe(false);
     expect(supportsNativeSpeed("haiku-4-5")).toBe(false);
     expect(supportsNativeSpeed("codex:gpt-6-astra")).toBe(true);
+    expect(supportsNativeSpeed("composer-2-5")).toBe(true);
+    // Card 951a8b40: native Grok, Kimi and Qwen have no accelerated tier.
+    expect(supportsNativeSpeed("grok-4-6")).toBe(false);
+    expect(supportsNativeSpeed("grok-4-7")).toBe(false);
+    expect(supportsNativeSpeed("kimi-k3")).toBe(false);
+    expect(supportsNativeSpeed("qwen-3-8-max")).toBe(false);
+  });
+
+  it("offers Fast through Cursor only for families the live catalog marks nativeFast (card 951a8b40)", () => {
+    // Cursor sells Fast per family: Grok 4.7 has -fast ids, a Sonnet family
+    // does not. A hardcoded list either lies or hides a real tier.
+    expect(supportsNativeSpeed("cursor:grok-4.7")).toBe(false);
+    const bootstrapCursor = [
+      ...(VENDORS.find((vendor) => vendor.id === "cursor")?.models ?? []),
+    ];
+    applyRuntimeVendorCatalog([
+      {
+        id: "cursor",
+        label: "Cursor",
+        models: [
+          {
+            value: "cursor:grok-4.7",
+            label: "Grok 4.7",
+            contextWindowLabel: "500K",
+            nativeFast: true,
+          },
+          {
+            value: "cursor:claude-4.6-sonnet",
+            label: "Sonnet 4.6",
+            contextWindowLabel: "1M",
+            nativeFast: false,
+          },
+        ],
+      },
+    ]);
+    expect(supportsNativeSpeed("cursor:grok-4.7")).toBe(true);
+    expect(supportsNativeSpeed("cursor:claude-4.6-sonnet")).toBe(false);
+    expect(supportsNativeSpeed("cursor:unknown-family")).toBe(false);
+    applyRuntimeVendorCatalog([
+      { id: "cursor", label: "Cursor", models: bootstrapCursor },
+    ]);
   });
 
   it("renders only the effort levels supported by the selected route", () => {

@@ -24,6 +24,8 @@ export interface ModelInfo {
   description: string;
   /** If true, the model is shown but cannot be selected (e.g. not wired yet). */
   disabled?: boolean;
+  /** From the live catalog: the route has a native accelerated tier. */
+  nativeFast?: boolean;
 }
 
 export interface VendorInfo {
@@ -247,9 +249,7 @@ export function applyRuntimeVendorCatalog(
     };
   }).filter((vendor) => vendor.models.length > 0);
   if (assembled.length === 0) return;
-  observeCukiiLatestGeneration(
-    assembled.flatMap((vendor) => vendor.models),
-  );
+  observeCukiiLatestGeneration(assembled.flatMap((vendor) => vendor.models));
   const next = sortVendorsByLabel(
     assembled.map((vendor) => ({
       id: vendor.id,
@@ -341,15 +341,23 @@ export function modelInfo(model: BrokerModel): ModelInfo | undefined {
   return ALL_MODELS.find((m) => m.value === model);
 }
 
-/** Native vendor acceleration, as opposed to a prompt-level approximation. */
+/**
+ * Native vendor acceleration, as opposed to a prompt-level approximation.
+ * Keep aligned with vendor-bridge `supportsNativeSpeed`: a switch here that
+ * the bridge cannot pass is decoration (card 951a8b40). Claude Opus uses
+ * `fastMode`, Codex `service_tier=priority`, Composer its `-fast` id. Cursor
+ * sells Fast per family, so a `cursor:` model has it only when the live
+ * catalog found a `-fast` id for it (`nativeFast`). Native Grok, Kimi, Qwen,
+ * Sonnet, Fable and Haiku have no tier.
+ */
 export function supportsNativeSpeed(model: BrokerModel): boolean {
+  if (model.startsWith("cursor:")) return modelInfo(model)?.nativeFast === true;
   return (
     model === "opus-5-5" ||
     model === "opus-5" ||
     model.startsWith("codex-") ||
     model.startsWith("codex:") ||
-    model === "composer-2-5" ||
-    model.startsWith("cursor:")
+    model === "composer-2-5"
   );
 }
 
