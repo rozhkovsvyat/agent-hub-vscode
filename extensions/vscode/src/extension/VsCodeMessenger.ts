@@ -93,6 +93,7 @@ import {
 } from "@cukii/vendor-bridge";
 import { retryBridgeTeardownOnDispose } from "@cukii/vendor-bridge";
 import {
+  CREDENTIAL_API_OPT_IN_VENDORS,
   createUsagePoller,
   type VendorUsagePoller,
 } from "@cukii/vendor-bridge";
@@ -705,6 +706,13 @@ export class VsCodeMessenger {
       },
       log: (line) =>
         this.usageLog.appendLine(`[${new Date().toISOString()}] ${line}`),
+      // Opt-in only (plan item 1): without it Claude/Codex stored logins are
+      // never read for usage; their windows come from the CLIs themselves.
+      credentialApiOptIn: vscode.workspace
+        .getConfiguration("cukii")
+        .get<boolean>("usage.directVendorApi", false)
+        ? CREDENTIAL_API_OPT_IN_VENDORS
+        : [],
     });
     this.usagePoller.start();
     context.subscriptions.push({ dispose: () => this.usagePoller.stop() });
