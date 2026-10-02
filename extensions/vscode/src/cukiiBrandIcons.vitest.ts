@@ -104,10 +104,11 @@ describe("cukii brand icons", () => {
     expect(markSvg).toContain('cx="22.4" cy="42.5" r="2.95"');
   });
 
-  it("puts the cookie inside a message bubble on every Cukii Chat mark", () => {
-    // Owner, 2026-10-02: the plugin becomes "Cukii Chat", its logo is the
-    // cookie sitting inside a chat bubble. One bubble path on all three marks.
-    const bubble = /<path d="(M17 7 H47 [^"]+)"/;
+  it("cuts the cookie out of a filled chat bubble on every Cukii Chat mark", () => {
+    // Owner, 2026-10-02: the plugin is "Cukii Chat"; its mark is a FILLED chat
+    // bubble, the cookie is a cut-out inside it and the chips are filled back
+    // in. One bubble path on all three marks, rounded like the capsules.
+    const bubble = /<path d="(M21 8 H43 [^"]+)"/;
     const marks = [
       "cukii-store.svg",
       "cukii-activity.svg",
@@ -117,17 +118,28 @@ describe("cukii brand icons", () => {
     expect(paths[0]).toBeDefined();
     expect(new Set(paths).size).toBe(1);
     for (const svg of marks) {
-      // The cookie is nested, not redrawn: same silhouette inside one group.
-      expect(svg).toMatch(/<g transform="[^"]+">\s*<path d="M56\.3/);
+      // The bubble is painted, the cookie is a hole punched by the mask.
+      expect(svg).toMatch(
+        /<path d="M21 8 H43 [^"]+" fill="[^"]+" mask="url\(#cutout-mask\)"/,
+      );
+      expect(svg).toMatch(/<path d="M56\.3[^"]+" fill="black"\/>/);
+      // Bite and chips restore the bubble colour inside the hole.
+      for (const restored of [
+        'cx="49.5" cy="14" r="10" fill="white"',
+        'cx="26.6" cy="28.8" r="3.75" fill="white"',
+        'cx="39.9" cy="35" r="5.25" fill="white"',
+        'cx="28.2" cy="40.6" r="4.1" fill="white"',
+      ]) {
+        expect(svg).toContain(restored);
+      }
     }
-    // Monochrome marks keep the bubble as a stroke so the mask stays legible.
-    expect(marks[1]).toMatch(/fill="none" stroke="currentColor"/);
+    expect(marks[1]).toContain('fill="currentColor" mask="url(#cutout-mask)"');
   });
 
   it("keeps the in-chat thinking glyph a bare cookie, without the bubble", () => {
     const cookie = readMediaIcon("media/cukii-cookie.svg");
     expect(cookie).toContain('d="M56.3');
-    expect(cookie).not.toContain("M17 7 H47");
+    expect(cookie).not.toContain("M21 8 H43");
     const glyph = readFileSync(
       join(
         __dirname,

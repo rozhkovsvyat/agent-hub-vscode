@@ -1,8 +1,8 @@
 # Changelog
 
-## 2.0.159
+## 2.0.160
 
-- **Cukii Chat.** The extension is now called Cukii Chat, with a new logo: the cookie inside a chat bubble.
+- **Cukii Chat.** The extension is now called Cukii Chat, with a new logo: the cookie cut out of a chat bubble.
 - **Usage limits without your logins.** Claude and Codex limits now come from the CLIs themselves. Reading your stored login for them is an opt-in setting (`cukii.usage.directVendorApi`).
 - **No orphaned agents.** If VS Code is killed instead of closed, the agent processes it started now stop too, instead of running on and spending quota.
 
