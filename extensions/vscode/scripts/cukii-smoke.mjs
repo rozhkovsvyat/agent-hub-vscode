@@ -190,14 +190,19 @@ if (cmd === "launch") {
     await sleep(1000);
   }
   await sleep(6000);
-  const panel = await openPanel(cdp);
-  // First activation of a fresh profile takes a while; wait until the Cukii
-  // webview has actually rendered its session list before handing over.
+  // A click that lands before the workbench is ready only shows the tooltip,
+  // and first activation of a fresh profile is slow: click, then wait for the
+  // Cukii webview to render its session list, and retry the click.
+  let panel;
   let ready = false;
-  for (let i = 0; i < 45 && !ready; i++) {
-    ready = !!(await sidebarEval(cdp, `/New session/.test(document.body?.innerText || "") ? "ready" : null`).catch(() => undefined));
-    if (!ready) await sleep(1000);
+  for (let attempt = 0; attempt < 3 && !ready; attempt++) {
+    panel = await openPanel(cdp);
+    for (let i = 0; i < 20 && !ready; i++) {
+      ready = !!(await sidebarEval(cdp, `/New session/.test(document.body?.innerText || "") ? "ready" : null`).catch(() => undefined));
+      if (!ready) await sleep(1000);
+    }
   }
+  if (!ready) fail("Cukii panel did not open");
   out({ port: cdp, profile, panel: panel ?? null, ready });
 }
 
