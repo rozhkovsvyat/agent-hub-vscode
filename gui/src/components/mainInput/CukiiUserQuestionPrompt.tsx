@@ -202,7 +202,7 @@ export function CukiiUserQuestionPrompt() {
         onPointerMove={drag}
         onPointerUp={stopDrag}
       >
-        Cukii needs your input
+        Cukii Chat needs your input
         {request.questions.length > 1 && (
           <span className="cukii-user-question-count">
             {request.questions.length} questions
