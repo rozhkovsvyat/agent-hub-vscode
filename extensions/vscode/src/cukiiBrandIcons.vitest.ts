@@ -103,4 +103,45 @@ describe("cukii brand icons", () => {
     expect(markSvg).toContain('cx="34.9" cy="40" r="3.2"');
     expect(markSvg).toContain('cx="22.4" cy="42.5" r="2.95"');
   });
+
+  it("puts the cookie inside a message bubble on every Cukii Chat mark", () => {
+    // Owner, 2026-10-02: the plugin becomes "Cukii Chat", its logo is the
+    // cookie sitting inside a chat bubble. One bubble path on all three marks.
+    const bubble = /<path d="(M17 7 H47 [^"]+)"/;
+    const marks = [
+      "cukii-store.svg",
+      "cukii-activity.svg",
+      "cukii-title.svg",
+    ].map((file) => readMediaIcon(`media/${file}`));
+    const paths = marks.map((svg) => bubble.exec(svg)?.[1]);
+    expect(paths[0]).toBeDefined();
+    expect(new Set(paths).size).toBe(1);
+    for (const svg of marks) {
+      // The cookie is nested, not redrawn: same silhouette inside one group.
+      expect(svg).toMatch(/<g transform="[^"]+">\s*<path d="M56\.3/);
+    }
+    // Monochrome marks keep the bubble as a stroke so the mask stays legible.
+    expect(marks[1]).toMatch(/fill="none" stroke="currentColor"/);
+  });
+
+  it("keeps the in-chat thinking glyph a bare cookie, without the bubble", () => {
+    const cookie = readMediaIcon("media/cukii-cookie.svg");
+    expect(cookie).toContain('d="M56.3');
+    expect(cookie).not.toContain("M17 7 H47");
+    const glyph = readFileSync(
+      join(
+        __dirname,
+        "..",
+        "..",
+        "..",
+        "gui",
+        "src",
+        "components",
+        "cukii",
+        "CukiiThinkingGlyph.tsx",
+      ),
+      "utf8",
+    );
+    expect(glyph).toContain("media/cukii-cookie.svg");
+  });
 });

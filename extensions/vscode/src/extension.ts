@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
     const environmentError = describeCukiiEnvironmentError(e);
     vscode.window
       .showWarningMessage(
-        environmentError ?? "Error activating the Cukii extension.",
+        environmentError ?? "Error activating the Cukii Chat extension.",
         "View Logs",
         "Retry",
       )

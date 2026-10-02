@@ -53,7 +53,7 @@ describe("cukiiComposerPlaceholder", () => {
         isComposerFocused: true,
         isWebviewFocused: false,
       }),
-    ).toBe("ctrl esc to focus or unfocus Cukii");
+    ).toBe("ctrl esc to focus or unfocus Cukii Chat");
 
     expect(
       cukiiComposerPlaceholder({
@@ -66,7 +66,7 @@ describe("cukiiComposerPlaceholder", () => {
         isComposerFocused: false,
         isWebviewFocused: true,
       }),
-    ).toBe("ctrl esc to focus or unfocus Cukii");
+    ).toBe("ctrl esc to focus or unfocus Cukii Chat");
   });
 
   it("keeps edit and busy states ahead of the selection hint", () => {
@@ -104,7 +104,7 @@ describe("cukiiComposerPlaceholder", () => {
         historyLength: 1,
         sessionId: "session-a",
       }),
-    ).toBe("ctrl esc to focus or unfocus Cukii");
+    ).toBe("ctrl esc to focus or unfocus Cukii Chat");
   });
 
   it("does not use the streaming placeholder on non-main inputs", () => {

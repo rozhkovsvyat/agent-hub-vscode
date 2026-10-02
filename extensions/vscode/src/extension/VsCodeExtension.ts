@@ -565,7 +565,7 @@ export class VsCodeExtension {
               const alibabaEnv =
                 agent === "qwen" ? await alibabaSpawnEnv("qwen-3-8-max") : {};
               const terminal = vscode.window.createTerminal({
-                name: `Cukii · ${agent} · ${role}`,
+                name: `Cukii Chat · ${agent} · ${role}`,
                 cwd: command.cwd,
                 shellPath: command.program,
                 shellArgs: command.args,

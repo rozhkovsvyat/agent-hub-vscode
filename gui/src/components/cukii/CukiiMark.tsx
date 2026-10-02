@@ -17,6 +17,11 @@ export function CukiiMark({ size = 56 }: { size?: number }) {
   } as CSSProperties;
 
   return (
-    <span className="cukii-mark" style={style} role="img" aria-label="Cukii" />
+    <span
+      className="cukii-mark"
+      style={style}
+      role="img"
+      aria-label="Cukii Chat"
+    />
   );
 }

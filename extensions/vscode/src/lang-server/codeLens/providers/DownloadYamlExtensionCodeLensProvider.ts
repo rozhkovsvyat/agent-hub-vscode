@@ -22,7 +22,7 @@ export class DownloadYamlExtensionCodeLensProvider
     const docCodeLens: vscode.CodeLens = {
       range: new vscode.Range(0, 0, 0, 0),
       command: {
-        title: "📖 View Cukii Reference",
+        title: "📖 View Cukii Chat Reference",
         command: "vscode.open",
         arguments: [
           vscode.Uri.parse("https://github.com/rozhkovsvyat/agent-hub-vscode"),

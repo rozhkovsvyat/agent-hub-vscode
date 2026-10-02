@@ -24,7 +24,7 @@ export function getNonce() {
 export function getExtensionUri(): vscode.Uri {
   const extension = vscode.extensions.getExtension("cukii.cukii-vscode");
   if (!extension) {
-    throw new Error("Cukii extension is not registered in VS Code");
+    throw new Error("Cukii Chat extension is not registered in VS Code");
   }
   return extension.extensionUri;
 }

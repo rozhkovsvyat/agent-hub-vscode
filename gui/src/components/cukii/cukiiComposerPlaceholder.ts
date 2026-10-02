@@ -1,6 +1,6 @@
 export const CUKII_COMPOSER_EMPTY_MESSAGES = [
   "What shall we bake today?",
-  "Bring the task — Cukii will handle the crumbs.",
+  "Bring the task — Cukii Chat will handle the crumbs.",
   "Ready to make something worth shipping?",
   "What are we fixing first?",
   "Drop in the context. Let’s get cooking.",
@@ -52,7 +52,7 @@ export function cukiiComposerPlaceholder({
   }
 
   if (historyLength > 0) {
-    return "ctrl esc to focus or unfocus Cukii";
+    return "ctrl esc to focus or unfocus Cukii Chat";
   }
 
   // Cukii has no prompt-suggestion provider in the IDE protocol. The native

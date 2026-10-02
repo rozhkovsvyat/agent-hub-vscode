@@ -15,9 +15,9 @@
   },
   "homepage": "https://github.com/rozhkovsvyat/agent-hub-vscode",
   "license": "Apache-2.0",
-  "displayName": "Cukii",
+  "displayName": "Cukii Chat",
   "pricing": "Free",
-  "description": "Cukii - local AI development workspace",
+  "description": "Cukii Chat — one chat for the Claude Code, Codex, Grok, Qwen, Kimi and Cursor CLIs you already pay for",
   "publisher": "cukii",
   "engines": {
     "vscode": "^1.70.0",
@@ -78,7 +78,7 @@
       }
     ],
     "configuration": {
-      "title": "Cukii",
+      "title": "Cukii Chat",
       "properties": {
         "continue.telemetryEnabled": {
           "type": "boolean",
@@ -157,230 +157,230 @@
     "commands": [
       {
         "command": "cukii.openBridgeSession",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Open Bridge Session"
       },
       {
         "command": "cukii.recoverBridgeSession",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Recover Bridge Session"
       },
       {
         "command": "continue.applyCodeFromChat",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Apply code from chat",
         "group": "Cukii"
       },
       {
         "command": "continue.acceptDiff",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Accept Diff",
         "group": "Cukii"
       },
       {
         "command": "continue.rejectDiff",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Reject Diff",
         "group": "Cukii",
         "icon": "$(stop)"
       },
       {
         "command": "continue.acceptVerticalDiffBlock",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Accept Vertical Diff Block",
         "group": "Cukii"
       },
       {
         "command": "continue.rejectVerticalDiffBlock",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Reject Vertical Diff Block",
         "group": "Cukii"
       },
       {
         "command": "continue.focusEdit",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Add to Edit",
         "group": "Cukii"
       },
       {
         "command": "continue.focusCuKiiInput",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Add Highlighted Code to Context and Clear Chat",
         "group": "Cukii"
       },
       {
         "command": "continue.focusCuKiiInputWithoutClear",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Add to Chat",
         "group": "Cukii"
       },
       {
         "command": "continue.debugTerminal",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Debug Terminal",
         "group": "Cukii"
       },
       {
         "command": "continue.exitEditMode",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Exit Edit Mode",
         "group": "Cukii"
       },
       {
         "command": "continue.openConfigPage",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Open Settings",
         "icon": "$(gear)",
         "group": "Cukii"
       },
       {
         "command": "continue.toggleTabAutocompleteEnabled",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Toggle Autocomplete Enabled",
         "group": "Cukii"
       },
       {
         "command": "continue.forceAutocomplete",
-        "title": "Cukii: Force Autocomplete",
-        "category": "Cukii"
+        "title": "Cukii Chat: Force Autocomplete",
+        "category": "Cukii Chat"
       },
       {
         "command": "continue.selectFilesAsContext",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Select Files as Context",
         "group": "Cukii"
       },
       {
         "command": "continue.newSession",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "New Session",
         "icon": "$(add)",
         "group": "Cukii"
       },
       {
         "command": "continue.shareSession",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Share Current Chat Session as Markdown",
         "group": "Cukii"
       },
       {
         "command": "continue.viewLogs",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "View Logs",
         "group": "Cukii"
       },
       {
         "command": "continue.clearConsole",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Clear Console",
         "icon": "$(clear-all)",
         "group": "Cukii"
       },
       {
         "command": "continue.navigateTo",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Navigate to a path",
         "group": "Cukii"
       },
       {
         "command": "continue.writeCommentsForCode",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Write Comments for this Code",
         "group": "Cukii"
       },
       {
         "command": "continue.writeDocstringForCode",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Write a Docstring for this Code",
         "group": "Cukii"
       },
       {
         "command": "continue.fixCode",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Fix this Code",
         "group": "Cukii"
       },
       {
         "command": "continue.optimizeCode",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Optimize this Code",
         "group": "Cukii"
       },
       {
         "command": "continue.fixGrammar",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Fix Grammar / Spelling",
         "group": "Cukii"
       },
       {
         "command": "continue.codebaseForceReIndex",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Codebase Force Re-Index",
         "group": "Cukii"
       },
       {
         "command": "continue.rebuildCodebaseIndex",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Rebuild codebase index",
         "group": "Cukii"
       },
       {
         "command": "continue.docsIndex",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Docs Index",
         "group": "Cukii"
       },
       {
         "command": "continue.docsReIndex",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Docs Force Re-Index",
         "group": "Cukii"
       },
       {
         "command": "continue.focusCuKiiInput",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Focus Cukii Chat",
         "group": "Cukii"
       },
       {
         "command": "continue.enterEnterpriseLicenseKey",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Enter Enterprise License Key",
         "group": "Cukii"
       },
       {
         "command": "continue.toggleNextEditEnabled",
-        "title": "Cukii: Toggle Next Edit"
+        "title": "Cukii Chat: Toggle Next Edit"
       },
       {
         "command": "continue.nextEditWindow.hideNextEditSuggestion",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Hide Next Edit Suggestion"
       },
       {
         "command": "continue.nextEditWindow.acceptNextEditSuggestion",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Accept Next Edit Suggestion"
       },
       {
         "command": "continue.forceNextEdit",
-        "category": "Cukii",
-        "title": "Cukii: Force Next Edit"
+        "category": "Cukii Chat",
+        "title": "Cukii Chat: Force Next Edit"
       },
       {
         "command": "continue.acceptJump",
-        "category": "Cukii",
-        "title": "Cukii: Accept Jump Suggestion"
+        "category": "Cukii Chat",
+        "title": "Cukii Chat: Accept Jump Suggestion"
       },
       {
         "command": "continue.rejectJump",
-        "category": "Cukii",
-        "title": "Cukii: Reject Jump Suggestion"
+        "category": "Cukii Chat",
+        "title": "Cukii Chat: Reject Jump Suggestion"
       },
       {
         "command": "continue.openInNewWindow",
-        "category": "Cukii",
-        "title": "Open Cukii in a New Tab",
+        "category": "Cukii Chat",
+        "title": "Open Cukii Chat in a New Tab",
         "icon": {
           "light": "media/cukii-title.svg",
           "dark": "media/cukii-title.svg"
@@ -389,13 +389,13 @@
       },
       {
         "command": "cukii.renameChatPanel",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Rename Session",
         "group": "Cukii"
       },
       {
         "command": "cukii.installMemoryDiscipline",
-        "category": "Cukii",
+        "category": "Cukii Chat",
         "title": "Install Memory Discipline",
         "group": "Cukii"
       }
@@ -640,14 +640,14 @@
       "activitybar": [
         {
           "id": "cukii",
-          "title": "Cukii",
+          "title": "Cukii Chat",
           "icon": "media/cukii-activity.svg"
         }
       ],
       "panel": [
         {
           "id": "continueConsole",
-          "title": "Cukii Console",
+          "title": "Cukii Chat Console",
           "icon": "$(window)"
         }
       ]
@@ -657,7 +657,7 @@
         {
           "type": "webview",
           "id": "continue.continueGUIView",
-          "name": "Cukii",
+          "name": "Cukii Chat",
           "icon": "media/cukii-activity.svg",
           "visibility": "visible"
         }
@@ -666,7 +666,7 @@
         {
           "type": "webview",
           "id": "continue.continueConsoleView",
-          "name": "Cukii Console",
+          "name": "Cukii Chat Console",
           "icon": "$(window)",
           "visibility": "visible",
           "when": "config.continue.enableConsole"

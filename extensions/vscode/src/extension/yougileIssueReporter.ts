@@ -191,11 +191,11 @@ export function cukiiIssueReportTitle(description: string): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  const title = (firstLine ?? "Cukii issue report").slice(
+  const title = (firstLine ?? "Cukii Chat issue report").slice(
     0,
     CUKII_ISSUE_MAX_TITLE,
   );
-  return title.trim() || "Cukii issue report";
+  return title.trim() || "Cukii Chat issue report";
 }
 
 function retryDelay(attempts: number): number {
@@ -1074,17 +1074,12 @@ export class YougileIssueReporter {
     }
 
     if (!report.taskId) {
-      const created = (await this.requestJson(
-        key,
-        "/tasks",
-        "POST",
-        {
-          title: report.title,
-          columnId: CUKII_BUGS_INBOX_COLUMN_ID,
-          description: this.description(report),
-          idempotencyKey: report.reportId,
-        },
-      )) as { id?: unknown };
+      const created = (await this.requestJson(key, "/tasks", "POST", {
+        title: report.title,
+        columnId: CUKII_BUGS_INBOX_COLUMN_ID,
+        description: this.description(report),
+        idempotencyKey: report.reportId,
+      })) as { id?: unknown };
       if (typeof created.id !== "string" || !created.id) {
         throw new DeliveryError("YouGile returned no task id.");
       }

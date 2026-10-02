@@ -693,7 +693,7 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     const issueReporter = yougileIssueReporterForContext(context);
-    this.usageLog = vscode.window.createOutputChannel("Cukii · usage");
+    this.usageLog = vscode.window.createOutputChannel("Cukii Chat · usage");
     context.subscriptions.push(this.usageLog);
     this.usagePoller = createUsagePoller({
       vendors: CUKII_USAGE_POLLER_VENDORS,
@@ -738,7 +738,7 @@ export class VsCodeMessenger {
     });
     // Every discipline attempt lands here, success or failure. Without it the
     // only way to learn why a machine has no contract was to read the source.
-    const memoryLog = vscode.window.createOutputChannel("Cukii · memory");
+    const memoryLog = vscode.window.createOutputChannel("Cukii Chat · memory");
     context.subscriptions.push(memoryLog);
     const memoryAccount = cukiiMemoryAccountForContext(context, (line) =>
       memoryLog.appendLine(`[${new Date().toISOString()}] ${line}`),
@@ -1275,7 +1275,7 @@ export class VsCodeMessenger {
         canSelectFolders: false,
         canSelectMany: remaining > 1,
         openLabel: "Attach screenshots",
-        title: "Attach screenshots to the Cukii issue report",
+        title: "Attach screenshots to the Cukii Chat issue report",
         filters: { Images: ["png", "jpg", "jpeg", "webp", "gif"] },
       });
       return issueReporter.registerPickedImages(
@@ -1299,7 +1299,7 @@ export class VsCodeMessenger {
         canSelectFolders: false,
         canSelectMany: true,
         openLabel: "Upload",
-        title: "Upload files to Cukii",
+        title: "Upload files to Cukii Chat",
       });
       return (picked ?? []).map((uri) => ({
         path: uri.fsPath,
@@ -1445,7 +1445,7 @@ export class VsCodeMessenger {
         // a fresh channel per login both accumulated duplicates and spread
         // the one-time code across more log files (Fable review MINOR-5).
         this.codexLoginOutput ??= vscode.window.createOutputChannel(
-          "Cukii · codex login",
+          "Cukii Chat · codex login",
         );
         const output = this.codexLoginOutput;
         output.clear();
@@ -1528,7 +1528,7 @@ export class VsCodeMessenger {
         spec.closesTerminal === true
       ) {
         const output = vscode.window.createOutputChannel(
-          `Cukii · ${vendor} install`,
+          `Cukii Chat · ${vendor} install`,
         );
         output.clear();
         output.appendLine(

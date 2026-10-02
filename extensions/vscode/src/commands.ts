@@ -1091,7 +1091,7 @@ const getCommandsMap: (
           sessionId: candidate.sessionId,
         })),
         {
-          title: "Choose Cukii editor tab to rename",
+          title: "Choose Cukii Chat editor tab to rename",
           placeHolder: "Select the tab you opened the context menu from",
           matchOnDescription: true,
         },
@@ -1108,7 +1108,7 @@ const getCommandsMap: (
       // into the input and let it be saved as a manual session title.
       const currentTitle = entry.displayTitle?.trim() ?? "";
       const nextTitle = await vscode.window.showInputBox({
-        title: "Rename Cukii session",
+        title: "Rename Cukii Chat session",
         value: currentTitle,
         validateInput: (value) =>
           value.trim() ? undefined : "Title cannot be empty",

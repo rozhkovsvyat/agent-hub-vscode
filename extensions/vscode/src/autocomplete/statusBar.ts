@@ -48,29 +48,29 @@ const statusBarItemText = (
   error?: boolean,
 ) => {
   if (error) {
-    return "$(alert) Cukii (config error)";
+    return "$(alert) Cukii Chat (config error)";
   }
 
   let text: string;
   switch (status) {
     case undefined:
       if (loading) {
-        text = "$(loading~spin) Cukii";
+        text = "$(loading~spin) Cukii Chat";
       } else {
-        text = "Cukii";
+        text = "Cukii Chat";
       }
       break;
     case StatusBarStatus.Disabled:
-      text = "$(circle-slash) Cukii";
+      text = "$(circle-slash) Cukii Chat";
       break;
     case StatusBarStatus.Enabled:
-      text = "$(check) Cukii";
+      text = "$(check) Cukii Chat";
       break;
     case StatusBarStatus.Paused:
-      text = "$(debug-pause) Cukii";
+      text = "$(debug-pause) Cukii Chat";
       break;
     default:
-      text = "Cukii";
+      text = "Cukii Chat";
   }
 
   // Append Next Edit indicator if enabled.

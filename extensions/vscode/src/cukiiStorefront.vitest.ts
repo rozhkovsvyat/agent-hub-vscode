@@ -32,7 +32,9 @@ describe("cukii storefront card", () => {
   it("is published as cukii.cukii-vscode with our own name", () => {
     expect(manifest.publisher).toBe("cukii");
     expect(manifest.name).toBe("cukii-vscode");
-    expect(manifest.displayName).toBe("Cukii");
+    // Rebrand 2026-10-02: the plugin is "Cukii Chat"; "Cukii Box" is the
+    // second product, so the bare family name no longer names the extension.
+    expect(manifest.displayName).toBe("Cukii Chat");
     expect(manifest.description).not.toMatch(/continue/i);
   });
 
