@@ -2,7 +2,7 @@
   "name": "cukii-vscode",
   "icon": "media/icon.png",
   "author": "Cukii",
-  "version": "2.0.160",
+  "version": "2.0.161",
   "repository": {
     "type": "git",
     "url": "https://github.com/rozhkovsvyat/agent-hub-vscode"
@@ -454,98 +454,28 @@
         "when": "continue.diffVisible"
       },
       {
-        "command": "continue.quickEditHistoryUp",
-        "mac": "up",
-        "key": "up",
-        "when": "false && continue.quickEditHistoryFocused"
-      },
-      {
-        "command": "continue.quickEditHistoryDown",
-        "mac": "down",
-        "key": "down",
-        "when": "false && continue.quickEditHistoryFocused"
-      },
-      {
         "command": "continue.acceptVerticalDiffBlock",
         "mac": "alt+cmd+y",
-        "key": "alt+ctrl+y"
+        "key": "alt+ctrl+y",
+        "when": "continue.diffVisible"
       },
       {
         "command": "continue.rejectVerticalDiffBlock",
         "mac": "alt+cmd+n",
-        "key": "alt+ctrl+n"
-      },
-      {
-        "command": "continue.focusEdit",
-        "title": "Edit code with natural language",
-        "mac": "cmd+i",
-        "key": "ctrl+i"
-      },
-      {
-        "command": "continue.exitEditMode",
-        "mac": "escape",
-        "key": "escape",
-        "when": "continue.inEditMode && editorFocus"
-      },
-      {
-        "command": "continue.debugTerminal",
-        "mac": "cmd+shift+r",
-        "key": "ctrl+shift+r"
+        "key": "alt+ctrl+n",
+        "when": "continue.diffVisible"
       },
       {
         "command": "continue.openInNewWindow",
         "mac": "cmd+k cmd+m",
         "key": "ctrl+k ctrl+m",
         "when": "!terminalFocus"
-      },
-      {
-        "command": "continue.toggleTabAutocompleteEnabled",
-        "mac": "cmd+k cmd+a",
-        "key": "ctrl+k ctrl+a",
-        "when": "!terminalFocus"
-      },
-      {
-        "command": "continue.forceAutocomplete",
-        "key": "ctrl+alt+space",
-        "mac": "cmd+alt+space",
-        "when": "editorTextFocus && !editorHasSelection && !editorReadOnly && !inSnippetMode"
-      },
-      {
-        "command": "continue.applyCodeFromChat",
-        "mac": "alt+a",
-        "key": "alt+a"
-      },
-      {
-        "command": "continue.toggleNextEditEnabled",
-        "key": "ctrl+k ctrl+n",
-        "mac": "cmd+k cmd+n",
-        "when": "editorTextFocus"
-      },
-      {
-        "command": "continue.nextEditWindow.hideNextEditSuggestion",
-        "key": "escape",
-        "when": "editorTextFocus && nextEditWindowActive && !continue.jumpDecorationVisible"
-      },
-      {
-        "command": "continue.nextEditWindow.acceptNextEditSuggestion",
-        "key": "tab",
-        "when": "editorTextFocus && nextEditWindowActive && !continue.jumpDecorationVisible"
-      },
-      {
-        "command": "continue.acceptJump",
-        "key": "tab",
-        "when": "editorTextFocus && continue.jumpDecorationVisible"
-      },
-      {
-        "command": "continue.rejectJump",
-        "key": "escape",
-        "when": "editorTextFocus && continue.jumpDecorationVisible"
       }
     ],
     "submenus": [
       {
         "id": "continue.continueSubMenu",
-        "label": "Cukii"
+        "label": "Cukii Chat"
       }
     ],
     "menus": {
@@ -563,10 +493,95 @@
           "command": "continue.newSession"
         },
         {
-          "command": "continue.enterEnterpriseLicenseKey"
+          "command": "continue.openInNewWindow"
         },
         {
-          "command": "continue.openInNewWindow"
+          "command": "continue.toggleTabAutocompleteEnabled",
+          "when": "false"
+        },
+        {
+          "command": "continue.forceAutocomplete",
+          "when": "false"
+        },
+        {
+          "command": "continue.toggleNextEditEnabled",
+          "when": "false"
+        },
+        {
+          "command": "continue.forceNextEdit",
+          "when": "false"
+        },
+        {
+          "command": "continue.acceptJump",
+          "when": "false"
+        },
+        {
+          "command": "continue.rejectJump",
+          "when": "false"
+        },
+        {
+          "command": "continue.nextEditWindow.hideNextEditSuggestion",
+          "when": "false"
+        },
+        {
+          "command": "continue.nextEditWindow.acceptNextEditSuggestion",
+          "when": "false"
+        },
+        {
+          "command": "continue.writeCommentsForCode",
+          "when": "false"
+        },
+        {
+          "command": "continue.writeDocstringForCode",
+          "when": "false"
+        },
+        {
+          "command": "continue.fixCode",
+          "when": "false"
+        },
+        {
+          "command": "continue.optimizeCode",
+          "when": "false"
+        },
+        {
+          "command": "continue.fixGrammar",
+          "when": "false"
+        },
+        {
+          "command": "continue.codebaseForceReIndex",
+          "when": "false"
+        },
+        {
+          "command": "continue.rebuildCodebaseIndex",
+          "when": "false"
+        },
+        {
+          "command": "continue.docsIndex",
+          "when": "false"
+        },
+        {
+          "command": "continue.docsReIndex",
+          "when": "false"
+        },
+        {
+          "command": "continue.enterEnterpriseLicenseKey",
+          "when": "false"
+        },
+        {
+          "command": "continue.focusEdit",
+          "when": "false"
+        },
+        {
+          "command": "continue.exitEditMode",
+          "when": "false"
+        },
+        {
+          "command": "continue.applyCodeFromChat",
+          "when": "false"
+        },
+        {
+          "command": "continue.openConfigPage",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -596,11 +611,6 @@
         {
           "command": "continue.focusCuKiiInputWithoutClear",
           "group": "Cukii"
-        },
-        {
-          "command": "continue.focusEdit",
-          "group": "Cukii",
-          "when": "!editorReadonly"
         }
       ],
       "explorer/context": [

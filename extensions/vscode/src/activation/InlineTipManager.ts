@@ -15,7 +15,9 @@ const SVG_CONFIG = {
   radius: 3,
   leftMargin: 40,
   debounceDelay: 500,
-  chatLabel: "Chat",
+  // Only chat is advertised: Continue's Edit mode (⌘I) needs Continue-configured
+  // models a Cukii Chat user never has, so the tip pointed at a dead feature.
+  chatLabel: "Cukii Chat",
   chatShortcut: `${getMetaKeyLabel()}+L`,
   editLabel: "Edit",
   editShortcut: `${getMetaKeyLabel()}+I`,
@@ -40,8 +42,8 @@ const SVG_CONFIG = {
   },
   get tipWidth() {
     return (
-      this.editShortcutX +
-      this.getEstimatedTextWidth(this.editShortcut) +
+      this.chatShortcutX +
+      this.getEstimatedTextWidth(this.chatShortcut) +
       this.paddingX
     );
   },
@@ -285,23 +287,6 @@ export class InlineTipManager {
             fill: SVG_CONFIG.shortcutColor,
           },
           SVG_CONFIG.chatShortcut,
-        )
-        // Edit
-        .text(
-          {
-            ...baseTextConfig,
-            x: SVG_CONFIG.editLabelX,
-            fill: this.theme?.colors["editor.foreground"] ?? SVG_CONFIG.stroke,
-          },
-          SVG_CONFIG.editLabel,
-        )
-        .text(
-          {
-            ...baseTextConfig,
-            x: SVG_CONFIG.editShortcutX,
-            fill: SVG_CONFIG.shortcutColor,
-          },
-          SVG_CONFIG.editShortcut,
         )
         .render();
 

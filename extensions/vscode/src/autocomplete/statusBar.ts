@@ -99,6 +99,14 @@ const statusBarItemTooltip = (status: StatusBarStatus | undefined) => {
   }
 };
 
+export function statusBarItemVisible(
+  status: StatusBarStatus | undefined,
+): boolean {
+  return (
+    status === StatusBarStatus.Enabled || status === StatusBarStatus.Paused
+  );
+}
+
 let statusBarStatus: StatusBarStatus | undefined = undefined;
 let statusBarItem: vscode.StatusBarItem | undefined = undefined;
 let statusBarFalseTimeout: NodeJS.Timeout | undefined = undefined;
@@ -149,9 +157,16 @@ export function setupStatusBar(
   statusBarItem.tooltip = statusBarItemTooltip(status ?? statusBarStatus);
   statusBarItem.command = "continue.openTabAutocompleteConfigMenu";
 
-  statusBarItem.show();
   if (status !== undefined) {
     statusBarStatus = status;
+  }
+  // Tab autocomplete is off by default in Cukii Chat (chat runs on the vendor
+  // CLIs). A permanent "⊘ Cukii Chat" item read as "the plugin is disabled",
+  // so the item exists only while autocomplete is actually on or paused.
+  if (statusBarItemVisible(statusBarStatus)) {
+    statusBarItem.show();
+  } else {
+    statusBarItem.hide();
   }
 
   // Guard: only register this listener once. Previously it was registered on
