@@ -1,7 +1,12 @@
 import { act } from "@testing-library/react";
 import { vi } from "vitest";
 import { renderWithProviders } from "../../../util/test/render";
-import { Chat, INITIAL_TRANSCRIPT_WINDOW, stickySafeTranscriptStart } from "../Chat";
+import {
+  Chat,
+  INITIAL_TRANSCRIPT_WINDOW,
+  nextTranscriptWindow,
+  stickySafeTranscriptStart,
+} from "../Chat";
 import {
   newSession,
   setActive,
@@ -123,7 +128,8 @@ describe("Cukii saved-session loading", () => {
       `assistant-${INITIAL_TRANSCRIPT_WINDOW * 2}`,
     );
     markdownRenderSpy.mockClear();
-    const transcript = container.querySelector<HTMLElement>(".cukii-transcript")!;
+    const transcript =
+      container.querySelector<HTMLElement>(".cukii-transcript")!;
     Object.defineProperty(transcript, "clientHeight", {
       configurable: true,
       value: 400,
@@ -176,6 +182,35 @@ describe("Cukii saved-session loading", () => {
     expect(stickySafeTranscriptStart(history, 4)).toBe(0);
   });
 
+  it("moves the window start to an earlier turn even across a long autonomous turn (card 1e059c83)", () => {
+    // Shape of the owner's session: earlier turns, then one user prompt
+    // followed by 300 assistant items, then a recent turn.
+    const row = (role: "user" | "assistant", i: number) =>
+      ({
+        message: { id: `${role}-${i}`, role, content: `${role} ${i}` },
+        contextItems: [],
+      }) as any;
+    const history = [
+      row("user", 0),
+      ...Array.from({ length: 50 }, (_, i) => row("assistant", i + 1)),
+      row("user", 51),
+      ...Array.from({ length: 400 }, (_, i) => row("assistant", i + 52)),
+      row("user", 452),
+      ...Array.from({ length: 100 }, (_, i) => row("assistant", i + 453)),
+    ];
+    const start = (count: number) => stickySafeTranscriptStart(history, count);
+    // The old fixed step: two windows that start at the very same row.
+    const stuck = 2 * INITIAL_TRANSCRIPT_WINDOW;
+    expect(start(stuck)).toBe(51);
+    expect(start(stuck + INITIAL_TRANSCRIPT_WINDOW)).toBe(51);
+    // The new step always reveals an earlier turn.
+    const next = nextTranscriptWindow(history, stuck);
+    expect(start(next)).toBeLessThan(start(stuck));
+    expect(start(next)).toBe(0);
+    // Fully shown history stays put.
+    expect(nextTranscriptWindow(history, history.length)).toBe(history.length);
+  });
+
   it("loads earlier history automatically when the transcript reaches the top", async () => {
     const { store, container } = await renderWithProviders(<Chat />);
     const history = Array.from(
@@ -202,7 +237,8 @@ describe("Cukii saved-session loading", () => {
 
     expect(container.querySelector(".cukii-load-earlier")).toBeNull();
     expect(container.textContent).not.toContain("assistant-0");
-    const transcript = container.querySelector<HTMLElement>(".cukii-transcript")!;
+    const transcript =
+      container.querySelector<HTMLElement>(".cukii-transcript")!;
     Object.defineProperty(transcript, "clientHeight", {
       configurable: true,
       value: 400,

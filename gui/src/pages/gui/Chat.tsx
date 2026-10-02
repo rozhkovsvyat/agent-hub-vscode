@@ -136,6 +136,30 @@ export function stickySafeTranscriptStart(
   }
   return start;
 }
+/**
+ * The next history window when the reader reaches the top. Growing by one
+ * fixed step is not enough: the window start snaps back to the turn's user
+ * prompt, so a long autonomous turn (hundreds of items without a user message)
+ * made two consecutive windows start at the same row. Nothing was prepended,
+ * the viewport stayed at scrollTop 0, no further scroll event fired, and the
+ * rest of the session became unreachable (card 1e059c83). Grow until the start
+ * actually moves to an earlier turn, or the whole history is shown.
+ */
+export function nextTranscriptWindow(
+  history: ChatHistoryItemWithMessageId[],
+  visibleCount: number,
+): number {
+  const currentStart = stickySafeTranscriptStart(history, visibleCount);
+  if (currentStart === 0) return visibleCount;
+  let next = visibleCount + INITIAL_TRANSCRIPT_WINDOW;
+  while (
+    next < history.length &&
+    stickySafeTranscriptStart(history, next) >= currentStart
+  ) {
+    next += INITIAL_TRANSCRIPT_WINDOW;
+  }
+  return Math.min(next, history.length);
+}
 export const CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX = 40;
 export const CLAUDE_COMPOSER_BOTTOM_INSET_PX = 16;
 export const CUKII_STREAMING_LOADER_GAP_PX = 16;
@@ -323,6 +347,11 @@ export function Chat() {
     if (!element || anchor === null) return;
     loadEarlierAnchorRef.current = null;
     element.scrollTop = element.scrollHeight - anchor;
+    // A short prepended batch can leave the reader at the very top, where
+    // the browser fires no further scroll event; re-run the top check.
+    if (element.scrollTop <= 64) {
+      requestAnimationFrame(() => element.dispatchEvent(new Event("scroll")));
+    }
   }, [transcriptStart]);
 
   // Seamless history: approaching the top expands the window automatically.
@@ -343,16 +372,18 @@ export function Chat() {
       loadEarlierAnchorRef.current = element.scrollHeight - element.scrollTop;
       setTranscriptWindow((current) => ({
         sessionId,
-        visibleCount:
-          (current.sessionId === sessionId
+        visibleCount: nextTranscriptWindow(
+          history,
+          current.sessionId === sessionId
             ? current.visibleCount
-            : INITIAL_TRANSCRIPT_WINDOW) + INITIAL_TRANSCRIPT_WINDOW,
+            : INITIAL_TRANSCRIPT_WINDOW,
+        ),
       }));
     };
 
     transcript.addEventListener("scroll", expandIfAtTop, { passive: true });
     return () => transcript.removeEventListener("scroll", expandIfAtTop);
-  }, [history.length, isSessionLoading, sessionId, visibleTranscriptCount]);
+  }, [history, isSessionLoading, sessionId, visibleTranscriptCount]);
 
   // Claude parity: wheeling over the composer's own chrome — the padding
   // left/right of the editor, the toolbar backing zone below it — scrolls
