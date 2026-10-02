@@ -19,7 +19,7 @@ describe("CukiiEmptyState", () => {
     });
     expect(root).not.toHaveTextContent("Chat, Plan, Agent");
     expect(root).not.toHaveTextContent("Continue");
-    expect(screen.getByRole("img", { name: "Cukii" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Cukii Chat" })).toBeTruthy();
   });
 
   it("selects all ten messages deterministically from session ids", () => {
