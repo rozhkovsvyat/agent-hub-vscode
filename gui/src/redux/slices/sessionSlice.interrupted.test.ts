@@ -14,6 +14,7 @@ describe("Interrupted marker after a Stop (card 27b3f1a6)", () => {
       newSession({
         sessionId: "s",
         title: "t",
+        workspaceDirectory: "",
         history: [
           {
             message: { id: "u", role: "user", content: "run sleep" },

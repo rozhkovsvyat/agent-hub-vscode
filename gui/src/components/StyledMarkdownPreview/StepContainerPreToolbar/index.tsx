@@ -82,6 +82,16 @@ export function StepContainerPreToolbar({
   const applyState = useAppSelector((state) =>
     selectApplyStateByStreamId(state, codeBlockStreamId),
   );
+  // Applying into an existing file needs a Continue "apply"/"chat" model; a
+  // Cukii Chat user runs vendor CLIs and has none, so "Apply" only produced
+  // 'No model with roles "apply" or "chat" found in config.'
+  const hasApplyModel = useAppSelector(
+    (state) =>
+      !!(
+        state.config.config.selectedModelByRole?.apply ??
+        state.config.config.selectedModelByRole?.chat
+      ),
+  );
   const toolCallApplyState = useAppSelector((state) =>
     selectApplyStateByToolCallId(state, forceToolCallId),
   );
@@ -270,6 +280,13 @@ export function StepContainerPreToolbar({
     }
 
     if (fileExists || !relativeFilepath) {
+      const activeApply = toolCallApplyState ?? applyState;
+      if (
+        !hasApplyModel &&
+        (!activeApply || activeApply.status === "not-started")
+      ) {
+        return null;
+      }
       return (
         <ApplyActions
           disableManualApply={disableManualApply}
@@ -312,13 +329,13 @@ export function StepContainerPreToolbar({
               onClick={fileExists ? onClickFilename : undefined}
             />
           ) : (
-            <span className="text-lightgray ml-2 select-none capitalize">
+            <span className="text-lightgray ml-2 min-w-0 select-none truncate whitespace-nowrap capitalize">
               {language}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-2.5">
           {!isGeneratingCodeBlock && (
             <div className="xs:flex hidden items-center gap-2.5">
               <InsertButton onInsert={onClickInsertAtCursor} />
