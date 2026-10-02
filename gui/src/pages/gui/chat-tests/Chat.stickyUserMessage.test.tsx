@@ -327,13 +327,18 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   );
 });
 
-test("the last turn reserves no eviction slack, so the transcript never scrolls into a blank", () => {
+test("the last turn keeps its eviction slack so its one-line capsule stays pinned", () => {
+  // 2.0.167: with the last turn's slack switched off, the sticky row's tall
+  // box rode up with the end of the turn and the capsule left the top at
+  // max scroll (rowTop -323) with no next capsule in sight (card 8cfde09e).
+  // The blank that once justified the special case is now clipped by
+  // `.cukii-turns` (next test); live, the scroll range stayed 1645px.
   const css = canonicalCss();
-  expect(css).toMatch(
-    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*\{\s*margin-bottom:\s*0;?\s*\}/s,
+  expect(css).not.toMatch(
+    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*>\s*\.cukii-turn-slack\s*\{[^}]*display:\s*none/s,
   );
-  expect(css).toMatch(
-    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*>\s*\.cukii-turn-slack\s*\{\s*display:\s*none;?\s*\}/s,
+  expect(css).not.toMatch(
+    /\.cukii-turn:not\(:has\(~ \.cukii-turn\)\)\s*\{[^}]*margin-bottom:\s*0/s,
   );
 });
 

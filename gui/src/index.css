@@ -2367,18 +2367,13 @@ button.cukii-submit-button--stop:active {
   overflow-y: clip;
 }
 
-/* The last turn has no next capsule to evict its row, and a slack box that
-   outlives its turn's negative margin becomes real scrollable overflow: the
-   transcript grew by a prompt-sized blank and auto-scroll parked the answer
-   far above the viewport (2.0.155 acceptance). The fold cap keeps the last
-   capsule honest without it. */
-.cukii-turn:not(:has(~ .cukii-turn)) {
-  margin-bottom: 0;
-}
-
-.cukii-turn:not(:has(~ .cukii-turn)) > .cukii-turn-slack {
-  display: none;
-}
+/* The last turn keeps its slack too. Without it the sticky row's tall box
+   (full prompt height, only the top strip painted) rode up with the end of
+   the turn and the one-line capsule left the top although no next capsule
+   had arrived (2.0.167: rowTop -323 at max scroll; card 8cfde09e). The
+   prompt-sized blank that once made the last turn special (2.0.155) is now
+   prevented by `.cukii-turns { overflow-y: clip }`: measured, the scroll
+   range stays 1645px with the slack on. */
 
 /* Transcript layer scale. Upstream code-block and tool-call headers ship as
    `sticky -top-2 z-10`, so a capsule at the old z-index 2 was painted over by
