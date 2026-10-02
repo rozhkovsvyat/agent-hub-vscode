@@ -360,6 +360,9 @@ type SessionState = {
    * to redeliver it. Consumed by the next bridge turn to resume the task.
    * Ephemeral; never persisted. */
   steerInterruptPending?: boolean;
+  /** The user pressed Stop on a running turn. The next bridge turn tells the
+   * agent not to redo the stopped work. Ephemeral; never persisted. */
+  userStopPending?: boolean;
   title: string;
   titleManuallySet: boolean;
   revision: number;
@@ -869,6 +872,12 @@ export const sessionSlice = createSlice({
     clearSteerInterrupt: (state) => {
       state.steerInterruptPending = false;
     },
+    markUserStop: (state) => {
+      state.userStopPending = true;
+    },
+    clearUserStop: (state) => {
+      state.userStopPending = false;
+    },
     markSteerRead: (state, action: PayloadAction<{ messageId: string }>) => {
       const item = state.history.find(
         (entry) => entry.message.id === action.payload.messageId,
@@ -1121,6 +1130,7 @@ export const sessionSlice = createSlice({
       state.activeBridgeRunId = undefined;
       state.bridgeWait = undefined;
       state.steerInterruptPending = false;
+      state.userStopPending = false;
       state.isSessionLoading = false;
       state.symbols = {};
 
@@ -1643,6 +1653,8 @@ export const {
   cancelQueuedSteers,
   requestSteerInterrupt,
   clearSteerInterrupt,
+  clearUserStop,
+  markUserStop,
   streamUpdate,
   newSession,
   updateSessionTitle,

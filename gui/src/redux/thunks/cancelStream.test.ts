@@ -90,6 +90,8 @@ describe("cancelStream", () => {
     expect(
       store.getState().session.history.filter((item: any) => item.interrupted),
     ).toHaveLength(1);
+    // The next turn must tell the agent not to redo the stopped work.
+    expect(store.getState().session.userStopPending).toBe(true);
   });
 
   it("provider/lifecycle cancellation emits no Interrupted even if native receipt says turn", async () => {
@@ -119,6 +121,7 @@ describe("cancelStream", () => {
     expect(
       store.getState().session.history.filter((item: any) => item.interrupted),
     ).toHaveLength(0);
+    expect(store.getState().session.userStopPending).toBeFalsy();
   });
 
   it("ignores a late user-cancel receipt after the session was replaced", async () => {

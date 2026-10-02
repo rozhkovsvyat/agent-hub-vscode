@@ -11,6 +11,7 @@ import {
   setActive,
   setInactive,
   streamUpdate,
+  markUserStop,
 } from "../slices/sessionSlice";
 import { setupStore } from "../store";
 import {
@@ -1004,6 +1005,26 @@ describe("streamBrokerBridgeInput controls", () => {
         ],
       }),
     ]);
+  });
+
+  it("tells the next turn once that the user stopped the previous one", async () => {
+    const ideMessenger = new MockIdeMessenger();
+    const captured: Array<Record<string, unknown>> = [];
+    ideMessenger.streamRequest = vi.fn(async function* (_messageType, data) {
+      captured.push(data as Record<string, unknown>);
+      yield [{ role: "assistant", content: "ok", cukiiTerminal: true }];
+    }) as typeof ideMessenger.streamRequest;
+    const store = setupStore({ ideMessenger });
+    store.dispatch(newSession(undefined));
+    store.dispatch(markUserStop());
+    store.dispatch(streamUpdate([{ role: "user", content: "after stop" }]));
+    await store.dispatch(streamBrokerBridgeInput());
+    expect(captured[0]?.previousTurnStopped).toBe(true);
+    expect(store.getState().session.userStopPending).toBe(false);
+
+    store.dispatch(streamUpdate([{ role: "user", content: "next" }]));
+    await store.dispatch(streamBrokerBridgeInput());
+    expect(captured[1]?.previousTurnStopped).toBe(false);
   });
 
   it("awaits generator return when Stop cancels a live bridge", async () => {

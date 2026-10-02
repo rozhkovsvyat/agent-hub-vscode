@@ -4,6 +4,7 @@ import {
   abortStream,
   cancelQueuedSteers,
   clearDanglingMessages,
+  markUserStop,
   setCancelling,
   setCancellingSource,
   setInactive,
@@ -43,6 +44,7 @@ export const cancelStream = createAsyncThunk<
       dispatch(abortStream());
       dispatch(clearDanglingMessages(interrupted));
       dispatch(cancelQueuedSteers());
+      dispatch(markUserStop());
     }
     return;
   }
@@ -74,6 +76,9 @@ export const cancelStream = createAsyncThunk<
     // follow-up outbox too; otherwise the trailing drain below would restart
     // the bridge a couple of seconds after the user believes it was stopped.
     dispatch(cancelQueuedSteers());
+    // The native session does not record the Stop; the next turn must tell
+    // the agent not to redo the stopped work.
+    dispatch(markUserStop());
   }
   // Keep duplicate Stop/Escape events gated until the native process-tree
   // cancellation receipt arrives, even though the visible turn is already

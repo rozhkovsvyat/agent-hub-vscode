@@ -12,6 +12,7 @@ import {
   addPromptCompletionPair,
   claimBridgeRun,
   clearSteerInterrupt,
+  clearUserStop,
   errorToolCall,
   markSteerRead,
   markLatestUserReceiptDelivered,
@@ -292,6 +293,8 @@ export const streamBrokerBridgeInput = createAsyncThunk<
     if (state.session.steerInterruptPending) {
       dispatch(clearSteerInterrupt());
     }
+    const previousTurnStopped = Boolean(state.session.userStopPending);
+    if (previousTurnStopped) dispatch(clearUserStop());
     const currentSubmitId = hasImplicitRecovery
       ? initialUserReceiptId
       : undefined;
@@ -432,6 +435,7 @@ export const streamBrokerBridgeInput = createAsyncThunk<
           queuedFollowUpMessageIds,
           currentSubmitMessageId: currentSubmitId,
           steerInterrupt,
+          previousTurnStopped,
           forceColdStart,
         },
         streamAborter.signal,

@@ -1,11 +1,12 @@
 # Changelog
 
-## 2.0.164
+## 2.0.165
 
 - **Cukii Chat.** The extension is now called Cukii Chat, with a new logo: the cookie cut out of a chat bubble.
 - **Usage limits without your logins.** Claude and Codex limits now come from the CLIs themselves. Reading your stored login for them is an opt-in setting (`cukii.usage.directVendorApi`).
 - **No orphaned agents.** If VS Code is killed instead of closed, the agent processes it started now stop too, instead of running on and spending quota.
 - **Stop stops everything.** Stop now also ends the commands an agent started (a running build, test or `sleep`), not only the agent itself.
+- **Stopped means stopped.** After you press Stop, the agent no longer restarts the stopped work on your next message unless you ask for it again.
 - **Your shortcuts stay yours.** Cukii Chat no longer binds ⌥A, ⌘I, ⌘⇧R or the ⌥⌘Y/⌥⌘N diff keys everywhere, and the autocomplete, Next Edit, Quick Actions and indexing commands inherited from Continue are gone from the command palette.
 - **Quieter UI.** The editor tip now only points to the chat, and the status bar no longer shows a crossed-out item while autocomplete is off.
 - **The whole history stays reachable.** Scrolling up after a long agent turn no longer stops at the start of that turn; earlier messages keep loading.
