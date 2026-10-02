@@ -47,4 +47,4 @@ Something stuck or answered wrongly? Use **Report a bug** in the session — it 
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE).
+Apache-2.0 — see [LICENSE](./LICENSE.txt) and [NOTICE](./NOTICE).

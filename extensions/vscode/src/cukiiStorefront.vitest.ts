@@ -106,4 +106,21 @@ describe("cukii storefront card", () => {
     expect(manifest.icon).toBe("media/icon.png");
     expect(existsSync(join(extensionRoot, manifest.icon))).toBe(true);
   });
+
+  it("links only files that ship, and opens the changelog at this version", () => {
+    // Until 2.0.158 the README linked ./LICENSE while the file is LICENSE.txt,
+    // so the license link on the Marketplace card was dead.
+    const readme = readFileSync(join(extensionRoot, "README.md"), "utf8");
+    for (const link of readme.matchAll(/\]\((\.\/[^)]+)\)/g)) {
+      expect(existsSync(join(extensionRoot, link[1])), link[1]).toBe(true);
+    }
+    const notice = readFileSync(join(extensionRoot, "NOTICE"), "utf8");
+    // Apache-2.0 keeps the upstream copyright; it must stay attributed.
+    expect(notice).toMatch(/fork of Continue/);
+    const changelog = readFileSync(join(extensionRoot, "CHANGELOG.md"), "utf8");
+    const version = (manifest as unknown as { version: string }).version;
+    expect(changelog).toMatch(
+      new RegExp(`^## ${version.replace(/\./g, "\\.")}$`, "m"),
+    );
+  });
 });
