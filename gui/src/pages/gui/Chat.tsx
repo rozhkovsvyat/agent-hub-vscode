@@ -351,11 +351,9 @@ export function Chat() {
     if (!element || anchor === null) return;
     loadEarlierAnchorRef.current = null;
     element.scrollTop = element.scrollHeight - anchor;
-    // A short prepended batch can leave the reader at the very top, where
-    // the browser fires no further scroll event; re-run the top check.
-    if (element.scrollTop <= 64) {
-      requestAnimationFrame(() => element.dispatchEvent(new Event("scroll")));
-    }
+    // No re-check needed here: nextTranscriptWindow always prepends at least
+    // one earlier turn, so after re-pinning the reader is below the top and
+    // the next upward scroll fires a scroll event again.
   }, [transcriptStart]);
 
   // Seamless history: approaching the top expands the window automatically.
