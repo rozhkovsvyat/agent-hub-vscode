@@ -266,6 +266,19 @@ function clampedPercent(window: CukiiVendorUsageWindow): number {
   return Math.max(0, Math.min(100, Math.round(window.utilization * 100)));
 }
 
+/**
+ * A window whose reset time has passed is a new window: it starts at 0 even
+ * if no newer event has reported it yet. Showing the last observed value read
+ * "100%" right after a reset (card 3034997a).
+ */
+function currentWindow(
+  window: CukiiVendorUsageWindow,
+  now = Date.now(),
+): CukiiVendorUsageWindow {
+  if (!window.resetsAt || window.resetsAt * 1_000 > now) return window;
+  return { ...window, utilization: 0, resetsAt: undefined };
+}
+
 export function resetCopy(resetsAt?: number, now = Date.now()): string | null {
   if (!resetsAt) return null;
   const remaining = Math.max(0, resetsAt * 1_000 - now);
@@ -312,7 +325,8 @@ function UsageContents({ snapshot }: { snapshot: CukiiVendorUsageSnapshot }) {
         <BodySection>
           <BodyTitle>Usage</BodyTitle>
           <UsageBars>
-            {snapshot.windows.map((window) => {
+            {snapshot.windows.map((raw) => {
+              const window = currentWindow(raw);
               const percent = clampedPercent(window);
               const reset = resetCopy(window.resetsAt);
               return (

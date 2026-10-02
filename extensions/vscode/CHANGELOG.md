@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.171
+
+- **Limits after a reset.** Once a usage window's reset time has passed, Account & usage shows it as fresh (0%) instead of the last value from the old window, such as 100% right after Opus resets.
+
 ## 2.0.170
 
 - **No raw service lines.** When Kimi stops before answering (for example, out of quota), the chat no longer shows a raw `{"role":"meta",…}` line next to the error.

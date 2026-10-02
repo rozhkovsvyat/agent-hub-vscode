@@ -253,6 +253,46 @@ describe("Cukii vendor usage Claude parity", () => {
     ).toHaveAttribute("aria-valuenow", "12");
   });
 
+  it("shows a window whose reset time has passed as fresh, not as the old usage (card 3034997a)", async () => {
+    // 02.10: right after the Opus 5-hour reset the widget still read 100%.
+    // A newer event may not have arrived yet, but a new window starts at 0.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const messenger = new MockIdeMessenger();
+    messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
+      async ({ vendor }) => ({
+        vendor,
+        windows: [
+          {
+            id: "five_hour",
+            label: "Session (5hr)",
+            utilization: 1,
+            resetsAt: nowSeconds - 60,
+            source: "cli" as const,
+          },
+          {
+            id: "seven_day",
+            label: "Weekly (7 day)",
+            utilization: 0.77,
+            resetsAt: nowSeconds + 86_400,
+            source: "cli" as const,
+          },
+        ],
+      }),
+    );
+
+    await renderWithProviders(
+      <CukiiVendorUsageSection brokerModel="opus-5-5" />,
+      { mockIdeMessenger: messenger },
+    );
+
+    expect(await screen.findByText("77%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "Session (5hr)" }),
+    ).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.getAllByText(/^Resets in/)).toHaveLength(1);
+  });
+
   it("shows a stable explicit empty state instead of vanishing with no data", async () => {
     const messenger = new MockIdeMessenger();
     messenger.responseHandlers["cukii/getVendorUsage"] = vi.fn(
