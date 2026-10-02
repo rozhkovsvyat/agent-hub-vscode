@@ -240,6 +240,41 @@ describe("Cukii Claude-parity input toolbar", () => {
     );
   });
 
+  it("names the model that actually runs when it is missing from the live catalog", async () => {
+    // 2.0.169 smoke: the first message went out before the catalog arrived,
+    // so the session kept the Qwen default while Alibaba had no key. The pill
+    // then read "Opus 5 (1M)" and every turn failed with a Bailian key error.
+    const mockIdeMessenger = new MockIdeMessenger();
+    mockIdeMessenger.responseHandlers["cukii/listBrokerModelCatalog"] =
+      async () => [
+        {
+          id: "claude" as const,
+          label: "Anthropic",
+          models: [
+            {
+              value: "opus-5-5" as const,
+              label: "Opus 5.5",
+              contextWindowLabel: "1M",
+            },
+          ],
+        },
+        // Without a key the bridge reports Alibaba with no live models.
+        { id: "qwen" as const, label: "Alibaba", models: [] },
+      ];
+    const store = setupStore({ ideMessenger: mockIdeMessenger });
+    store.dispatch({ type: "session/setBrokerModel", payload: "qwen-3-8-max" });
+    seedSavedHistory(store);
+    retainInitializedSession(mockIdeMessenger, store);
+    await renderWithProviders(<InputToolbar {...props} />, {
+      mockIdeMessenger,
+      store,
+    });
+
+    const pill = await getElementByTestId("cukii-model-pill");
+    await waitFor(() => expect(pill.textContent).toContain("Qwen 3.8 Max"));
+    expect(pill.textContent).not.toContain("Opus");
+  });
+
   it("shows a Claude-style model pill beside the slash control that opens the model picker", async () => {
     const { user } = await renderWithProviders(<InputToolbar {...props} />);
 

@@ -39,7 +39,7 @@ export const BROKER_MODEL_LABELS: Record<string, string> = {
   "qwen-glm-5-2": "GLM 5.2",
 };
 
-function brokerModelLabel(value?: string): string | undefined {
+export function brokerModelLabel(value?: string): string | undefined {
   if (!value) {
     return undefined;
   }

@@ -6,6 +6,7 @@ import {
   PencilIcon,
 } from "@heroicons/react/24/outline";
 import { InputModifiers } from "core";
+import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
 import {
   brokerVendorForModel,
   resolvePermissionModeForVendor,
@@ -23,6 +24,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { brokerModelLabel } from "../../redux/util/getBaseSystemMessage";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
 import {
@@ -203,7 +205,9 @@ function InputToolbar(props: InputToolbarProps) {
   const [modelCatalogAvailability, setModelCatalogAvailability] = useState<
     "loading" | "available" | "empty" | "unavailable"
   >("loading");
-  const selectedVendor = brokerVendorForModel(brokerModel ?? "qwen-3-8-max");
+  const selectedVendor = brokerVendorForModel(
+    brokerModel ?? CUKII_DEFAULT_BROKER_MODEL,
+  );
   const [permissionCapabilities, setPermissionCapabilities] = useState<{
     vendor: BrokerVendorId;
     supportedModes: CukiiPermissionMode[];
@@ -412,7 +416,8 @@ function InputToolbar(props: InputToolbarProps) {
       setPanelDraftResolved(true);
       return;
     }
-    const restoredModel = draft.brokerModel ?? brokerModel ?? "opus-5";
+    const restoredModel =
+      draft.brokerModel ?? brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
     if (draft.brokerModel) dispatch(setBrokerModel(draft.brokerModel));
     if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
     if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
@@ -492,13 +497,17 @@ function InputToolbar(props: InputToolbarProps) {
   const isRetry = props.toolbarOptions?.enterText === "Retry";
   const showStop = isStreaming && (props.isInputEmpty ?? true);
   const hasLiveBrokerModel = modelCatalogAvailability === "available";
-  const currentModel = brokerModel ?? "opus-5";
+  const currentModel = brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
   const currentModelInfo = modelInfo(currentModel);
   // Cursor re-serves Anthropic/Moonshot/xAI models under the same names; the
   // pill must say which route runs, or a Cursor quota error reads as a broken
   // Opus (card 6f333f93).
+  // A model can drop out of the live catalog (Alibaba without a key) while
+  // the session still runs on it: name it, never another model.
   const currentLabel =
-    (currentModelInfo ? displayModelLabel(currentModelInfo) : "Opus 5 (1M)") +
+    (currentModelInfo
+      ? displayModelLabel(currentModelInfo)
+      : brokerModelLabel(currentModel)) +
     (currentModel.startsWith("cursor:") ? " · Cursor" : "");
   const nativeFastAvailable = supportsNativeSpeed(currentModel);
   const nativeThinkingAvailable = supportsNativeThinking(currentModel);

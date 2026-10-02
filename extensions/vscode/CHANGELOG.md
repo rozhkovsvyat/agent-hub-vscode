@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.169
+
+- **Kimi limits are back.** The Kimi Account & Usage panel finds the login of Kimi CLI 2.x again and shows your 5-hour window.
+- **The pill names the model that runs.** If your first message goes out before the model list loads, the model pill no longer shows “Opus 5” while the turn runs on Qwen.
+
 ## 2.0.168
 
 - **Cukii Chat.** The extension is now called Cukii Chat, with a new logo: the cookie cut out of a chat bubble.

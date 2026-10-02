@@ -28,6 +28,7 @@
 //   node cukii-smoke.mjs wait-idle --port N [--tab ...] [--timeout 300]
 //   node cukii-smoke.mjs stop --port N [--tab ...]
 //   node cukii-smoke.mjs probe --port N --js "<expression>" [--tab ...]
+//   node cukii-smoke.mjs sidebar-probe --port N --js "<expression, truthy where found>"
 //   node cukii-smoke.mjs shot --port N --out /tmp/x.png
 //   node cukii-smoke.mjs close --profile /tmp/cukii-smoke-x
 import { execFileSync, spawn } from "node:child_process";
@@ -123,7 +124,7 @@ async function sidebarEval(port, expression) {
     await c.call("Runtime.enable");
     await sleep(300);
     for (const ctx of c.contexts) {
-      const r = await c.call("Runtime.evaluate", { contextId: ctx.id, expression, returnByValue: true });
+      const r = await c.call("Runtime.evaluate", { contextId: ctx.id, expression, returnByValue: true, awaitPromise: true });
       if (r.result?.result?.value) {
         c.ws.close();
         return r.result.result.value;
@@ -227,6 +228,11 @@ if (!port) fail("--port is required");
 if (cmd === "new-session") {
   const r = await sidebarEval(port, `(() => { const b = [...document.querySelectorAll("button")].find(x => /New session/.test(x.innerText || "")); if (!b) return null; b.click(); return "clicked"; })()`);
   out({ newSession: r ?? null });
+}
+
+if (cmd === "sidebar-probe") {
+  // The sessions navigator (with Account & usage) is its own webview.
+  out({ value: (await sidebarEval(port, opt("js", "null"))) ?? null });
 }
 
 if (cmd === "shot") {

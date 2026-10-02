@@ -1,5 +1,6 @@
 import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, PromptLog } from "core";
+import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
 import type { CukiiBridgeStreamDisposition } from "core/protocol/ideWebview";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -258,7 +259,8 @@ export const streamBrokerBridgeInput = createAsyncThunk<
         : implicitlyRecoveredFollowUps.map((item) => item.message.id);
     const hasImplicitRecovery = implicitlyRecoveredFollowUps.length > 0;
     const queuedFollowUpMessageId = queuedFollowUpMessageIds[0];
-    const brokerModel = state.session.brokerModel ?? "fable-5";
+    // Same default as a new session; never fall back to a paid flagship.
+    const brokerModel = state.session.brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
     const brokerSubagent = state.session.brokerSubagent ?? "auto";
     const brokerEffort = state.session.brokerEffort;
     const brokerSpeed = state.session.brokerSpeed;
