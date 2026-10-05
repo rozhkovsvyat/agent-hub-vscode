@@ -84,6 +84,13 @@ import {
   stopVoiceRecording,
   voiceRecordingStatus,
 } from "./voiceDictation";
+import {
+  WHISPER_SMALL_DOWNLOAD_MB,
+  WHISPER_SMALL_FILES,
+  downloadWhisperSmall,
+  resolveVoiceModelChoice,
+  type VoiceModelChoice,
+} from "./voiceModelStore";
 import { BridgeSteeringController } from "@cukii/vendor-bridge";
 import { BridgeRunCancellation } from "@cukii/vendor-bridge";
 import {
@@ -356,6 +363,64 @@ export class VsCodeMessenger {
       }
     }
     this.scheduleManagedVendorCliUpdates(VENDOR_CLI_UPDATE_FAILURE_INTERVAL_MS);
+  }
+
+  private voiceModelDownload?: Thenable<void>;
+
+  /**
+   * The model for the next dictation: whisper-small once it is chosen and
+   * fully downloaded, otherwise the packaged whisper-base. Choosing small
+   * without the files starts the download; dictation never waits for it.
+   */
+  private voiceModelChoice(): VoiceModelChoice | undefined {
+    const setting = vscode.workspace
+      .getConfiguration("cukii")
+      .get<string>("voiceModel");
+    const storage = this.context.globalStorageUri.fsPath;
+    const choice = resolveVoiceModelChoice(setting, storage);
+    if (!choice && setting?.trim().toLowerCase() === "small") {
+      this.downloadVoiceModel(storage);
+    }
+    return choice;
+  }
+
+  private downloadVoiceModel(storage: string): void {
+    if (this.voiceModelDownload) return;
+    const total = Object.keys(WHISPER_SMALL_FILES).length;
+    this.voiceModelDownload = vscode.window
+      .withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Cukii Chat: downloading the better speech model (whisper-small, ${WHISPER_SMALL_DOWNLOAD_MB} MB)`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => controller.abort());
+          await downloadWhisperSmall(storage, {
+            signal: controller.signal,
+            onProgress: (done, file) =>
+              progress.report({
+                message: `${done}/${total} · ${file}`,
+                increment: 100 / total,
+              }),
+          });
+        },
+      )
+      .then(
+        () => {
+          this.voiceModelDownload = undefined;
+          void vscode.window.showInformationMessage(
+            "Cukii Chat: the better speech model is ready. Your next dictation uses it.",
+          );
+        },
+        (error: unknown) => {
+          this.voiceModelDownload = undefined;
+          void vscode.window.showErrorMessage(
+            `Cukii Chat: the speech model download stopped (${error instanceof Error ? error.message : String(error)}). Dictation keeps using the built-in model.`,
+          );
+        },
+      );
   }
 
   private enqueueSessionRename<T>(sessionId: string, work: () => Promise<T>) {
@@ -693,6 +758,14 @@ export class VsCodeMessenger {
     private readonly vsCodeExtension: VsCodeExtension,
   ) {
     const issueReporter = yougileIssueReporterForContext(context);
+    // Choosing the better speech model starts its one-time download.
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("cukii.voiceModel")) {
+          this.voiceModelChoice();
+        }
+      }),
+    );
     this.usageLog = vscode.window.createOutputChannel("Cukii Chat · usage");
     context.subscriptions.push(this.usageLog);
     this.usagePoller = createUsagePoller({
@@ -1316,7 +1389,10 @@ export class VsCodeMessenger {
           .get<string>("voiceLanguage"),
       });
       return {
-        text: await stopVoiceRecording(msg.data.recordingId, { language }),
+        text: await stopVoiceRecording(msg.data.recordingId, {
+          language,
+          model: this.voiceModelChoice(),
+        }),
       };
     });
     this.onWebview("cukii/cancelVoiceRecording", async (msg) => {

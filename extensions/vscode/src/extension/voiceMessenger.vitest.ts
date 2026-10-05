@@ -64,7 +64,43 @@ describe("voice messenger error channel", () => {
     expect(probe).toContain("verifyPackagedWhisperModel");
     expect(probe).toContain("Network access is disabled");
     expect(runtime).toContain("env.allowRemoteModels = false");
-    expect(runtime).toContain('env.localModelPath = path.join(__dirname, "models")');
+    expect(runtime).toContain(
+      'env.localModelPath = model?.localModelPath ?? path.join(__dirname, "models")',
+    );
     expect(runtime).not.toContain("Downloading local Whisper model");
+  });
+
+  it("offers the better speech model as a registered, checksum-verified opt-in", () => {
+    const root = path.resolve(__dirname, "../../../..");
+    const manifest = JSON.parse(
+      fs.readFileSync(
+        path.join(root, "extensions/vscode/package.json"),
+        "utf8",
+      ),
+    );
+    const setting =
+      manifest.contributes.configuration.properties["cukii.voiceModel"];
+    expect(setting.enum).toEqual(["base", "small"]);
+    expect(setting.default).toBe("base");
+    // The download size is promised in the setting text and in the toast.
+    expect(setting.markdownDescription).toContain("250 MB");
+    const messenger = fs.readFileSync(
+      path.join(root, "extensions/vscode/src/extension/VsCodeMessenger.ts"),
+      "utf8",
+    );
+    // Dictation picks the model up only once it is fully on disk…
+    expect(messenger).toContain(
+      'event.affectsConfiguration("cukii.voiceModel")',
+    );
+    expect(messenger).toContain("model: this.voiceModelChoice()");
+    expect(messenger).toContain("WHISPER_SMALL_DOWNLOAD_MB} MB");
+    // …and the transcribe path honors it instead of the packaged base.
+    const runtime = fs.readFileSync(
+      path.join(root, "extensions/vscode/src/extension/voiceDictation.ts"),
+      "utf8",
+    );
+    expect(runtime).toContain("transcriber(options.model)");
+    expect(runtime).toContain("model?.localModelPath ??");
+    expect(runtime).toContain("model?.id ?? `whisper-base/");
   });
 });

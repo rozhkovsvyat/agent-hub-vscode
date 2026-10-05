@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
 import { CUKII_VOICE_SCRATCH_ROOT } from "./vendorBridgeHost";
+import { verifyModelFiles, type VoiceModelChoice } from "./voiceModelStore";
 import {
   createCukiiScratchDirectory,
   removeCukiiScratchDirectory,
@@ -107,7 +108,7 @@ const KEPT_RECORDING_TTL_MS = 30 * 60 * 1000;
 const EXPIRED_MESSAGE =
   "Voice recording reached the five-minute limit. Transcribing what was recorded…";
 const KEPT_SUFFIX = " The recording is kept: press Retry to transcribe it again.";
-let transcriberPromise: Promise<any> | undefined;
+const transcriberPromises = new Map<string, Promise<any>>();
 
 type VoiceRecordingOptions = {
   resolveDevice?: () => Promise<string | VoiceCaptureDevice>;
@@ -502,34 +503,42 @@ function voiceError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-async function createTranscriber(): Promise<any> {
-  const modelState = verifyPackagedWhisperModel();
+async function createTranscriber(model?: VoiceModelChoice): Promise<any> {
+  const modelState = model
+    ? verifyModelFiles(model.dir, model.files)
+    : verifyPackagedWhisperModel();
   if (!modelState.valid) {
     throw new Error(
-      `Cukii's packaged Whisper model failed integrity verification: ${modelState.reason}. Reinstall Cukii.`,
+      model
+        ? `The downloaded speech model failed integrity verification: ${modelState.reason}. Set cukii.voiceModel to "small" again to re-download it.`
+        : `Cukii's packaged Whisper model failed integrity verification: ${modelState.reason}. Reinstall Cukii.`,
     );
   }
   const { env, pipeline } = await import("@xenova/transformers");
   env.allowRemoteModels = false;
   env.allowLocalModels = true;
-  env.localModelPath = path.join(__dirname, "models");
+  env.localModelPath = model?.localModelPath ?? path.join(__dirname, "models");
   env.useFSCache = false;
   env.useBrowserCache = false;
   return pipeline(
     "automatic-speech-recognition",
-    `whisper-base/${PACKAGED_WHISPER_REVISION}`,
+    model?.id ?? `whisper-base/${PACKAGED_WHISPER_REVISION}`,
     { local_files_only: true },
   );
 }
 
-async function transcriber(): Promise<any> {
-  if (!transcriberPromise) {
-    transcriberPromise = createTranscriber().catch((error) => {
-      transcriberPromise = undefined;
+/** One loaded pipeline per model; the packaged base model is the default. */
+async function transcriber(model?: VoiceModelChoice): Promise<any> {
+  const key = model?.id ?? "packaged";
+  let loading = transcriberPromises.get(key);
+  if (!loading) {
+    loading = createTranscriber(model).catch((error) => {
+      transcriberPromises.delete(key);
       throw voiceError(error);
     });
+    transcriberPromises.set(key, loading);
   }
-  return transcriberPromise;
+  return loading;
 }
 
 /** Decode every supported WAV/recording to Whisper's required mono 16k Float32. */
@@ -927,6 +936,8 @@ function canonicalWhisperLanguage(raw?: string | null): string | undefined {
 
 export type VoiceTranscribeOptions = {
   language?: string;
+  /** The opt-in downloaded model; undefined is the packaged whisper-base. */
+  model?: VoiceModelChoice;
   detectLanguage?: (
     recognize: any,
     audio: Float32Array,
@@ -980,7 +991,7 @@ export async function transcribeVoiceFile(
   }
   return transcribeDecodedVoiceAudio(
     await decodeVoiceAudio(inputPath),
-    transcriber,
+    () => transcriber(options.model),
     options,
   );
 }
