@@ -15,6 +15,11 @@
 //    "Cursor"; pick by group, or the run silently spends Cursor quota.
 //  - Screenshot the smoke window only (Page.captureScreenshot), never the
 //    owner's screen.
+//  - The chat history is NOT isolated either: it is the owner's
+//    ~/.cukii/history.sqlite3, and test chats piled up in his session list
+//    (card 44a9280d). Close with `close --port N --profile P`, which first runs
+//    `cleanup`: it deletes, through the extension's own history/delete, only
+//    the sessions whose workspace is this profile's ws folder.
 //  - The profile is isolated, the vendor CLIs are NOT: their configs (incl. the
 //    Cukii Box memory MCP) are the owner's. Never ask an agent to "remember"
 //    in a test prompt — Kimi stored a test codeword in the owner's memory —
@@ -30,7 +35,8 @@
 //   node cukii-smoke.mjs probe --port N --js "<expression>" [--tab ...]
 //   node cukii-smoke.mjs sidebar-probe --port N --js "<expression, truthy where found>"
 //   node cukii-smoke.mjs shot --port N --out /tmp/x.png
-//   node cukii-smoke.mjs close --profile /tmp/cukii-smoke-x
+//   node cukii-smoke.mjs cleanup --port N --profile /tmp/cukii-smoke-x
+//   node cukii-smoke.mjs close [--port N] --profile /tmp/cukii-smoke-x
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -159,6 +165,47 @@ async function openPanel(port) {
   return undefined;
 }
 
+const WINDOWS = process.platform === "win32";
+
+/** `code` is a .cmd shim on Windows; Node refuses to spawn one without a shell. */
+function codeArgs(list) {
+  if (!WINDOWS) return ["code", list, {}];
+  const quoted = list.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a));
+  return ["code.cmd", quoted, { shell: true, windowsHide: true }];
+}
+
+/**
+ * Deletes, through the extension's own history/delete, every session whose
+ * workspace is this profile's ws folder — nothing else in the owner's history.
+ */
+async function cleanupSessions(port, profile) {
+  const ws = path.resolve(profile, "ws");
+  const expression = `(async () => {
+    if (typeof vscode === "undefined") return null;
+    const ask = (messageType, data) => new Promise((resolve, reject) => {
+      const messageId = "cukii-smoke-" + Math.random().toString(36).slice(2);
+      const timer = setTimeout(() => { window.removeEventListener("message", on); reject(new Error(messageType + " timed out")); }, 15000);
+      const on = (event) => {
+        if (event.data?.messageId !== messageId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", on);
+        const reply = event.data.data;
+        reply?.status === "error" ? reject(new Error(reply.error)) : resolve(reply?.content ?? reply);
+      };
+      window.addEventListener("message", on);
+      vscode.postMessage({ messageId, messageType, data });
+    });
+    const norm = (p) => String(p || "").replace(/^file:\\/\\/\\/?/i, "").replace(/\\\\/g, "/").replace(/\\/+$/, "").toLowerCase();
+    const mine = norm(${JSON.stringify(ws)});
+    const sessions = await ask("history/list", {});
+    const own = sessions.filter((s) => { const w = norm(decodeURIComponent(s.workspaceDirectory || "")); return w === mine || w.endsWith(mine); });
+    for (const s of own) await ask("history/delete", { id: s.sessionId });
+    const left = (await ask("history/list", {})).filter((s) => own.some((o) => o.sessionId === s.sessionId)).length;
+    return { deleted: own.length, left, titles: own.map((s) => s.title) };
+  })()`;
+  return sidebarEval(port, expression);
+}
+
 const cmd = process.argv[2];
 const port = Number(opt("port", 0));
 
@@ -175,12 +222,15 @@ if (cmd === "launch") {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   const base = ["--user-data-dir", path.join(profile, "ud"), "--extensions-dir", path.join(profile, "ext")];
-  execFileSync("code", [...base, "--install-extension", vsix, "--force"], { env, stdio: "ignore" });
+  const [installBin, installArgs, installOpts] = codeArgs([...base, "--install-extension", vsix, "--force"]);
+  execFileSync(installBin, installArgs, { env, stdio: "ignore", ...installOpts });
   const cdp = await freePort();
-  spawn("code", [...base, `--remote-debugging-port=${cdp}`, "--new-window", "--disable-workspace-trust", path.join(profile, "ws")], {
+  const [runBin, runArgs, runOpts] = codeArgs([...base, `--remote-debugging-port=${cdp}`, "--new-window", "--disable-workspace-trust", path.join(profile, "ws")]);
+  spawn(runBin, runArgs, {
     env,
     detached: true,
     stdio: "ignore",
+    ...runOpts,
   }).unref();
   for (let i = 0; i < 60; i++) {
     try {
@@ -207,20 +257,52 @@ if (cmd === "launch") {
   out({ port: cdp, profile, panel: panel ?? null, ready });
 }
 
+if (cmd === "cleanup") {
+  const profile = opt("profile");
+  if (!port || !profile) fail("--port and --profile are required");
+  const result = await cleanupSessions(port, profile);
+  if (!result) fail("no Cukii webview answered the cleanup");
+  out(result);
+}
+
 if (cmd === "close") {
   const profile = opt("profile");
   if (!profile) fail("--profile is required");
+  // Test chats first, while the instance can still delete them (44a9280d).
+  const cleaned = port ? await cleanupSessions(port, profile).catch((e) => ({ error: String(e) })) : null;
   const ud = path.join(profile, "ud");
   let killed = 0;
-  for (const line of execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).split("\n")) {
-    const m = line.trim().match(/^(\d+)\s+(.*)$/);
-    // Only the main process of THIS profile; helpers exit with it.
-    if (m && m[2].includes("/MacOS/Code ") && m[2].includes(`--user-data-dir ${ud}`)) {
-      process.kill(Number(m[1]));
-      killed++;
+  if (WINDOWS) {
+    // Every Code.exe of THIS profile (main and helpers share --user-data-dir).
+    const list = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name='Code.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+      { encoding: "utf8", windowsHide: true },
+    );
+    const mark = `--user-data-dir ${ud}`.toLowerCase();
+    for (const line of list.split(/\r?\n/)) {
+      const [pid, commandLine = ""] = line.split("\t");
+      const cl = commandLine.replace(/"/g, "").toLowerCase();
+      if (pid && (cl.includes(mark) || cl.includes(`--user-data-dir=${ud}`.toLowerCase()))) {
+        try {
+          process.kill(Number(pid));
+          killed++;
+        } catch {
+          /* already gone with its parent */
+        }
+      }
+    }
+  } else {
+    for (const line of execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).split("\n")) {
+      const m = line.trim().match(/^(\d+)\s+(.*)$/);
+      // Only the main process of THIS profile; helpers exit with it.
+      if (m && m[2].includes("/MacOS/Code ") && m[2].includes(`--user-data-dir ${ud}`)) {
+        process.kill(Number(m[1]));
+        killed++;
+      }
     }
   }
-  out({ closed: killed });
+  out({ closed: killed, cleaned });
 }
 
 if (!port) fail("--port is required");

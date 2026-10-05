@@ -30,7 +30,8 @@ describe("broker inbox steering gate", () => {
       const lines = brokerInboxDirective(model);
       expect(lines).toHaveLength(2);
       expect(lines[0]).toContain("base name is broker_inbox");
-      expect(lines[0]).toContain("cukii-broker or agent-hub-broker");
+      expect(lines[0]).toContain("through the cukii-broker server");
+      expect(lines[0]).not.toContain("may use cukii-broker or agent-hub-broker");
       expect(lines[0]).toContain("broker_inbox_ack");
       expect(lines[0]).toContain(
         "If you fail before ack, the batch must be delivered again",
@@ -53,7 +54,8 @@ describe("broker inbox steering gate", () => {
       // Inter-agent channel rides the same rails.
       expect(lines[1]).toContain("broker_send");
       expect(lines[1]).toContain("broker_sessions");
-      expect(lines[1]).toContain("never broker_send");
+      expect(lines[1]).toContain("it never hands a session new work");
+      expect(lines[1]).not.toContain("broker_delegate");
     }
   });
 

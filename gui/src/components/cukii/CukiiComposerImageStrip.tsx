@@ -55,10 +55,21 @@ export function CukiiComposerImageStrip({ editor }: { editor: Editor | null }) {
       return;
     }
     const sync = () => setImages(collectImages(editor));
+    // `transaction`, not `update`: history recall (arrow up) replaces the
+    // document with `setContent`, which TipTap applies without an update
+    // event, so a recalled picture only appeared after the next keystroke
+    // (card 6f01bf1d).
+    const onTransaction = ({
+      transaction,
+    }: {
+      transaction: { docChanged: boolean };
+    }) => {
+      if (transaction.docChanged) sync();
+    };
     sync();
-    editor.on("update", sync);
+    editor.on("transaction", onTransaction);
     return () => {
-      editor.off("update", sync);
+      editor.off("transaction", onTransaction);
     };
   }, [editor]);
 

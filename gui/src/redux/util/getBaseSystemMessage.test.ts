@@ -54,7 +54,7 @@ test("getBaseSystemMessage should return the correct system message based on mod
   expect(
     getBaseSystemMessage("broker", mockModel, [mockTool], "fable-5", "opus-5"),
   ).toBe(
-    'Custom Agent System Message\n\nYou are running in Cukii Broker mode. Broker model intent: Fable 5. Coordinate execution through the Cukii broker MCP tools when delegation is useful. Prefer broker_delegate for isolated worker tasks, broker_status to inspect work, and broker_accept only after reviewing results. Preferred subagent model: Opus 5. For broker_delegate use agent="claude" and model="Opus 5".',
+    "Custom Agent System Message\n\nYou are running in Cukii Broker mode. Broker model intent: Fable 5. Preferred subagent model: Opus 5. When you delegate, use the Opus 5 worker.",
   );
 });
 
@@ -91,7 +91,7 @@ test("getBaseSystemMessage should append no-tools warning for agent/plan modes w
   );
 
   expect(getBaseSystemMessage("broker", mockModel, [], "fable-5", "auto")).toBe(
-    "Custom Agent System Message\n\nYou are running in Cukii Broker mode. Broker model intent: Fable 5. Coordinate execution through the Cukii broker MCP tools when delegation is useful. Prefer broker_delegate for isolated worker tasks, broker_status to inspect work, and broker_accept only after reviewing results. Preferred subagent model: auto-select the strongest available worker. If Auto is selected, choose the strongest appropriate worker and explain the choice briefly." +
+    "Custom Agent System Message\n\nYou are running in Cukii Broker mode. Broker model intent: Fable 5. Preferred subagent model: auto-select the strongest available worker. If Auto is selected, choose the strongest appropriate worker and explain the choice briefly." +
       NO_TOOL_WARNING,
   );
 });
@@ -110,5 +110,7 @@ test("names Opus 5.5 and routes it to the claude agent (card a84d2dda)", () => {
     "opus-5-5",
   );
   expect(message).toContain("Broker model intent: Opus 5.5.");
-  expect(message).toContain('agent="claude" and model="Opus 5.5"');
+  expect(message).toContain("When you delegate, use the Opus 5.5 worker.");
+  // The owner's broker is not the product (decision 2026-10-02, item 7).
+  expect(message).not.toMatch(/broker_delegate|broker_status|broker_accept/);
 });

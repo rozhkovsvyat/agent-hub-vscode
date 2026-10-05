@@ -1999,14 +1999,28 @@ export class VsCodeMessenger {
       "cukii/cancelBridgeRun",
       async (msg): Promise<CukiiCancelReceipt> => {
         const protocol = sourceProtocol(msg, this.webviewProtocol);
-        const run = this.bridgeCandidateFor(protocol, {
+        const exact = this.bridgeCandidateFor(protocol, {
           runId: msg.data.runId,
         });
-        if (
-          !run ||
-          run.sessionId !== msg.data.sessionId ||
-          (msg.data.runId !== undefined && run.runId !== msg.data.runId)
-        ) {
+        const exactMatches =
+          !!exact &&
+          exact.sessionId === msg.data.sessionId &&
+          (msg.data.runId === undefined || exact.runId === msg.data.runId);
+        // Card 2edb37f2: a Stop carrying a stale runId, or sent from another
+        // view of the session, was answered "already-cancelled" while the
+        // session's live run went on — the GUI showed it stopped, Qwen kept
+        // working. Stop means "stop this session": like steering, fall back to
+        // the run that owns the session in any panel.
+        const run = exactMatches
+          ? exact
+          : this.bridgeRunForSteer(protocol, { sessionId: msg.data.sessionId });
+        recordCukiiDiagnostic("bridge.cancel.requested", {
+          sessionId: msg.data.sessionId,
+          runId: msg.data.runId,
+          matched: exactMatches ? "exact" : run ? "session" : "none",
+          ownerRunId: run?.runId,
+        });
+        if (!run || run.sessionId !== msg.data.sessionId) {
           return {
             requestId: msg.data.requestId,
             sessionId: msg.data.sessionId,

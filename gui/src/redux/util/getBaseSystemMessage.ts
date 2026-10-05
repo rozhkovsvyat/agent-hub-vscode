@@ -50,30 +50,6 @@ export function brokerModelLabel(value?: string): string | undefined {
   );
 }
 
-function brokerModelAgent(value?: string): string | undefined {
-  if (!value) return undefined;
-  if (
-    [
-      "opus-5",
-      "opus-5-5",
-      "sonnet-5",
-      "fable-5",
-      "fable-5-1",
-      "haiku-4-5",
-    ].includes(value)
-  ) {
-    return "claude";
-  }
-  if (value.startsWith("codex")) return "codex";
-  if (value.startsWith("grok")) return "grok";
-  if (value.startsWith("composer") || value.startsWith("cursor:"))
-    return "cursor";
-  if (value.startsWith("kimi")) return "claude";
-  if (value.startsWith("deepseek")) return "deepseek";
-  if (value.startsWith("qwen")) return "qwen";
-  return undefined;
-}
-
 export function getBaseSystemMessage(
   messageMode: string,
   model: ModelDescription,
@@ -91,12 +67,10 @@ export function getBaseSystemMessage(
       brokerSubagent && brokerSubagent !== "auto"
         ? brokerModelLabel(brokerSubagent)
         : "auto-select the strongest available worker";
-    const subagentAgent =
-      brokerSubagent && brokerSubagent !== "auto"
-        ? brokerModelAgent(brokerSubagent)
-        : undefined;
     const broker = brokerModelLabel(brokerModel) || "Fable 5";
-    baseMessage += `\n\nYou are running in Cukii Broker mode. Broker model intent: ${broker}. Coordinate execution through the Cukii broker MCP tools when delegation is useful. Prefer broker_delegate for isolated worker tasks, broker_status to inspect work, and broker_accept only after reviewing results. Preferred subagent model: ${subagent}.${subagentAgent ? ` For broker_delegate use agent=\"${subagentAgent}\" and model=\"${subagent}\".` : " If Auto is selected, choose the strongest appropriate worker and explain the choice briefly."}`;
+    // broker_delegate/status/accept are the owner's personal broker, not the
+    // product (decision 2026-10-02, plan item 7).
+    baseMessage += `\n\nYou are running in Cukii Broker mode. Broker model intent: ${broker}. Preferred subagent model: ${subagent}.${brokerSubagent && brokerSubagent !== "auto" ? ` When you delegate, use the ${subagent} worker.` : " If Auto is selected, choose the strongest appropriate worker and explain the choice briefly."}`;
   } else if (messageMode === "plan") {
     baseMessage = model.basePlanSystemMessage ?? DEFAULT_PLAN_SYSTEM_MESSAGE;
   } else {

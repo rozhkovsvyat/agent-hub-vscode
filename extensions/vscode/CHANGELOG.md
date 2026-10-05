@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.172
+
+- **New logo.** The Cukii Chat mark is now the cookie itself, with a reply tail — no bubble around it.
+- **Voice input keeps your language.** With VS Code in English, Russian dictation used to come back translated into English. The spoken language is now detected from the start of each recording.
+- **Long dictation is not lost.** Long recordings are recognized in full instead of failing with "repeated text", a recording that reaches the five-minute limit is transcribed instead of discarded, and if recognition fails the recording is kept so **Retry** can try again.
+- **You can see what voice input is doing.** A red dot and a timer while recording, "Transcribing…" with a timer after you stop.
+- **Pictures come back with arrow-up.** Recalling a previous message that had an image shows the image at once, not after the next keystroke.
+- **No stray `tmp` folder.** Grok runs no longer leave a `tmp\sessions` folder at the root of your workspace drive.
+- **Clearer messages.** A WebSocket hiccup Codex recovers from by itself no longer shows up as an error, and a Grok run that prints nothing says what Cukii can actually tell.
+- Cukii no longer tells agents to use broker delegation tools that are not part of the extension.
+
 ## 2.0.171
 
 - **Limits after a reset.** Once a usage window's reset time has passed, Account & usage shows it as fresh (0%) instead of the last value from the old window, such as 100% right after Opus resets.

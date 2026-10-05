@@ -111,17 +111,23 @@ describe("VsCodeMessenger native bridge run contract", () => {
 
   it("does not acknowledge explicit Stop before pending inbox messages are retired", () => {
     expect(source).toMatch(
-      /if \([\s\S]*?run\.runId !== msg\.data\.runId[\s\S]*?return \{[\s\S]*?status: "already-cancelled"[\s\S]*?const purge = purgeUnreadBridgeInboxMessages\(msg\.data\.sessionId\)/,
+      /if \(!run \|\| run\.sessionId !== msg\.data\.sessionId\) \{[\s\S]*?status: "already-cancelled"[\s\S]*?const purge = purgeUnreadBridgeInboxMessages\(msg\.data\.sessionId\)/,
     );
     expect(source).toMatch(
       /const \[receipt, purged\] = await Promise\.all\(\[\s*this\.cancelBridgeRun\([\s\S]*?purge,\s*\]\);[\s\S]*?if \(!purged\) \{[\s\S]*?return receipt;/,
     );
   });
 
-  it("binds abort and explicit Stop to the exact bridge run", () => {
+  it("binds abort to the exact run and Stop to the run that owns the session", () => {
     expect(source).toContain("streamMessageId: msg.messageId");
     expect(source).toContain("streamMessageId: expectedStreamMessageId");
-    expect(source).toContain("run.runId !== msg.data.runId");
+    // Card 2edb37f2: a Stop with a stale runId or from another view of the
+    // session used to be answered "already-cancelled" while the run went on.
+    expect(source).toContain("exact.runId === msg.data.runId");
+    expect(source).toMatch(
+      /: this\.bridgeRunForSteer\(protocol, \{ sessionId: msg\.data\.sessionId \}\);/,
+    );
+    expect(source).toContain('recordCukiiDiagnostic("bridge.cancel.requested"');
   });
 
   it("registers pending runs so Stop before acquisition prevents spawn", () => {

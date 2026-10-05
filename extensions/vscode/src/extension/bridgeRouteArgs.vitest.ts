@@ -58,7 +58,6 @@ vi.mock(
 );
 
 import {
-  BROKER_NOT_ROUTABLE_GUIDANCE,
   attachClaudePermissionTransport,
   bridgeEventsProveInputAccepted,
   bridgeFailureDetail,
@@ -94,21 +93,12 @@ import {
 
 const promptFiles: string[] = [];
 
-describe("broker delegation recovery guidance", () => {
-  it("does not turn a scope routing failure into a false model/account outage", () => {
-    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("task/scope routing error");
-    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("never evidence");
-    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain("route_reason");
-    expect(BROKER_NOT_ROUTABLE_GUIDANCE).toContain(
-      "explicit known vault scope",
-    );
-  });
-
-  // Board cards d4c6c6fd/de99bf3d: with subagent routing on Auto the broker
-  // refused a scope-less delegation with not_routable, and the model told the
-  // owner "route gpt-6-astra is unavailable" although the subscription was
-  // connected. The locked branch already carries the guidance; Auto must too.
-  it("carries the not_routable semantics into Auto subagent routing as well", () => {
+describe("delegation the product offers", () => {
+  // Decision 2026-10-02 (plan item 7): broker_delegate/status/accept are the
+  // owner's personal infrastructure. The not_routable guidance for them
+  // (cards d4c6c6fd/de99bf3d) left with them; the prompt delegates by running
+  // the selected native CLI and still asks to report a failed launch.
+  it("keeps the owner's broker out of both subagent routes", () => {
     const source = fs
       .readFileSync(
         path.join(VENDOR_BRIDGE_SRC, "bridgeChatAdapter.ts"),
@@ -121,13 +111,15 @@ describe("broker delegation recovery guidance", () => {
     );
     expect(autoAt).toBeGreaterThan(-1);
     expect(lockedAt).toBeGreaterThan(autoAt);
-    const autoBranch = source.slice(autoAt, lockedAt);
-    expect(autoBranch).toContain("BROKER_NOT_ROUTABLE_GUIDANCE");
-    expect(autoBranch).toContain("EXPLICIT scope");
-    expect(autoBranch).toContain("report that failure explicitly");
+    // Prompt text only: comments may explain why the tools are gone.
+    const routes = source
+      .slice(autoAt, lockedAt + 1_200)
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(routes).not.toMatch(/broker_delegate|broker_status|broker_accept/);
+    expect(routes).toContain("report that failure explicitly");
+    expect(routes).toContain("Delegate by running the selected native CLI yourself:");
   });
 });
-
 afterEach(() => {
   for (const file of promptFiles.splice(0)) fs.rmSync(file, { force: true });
   vi.restoreAllMocks();
