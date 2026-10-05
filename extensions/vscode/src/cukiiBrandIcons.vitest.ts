@@ -23,7 +23,8 @@ describe("cukii brand icons", () => {
       expect(svg).toContain('cx="26.6" cy="28.8" r="3.75"');
       expect(svg).toContain('cx="39.9" cy="35" r="5.25"');
       expect(svg).toContain('cx="28.2" cy="40.6" r="4.1"');
-      expect(svg).toContain('viewBox="5 5 54 54"');
+      // Wider than the bare cookie's 5 5 54 54: the reply tail reaches y=60.
+      expect(svg).toContain('viewBox="3 4 57 57"');
     }
     expect(activitySvg).not.toContain('width="22"');
   });
@@ -104,42 +105,58 @@ describe("cukii brand icons", () => {
     expect(markSvg).toContain('cx="22.4" cy="42.5" r="2.95"');
   });
 
-  it("cuts the cookie out of a filled chat bubble on every Cukii Chat mark", () => {
-    // Owner, 2026-10-02: the plugin is "Cukii Chat"; its mark is a FILLED chat
-    // bubble, the cookie is a cut-out inside it and the chips are filled back
-    // in. One bubble path on all three marks, rounded like the capsules.
-    const bubble = /<path d="(M21 8 H43 [^"]+)"/;
+  it("makes the cookie itself the chat bubble on every Cukii Chat mark", () => {
+    // Owner, 2026-10-05, picked from the sheet of the mark system: one cookie
+    // for the brand, a product is a gesture on it. Cukii Chat is the cookie
+    // whose edge pulls out into a reply tail — no bubble around the cookie
+    // any more (2.0.160–2.0.171 cut the cookie out of a filled bubble).
+    const tail = /<path d="(M12\.5 43 [^"]+)"/;
     const marks = [
       "cukii-store.svg",
       "cukii-activity.svg",
       "cukii-title.svg",
     ].map((file) => readMediaIcon(`media/${file}`));
-    const paths = marks.map((svg) => bubble.exec(svg)?.[1]);
-    expect(paths[0]).toBeDefined();
-    expect(new Set(paths).size).toBe(1);
+    const tails = marks.map((svg) => tail.exec(svg)?.[1]);
+    expect(tails[0]).toBeDefined();
+    expect(new Set(tails).size).toBe(1);
     for (const svg of marks) {
-      // The bubble is painted, the cookie is a hole punched by the mask.
-      expect(svg).toMatch(
-        /<path d="M21 8 H43 [^"]+" fill="[^"]+" mask="url\(#cutout-mask\)"/,
-      );
-      expect(svg).toMatch(/<path d="M56\.3[^"]+" fill="black"\/>/);
-      // Bite and chips restore the bubble colour inside the hole.
-      for (const restored of [
-        'cx="49.5" cy="14" r="10" fill="white"',
-        'cx="26.6" cy="28.8" r="3.75" fill="white"',
-        'cx="39.9" cy="35" r="5.25" fill="white"',
-        'cx="28.2" cy="40.6" r="4.1" fill="white"',
+      expect(svg).not.toContain("M21 8 H43");
+      // The double bite is a hole on every mark, never a painted patch.
+      expect(svg).toContain('cx="49.5" cy="14" r="10" fill="black"');
+      expect(svg).toContain('cx="38.5" cy="8.5" r="6" fill="black"');
+    }
+
+    // Activity bar and title: one silhouette painted through the mask, the
+    // chips punched out with the bite, since only the alpha channel shows.
+    for (const svg of marks.slice(1)) {
+      expect(svg).toContain('<g fill="currentColor" mask="url(#cutout-mask)">');
+      for (const chip of [
+        'cx="26.6" cy="28.8" r="3.75" fill="black"',
+        'cx="39.9" cy="35" r="5.25" fill="black"',
+        'cx="28.2" cy="40.6" r="4.1" fill="black"',
       ]) {
-        expect(svg).toContain(restored);
+        expect(svg).toContain(chip);
       }
     }
-    expect(marks[1]).toContain('fill="currentColor" mask="url(#cutout-mask)"');
+
+    // Store tile: dough, a baked edge the bite cuts through, dark chips.
+    const store = marks[0];
+    expect(store).toContain('stroke="#B8792F"');
+    for (const chip of [
+      'cx="26.6" cy="28.8" r="3.75" fill="#5C3A28"',
+      'cx="39.9" cy="35" r="5.25" fill="#5C3A28"',
+      'cx="28.2" cy="40.6" r="4.1" fill="#5C3A28"',
+    ]) {
+      expect(store).toContain(chip);
+    }
   });
 
-  it("keeps the in-chat thinking glyph a bare cookie, without the bubble", () => {
+  it("keeps the in-chat thinking glyph a bare cookie, without the reply tail", () => {
+    // The bare cookie is the brand mark; the tail belongs to Cukii Chat only.
     const cookie = readMediaIcon("media/cukii-cookie.svg");
     expect(cookie).toContain('d="M56.3');
     expect(cookie).not.toContain("M21 8 H43");
+    expect(cookie).not.toContain("M12.5 43");
     const glyph = readFileSync(
       join(
         __dirname,

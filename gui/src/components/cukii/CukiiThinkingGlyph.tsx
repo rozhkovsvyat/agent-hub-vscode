@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
-// Голая печенька без облачка логотипа Cukii Chat: в строке чата облачко лишнее.
-// Тот же силуэт, что внутри облачка в activity bar (media/cukii-cookie.svg).
+// Голая печенька без хвостика реплики из знака Cukii Chat: в строке чата он лишний.
+// Тот же силуэт, надкус и крошки, что в activity bar (media/cukii-cookie.svg).
 // Vite копирует SVG в GUI bundle, поэтому webview не зависит от пути к extension media.
 const activityIcon = new URL(
   "../../../../extensions/vscode/media/cukii-cookie.svg",
