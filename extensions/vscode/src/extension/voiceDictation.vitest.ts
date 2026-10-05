@@ -23,6 +23,7 @@ import {
   transcribeVoiceFile,
   transcribeDecodedVoiceAudio,
   resolveWhisperTranscribeLanguage,
+  splitVoiceAudioAtPauses,
   verifyPackagedWhisperModel,
   voiceFfmpegExecutable,
   voiceRecorderArgs,
@@ -51,6 +52,32 @@ function fakeRecorder(outputPath: string, exitDelayMs = 0): ChildProcess {
   });
   return process;
 }
+
+/** A steady 220 Hz "voice" with 0.6 s of silence centred on each pause. */
+function speechWithPauses(seconds: number, pauses: number[]): Float32Array {
+  return Float32Array.from({ length: seconds * 16_000 }, (_, index) => {
+    const t = index / 16_000;
+    if (pauses.some((pause) => Math.abs(t - pause) < 0.3)) return 0;
+    return 0.05 * Math.sin((2 * Math.PI * 220 * index) / 16_000);
+  });
+}
+
+/**
+ * Three minutes of Russian dictation shaped like the owner's real one in card
+ * 364dbc2f (fillers, repeats): as one text it compresses 2.60x, each piece at
+ * most 1.67x.
+ */
+const OWNER_DICTATION_PIECES = [
+  "Ну смотри, я сейчас открыл плагин и попробовал надиктовать задачу, вот, и сначала вроде всё нормально, кнопка нажалась, запись пошла.",
+  "Потом я говорю, говорю, то есть минуты две, наверное, рассказываю, что надо поправить в настройках, и вот тут уже непонятно, идёт запись или нет.",
+  "Вот, и я такой думаю, ладно, нажму стоп, посмотрю, что получится. Нажимаю стоп, и ничего не происходит, вообще ничего, просто тишина.",
+  "Ну то есть я не понимаю, он распознаёт или он сломался, вот, никакой индикации, кнопка просто серая, и всё, сиди жди.",
+  "Потом вылезает ошибка, что якобы повторяющийся текст, хотя я ничего не повторял, я просто нормально говорил, как обычно говорю.",
+  "И самое обидное, что вот всё, что я надиктовал, оно просто пропало, то есть мне теперь надо заново всё это рассказывать.",
+  "Вот, а с телефона, если я записываю голосовое и кидаю агенту, оно нормально распознаётся, вот, без всяких проблем, длинное, короткое, любое.",
+  "Поэтому я не понимаю, почему тут нельзя сделать так же, вот, ну то есть та же модель, тот же алгоритм, и всё будет работать.",
+  "Короче, надо, чтобы было видно, что идёт запись, сколько времени прошло, и чтобы после стопа было видно, что он распознаёт, вот, и чтобы текст не терялся.",
+];
 
 describe("voice dictation runtime", () => {
   it.each([
@@ -90,23 +117,41 @@ describe("voice dictation runtime", () => {
   });
 
   it.each([
-    [{ vscodeLanguage: "ru" }, "russian"],
-    [{ vscodeLanguage: "ru-RU" }, "russian"],
-    [{ vscodeLanguage: "en-US" }, "english"],
-    [{ configured: "auto", vscodeLanguage: "uk" }, "ukrainian"],
-    [{ configured: "ru", vscodeLanguage: "en" }, "russian"],
+    [{}, undefined],
+    [{ configured: "auto" }, undefined],
+    [{ configured: "detect" }, undefined],
+    [{ configured: "ru" }, "russian"],
+    [{ configured: "ru-RU" }, "russian"],
     [{ configured: "russian" }, "russian"],
-    [{ configured: "detect", vscodeLanguage: "ru" }, undefined],
+    [{ configured: "en" }, "english"],
   ])("resolves Whisper language from %j", (input, expected) => {
     expect(resolveWhisperTranscribeLanguage(input)).toBe(expected);
   });
 
-  it("passes the resolved language so Russian speech is transcribed, not forced into English", async () => {
+  it("never forces the VS Code display language onto dictation", () => {
+    // Card 364dbc2f: an English UI forced `<|en|>`, and Whisper translated
+    // Russian speech into English. `auto` is detection, not the UI language.
+    const messenger = fs.readFileSync(
+      path.join(__dirname, "VsCodeMessenger.ts"),
+      "utf8",
+    );
+    expect(messenger).not.toMatch(/vscodeLanguage|env\.language/);
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"),
+    );
+    const setting =
+      manifest.contributes.configuration.properties["cukii.voiceLanguage"];
+    expect(setting.default).toBe("auto");
+    expect(setting.markdownDescription).not.toMatch(/display language/i);
+  });
+
+  it("passes a configured language and skips detection", async () => {
     const audio = Float32Array.from(
       { length: 16_000 },
       (_, index) => 0.001 * Math.sin((2 * Math.PI * 220 * index) / 16_000),
     );
     let seen: Record<string, unknown> | undefined;
+    let detections = 0;
     await expect(
       transcribeDecodedVoiceAudio(
         audio,
@@ -114,18 +159,44 @@ describe("voice dictation runtime", () => {
           seen = options as Record<string, unknown>;
           return { text: "проверка микрофона" };
         },
-        { language: "russian" },
+        {
+          language: "russian",
+          detectLanguage: async () => {
+            detections += 1;
+            return "english";
+          },
+        },
       ),
     ).resolves.toBe("проверка микрофона");
-    expect(seen).toMatchObject({
-      chunk_length_s: 30,
-      stride_length_s: 5,
-      task: "transcribe",
-      language: "russian",
-    });
+    expect(seen).toEqual({ task: "transcribe", language: "russian" });
+    expect(detections).toBe(0);
   });
 
-  it("omits language when the caller asked for model auto-detect", async () => {
+  it("detects the language once and forces it on every piece", async () => {
+    const audio = speechWithPauses(70, [20.5, 45.5]);
+    const languages: unknown[] = [];
+    let detections = 0;
+    const text = await transcribeDecodedVoiceAudio(
+      audio,
+      async () => async (_piece: Float32Array, options: any) => {
+        languages.push(options.language);
+        return { text: "кусок диктовки" };
+      },
+      {
+        detectLanguage: async (_recognize, opening) => {
+          detections += 1;
+          expect(opening.length).toBe(audio.length);
+          return "russian";
+        },
+      },
+    );
+    expect(detections).toBe(1);
+    expect(languages.length).toBeGreaterThan(1);
+    expect(new Set(languages)).toEqual(new Set(["russian"]));
+    expect(text).toBe(languages.map(() => "кусок диктовки").join(" "));
+  });
+
+  it("omits language when detection has no answer", async () => {
     const audio = Float32Array.from(
       { length: 16_000 },
       (_, index) => 0.001 * Math.sin((2 * Math.PI * 220 * index) / 16_000),
@@ -137,9 +208,69 @@ describe("voice dictation runtime", () => {
         seen = options as Record<string, unknown>;
         return { text: "hello there" };
       },
+      { detectLanguage: async () => undefined },
     );
-    expect(seen).toMatchObject({ task: "transcribe" });
-    expect(seen).not.toHaveProperty("language");
+    expect(seen).toEqual({ task: "transcribe" });
+  });
+
+  it("cuts long dictation inside pauses, never past Whisper's window", () => {
+    const pauses = [20.5, 45.5, 71];
+    const audio = speechWithPauses(90, pauses);
+    const segments = splitVoiceAudioAtPauses(audio);
+    expect(segments[0][0]).toBe(0);
+    expect(segments.at(-1)![1]).toBe(audio.length);
+    for (let i = 1; i < segments.length; i++) {
+      expect(segments[i][0]).toBe(segments[i - 1][1]);
+    }
+    for (const [start, end] of segments) {
+      expect((end - start) / 16_000).toBeLessThanOrEqual(28);
+    }
+    const cuts = segments.slice(1).map(([start]) => start / 16_000);
+    expect(cuts).toHaveLength(pauses.length);
+    cuts.forEach((cut, index) => {
+      expect(Math.abs(cut - pauses[index])).toBeLessThan(0.5);
+    });
+    expect(splitVoiceAudioAtPauses(new Float32Array(16_000 * 10))).toEqual([
+      [0, 16_000 * 10],
+    ]);
+  });
+
+  it("keeps a long real dictation that the old whole-text guard rejected", async () => {
+    // A long dictation shaped like the owner's: as one text it compresses
+    // past 2.4 and used to be thrown away as "repeated text"; each
+    // pause-bounded piece is ordinary speech.
+    const pieces = OWNER_DICTATION_PIECES;
+    expect(() => assertVoiceTranscriptIsUsable(pieces.join(" "), 188)).toThrow(
+      "repeated text",
+    );
+    let next = 0;
+    const text = await transcribeDecodedVoiceAudio(
+      speechWithPauses(188, [17.6, 35, 54.7, 81.9, 108.2, 133, 153.3, 172]),
+      async () => async () => ({ text: pieces[next++] }),
+      { detectLanguage: async () => "russian" },
+    );
+    expect(next).toBe(pieces.length);
+    expect(text).toBe(pieces.join(" "));
+  });
+
+  it("drops only the looped piece and keeps the rest of the dictation", async () => {
+    const replies = ["первая часть", "R R R R R R R R", "третья часть"];
+    let next = 0;
+    await expect(
+      transcribeDecodedVoiceAudio(
+        speechWithPauses(70, [20.5, 45.5]),
+        async () => async () => ({ text: replies[next++] }),
+        { detectLanguage: async () => "russian" },
+      ),
+    ).resolves.toBe("первая часть третья часть");
+
+    await expect(
+      transcribeDecodedVoiceAudio(
+        speechWithPauses(70, [20.5, 45.5]),
+        async () => async () => ({ text: "you you you you" }),
+        { detectLanguage: async () => "russian" },
+      ),
+    ).rejects.toThrow("repeated text");
   });
 
   it.each([
@@ -499,10 +630,20 @@ describe("voice dictation runtime", () => {
     }
   });
 
-  it("expires through unified cleanup and exposes a terminal UI contract", async () => {
+  /** The WAV a fake recorder writes, wherever the owned capture dir is. */
+  function capturedWav(tempDir: string): string | undefined {
+    const dir = fs
+      .readdirSync(tempDir)
+      .find((name) => name.startsWith("cukii-voice-capture-"));
+    const wav = dir && path.join(tempDir, dir, "recording.wav");
+    return wav && fs.existsSync(wav) ? wav : undefined;
+  }
+
+  it("keeps the audio at the five-minute limit and transcribes it on stop", async () => {
+    // Card 364dbc2f: the limit used to delete the recording, so a long
+    // dictation was simply gone.
     const recordingId = "duration-expiry-test";
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-expiry-"));
-    const outputPath = path.join(tempDir, `cukii-voice-${recordingId}.wav`);
     try {
       await startVoiceRecording(recordingId, {
         resolveDevice: async () => "Test microphone",
@@ -517,17 +658,28 @@ describe("voice dictation runtime", () => {
         state: "expired",
         message: expect.stringContaining("five-minute limit"),
       });
-      expect(fs.existsSync(outputPath)).toBe(false);
-      await expect(cancelVoiceRecording(recordingId)).resolves.toBeUndefined();
+      const wav = capturedWav(tempDir);
+      expect(wav).toBeDefined();
+      const seen: string[] = [];
+      await expect(
+        stopVoiceRecording(recordingId, {
+          transcribeFile: async (file) => {
+            seen.push(file);
+            return "всё, что успел сказать";
+          },
+        }),
+      ).resolves.toBe("всё, что успел сказать");
+      expect(seen).toEqual([wav]);
+      expect(capturedWav(tempDir)).toBeUndefined();
+      expect(voiceRecordingStatus(recordingId).state).toBe("unknown");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
-  it("rejects manual stop meaningfully when expiry owns finalization", async () => {
+  it("transcribes the kept audio when stop races the limit timer", async () => {
     const recordingId = "stop-expiry-race-test";
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-race-"));
-    const outputPath = path.join(tempDir, `cukii-voice-${recordingId}.wav`);
     try {
       await startVoiceRecording(recordingId, {
         resolveDevice: async () => "Test microphone",
@@ -538,11 +690,91 @@ describe("voice dictation runtime", () => {
         tempDir,
       });
       await new Promise((resolve) => setTimeout(resolve, 20));
-      await expect(stopVoiceRecording(recordingId)).rejects.toThrow(
-        "five-minute limit",
+      await expect(
+        stopVoiceRecording(recordingId, {
+          transcribeFile: async () => "до лимита",
+        }),
+      ).resolves.toBe("до лимита");
+      expect(capturedWav(tempDir)).toBeUndefined();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the audio when transcription fails, so Retry can try again", async () => {
+    const recordingId = "kept-after-failure-test";
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-kept-"));
+    try {
+      await startVoiceRecording(recordingId, {
+        resolveDevice: async () => "Test microphone",
+        spawnRecorder: ((_command: string, args: readonly string[]) =>
+          fakeRecorder(String(args.at(-1)))) as any,
+        startupDelayMs: 0,
+        tempDir,
+      });
+      await expect(
+        stopVoiceRecording(recordingId, {
+          transcribeFile: async () => {
+            throw new Error("Speech recognition returned repeated text.");
+          },
+        }),
+      ).rejects.toThrow("The recording is kept: press Retry");
+      expect(voiceRecordingStatus(recordingId)).toMatchObject({
+        state: "kept",
+        message: expect.stringContaining("press Retry"),
+      });
+      expect(capturedWav(tempDir)).toBeDefined();
+
+      // Retry is the same stop on the same id.
+      await expect(
+        stopVoiceRecording(recordingId, {
+          transcribeFile: async () => "со второй попытки",
+        }),
+      ).resolves.toBe("со второй попытки");
+      expect(capturedWav(tempDir)).toBeUndefined();
+      expect(voiceRecordingStatus(recordingId).state).toBe("unknown");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not keep silence and lets cancel discard kept audio", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cukii-discard-"));
+    const start = (recordingId: string) =>
+      startVoiceRecording(recordingId, {
+        resolveDevice: async () => "Test microphone",
+        spawnRecorder: ((_command: string, args: readonly string[]) =>
+          fakeRecorder(String(args.at(-1)))) as any,
+        startupDelayMs: 0,
+        tempDir,
+      });
+    try {
+      await start("silent-recording-test");
+      await expect(
+        stopVoiceRecording("silent-recording-test", {
+          transcribeFile: async () => {
+            throw new Error(
+              "No speech was detected. Check the selected microphone and try again.",
+            );
+          },
+        }),
+      ).rejects.toThrow(/^No speech was detected\. Check the selected microphone and try again\.$/);
+      expect(capturedWav(tempDir)).toBeUndefined();
+
+      await start("discarded-recording-test");
+      await expect(
+        stopVoiceRecording("discarded-recording-test", {
+          transcribeFile: async () => {
+            throw new Error("boom");
+          },
+        }),
+      ).rejects.toThrow("press Retry");
+      expect(capturedWav(tempDir)).toBeDefined();
+      await cancelVoiceRecording("discarded-recording-test");
+      expect(capturedWav(tempDir)).toBeUndefined();
+      expect(voiceRecordingStatus("discarded-recording-test").state).toBe(
+        "unknown",
       );
-      expect(fs.existsSync(outputPath)).toBe(false);
-      expect(voiceRecordingStatus(recordingId).state).toBe("expired");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

@@ -441,6 +441,104 @@ html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
   color: var(--vscode-errorForeground, #f48771);
 }
 
+/* Recording is unmistakable: the button turns into a red stop square. */
+.cukii-voice-button.cukii-voice-button-listening,
+.cukii-voice-button.cukii-voice-button-listening:hover {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+/* Phase status left of the microphone: recording timer, transcribing, Retry. */
+.cukii-voice-status {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  right: 34px;
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cukii-voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--vscode-errorForeground, #f14c4c);
+  animation: cukii-voice-pulse 1.2s ease-in-out infinite;
+}
+
+.cukii-voice-limit {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+}
+
+.cukii-voice-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--vscode-descriptionForeground, #a0a0a0);
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: cukii-voice-spin 0.8s linear infinite;
+}
+
+.cukii-voice-status-action {
+  display: inline-flex;
+  height: 18px;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cukii-voice-status-action:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-voice-retry {
+  padding: 0 8px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-weight: 600;
+}
+
+@keyframes cukii-voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes cukii-voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cukii-voice-dot,
+  .cukii-voice-spinner {
+    animation: none;
+  }
+}
+
 .cukii-toggle-track {
   position: relative;
   display: inline-flex;

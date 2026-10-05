@@ -112,7 +112,7 @@
         "cukii.voiceLanguage": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "Language for microphone dictation. `auto` uses the VS Code display language (Russian UI → Russian transcript). `detect` lets Whisper guess the spoken language. Or set a Whisper language such as `ru` / `russian` or `en` / `english`."
+          "markdownDescription": "Language for microphone dictation. `auto` detects the spoken language from the start of each recording. Set a Whisper language such as `ru` / `russian` or `en` / `english` only if detection picks the wrong one: a set language makes Whisper translate speech in any other language into it."
         }
       }
     },

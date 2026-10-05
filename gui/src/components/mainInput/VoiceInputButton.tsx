@@ -12,7 +12,23 @@ type Operation = {
   phase: "starting" | "listening" | "stopping";
 };
 
-/** The webview is control-plane only; native capture and ASR live in the host. */
+/** Mirrors MAX_VOICE_RECORDING_MS in the host. */
+const VOICE_LIMIT_SECONDS = 5 * 60;
+
+export function formatVoiceElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The webview is control-plane only; native capture and ASR live in the host.
+ *
+ * Card 364dbc2f: a faint button fill was the only sign of recording, and after
+ * Stop nothing showed whether the plugin was transcribing or broken. Like the
+ * dictation in ChatGPT and Claude, each phase now has its own visible state:
+ * a red dot with a running timer while recording, a spinner with a timer while
+ * transcribing, and Retry when the host kept audio it could not transcribe.
+ */
 export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const sessionId = useAppSelector((state) => state.session.id);
@@ -22,6 +38,15 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   const mounted = useRef(true);
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string>();
+  const [keptId, setKeptId] = useState<string>();
+  const [phaseStartedAt, setPhaseStartedAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const enterPhase = (next: VoiceState) => {
+    const at = Date.now();
+    setPhaseStartedAt(at);
+    setNow(at);
+    setState(next);
+  };
   const cancel = (active?: Operation) => {
     if (!active || cancelledIds.current.has(active.recordingId)) return;
     cancelledIds.current.add(active.recordingId);
@@ -60,6 +85,67 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   }, [ideMessenger]);
 
   useEffect(() => {
+    if (state !== "listening" && state !== "transcribing") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [state]);
+
+  /** Stop-and-transcribe; on a kept recording the same call is Retry. */
+  const finish = async (active: Operation) => {
+    active.phase = "stopping";
+    setError(undefined);
+    enterPhase("transcribing");
+    try {
+      const response = await ideMessenger.request("cukii/stopVoiceRecording", {
+        recordingId: active.recordingId,
+      });
+      if (
+        !mounted.current ||
+        operation.current !== active ||
+        active.sessionId !== sessionIdRef.current
+      )
+        return;
+      operation.current = undefined;
+      if (response.status === "success") {
+        setKeptId(undefined);
+        const text = response.content.text.trim();
+        if (text) {
+          onTranscript(text);
+          setError(undefined);
+        } else raiseError("No speech was recognized.");
+      } else {
+        raiseError(response.error);
+        await offerRetry(active.recordingId);
+      }
+      setState("idle");
+    } catch (caught) {
+      if (mounted.current && operation.current === active) {
+        operation.current = undefined;
+        raiseError(caught instanceof Error ? caught.message : String(caught));
+        await offerRetry(active.recordingId);
+        setState("idle");
+      }
+    }
+  };
+
+  /** The host keeps audio it could not transcribe; show Retry only then. */
+  const offerRetry = async (recordingId: string) => {
+    try {
+      const status = await ideMessenger.request("cukii/voiceRecordingStatus", {
+        recordingId,
+      });
+      if (!mounted.current) return;
+      setKeptId(
+        status.status === "success" && status.content.state === "kept"
+          ? recordingId
+          : undefined,
+      );
+    } catch {
+      setKeptId(undefined);
+    }
+  };
+
+  useEffect(() => {
     if (state !== "listening") return;
     const timer = window.setInterval(async () => {
       const active = operation.current;
@@ -72,10 +158,15 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         if (
           !mounted.current ||
           operation.current !== active ||
+          active.phase !== "listening" ||
           response.status !== "success"
         )
           return;
-        if (response.content.state !== "listening") {
+        if (response.content.state === "expired") {
+          // The five-minute limit stopped the recorder and kept the audio:
+          // transcribe what was said instead of throwing it away.
+          void finish(active);
+        } else if (response.content.state !== "listening") {
           operation.current = undefined;
           cancel(active);
           raiseError(
@@ -128,7 +219,7 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         setState("idle");
       } else {
         active.phase = "listening";
-        setState("listening");
+        enterPhase("listening");
       }
     } catch (caught) {
       if (mounted.current && operation.current === active) {
@@ -142,36 +233,38 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
   const stop = async () => {
     const active = operation.current;
     if (!active || active.phase !== "listening") return;
-    active.phase = "stopping";
-    setState("transcribing");
-    try {
-      const response = await ideMessenger.request("cukii/stopVoiceRecording", {
-        recordingId: active.recordingId,
-      });
-      if (
-        !mounted.current ||
-        operation.current !== active ||
-        active.sessionId !== sessionIdRef.current
-      )
-        return;
-      operation.current = undefined;
-      if (response.status === "success") {
-        const text = response.content.text.trim();
-        if (text) {
-          onTranscript(text);
-          setError(undefined);
-        } else raiseError("No speech was recognized.");
-      } else raiseError(response.error);
-      setState("idle");
-    } catch (caught) {
-      if (mounted.current && operation.current === active) {
-        operation.current = undefined;
-        raiseError(caught instanceof Error ? caught.message : String(caught));
-        setState("idle");
-      }
-    }
+    await finish(active);
   };
 
+  const discardListening = () => {
+    const active = operation.current;
+    if (!active || active.phase !== "listening") return;
+    operation.current = undefined;
+    cancel(active);
+    setState("idle");
+  };
+
+  const retry = () => {
+    if (!keptId || operation.current) return;
+    const active: Operation = {
+      recordingId: keptId,
+      sessionId: sessionIdRef.current,
+      phase: "stopping",
+    };
+    operation.current = active;
+    void finish(active);
+  };
+
+  const discardKept = () => {
+    if (!keptId) return;
+    void ideMessenger
+      .request("cukii/cancelVoiceRecording", { recordingId: keptId })
+      .catch(() => undefined);
+    setKeptId(undefined);
+    setError(undefined);
+  };
+
+  const elapsed = formatVoiceElapsed(now - phaseStartedAt);
   const title =
     error ??
     (state === "starting"
@@ -181,35 +274,109 @@ export function VoiceInputButton({ onTranscript }: VoiceInputButtonProps) {
         : state === "transcribing"
           ? "Transcribing locally…"
           : "Start voice input");
-  return (
-    <button
-      type="button"
-      className={`cukii-voice-button ${state === "listening" ? "cukii-voice-button-listening" : ""} ${error ? "cukii-voice-button-error" : ""}`}
-      aria-label={
-        error
-          ? `Voice dictation failed: ${error}. Click to retry.`
-          : state === "listening"
-            ? "Voice dictation listening; click to stop and transcribe"
-            : "Voice dictation"
-      }
-      aria-pressed={state === "listening"}
-      aria-busy={state === "starting" || state === "transcribing"}
-      title={title}
-      disabled={state === "starting" || state === "transcribing"}
-      onClick={() => void (state === "listening" ? stop() : start())}
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 20 20"
-        fill="none"
-        aria-hidden="true"
+  const status =
+    state === "listening" ? (
+      <div
+        className="cukii-voice-status cukii-voice-status-listening"
+        role="status"
+        aria-live="polite"
+        data-testid="cukii-voice-status"
       >
-        <path
-          d="M10 2.75A2.75 2.75 0 0 0 7.25 5.5v4a2.75 2.75 0 0 0 5.5 0v-4A2.75 2.75 0 0 0 10 2.75Zm-4.75 6.5a.75.75 0 0 1 .75.75 4 4 0 0 0 8 0 .75.75 0 0 1 1.5 0 5.5 5.5 0 0 1-4.75 5.445v1.805h2a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1 0-1.5h2v-1.805A5.5 5.5 0 0 1 4.5 10a.75.75 0 0 1 .75-.75Z"
-          fill="currentColor"
-        />
-      </svg>
-    </button>
+        <span className="cukii-voice-dot" aria-hidden="true" />
+        <span className="cukii-voice-time">Recording {elapsed}</span>
+        <span className="cukii-voice-limit">
+          / {formatVoiceElapsed(VOICE_LIMIT_SECONDS * 1000)}
+        </span>
+        <button
+          type="button"
+          className="cukii-voice-status-action"
+          aria-label="Discard voice recording"
+          title="Discard recording"
+          onClick={discardListening}
+        >
+          ✕
+        </button>
+      </div>
+    ) : state === "transcribing" ? (
+      <div
+        className="cukii-voice-status"
+        role="status"
+        aria-live="polite"
+        data-testid="cukii-voice-status"
+      >
+        <span className="cukii-voice-spinner" aria-hidden="true" />
+        <span className="cukii-voice-time">Transcribing… {elapsed}</span>
+      </div>
+    ) : state === "idle" && keptId ? (
+      <div
+        className="cukii-voice-status cukii-voice-status-kept"
+        role="status"
+        data-testid="cukii-voice-status"
+      >
+        <button
+          type="button"
+          className="cukii-voice-status-action cukii-voice-retry"
+          title="Transcribe the kept recording again"
+          onClick={retry}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          className="cukii-voice-status-action"
+          aria-label="Discard kept voice recording"
+          title="Discard the kept recording"
+          onClick={discardKept}
+        >
+          ✕
+        </button>
+      </div>
+    ) : null;
+
+  return (
+    <>
+      {status}
+      <button
+        type="button"
+        className={`cukii-voice-button ${state === "listening" ? "cukii-voice-button-listening" : ""} ${error ? "cukii-voice-button-error" : ""}`}
+        aria-label={
+          error
+            ? `Voice dictation failed: ${error}. Click to retry.`
+            : state === "listening"
+              ? "Voice dictation listening; click to stop and transcribe"
+              : "Voice dictation"
+        }
+        aria-pressed={state === "listening"}
+        aria-busy={state === "starting" || state === "transcribing"}
+        title={title}
+        disabled={state === "starting" || state === "transcribing"}
+        onClick={() => void (state === "listening" ? stop() : start())}
+      >
+        {state === "listening" ? (
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            aria-hidden="true"
+            data-testid="cukii-voice-stop-glyph"
+          >
+            <rect x="2" y="2" width="10" height="10" rx="2" fill="currentColor" />
+          </svg>
+        ) : (
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M10 2.75A2.75 2.75 0 0 0 7.25 5.5v4a2.75 2.75 0 0 0 5.5 0v-4A2.75 2.75 0 0 0 10 2.75Zm-4.75 6.5a.75.75 0 0 1 .75.75 4 4 0 0 0 8 0 .75.75 0 0 1 1.5 0 5.5 5.5 0 0 1-4.75 5.445v1.805h2a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1 0-1.5h2v-1.805A5.5 5.5 0 0 1 4.5 10a.75.75 0 0 1 .75-.75Z"
+              fill="currentColor"
+            />
+          </svg>
+        )}
+      </button>
+    </>
   );
 }

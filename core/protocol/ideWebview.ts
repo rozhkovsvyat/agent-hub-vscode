@@ -426,7 +426,13 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
   "cukii/voiceRecordingStatus": [
     { recordingId: string },
     {
-      state: "starting" | "listening" | "expired" | "error" | "unknown";
+      state:
+        | "starting"
+        | "listening"
+        | "expired"
+        | "kept"
+        | "error"
+        | "unknown";
       message?: string;
     },
   ];

@@ -16,8 +16,9 @@ describe("voice messenger error channel", () => {
     expect(voiceRoutes).toContain('"cukii/cancelVoiceRecording"');
     expect(voiceRoutes).toContain('"cukii/voiceRecordingStatus"');
     expect(voiceRoutes).toContain("resolveWhisperTranscribeLanguage");
-    expect(voiceRoutes).toContain("vscode.env.language");
     expect(voiceRoutes).toContain("voiceLanguage");
+    // The display language forced Whisper to translate (card 364dbc2f).
+    expect(voiceRoutes).not.toContain("vscode.env.language");
     expect(voiceRoutes).not.toContain('"cukii/transcribeVoiceRecording"');
     expect(voiceRoutes).not.toContain("showErrorMessage");
     expect(voiceRoutes).not.toContain("audioBase64");

@@ -89,6 +89,24 @@ const terminalRecordings = new Map<
   string,
   { state: "expired" | "error"; message: string; cleanup: NodeJS.Timeout }
 >();
+/**
+ * Audio the recorder already finished but no transcript has been delivered
+ * for: the five-minute limit, or a transcription that failed. It used to be
+ * deleted on the spot, so a long dictation was lost to one recognition error
+ * (card 364dbc2f). `stopVoiceRecording` on the same id transcribes it again.
+ */
+type KeptRecording = {
+  state: "expired" | "kept";
+  message: string;
+  outputPath: string;
+  cleanupOwnedDir: () => void;
+  cleanup: NodeJS.Timeout;
+};
+const keptRecordings = new Map<string, KeptRecording>();
+const KEPT_RECORDING_TTL_MS = 30 * 60 * 1000;
+const EXPIRED_MESSAGE =
+  "Voice recording reached the five-minute limit. Transcribing what was recorded…";
+const KEPT_SUFFIX = " The recording is kept: press Retry to transcribe it again.";
 let transcriberPromise: Promise<any> | undefined;
 
 type VoiceRecordingOptions = {
@@ -569,10 +587,28 @@ export function assertVoiceAudioHasSpeech(audio: Float32Array): void {
   if (peak < 5e-4 && rms < 1e-4) throw new Error(NO_SPEECH_MESSAGE);
 }
 
+const REPEATED_TEXT_MESSAGE =
+  "Speech recognition returned repeated text. Check the selected microphone and try again.";
+
 export function assertVoiceTranscriptIsUsable(
   text: string,
   durationSeconds: number,
 ): void {
+  const problem = voiceTranscriptProblem(text, durationSeconds);
+  if (problem === "no-speech") throw new Error(NO_SPEECH_MESSAGE);
+  if (problem === "repeated") throw new Error(REPEATED_TEXT_MESSAGE);
+}
+
+/**
+ * Whisper's own hallucination limits (compression ratio 2.4 and friends) are
+ * defined per ~30 s decoding window. Applied to a whole long dictation they
+ * reject ordinary speech: the owner's real 111 s Russian dictation already
+ * compresses 2.45x (card 364dbc2f). Callers pass one pause-bounded segment.
+ */
+export function voiceTranscriptProblem(
+  text: string,
+  durationSeconds: number,
+): "no-speech" | "repeated" | undefined {
   const canonical = text
     .trim()
     .toLocaleLowerCase()
@@ -588,7 +624,7 @@ export function assertVoiceTranscriptIsUsable(
       "<|no_speech|>",
     ]).has(canonical)
   ) {
-    throw new Error(NO_SPEECH_MESSAGE);
+    return "no-speech";
   }
   const tokens = text.trim().split(/\s+/).filter(Boolean);
   const normalized = tokens.map((token) =>
@@ -619,21 +655,138 @@ export function assertVoiceTranscriptIsUsable(
     compressionRatio > 2.4 ||
     outputRateTooHigh
   ) {
-    throw new Error(
-      "Speech recognition returned repeated text. Check the selected microphone and try again.",
+    return "repeated";
+  }
+  return undefined;
+}
+
+const VOICE_SAMPLE_RATE = 16_000;
+/** Whisper decodes at most 30 s at once; a margin keeps every cut inside it. */
+const MAX_VOICE_SEGMENT_SECONDS = 28;
+const PAUSE_FRAME_SAMPLES = 480; // 30 ms
+const PAUSE_WINDOW_FRAMES = 5; // ±150 ms around a candidate cut
+
+/**
+ * Splits a dictation into independent pieces of at most `maxSeconds`, cutting
+ * at the quietest 300 ms in the last 40% of each piece, so a cut lands in a
+ * pause between words. Long dictation used to go through the pipeline's own
+ * 30 s / 5 s stride windows, whose merge dropped most of the first half
+ * minute of a real 188 s recording (123 words left of 318) or looped on
+ * "R R R"; pause-bounded pieces gave 307 (card 364dbc2f).
+ */
+export function splitVoiceAudioAtPauses(
+  audio: Float32Array,
+  maxSeconds = MAX_VOICE_SEGMENT_SECONDS,
+  sampleRate = VOICE_SAMPLE_RATE,
+): Array<[number, number]> {
+  const maxSamples = Math.floor(maxSeconds * sampleRate);
+  if (audio.length <= maxSamples) return [[0, audio.length]];
+  const frames = Math.floor(audio.length / PAUSE_FRAME_SAMPLES);
+  const energy = new Float64Array(frames);
+  for (let frame = 0; frame < frames; frame++) {
+    let sum = 0;
+    const offset = frame * PAUSE_FRAME_SAMPLES;
+    for (let i = offset; i < offset + PAUSE_FRAME_SAMPLES; i++) {
+      sum += audio[i] * audio[i];
+    }
+    energy[frame] = sum;
+  }
+  const maxFrames = Math.floor(maxSamples / PAUSE_FRAME_SAMPLES);
+  const segments: Array<[number, number]> = [];
+  let start = 0;
+  while (audio.length - start * PAUSE_FRAME_SAMPLES > maxSamples) {
+    let cut = start + maxFrames;
+    let quietest = Infinity;
+    for (
+      let frame = start + Math.floor(maxFrames * 0.6);
+      frame < start + maxFrames;
+      frame++
+    ) {
+      let around = 0;
+      for (
+        let k = frame - PAUSE_WINDOW_FRAMES;
+        k <= frame + PAUSE_WINDOW_FRAMES;
+        k++
+      ) {
+        around += energy[k] ?? 0;
+      }
+      if (around < quietest) {
+        quietest = around;
+        cut = frame;
+      }
+    }
+    segments.push([start * PAUSE_FRAME_SAMPLES, cut * PAUSE_FRAME_SAMPLES]);
+    start = cut;
+  }
+  segments.push([start * PAUSE_FRAME_SAMPLES, audio.length]);
+  return segments;
+}
+
+/**
+ * Whisper's language identification: one decoder step on the opening audio,
+ * argmax over the language tokens only. transformers.js 2.14 does not return
+ * the language its pipeline picked, and the unrestricted argmax at that
+ * position is `<|nocaptions|>`. Undefined when the recognizer is not the real
+ * pipeline or detection fails; each piece then detects on its own.
+ */
+export async function detectSpokenLanguage(
+  recognize: any,
+  audio: Float32Array,
+): Promise<string | undefined> {
+  const vocabulary: Map<string, number> | undefined =
+    recognize?.tokenizer?.model?.tokens_to_ids;
+  if (!vocabulary || !recognize?.processor || !recognize?.model?.generate) {
+    return undefined;
+  }
+  try {
+    const languageByToken = new Map<number, string>();
+    for (const [code, name] of Object.entries(WHISPER_LANGUAGE_BY_CODE)) {
+      const id = vocabulary.get(`<|${code}|>`);
+      if (id !== undefined) languageByToken.set(id, name);
+    }
+    const transcribeToken = vocabulary.get("<|transcribe|>");
+    if (languageByToken.size === 0 || transcribeToken === undefined) {
+      return undefined;
+    }
+    const { input_features } = await recognize.processor(
+      audio.subarray(0, Math.min(audio.length, 30 * VOICE_SAMPLE_RATE)),
     );
+    const onlyLanguages = (_ids: unknown, logits: { data: Float32Array }) => {
+      const data = logits.data;
+      for (let i = 0; i < data.length; i++) {
+        if (!languageByToken.has(i)) data[i] = -Infinity;
+      }
+      return logits;
+    };
+    const output = await recognize.model.generate(
+      input_features,
+      {
+        max_new_tokens: 1,
+        // Position 1 stays free for the language; 2.14 needs one forced id.
+        forced_decoder_ids: [[2, transcribeToken]],
+        return_timestamps: false,
+        suppress_tokens: null,
+        begin_suppress_tokens: null,
+      },
+      [onlyLanguages],
+    );
+    const ids = Array.from((output?.[0] ?? output) as ArrayLike<unknown>, Number);
+    return languageByToken.get(ids[ids.length - 1]);
+  } catch {
+    return undefined;
   }
 }
 
 export type WhisperLanguageSource = {
   configured?: string | null;
-  vscodeLanguage?: string | null;
 };
 
 /**
- * Whisper-base is multilingual, but with no language token it strongly prefers
- * English and will decode Russian speech as English text. `auto` follows the
- * VS Code display language; `detect` leaves language prediction to the model.
+ * Forcing a language token makes Whisper TRANSLATE speech in another language
+ * into it. `auto` used to force the VS Code display language, so with an
+ * English UI every Russian dictation came back as English text (card
+ * 364dbc2f). `auto` now means detection (`detectSpokenLanguage`), which named
+ * Russian correctly even on 3–4 s clips; a configured language still wins.
  */
 const WHISPER_LANGUAGE_BY_CODE: Readonly<Record<string, string>> = {
   af: "afrikaans",
@@ -745,12 +898,7 @@ const WHISPER_LANGUAGE_BY_NAME: Readonly<Record<string, string>> =
 export function resolveWhisperTranscribeLanguage(
   source: WhisperLanguageSource = {},
 ): string | undefined {
-  const configured = source.configured?.trim().toLowerCase();
-  if (configured && configured !== "auto") {
-    if (configured === "detect" || configured === "none") return undefined;
-    return canonicalWhisperLanguage(configured);
-  }
-  return canonicalWhisperLanguage(source.vscodeLanguage);
+  return canonicalWhisperLanguage(source.configured);
 }
 
 function canonicalWhisperLanguage(raw?: string | null): string | undefined {
@@ -771,30 +919,55 @@ function canonicalWhisperLanguage(raw?: string | null): string | undefined {
   return WHISPER_LANGUAGE_BY_CODE[code];
 }
 
+export type VoiceTranscribeOptions = {
+  language?: string;
+  detectLanguage?: (
+    recognize: any,
+    audio: Float32Array,
+  ) => Promise<string | undefined>;
+};
+
 export async function transcribeDecodedVoiceAudio(
   audio: Float32Array,
   getRecognizer: () => Promise<any> = transcriber,
-  options: { language?: string } = {},
+  options: VoiceTranscribeOptions = {},
 ): Promise<string> {
   assertVoiceAudioHasSpeech(audio);
   const recognize = await getRecognizer();
-  const language = options.language;
-  const result = await recognize(audio, {
-    chunk_length_s: 30,
-    stride_length_s: 5,
-    task: "transcribe",
-    ...(language ? { language } : {}),
-  });
-  const rawText = Array.isArray(result) ? result[0]?.text : result?.text;
-  const text = typeof rawText === "string" ? rawText.trim() : "";
-  if (!text) throw new Error("No speech was recognized.");
-  assertVoiceTranscriptIsUsable(text, audio.length / 16_000);
-  return text;
+  // One language for the whole dictation, as faster-whisper does: detecting
+  // per piece let one 27 s piece of Russian come out as English.
+  const language =
+    options.language ??
+    (await (options.detectLanguage ?? detectSpokenLanguage)(recognize, audio));
+  const parts: string[] = [];
+  let rejected: "no-speech" | "repeated" | undefined;
+  for (const [start, end] of splitVoiceAudioAtPauses(audio)) {
+    const piece = audio.subarray(start, end);
+    const result = await recognize(piece, {
+      task: "transcribe",
+      ...(language ? { language } : {}),
+    });
+    const rawText = Array.isArray(result) ? result[0]?.text : result?.text;
+    const text = typeof rawText === "string" ? rawText.trim() : "";
+    if (!text) continue;
+    const problem = voiceTranscriptProblem(text, piece.length / VOICE_SAMPLE_RATE);
+    if (problem) {
+      // A looped piece costs only itself, not the rest of the dictation.
+      if (rejected !== "repeated") rejected = problem;
+      continue;
+    }
+    parts.push(text);
+  }
+  const text = parts.join(" ").trim();
+  if (text) return text;
+  if (rejected === "repeated") throw new Error(REPEATED_TEXT_MESSAGE);
+  if (rejected === "no-speech") throw new Error(NO_SPEECH_MESSAGE);
+  throw new Error("No speech was recognized.");
 }
 
 export async function transcribeVoiceFile(
   inputPath: string,
-  options: { language?: string } = {},
+  options: VoiceTranscribeOptions = {},
 ): Promise<string> {
   if (!fs.existsSync(inputPath)) {
     throw new Error("The voice recording file is no longer available.");
@@ -821,10 +994,76 @@ function rememberTerminal(
   terminalRecordings.set(recordingId, { state, message, cleanup });
 }
 
+export type VoiceStopOptions = VoiceTranscribeOptions & {
+  /** Test seam; production transcribes the WAV with the packaged Whisper. */
+  transcribeFile?: (
+    outputPath: string,
+    options: VoiceTranscribeOptions,
+  ) => Promise<string>;
+};
+
+function keepRecording(
+  recordingId: string,
+  audio: Pick<KeptRecording, "outputPath" | "cleanupOwnedDir">,
+  state: KeptRecording["state"],
+  message: string,
+): void {
+  // One kept recording at a time: a newer one supersedes the older audio.
+  for (const id of [...keptRecordings.keys()]) {
+    if (id !== recordingId) discardKeptRecording(id);
+  }
+  const previous = keptRecordings.get(recordingId);
+  if (previous) clearTimeout(previous.cleanup);
+  const cleanup = setTimeout(
+    () => discardKeptRecording(recordingId),
+    KEPT_RECORDING_TTL_MS,
+  );
+  cleanup.unref();
+  keptRecordings.set(recordingId, { ...audio, state, message, cleanup });
+}
+
+function discardKeptRecording(recordingId: string): void {
+  const kept = keptRecordings.get(recordingId);
+  if (!kept) return;
+  keptRecordings.delete(recordingId);
+  clearTimeout(kept.cleanup);
+  kept.cleanupOwnedDir();
+}
+
+/** Silence is a property of the audio; transcribing it again cannot help. */
+function worthRetrying(error: Error): boolean {
+  return error.message !== NO_SPEECH_MESSAGE;
+}
+
+async function transcribeOwnedAudio(
+  recordingId: string,
+  audio: Pick<KeptRecording, "outputPath" | "cleanupOwnedDir">,
+  options: VoiceStopOptions,
+): Promise<string> {
+  const { transcribeFile = transcribeVoiceFile, ...transcribeOptions } =
+    options;
+  try {
+    const text = await transcribeFile(audio.outputPath, transcribeOptions);
+    audio.cleanupOwnedDir();
+    return text;
+  } catch (caught) {
+    const error = voiceError(caught);
+    if (!worthRetrying(error)) {
+      audio.cleanupOwnedDir();
+      throw error;
+    }
+    const message = error.message.endsWith(KEPT_SUFFIX)
+      ? error.message
+      : `${error.message}${KEPT_SUFFIX}`;
+    keepRecording(recordingId, audio, "kept", message);
+    throw new Error(message);
+  }
+}
+
 async function finalizeRecording(
   recordingId: string,
   mode: "stop" | "cancel" | "expire",
-  options: { language?: string } = {},
+  options: VoiceStopOptions = {},
 ): Promise<string | void> {
   const existing = finalizations.get(recordingId);
   if (existing) return existing;
@@ -840,24 +1079,24 @@ async function finalizeRecording(
   }
   recordings.delete(recordingId);
   const operation = (async () => {
+    // Who owns the WAV after the recorder stops: the transcription below or
+    // the kept-audio store. Every other path removes it here.
+    let handedOver = false;
     try {
       await stopRecorder(recording);
-      if (mode === "expire") {
-        rememberTerminal(
-          recordingId,
-          "expired",
-          "Voice recording reached the five-minute limit. Click the microphone to retry.",
-        );
-        return;
-      }
       if (mode === "cancel") return;
       const stats = fs.statSync(recording.outputPath);
       if (stats.size <= 44)
         throw new Error("No microphone audio was captured.");
-      return await transcribeVoiceFile(recording.outputPath, options);
+      handedOver = true;
+      if (mode === "expire") {
+        keepRecording(recordingId, recording, "expired", EXPIRED_MESSAGE);
+        return;
+      }
+      return await transcribeOwnedAudio(recordingId, recording, options);
     } finally {
       if (recording.durationTimer) clearTimeout(recording.durationTimer);
-      recording.cleanupOwnedDir();
+      if (!handedOver) recording.cleanupOwnedDir();
     }
   })();
   finalizations.set(recordingId, operation);
@@ -869,19 +1108,48 @@ async function finalizeRecording(
   }
 }
 
+async function transcribeKeptRecording(
+  recordingId: string,
+  options: VoiceStopOptions,
+): Promise<string> {
+  const kept = keptRecordings.get(recordingId);
+  if (!kept) throw new Error("The voice recording is no longer available.");
+  keptRecordings.delete(recordingId);
+  clearTimeout(kept.cleanup);
+  const operation = transcribeOwnedAudio(recordingId, kept, options);
+  finalizations.set(recordingId, operation);
+  try {
+    return await operation;
+  } finally {
+    finalizations.delete(recordingId);
+  }
+}
+
+/**
+ * Stop and transcribe. On an id whose audio is kept (five-minute limit, or a
+ * failed transcription) it transcribes the kept audio: that is Retry.
+ */
 export async function stopVoiceRecording(
   recordingId: string,
-  options: { language?: string } = {},
+  options: VoiceStopOptions = {},
 ): Promise<string> {
-  const transcript = await finalizeRecording(recordingId, "stop", options);
-  if (typeof transcript !== "string") {
-    const terminal = terminalRecordings.get(recordingId);
-    throw new Error(
-      terminal?.message ??
-        "Voice recording ended before it could be transcribed. Click the microphone to retry.",
-    );
+  const inFlight = finalizations.get(recordingId);
+  if (!recordings.has(recordingId) && !inFlight) {
+    if (keptRecordings.has(recordingId)) {
+      return transcribeKeptRecording(recordingId, options);
+    }
   }
-  return transcript;
+  const transcript = await finalizeRecording(recordingId, "stop", options);
+  if (typeof transcript === "string") return transcript;
+  // The limit timer finalized first and kept the audio: transcribe it now.
+  if (keptRecordings.has(recordingId)) {
+    return transcribeKeptRecording(recordingId, options);
+  }
+  const terminal = terminalRecordings.get(recordingId);
+  throw new Error(
+    terminal?.message ??
+      "Voice recording ended before it could be transcribed. Click the microphone to retry.",
+  );
 }
 
 export async function cancelVoiceRecording(recordingId: string): Promise<void> {
@@ -889,14 +1157,19 @@ export async function cancelVoiceRecording(recordingId: string): Promise<void> {
     cancelledStarts.add(recordingId);
   }
   await finalizeRecording(recordingId, "cancel");
+  discardKeptRecording(recordingId);
 }
 
 export function voiceRecordingStatus(recordingId: string): {
-  state: "starting" | "listening" | "expired" | "error" | "unknown";
+  state: "starting" | "listening" | "expired" | "kept" | "error" | "unknown";
   message?: string;
 } {
   if (pendingRecordings.has(recordingId) && !recordings.has(recordingId)) {
     return { state: "starting" };
+  }
+  const kept = keptRecordings.get(recordingId);
+  if (kept && !recordings.has(recordingId)) {
+    return { state: kept.state, message: kept.message };
   }
   const recording = recordings.get(recordingId);
   if (recording?.failure || recording?.exited) {

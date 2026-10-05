@@ -1314,7 +1314,6 @@ export class VsCodeMessenger {
         configured: vscode.workspace
           .getConfiguration("cukii")
           .get<string>("voiceLanguage"),
-        vscodeLanguage: vscode.env.language,
       });
       return {
         text: await stopVoiceRecording(msg.data.recordingId, { language }),
