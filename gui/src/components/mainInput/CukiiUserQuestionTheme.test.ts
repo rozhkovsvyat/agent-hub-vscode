@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const css = readFileSync(join(__dirname, "../../index.css"), "utf8");
+// Normalize line endings: on a Windows checkout the file is CRLF, and the
+// multi-line selectors below embed a literal "\n".
+const css = readFileSync(join(__dirname, "../../index.css"), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
 
 function block(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
