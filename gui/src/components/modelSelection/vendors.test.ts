@@ -357,6 +357,15 @@ describe("Cukii model context labels", () => {
       "max",
       "ultra",
     ]);
+    // Card 68e50e2e: the dotted 6.1 family is the same route.
+    expect(effortLevelsForModel("codex:gpt-6.1-sol")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra",
+    ]);
     expect(effortLevelsForModel("codex-5-6-luna")).toEqual([
       "low",
       "medium",

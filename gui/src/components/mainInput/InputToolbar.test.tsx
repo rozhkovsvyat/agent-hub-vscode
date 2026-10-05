@@ -368,7 +368,9 @@ describe("Cukii Claude-parity input toolbar", () => {
       );
       const pill = await getElementByTestId("cukii-model-pill");
       const name = (pill.firstElementChild as HTMLElement).textContent ?? "";
-      expect(name.endsWith(" · Cursor"), model).toBe(viaCursor);
+      // Card 657b3b88: the route reads first, "Cursor Opus 5.5".
+      expect(name.startsWith("Cursor "), model).toBe(viaCursor);
+      expect(name.endsWith(" · Cursor")).toBe(false);
       unmount();
     }
   });

@@ -501,14 +501,15 @@ function InputToolbar(props: InputToolbarProps) {
   const currentModelInfo = modelInfo(currentModel);
   // Cursor re-serves Anthropic/Moonshot/xAI models under the same names; the
   // pill must say which route runs, or a Cursor quota error reads as a broken
-  // Opus (card 6f333f93).
+  // Opus (card 6f333f93). The route reads first, as the owner phrases it:
+  // "Cursor Opus 5.5", not "Opus 5.5 · Cursor" (card 657b3b88).
   // A model can drop out of the live catalog (Alibaba without a key) while
   // the session still runs on it: name it, never another model.
   const currentLabel =
+    (currentModel.startsWith("cursor:") ? "Cursor " : "") +
     (currentModelInfo
       ? displayModelLabel(currentModelInfo)
-      : brokerModelLabel(currentModel)) +
-    (currentModel.startsWith("cursor:") ? " · Cursor" : "");
+      : brokerModelLabel(currentModel));
   const nativeFastAvailable = supportsNativeSpeed(currentModel);
   const nativeThinkingAvailable = supportsNativeThinking(currentModel);
   /**

@@ -3028,8 +3028,14 @@ button.cukii-submit-button--stop:active {
   margin: 0;
   /* When the capped first-line reserve is narrower than the receipt, the
      receipt covers the end of that line; paint it on the bubble colour so
-     the hidden letters do not show through the time and ticks. */
-  background-color: inherit;
+     the hidden letters do not show through the time and ticks. The left 16px
+     dissolve into the text instead of cutting it with a hard edge (card
+     39bbec48). */
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    var(--cukii-primary-action-background, #e3a867) 16px
+  );
   padding-left: 4px;
   border-radius: 6px;
 }

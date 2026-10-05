@@ -313,7 +313,11 @@ test("the canvas mask, receipt row and fade ride the clipped edge; the fade neve
   // In a ~180px column the full reserve left no room on the first line, so the
   // folded capsule showed only the receipt (card 526b6026): the reserve is
   // capped and the receipt paints on the bubble colour over the line's end.
+  // Its left edge dissolves over 16px instead of cutting the text (39bbec48).
   expect(css).toMatch(
+    /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*background:\s*linear-gradient\(\s*to right,\s*transparent 0,\s*var\(--cukii-primary-action-background,\s*#e3a867\)\s*16px\s*\)/s,
+  );
+  expect(css).not.toMatch(
     /\.cukii-user-message-bubble\[data-cukii-long-prompt="true"\]\s*>\s*\.cukii-user-fold-footer\s*\{[^}]*background-color:\s*inherit/s,
   );
   expect(css).not.toMatch(

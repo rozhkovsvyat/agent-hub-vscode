@@ -401,7 +401,8 @@ export function effortLevelsForModel(
     model === "codex-5-6-sol" ||
     model === "codex-5-6-terra" ||
     /(?:^|:)gpt-5\.6-(?:sol|terra)$/.test(model) ||
-    /(?:^|:)gpt-6(?:-|$)/.test(model)
+    // Dotted family members (gpt-6.1-sol) ship the same native effort argv.
+    /(?:^|:)gpt-6(?:[.-]|$)/.test(model)
   ) {
     return FULL_EFFORT_LEVELS;
   }
