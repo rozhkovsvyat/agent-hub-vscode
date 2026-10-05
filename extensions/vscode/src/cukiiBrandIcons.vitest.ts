@@ -10,16 +10,38 @@ function readMediaIcon(fileName: string): string {
 
 describe("cukii brand icons", () => {
   it("keeps the title icon at a 22px optical size", () => {
-    const titleSvg = readMediaIcon("media/cukii-title.svg");
-    expect(titleSvg).toContain('width="22"');
-    expect(titleSvg).toContain('height="22"');
+    for (const theme of ["light", "dark"]) {
+      const titleSvg = readMediaIcon(`media/cukii-title-${theme}.svg`);
+      expect(titleSvg).toContain('width="22"');
+      expect(titleSvg).toContain('height="22"');
+    }
+  });
+
+  it("paints the title and tab marks in the theme's icon colour, not currentColor", () => {
+    // VS Code draws an extension's title-bar action and webview tab icon from
+    // the file as an image, so currentColor came out black: the mark was
+    // nearly invisible on a dark theme (seen in the 2.0.172 acceptance).
+    const dark = readMediaIcon("media/cukii-title-dark.svg");
+    const light = readMediaIcon("media/cukii-title-light.svg");
+    expect(dark).toContain('<g fill="#C5C5C5" mask="url(#cutout-mask)">');
+    expect(light).toContain('<g fill="#424242" mask="url(#cutout-mask)">');
+    for (const svg of [dark, light]) expect(svg).not.toContain("currentColor");
+    const manifest = readFileSync(join(__dirname, "..", "package.json"), "utf8");
+    expect(manifest).toContain('"light": "media/cukii-title-light.svg"');
+    expect(manifest).toContain('"dark": "media/cukii-title-dark.svg"');
+    expect(manifest).not.toContain("media/cukii-title.svg");
+    const commands = readFileSync(join(__dirname, "commands.ts"), "utf8");
+    expect(commands).toContain('"media", "cukii-title-light.svg"');
+    expect(commands).toContain('"media", "cukii-title-dark.svg"');
   });
 
   it("moves only the three activity/title chip cutouts by -0.6px on x", () => {
     const activitySvg = readMediaIcon("media/cukii-activity.svg");
-    const titleSvg = readMediaIcon("media/cukii-title.svg");
+    const titleSvgs = ["light", "dark"].map((theme) =>
+      readMediaIcon(`media/cukii-title-${theme}.svg`),
+    );
 
-    for (const svg of [activitySvg, titleSvg]) {
+    for (const svg of [activitySvg, ...titleSvgs]) {
       expect(svg).toContain('cx="26.6" cy="28.8" r="3.75"');
       expect(svg).toContain('cx="39.9" cy="35" r="5.25"');
       expect(svg).toContain('cx="28.2" cy="40.6" r="4.1"');
@@ -114,7 +136,8 @@ describe("cukii brand icons", () => {
     const marks = [
       "cukii-store.svg",
       "cukii-activity.svg",
-      "cukii-title.svg",
+      "cukii-title-light.svg",
+      "cukii-title-dark.svg",
     ].map((file) => readMediaIcon(`media/${file}`));
     const tails = marks.map((svg) => tail.exec(svg)?.[1]);
     expect(tails[0]).toBeDefined();
@@ -126,10 +149,14 @@ describe("cukii brand icons", () => {
       expect(svg).toContain('cx="38.5" cy="8.5" r="6" fill="black"');
     }
 
-    // Activity bar and title: one silhouette painted through the mask, the
-    // chips punched out with the bite, since only the alpha channel shows.
+    // Activity bar and title: one silhouette in one colour, the chips punched
+    // out with the bite. The activity bar paints the file as a CSS mask, so
+    // there the colour is currentColor; the title marks carry the theme's.
+    expect(marks[1]).toContain(
+      '<g fill="currentColor" mask="url(#cutout-mask)">',
+    );
     for (const svg of marks.slice(1)) {
-      expect(svg).toContain('<g fill="currentColor" mask="url(#cutout-mask)">');
+      expect(svg).toMatch(/<g fill="[^"]+" mask="url\(#cutout-mask\)">/);
       for (const chip of [
         'cx="26.6" cy="28.8" r="3.75" fill="black"',
         'cx="39.9" cy="35" r="5.25" fill="black"',

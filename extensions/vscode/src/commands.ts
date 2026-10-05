@@ -100,8 +100,8 @@ function reviveCukiiPanelId(candidate: unknown): string | undefined {
  */
 function applyCukiiPanelChrome(panel: vscode.WebviewPanel, title?: string) {
   panel.iconPath = {
-    light: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
-    dark: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
+    light: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title-light.svg"),
+    dark: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title-dark.svg"),
   };
   panel.title = isPersistableCukiiTitle(title)
     ? title.trim()

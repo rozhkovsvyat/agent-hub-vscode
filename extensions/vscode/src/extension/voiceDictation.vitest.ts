@@ -293,6 +293,12 @@ describe("voice dictation runtime", () => {
     "[NO.SPEECH]",
     "[BLANK-AUDIO]",
     "<|no-speech|>",
+    // Sound captions with no words (2.0.172 acceptance: a quiet room).
+    "[Birds chirping]",
+    "(upbeat music)",
+    "[Music] [Applause]",
+    "[музыка]",
+    " [ Silence ]. ",
   ])("rejects a standalone no-speech marker: %s", (text) => {
     expect(() => assertVoiceTranscriptIsUsable(text, 2)).toThrow(
       "No speech was detected",
@@ -303,6 +309,8 @@ describe("voice dictation runtime", () => {
     "The no speech setting is disabled",
     "Please remove the [blank_audio] marker from this sentence",
     "S is a normal letter",
+    "[Music] and then I said hello",
+    "открой файл (тот, что вчера)",
   ])("keeps normal text containing marker-like words: %s", (text) => {
     expect(() => assertVoiceTranscriptIsUsable(text, 5)).not.toThrow();
   });

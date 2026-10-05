@@ -344,8 +344,8 @@
         "category": "Cukii Chat",
         "title": "Open Cukii Chat in a New Tab",
         "icon": {
-          "light": "media/cukii-title.svg",
-          "dark": "media/cukii-title.svg"
+          "light": "media/cukii-title-light.svg",
+          "dark": "media/cukii-title-dark.svg"
         },
         "group": "Cukii"
       },

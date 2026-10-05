@@ -622,7 +622,13 @@ export function voiceTranscriptProblem(
       "[no_speech]",
       "<|nospeech|>",
       "<|no_speech|>",
-    ]).has(canonical)
+    ]).has(canonical) ||
+    // Whisper captions sound it cannot read as speech: "[Birds chirping]",
+    // "(upbeat music)", "[музыка]". A piece made only of such captions has
+    // no words; the 2.0.172 acceptance inserted "[Birds chirping]" from a
+    // quiet room. Words around a bracket are speech and stay; a long run of
+    // one caption is a decoding loop and stays "repeated".
+    /^(?:\s*(?:\[[^\[\]]{1,60}\]|\([^()]{1,60}\))[\s.,!?…-]*){1,3}$/u.test(text)
   ) {
     return "no-speech";
   }
