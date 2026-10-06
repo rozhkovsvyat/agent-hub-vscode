@@ -305,19 +305,28 @@ export class VsCodeExtension {
           webview: () => this.sidebar.webview,
           visible: () => this.sidebar.isVisible === true,
         },
-        ...cukiiPanelRegistry.values().map((entry) => ({
-          id: entry.id,
-          label: entry.panel.panel.title || "chat",
-          webview: () => entry.panel.panel.webview,
-          visible: () => entry.panel.panel.visible,
-        })),
+        // A disposed tab throws on every getter; skip it rather than lose
+        // the watch over every other surface.
+        ...cukiiPanelRegistry.values().flatMap((entry) => {
+          try {
+            return [
+              {
+                id: entry.id,
+                label: entry.panel.panel.title || "chat",
+                webview: () => entry.panel.panel.webview,
+                visible: () => entry.panel.panel.visible,
+              },
+            ];
+          } catch {
+            return [];
+          }
+        }),
       ],
       windowFocused: () => vscode.window.state.focused,
-      onWindowFocusChange: (listener) => {
+      onWindowFocusChange: (listener) =>
         vscode.window.onDidChangeWindowState((event) =>
           listener(event.focused),
-        );
-      },
+        ),
       showWarning: (message, ...actions) =>
         vscode.window.showWarningMessage(message, ...actions),
       executeCommand: (command) => vscode.commands.executeCommand(command),

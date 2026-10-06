@@ -37,7 +37,9 @@ export interface CukiiHeartbeatDeps {
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   windowFocused?: () => boolean;
-  onWindowFocusChange?: (listener: (focused: boolean) => void) => void;
+  onWindowFocusChange?: (
+    listener: (focused: boolean) => void,
+  ) => { dispose(): void } | void;
   showWarning: (
     message: string,
     ...actions: string[]
@@ -52,10 +54,16 @@ interface TargetState {
   disposeSubscription?: () => void;
 }
 
+/**
+ * A tick this late means the extension host itself stalled, and a pong may be
+ * sitting in its queue behind this very timer. Judging then would blame a
+ * live page for the host's pause (review of 06.10), so the tick only resets.
+ */
+const HOST_STALL_MS = CUKII_HEARTBEAT_INTERVAL_MS * 1.5;
+
 export class CukiiWebviewHeartbeat {
   private readonly states = new Map<string, TargetState>();
-  private readonly subscribed = new WeakSet<object>();
-  private readonly disposables: (() => void)[] = [];
+  private readonly focusSubscription: { dispose(): void } | void;
   private readonly timer: unknown;
   private lastTickAt: number;
   private disposed = false;
@@ -63,10 +71,14 @@ export class CukiiWebviewHeartbeat {
   constructor(private readonly deps: CukiiHeartbeatDeps) {
     const now = this.now();
     this.lastTickAt = now;
-    for (const target of this.deps.targets()) {
-      this.states.set(target.id, { lastPongAt: now, flagged: false });
+    try {
+      for (const target of this.deps.targets()) {
+        this.states.set(target.id, { lastPongAt: now, flagged: false });
+      }
+    } catch {
+      // Surfaces that cannot be listed yet are picked up by the first tick.
     }
-    this.deps.onWindowFocusChange?.((focused) => {
+    this.focusSubscription = this.deps.onWindowFocusChange?.((focused) => {
       // A background window throttles webview timers hard; pongs would lag
       // past the timeout without anything being frozen.
       if (focused) this.resetBaselines();
@@ -96,28 +108,26 @@ export class CukiiWebviewHeartbeat {
     return state;
   }
 
-  private subscribe(target: CukiiHeartbeatTarget, webview: vscode.Webview) {
-    if (this.subscribed.has(webview)) return;
-    this.subscribed.add(webview);
+  private subscribe(state: TargetState, webview: vscode.Webview) {
+    if (state.subscribed === webview) return;
+    // The sidebar can be resolved again with a new webview; the old
+    // subscription would otherwise live as long as the window.
+    state.disposeSubscription?.();
     const subscription = webview.onDidReceiveMessage((message: any) => {
       if (message?.messageType !== CUKII_HEARTBEAT_MESSAGE_TYPE) return;
-      const state = this.states.get(target.id);
-      if (!state) return;
       state.lastPongAt = this.now();
       state.flagged = false;
     });
-    const state = this.stateFor(target.id);
     state.subscribed = webview;
     state.disposeSubscription = () => subscription.dispose();
-    this.disposables.push(state.disposeSubscription);
   }
 
   tick(): void {
     if (this.disposed) return;
     const now = this.now();
-    // Machine sleep or a long host stall: the gap itself is not evidence of
-    // a frozen webview, so treat the wake-up moment as a fresh baseline.
-    if (now - this.lastTickAt > CUKII_HEARTBEAT_INTERVAL_MS * 3) {
+    // Machine sleep or a host stall: the gap itself is not evidence of a
+    // frozen webview, so treat the wake-up moment as a fresh baseline.
+    if (now - this.lastTickAt > HOST_STALL_MS) {
       this.lastTickAt = now;
       this.resetBaselines();
       return;
@@ -125,25 +135,38 @@ export class CukiiWebviewHeartbeat {
     this.lastTickAt = now;
     if (this.deps.windowFocused && !this.deps.windowFocused()) return;
 
+    let targets: CukiiHeartbeatTarget[];
+    try {
+      targets = this.deps.targets();
+    } catch {
+      return;
+    }
     const newlyFlagged: CukiiHeartbeatTarget[] = [];
     const liveIds = new Set<string>();
-    for (const target of this.deps.targets()) {
+    for (const target of targets) {
       liveIds.add(target.id);
       const state = this.stateFor(target.id);
-      const webview = target.webview();
-      if (!webview || !target.visible()) {
-        // Hidden panels keep no guarantee of timely timers; judge only what
-        // the owner can actually see.
+      try {
+        const webview = target.webview();
+        if (!webview || !target.visible()) {
+          // Hidden panels keep no guarantee of timely timers; judge only
+          // what the owner can actually see.
+          state.lastPongAt = now;
+          state.flagged = false;
+          continue;
+        }
+        this.subscribe(state, webview);
+        webview.postMessage({
+          messageType: CUKII_HEARTBEAT_MESSAGE_TYPE,
+          data: undefined,
+          messageId: uuidv4(),
+        });
+      } catch {
+        // A tab disposed between listing and probing throws on access; it
+        // must not stop the watch over every other surface.
         state.lastPongAt = now;
-        state.flagged = false;
         continue;
       }
-      this.subscribe(target, webview);
-      webview.postMessage({
-        messageType: CUKII_HEARTBEAT_MESSAGE_TYPE,
-        data: undefined,
-        messageId: uuidv4(),
-      });
       if (!state.flagged && now - state.lastPongAt > CUKII_HEARTBEAT_TIMEOUT_MS) {
         state.flagged = true;
         newlyFlagged.push(target);
@@ -181,8 +204,8 @@ export class CukiiWebviewHeartbeat {
     const clearTimer =
       this.deps.clearTimer ?? ((handle: unknown) => clearInterval(handle as any));
     clearTimer(this.timer);
-    for (const dispose of this.disposables) dispose();
-    this.disposables.length = 0;
+    this.focusSubscription?.dispose();
+    for (const state of this.states.values()) state.disposeSubscription?.();
     this.states.clear();
   }
 }

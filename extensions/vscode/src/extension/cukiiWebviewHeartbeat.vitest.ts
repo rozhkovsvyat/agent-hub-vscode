@@ -19,6 +19,7 @@ interface FakeWebview {
   postMessage(message: any): void;
   onDidReceiveMessage(fn: (message: any) => void): { dispose(): void };
   receive(message: any): void;
+  listenerCount(): number;
 }
 
 function fakeWebview(): FakeWebview {
@@ -41,6 +42,7 @@ function fakeWebview(): FakeWebview {
     receive(message) {
       for (const fn of [...listeners]) fn(message);
     },
+    listenerCount: () => listeners.length,
   };
 }
 
@@ -51,6 +53,7 @@ interface Harness {
   commands: string[];
   visible: { current: boolean };
   focused: { current: boolean };
+  focusListenerDisposed: () => boolean;
   refocus(): void;
   advance(ticks: number): void;
   jump(ms: number): void;
@@ -64,6 +67,7 @@ function setup(webviewCount = 1): Harness {
   const visible = { current: true };
   const focused = { current: true };
   let focusListener: ((focused: boolean) => void) | undefined;
+  let focusListenerDisposed = false;
 
   const heartbeat = new CukiiWebviewHeartbeat({
     targets: (): CukiiHeartbeatTarget[] =>
@@ -79,6 +83,11 @@ function setup(webviewCount = 1): Harness {
     windowFocused: () => focused.current,
     onWindowFocusChange: (listener) => {
       focusListener = listener;
+      return {
+        dispose: () => {
+          focusListenerDisposed = true;
+        },
+      };
     },
     showWarning: (message, ...actions) => {
       let choose!: (choice?: string) => void;
@@ -100,6 +109,7 @@ function setup(webviewCount = 1): Harness {
     commands,
     visible,
     focused,
+    focusListenerDisposed: () => focusListenerDisposed,
     refocus: () => {
       focused.current = true;
       focusListener?.(true);
@@ -224,6 +234,86 @@ describe("CukiiWebviewHeartbeat", () => {
     expect(harness.warnings[0].message).toContain("panel-0");
     expect(harness.warnings[0].message).toContain("panel-1");
     expect(harness.warnings[0].actions).toEqual([CUKII_HEARTBEAT_RELOAD_WINDOW]);
+  });
+
+  it("does not blame a live page for the host's own stall", () => {
+    // Review of 06.10: the host froze for 35 s right after a ping, so the
+    // pong was still queued behind the late tick that judged it.
+    const harness = setup();
+    harness.advance(1);
+    harness.jump(35_000);
+    expect(harness.warnings).toHaveLength(0);
+    // A page that really stays silent is still caught afterwards.
+    harness.advance(4);
+    expect(harness.warnings).toHaveLength(1);
+  });
+
+  it("releases the subscription of a closed tab", () => {
+    const harness = setup(2);
+    harness.advance(1);
+    const closed = harness.webviews.pop()!;
+    expect(closed.listenerCount()).toBe(1);
+    harness.advance(1);
+    expect(closed.listenerCount()).toBe(0);
+  });
+
+  it("moves to a re-resolved sidebar webview and drops the old one", () => {
+    const harness = setup();
+    harness.advance(1);
+    const old = harness.webviews[0];
+    harness.webviews[0] = fakeWebview();
+    harness.advance(1);
+    expect(old.listenerCount()).toBe(0);
+    expect(harness.webviews[0].listenerCount()).toBe(1);
+  });
+
+  it("releases every subscription and the focus listener on dispose", () => {
+    const harness = setup(2);
+    harness.advance(1);
+    harness.heartbeat.dispose();
+    expect(harness.webviews.map((webview) => webview.listenerCount())).toEqual([
+      0, 0,
+    ]);
+    expect(harness.focusListenerDisposed()).toBe(true);
+  });
+
+  it("keeps watching the other surfaces when one tab throws", () => {
+    let now = 0;
+    const warnings: string[] = [];
+    const frozen = fakeWebview();
+    const heartbeat = new CukiiWebviewHeartbeat({
+      targets: () => [
+        {
+          id: "disposed",
+          label: "disposed",
+          webview: () => {
+            throw new Error("Webview is disposed");
+          },
+          visible: () => true,
+        },
+        {
+          id: "frozen",
+          label: "frozen",
+          webview: () => frozen as unknown as vscode.Webview,
+          visible: () => true,
+        },
+      ],
+      now: () => now,
+      setTimer: () => 0,
+      clearTimer: () => {},
+      showWarning: async (message) => {
+        warnings.push(message);
+        return undefined;
+      },
+      executeCommand: async () => undefined,
+    });
+    for (let i = 0; i < 4; i++) {
+      now += CUKII_HEARTBEAT_INTERVAL_MS;
+      heartbeat.tick();
+    }
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"frozen"');
+    expect(warnings[0]).not.toContain('"disposed"');
   });
 
   it("keeps the detection window at three missed pings", () => {
