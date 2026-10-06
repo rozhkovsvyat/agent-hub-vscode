@@ -20,6 +20,9 @@
 //    (card 44a9280d). Close with `close --port N --profile P`, which first runs
 //    `cleanup`: it deletes, through the extension's own history/delete, only
 //    the sessions whose workspace is this profile's ws folder.
+//  - A frozen webview (heartbeat acceptance hangs one on purpose) answers no
+//    CDP call: every call has a deadline and a frame that does not answer
+//    Runtime.enable within 3 s is skipped, so cleanup and close still finish.
 //  - The profile is isolated, the vendor CLIs are NOT: their configs (incl. the
 //    Cukii Box memory MCP) are the owner's. Never ask an agent to "remember"
 //    in a test prompt — Kimi stored a test codeword in the owner's memory —
@@ -88,13 +91,23 @@ async function connect(wsUrl) {
       pending.delete(m.id);
     }
   });
-  const call = (method, params = {}) =>
-    new Promise((res) => {
-      const i = ++id;
-      pending.set(i, res);
-      ws.send(JSON.stringify({ id: i, method, params }));
-    });
+  // A hung page never answers. Without a deadline one frozen webview hung
+  // cleanup and close forever (06.10, heartbeat acceptance).
+  const call = (method, params = {}, timeoutMs = 60_000) =>
+    Promise.race([
+      new Promise((res) => {
+        const i = ++id;
+        pending.set(i, res);
+        ws.send(JSON.stringify({ id: i, method, params }));
+      }),
+      sleep(timeoutMs).then(() => ({ timeout: true })),
+    ]);
   return { ws, call, contexts };
+}
+
+/** Runtime.enable on a live frame; false for one that is frozen or gone. */
+async function enableRuntime(c) {
+  return !(await c.call("Runtime.enable", {}, 3_000)).timeout;
 }
 
 async function workbench(port) {
@@ -110,7 +123,10 @@ async function cukiiTab(port, tab) {
   wb.ws.close();
   for (const target of (await targets(port)).filter((t) => t.type === "iframe")) {
     const c = await connect(target.webSocketDebuggerUrl);
-    await c.call("Runtime.enable");
+    if (!(await enableRuntime(c))) {
+      c.ws.close();
+      continue;
+    }
     await sleep(300);
     for (const ctx of c.contexts) {
       const ev = async (expression) =>
@@ -127,7 +143,10 @@ async function cukiiTab(port, tab) {
 async function sidebarEval(port, expression) {
   for (const target of (await targets(port)).filter((t) => t.type === "iframe")) {
     const c = await connect(target.webSocketDebuggerUrl);
-    await c.call("Runtime.enable");
+    if (!(await enableRuntime(c))) {
+      c.ws.close();
+      continue;
+    }
     await sleep(300);
     for (const ctx of c.contexts) {
       const r = await c.call("Runtime.evaluate", { contextId: ctx.id, expression, returnByValue: true, awaitPromise: true });
