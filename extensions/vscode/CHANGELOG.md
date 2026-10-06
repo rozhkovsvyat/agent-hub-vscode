@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.173
+
+- **More accurate dictation, if you want it.** Set `cukii.voiceModel` to `small` for noticeably better recognition at about twice the time. It is a one-time 250 MB download, checksum-verified; dictation keeps using the built-in model until the download finishes.
+- **A frozen Cukii page is reported.** If a Cukii panel stops responding, VS Code now says so after 45 seconds and offers **Reload Window**, with what to do if Cukii is still blank after it.
+- **Install on Windows checks the result.** Installing an agent CLI now also installs its native component and reports success only once the CLI actually starts. A Codex install that is missing that component shows “Installed but cannot start” with **Install** to repair it, instead of a login that could not work.
+- **No more empty messages from Claude.** When a background task an agent started finishes mid-turn, its notice no longer shows up as an empty message bubble with only a time; it goes into a collapsed “Thought” entry that names what finished.
+- **Grok says sooner when it is stuck.** When Grok has finished starting but stays silent, Cukii reports it after the normal wait instead of ten minutes, and names any MCP server that failed to start.
+- **Extra high for GPT-6.1.** The GPT-6.1 Sol models offer every effort level; High was wrongly shown as the maximum.
+- **The pill reads “Cursor Opus 5.5”.** Models used through Cursor name Cursor first.
+- **A pinned long message no longer overlaps its footer.** The text fades out before the time and status again.
+
 ## 2.0.172
 
 - **New logo.** The Cukii Chat mark is now the cookie itself, with a reply tail — no bubble around it.
