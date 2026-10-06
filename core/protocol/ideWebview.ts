@@ -568,6 +568,8 @@ export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {
   "cukii/getActiveSessionId": [undefined, string];
   "cukii/openChatPanelsChanged": [CukiiOpenChatPanel[], void];
   "cukii/activeChatContextChanged": [CukiiActiveChatContext | null, void];
+  /** Host liveness probe; answered while the webview JS event loop is alive. */
+  "cukii/heartbeat": [undefined, { pong: number }];
   "cukii/vendorUsageChanged": [CukiiVendorUsageSnapshot, void];
   "cukii/userMessageReaction": [CukiiUserMessageReaction, void];
   "cukii/activeEditorSelectionChanged": [{ hasSelection: boolean }, void];

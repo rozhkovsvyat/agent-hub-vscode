@@ -41,6 +41,7 @@ import { VsCodeIdeUtils } from "../util/ideUtils";
 import { VsCodeIde } from "../VsCodeIde";
 
 import { ConfigYamlDocumentLinkProvider } from "./ConfigYamlDocumentLinkProvider";
+import { CukiiWebviewHeartbeat } from "./cukiiWebviewHeartbeat";
 import { VsCodeMessenger } from "./VsCodeMessenger";
 import {
   listBridgeScopes,
@@ -293,6 +294,37 @@ export class VsCodeExtension {
       ),
     );
     resolveWebviewProtocol(this.sidebar.webviewProtocol);
+
+    // Renderer-freeze watchdog: a dead webview cannot report itself, so the
+    // host pings every visible Cukii surface and says so when pongs stop.
+    const cukiiWebviewHeartbeat = new CukiiWebviewHeartbeat({
+      targets: () => [
+        {
+          id: "sidebar",
+          label: "sidebar",
+          webview: () => this.sidebar.webview,
+          visible: () => this.sidebar.isVisible === true,
+        },
+        ...cukiiPanelRegistry.values().map((entry) => ({
+          id: entry.id,
+          label: entry.panel.panel.title || "chat",
+          webview: () => entry.panel.panel.webview,
+          visible: () => entry.panel.panel.visible,
+        })),
+      ],
+      windowFocused: () => vscode.window.state.focused,
+      onWindowFocusChange: (listener) => {
+        vscode.window.onDidChangeWindowState((event) =>
+          listener(event.focused),
+        );
+      },
+      showWarning: (message, ...actions) =>
+        vscode.window.showWarningMessage(message, ...actions),
+      executeCommand: (command) => vscode.commands.executeCommand(command),
+    });
+    context.subscriptions.push({
+      dispose: () => cukiiWebviewHeartbeat.dispose(),
+    });
 
     const inProcessMessenger = new InProcessMessenger<
       ToCoreProtocol,

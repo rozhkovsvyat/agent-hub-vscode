@@ -59,6 +59,8 @@ export interface IIdeMessenger {
   ide: IDE;
 }
 
+let heartbeatResponderInstalled = false;
+
 export class IdeMessenger implements IIdeMessenger {
   ide: IDE;
 
@@ -73,6 +75,23 @@ export class IdeMessenger implements IIdeMessenger {
       },
       () => {},
     );
+    // Host liveness probe: answered for as long as this webview's JS event
+    // loop runs, so a frozen renderer is detectable from the extension host.
+    // A webview builds several messengers (the context default, the store's,
+    // one per provider render), so the responder is installed only once.
+    if (!heartbeatResponderInstalled) {
+      heartbeatResponderInstalled = true;
+      window.addEventListener("message", (event: { data?: Message }) => {
+        const message = event.data;
+        if (message?.messageType === "cukii/heartbeat") {
+          this.respond(
+            "cukii/heartbeat",
+            { pong: Date.now() },
+            message.messageId,
+          );
+        }
+      });
+    }
   }
 
   private _postToIde(
