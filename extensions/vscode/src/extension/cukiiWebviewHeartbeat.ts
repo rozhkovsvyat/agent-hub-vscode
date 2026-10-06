@@ -11,12 +11,12 @@ import { v4 as uuidv4 } from "uuid";
  * says so when pongs stop, instead of a dead panel the owner has to
  * diagnose by trial.
  *
- * Recovery is a window reload, never a panel reload: the webviews share one
- * renderer process, so a hung page freezes every Cukii surface at once and
- * fresh HTML is delivered into that same hung process. Measured 06.10 on an
- * isolated VS Code with a busy-looping sidebar: new HTML left it hung, and the
- * hung process even outlived a window reload (blank Cukii after it) until it
- * was killed. Hence the second step in the message.
+ * Recovery is a window reload, never a panel reload: fresh HTML is delivered
+ * as a message into the very page that hangs. Measured 06.10 on an isolated
+ * VS Code with a busy-looping sidebar: new HTML left it hung, and the reloaded
+ * sidebar came back in the same hung renderer process (blank Cukii) until
+ * that process was killed. Hence the second step in the message. A chat tab
+ * open next to it ran in a process of its own and kept answering.
  */
 export const CUKII_HEARTBEAT_INTERVAL_MS = 15_000;
 export const CUKII_HEARTBEAT_TIMEOUT_MS = 45_000;
