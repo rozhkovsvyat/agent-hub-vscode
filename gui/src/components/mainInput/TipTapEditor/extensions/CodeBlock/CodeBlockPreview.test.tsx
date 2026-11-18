@@ -80,4 +80,28 @@ describe("CodeBlockPreview", () => {
       filepath: "/test/file.ts",
     });
   });
+
+  it("marks only file attachments for replacement in saved user bubbles", async () => {
+    const fileProps = createMockNodeViewProps(createMockContextItem());
+    const fileRender = await renderWithProviders(
+      <CodeBlockPreview {...fileProps} />,
+    );
+    expect(
+      fileRender.container.querySelector(".cukii-file-attachment-node-view"),
+    ).not.toBeNull();
+    fileRender.unmount();
+
+    const nonFileProps = createMockNodeViewProps(
+      createMockContextItem({
+        id: { providerTitle: "docs", itemId: "docs-item" },
+        uri: undefined,
+      }),
+    );
+    const contextRender = await renderWithProviders(
+      <CodeBlockPreview {...nonFileProps} />,
+    );
+    expect(
+      contextRender.container.querySelector(".cukii-file-attachment-node-view"),
+    ).toBeNull();
+  });
 });

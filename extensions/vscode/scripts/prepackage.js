@@ -11,10 +11,20 @@ const {
 } = require("../../../scripts/util/index");
 
 const { copySqlite } = require("./download-copy-sqlite");
+const {
+  LANCEDB_PACKAGES,
+  lancedbVersionForTarget,
+  readWrapperManifest,
+} = require("./cross-target-packaging");
 const { generateAndCopyConfigYamlSchema } = require("./generate-copy-config");
 const { installAndCopyNodeModules } = require("./install-copy-nodemodule");
 const { npmInstall } = require("./npm-install");
-const { writeBuildTimestamp, continueDir } = require("./utils");
+const { writeBuildTimestamp } = require("./utils");
+const { buildAndCopyGui } = require("./build-copy-gui");
+const {
+  assertMissingDependencyCanBeInstalled,
+  createPrepackageDependencyTasks,
+} = require("./prepackage-dependency-plan");
 
 // Clear folders that will be packaged to ensure clean slate
 rimrafSync(path.join(__dirname, "..", "bin"));
@@ -22,12 +32,8 @@ rimrafSync(path.join(__dirname, "..", "out"));
 fs.mkdirSync(path.join(__dirname, "..", "out", "node_modules"), {
   recursive: true,
 });
-const guiDist = path.join(__dirname, "..", "..", "..", "gui", "dist");
-if (!fs.existsSync(guiDist)) {
-  fs.mkdirSync(guiDist, { recursive: true });
-}
-
 const skipInstalls = process.env.SKIP_INSTALLS === "true";
+const guiPrepared = process.env.CUKII_GUI_PREPARED === "true";
 
 // Get the target to package for
 let target = undefined;
@@ -77,93 +83,37 @@ void (async () => {
   // Make sure we have an initial timestamp file
   writeBuildTimestamp();
 
-  if (!skipInstalls) {
+  {
     const installStart = Date.now();
-    console.log(`[timer] Starting npm installs at ${new Date().toISOString()}`);
-    await Promise.all([generateAndCopyConfigYamlSchema(), npmInstall()]);
     console.log(
-      `[timer] npm installs completed in ${Date.now() - installStart}ms`,
+      `[timer] Starting dependency preparation at ${new Date().toISOString()}`,
+    );
+    const dependencyTasks = createPrepackageDependencyTasks({
+      skipInstalls,
+      generateConfigYamlSchema: generateAndCopyConfigYamlSchema,
+      installDependencies: npmInstall,
+    });
+    await Promise.all(dependencyTasks.map((task) => task()));
+    console.log(
+      `[timer] Dependency preparation completed in ${Date.now() - installStart}ms`,
     );
   }
 
-  process.chdir(path.join(continueDir, "gui"));
-
-  // Copy over the dist folder to the JetBrains extension //
-  const intellijExtensionWebviewPath = path.join(
-    "..",
-    "extensions",
-    "intellij",
-    "src",
-    "main",
-    "resources",
-    "webview",
-  );
-
-  const indexHtmlPath = path.join(intellijExtensionWebviewPath, "index.html");
-  fs.copyFileSync(indexHtmlPath, "tmp_index.html");
-  rimrafSync(intellijExtensionWebviewPath);
-  fs.mkdirSync(intellijExtensionWebviewPath, { recursive: true });
-
-  const jetbrainsCopyStart = Date.now();
-  console.log(`[timer] Starting JetBrains copy at ${new Date().toISOString()}`);
-  await new Promise((resolve, reject) => {
-    ncp("dist", intellijExtensionWebviewPath, (error) => {
-      if (error) {
-        console.warn(
-          "[error] Error copying React app build to JetBrains extension: ",
-          error,
-        );
-        reject(error);
-      }
-      resolve();
-    });
-  });
-  console.log(
-    `[timer] JetBrains copy completed in ${Date.now() - jetbrainsCopyStart}ms`,
-  );
-
-  // Put back index.html
-  if (fs.existsSync(indexHtmlPath)) {
-    rimrafSync(indexHtmlPath);
-  }
-  fs.copyFileSync("tmp_index.html", indexHtmlPath);
-  fs.unlinkSync("tmp_index.html");
-
-  console.log("[info] Copied gui build to JetBrains extension");
-
-  // Then copy over the dist folder to the VSCode extension //
-  const vscodeGuiPath = path.join("../extensions/vscode/gui");
-  rimrafSync(vscodeGuiPath);
-  fs.mkdirSync(vscodeGuiPath, { recursive: true });
-  const vscodeCopyStart = Date.now();
-  console.log(`[timer] Starting VSCode copy at ${new Date().toISOString()}`);
-  await new Promise((resolve, reject) => {
-    ncp("dist", vscodeGuiPath, (error) => {
-      if (error) {
-        console.log(
-          "Error copying React app build to VSCode extension: ",
-          error,
-        );
-        reject(error);
-      } else {
-        console.log("Copied gui build to VSCode extension");
-        resolve();
-      }
-    });
-  });
-  console.log(
-    `[timer] VSCode copy completed in ${Date.now() - vscodeCopyStart}ms`,
-  );
-
-  if (!fs.existsSync(path.join("dist", "assets", "index.js"))) {
-    throw new Error("gui build did not produce index.js");
-  }
-  if (!fs.existsSync(path.join("dist", "assets", "index.css"))) {
-    throw new Error("gui build did not produce index.css");
+  if (guiPrepared) {
+    console.log("[info] Reusing GUI prepared by package-all");
+  } else {
+    const guiBuildStart = Date.now();
+    console.log(
+      `[timer] Starting GUI build and copy at ${new Date().toISOString()}`,
+    );
+    buildAndCopyGui();
+    console.log(
+      `[timer] GUI build and copy completed in ${Date.now() - guiBuildStart}ms`,
+    );
   }
 
   // Copy over native / wasm modules //
-  process.chdir("../extensions/vscode");
+  process.chdir(path.join(__dirname, ".."));
 
   fs.mkdirSync("bin", { recursive: true });
 
@@ -202,6 +152,21 @@ void (async () => {
       }
       if (!target.startsWith("win")) {
         rimrafSync(path.join(__dirname, "../bin/napi-v3/win32"));
+      }
+
+      // Dropping the other platforms is not enough: onnxruntime ships one
+      // directory per architecture, so a darwin-arm64 build kept darwin/x64 and
+      // carried ~23 MB of machine code that can never run on the target.
+      const platformBin = path.join(__dirname, `../bin/napi-v3/${os}`);
+      if (fs.existsSync(platformBin)) {
+        for (const entry of fs.readdirSync(platformBin)) {
+          if (entry !== arch) {
+            rimrafSync(path.join(platformBin, entry));
+            console.log(
+              `[info] Removed foreign onnxruntime arch ${os}/${entry}`,
+            );
+          }
+        }
       }
 
       // Also don't want to include cuda/shared/tensorrt binaries, they are too large
@@ -292,16 +257,7 @@ void (async () => {
     );
   });
 
-  const lancedbPackagesByTarget = {
-    "darwin-arm64": "@lancedb/vectordb-darwin-arm64",
-    "darwin-x64": "@lancedb/vectordb-darwin-x64",
-    "linux-arm64": "@lancedb/vectordb-linux-arm64-gnu",
-    "linux-x64": "@lancedb/vectordb-linux-x64-gnu",
-    "win32-x64": "@lancedb/vectordb-win32-x64-msvc",
-    "win32-arm64": "@lancedb/vectordb-win32-arm64-msvc",
-  };
-
-  const packageToInstall = lancedbPackagesByTarget[target];
+  const packageToInstall = LANCEDB_PACKAGES[target];
   let packageDirName;
   let expectedPackagePath;
   if (packageToInstall) {
@@ -315,10 +271,26 @@ void (async () => {
     );
 
     if (!fs.existsSync(expectedPackagePath)) {
-      console.log(
-        `[info] Installing LanceDB binary for ${target}: ${packageToInstall}`,
+      assertMissingDependencyCanBeInstalled({
+        skipInstalls,
+        dependencyName: packageToInstall,
+        expectedPath: expectedPackagePath,
+      });
+      // Pin to the version the installed `vectordb` wrapper declares. Resolving
+      // `latest` here yields a native module from another major whose ABI the
+      // wrapper cannot load, and that only fails on the user's machine.
+      const lancedbVersion = lancedbVersionForTarget(
+        target,
+        readWrapperManifest(path.join(__dirname, "..")),
       );
-      await installAndCopyNodeModules(packageToInstall, "@lancedb");
+      console.log(
+        `[info] Installing LanceDB binary for ${target}: ${packageToInstall}@${lancedbVersion}`,
+      );
+      await installAndCopyNodeModules(
+        packageToInstall,
+        "@lancedb",
+        lancedbVersion,
+      );
       if (!fs.existsSync(expectedPackagePath)) {
         throw new Error(
           `Failed to install LanceDB binary at ${expectedPackagePath}`,
@@ -376,7 +348,14 @@ void (async () => {
   });
 
   // Copy node_modules for pre-built binaries
-  const NODE_MODULES_TO_COPY = ["@lancedb", "@vscode/ripgrep", "workerpool"];
+  const NODE_MODULES_TO_COPY = [
+    "@lancedb",
+    "@vscode/ripgrep",
+    "workerpool",
+    "sqlite3",
+    "bindings",
+    "file-uri-to-path",
+  ];
 
   fs.mkdirSync("out/node_modules", { recursive: true });
 
@@ -404,6 +383,31 @@ void (async () => {
   );
 
   console.log(`[info] Copied ${NODE_MODULES_TO_COPY.join(", ")}`);
+
+  // npm may deliberately skip sqlite3's install script in the build shell.
+  // Use the target-specific binary already prepared in core, but place it
+  // under the externalized package root where `bindings` resolves it.
+  //
+  // Do not use `ncp` for this one file. On a Windows cross-target build the
+  // parallel sqlite3 package copy creates `build/Release` first; ncp then
+  // reports success while leaving that existing directory empty. The legacy
+  // `out/build` copy above still contains the correct binary, which made the
+  // defect platform-specific and easy to miss on macOS. A direct file copy is
+  // atomic at this boundary and has an explicit non-empty postcondition.
+  const externalSqliteSource = path.join(
+    __dirname,
+    "../../../core/node_modules/sqlite3/build/Release/node_sqlite3.node",
+  );
+  const externalSqliteTarget = path.join(
+    __dirname,
+    "../out/node_modules/sqlite3/build/Release/node_sqlite3.node",
+  );
+  fs.mkdirSync(path.dirname(externalSqliteTarget), { recursive: true });
+  fs.copyFileSync(externalSqliteSource, externalSqliteTarget);
+  if (fs.statSync(externalSqliteTarget).size <= 0) {
+    throw new Error("External sqlite3 binding copy produced an empty file");
+  }
+  console.log("[info] Copied external sqlite3 binding");
 
   if (packageDirName && expectedPackagePath) {
     const expectedOutPackagePath = path.join(
@@ -465,6 +469,7 @@ void (async () => {
     "media/move-chat-panel-right.md",
     "continue_tutorial.py",
     "config_schema.json",
+    "config-yaml-schema.json",
 
     // Embeddings model
     "models/all-MiniLM-L6-v2/config.json",
@@ -485,6 +490,13 @@ void (async () => {
     "out/xhr-sync-worker.js",
     // SQLite3 Node native module
     "out/build/Release/node_sqlite3.node",
+    "out/node_modules/sqlite3/package.json",
+    "out/node_modules/sqlite3/lib/sqlite3.js",
+    "out/node_modules/sqlite3/build/Release/node_sqlite3.node",
+    "out/node_modules/bindings/package.json",
+    "out/node_modules/bindings/bindings.js",
+    "out/node_modules/file-uri-to-path/package.json",
+    "out/node_modules/file-uri-to-path/index.js",
 
     // out/node_modules (to be accessed by extension.js)
     `out/node_modules/@vscode/ripgrep/bin/rg${exe}`,

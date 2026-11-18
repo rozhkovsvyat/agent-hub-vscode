@@ -5,7 +5,10 @@ import { ChatHistoryService } from "./ChatHistoryService.js";
 
 // Mock the dependencies
 vi.mock("../session.js", () => ({
-  updateSessionHistory: vi.fn(),
+  // Production is async; keeping the mock Promise-shaped ensures callers can
+  // attach error handling without turning a contract mismatch into a runtime
+  // test failure.
+  updateSessionHistory: vi.fn().mockResolvedValue(undefined),
   loadSession: vi.fn(),
   createSession: vi.fn((history) => ({
     sessionId: "test-session-id",

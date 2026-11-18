@@ -1,27 +1,23 @@
-import {
-  ArrowLeftIcon,
-  ChatBubbleOvalLeftIcon,
-} from "@heroicons/react/24/outline";
 import { Editor, JSONContent } from "@tiptap/react";
 import { ChatHistoryItem, InputModifiers } from "core";
-import { renderChatMessage } from "core/util/messageContent";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
+import { renderChatMessage, stripImages } from "core/util/messageContent";
 import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
 import { useFindWidget } from "../../components/find/FindWidget";
-import TimelineItem from "../../components/gui/TimelineItem";
-import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
 import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
-import { useOnboardingCard } from "../../components/OnboardingCard";
 import StepContainer from "../../components/StepContainer";
 import { TabBar } from "../../components/TabBar/TabBar";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
@@ -37,26 +33,56 @@ import {
   newSession,
   updateToolCallOutput,
 } from "../../redux/slices/sessionSlice";
+
 import { streamEditThunk } from "../../redux/thunks/edit";
-import { loadLastSession } from "../../redux/thunks/session";
 import { streamResponseThunk } from "../../redux/thunks/streamResponse";
-import { isJetBrains, isMetaEquivalentKeyPressed } from "../../util";
-import { ToolCallDiv } from "./ToolCallDiv";
+import { isMetaEquivalentKeyPressed } from "../../util";
+import { SingleToolCallDiv } from "./ToolCallDiv";
+import {
+  NestedWorkerCard,
+  parseNestedWorkerThinking,
+} from "./ToolCallDiv/NestedWorkerCard";
 
 import { useStore } from "react-redux";
-import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 
-import { DeprecationBanner } from "../../components/DeprecationBanner";
 import { FatalErrorIndicator } from "../../components/config/FatalErrorNotice";
 import InlineErrorMessage from "../../components/mainInput/InlineErrorMessage";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor/utils/resolveEditorContent";
-import { setDialogMessage, setShowDialog } from "../../redux/slices/uiSlice";
+import {
+  setDialogMessage,
+  setShowDialog,
+  setThinkingCollapse,
+  setFocusView,
+} from "../../redux/slices/uiSlice";
 import { RootState } from "../../redux/store";
 import { cancelStream } from "../../redux/thunks/cancelStream";
-import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { useAutoScroll } from "./useAutoScroll";
+import {
+  CukiiStreamingToolbar,
+  CukiiWaitingReceipt,
+} from "../../components/mainInput/Lump/LumpToolbar/CukiiStreamingToolbar";
+import { CukiiCrumbs } from "../../components/cukii/CukiiCrumbs";
+import { CukiiMessageReceiptStatus } from "../../components/cukii/CukiiMessageReceiptStatus";
+import {
+  CukiiMessageReaction,
+  reactionPlacementForMessage,
+  readCukiiAgentReaction,
+} from "../../components/cukii/CukiiMessageReaction";
+import { CukiiStickyUserMessage } from "../../components/cukii/CukiiStickyUserMessage";
+import { messageContentToEditorDoc } from "../../components/cukii/userMessageEditorDoc";
+import { useMeasuredCanvasBackground } from "../../components/cukii/useMeasuredCanvasBackground";
+import { formatMessageTime as formatSteerSentTime } from "../../util/formatMessageTime";
+import {
+  getActiveTimelineToolId,
+  getToolTimelineClass,
+  isCukiiServiceToolCall,
+} from "./timelineUtils";
+import { dispatchResponseEscape } from "./chatEscape";
+import { shouldInterruptFromEscape } from "./interruptShortcut";
+import { userMetaFitsOnLastLine, userMetaWidth } from "./userMetaMode";
+import { isTimelineServiceMessage } from "./timelineServiceMessage";
 
 // Helper function to find the index of the latest conversation summary
 function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
@@ -68,20 +94,98 @@ function findLatestSummaryIndex(history: ChatHistoryItem[]): number {
   return -1; // No summary found
 }
 
+function assistantHasVisibleText(item: ChatHistoryItemWithMessageId): boolean {
+  const text = renderChatMessage(item.message).trim();
+  return (
+    text.length > 0 ||
+    !!item.conversationSummary ||
+    !!item.reasoning?.text?.trim()
+  );
+}
+
 const StepsDiv = styled.div`
   position: relative;
   background-color: transparent;
 
   & > * {
     position: relative;
+    flex-shrink: 0;
   }
 
   .thread-message {
-    margin: 0 0 0 1px;
+    margin: 0;
   }
 `;
 
 export const MAIN_EDITOR_INPUT_ID = "main-editor-input";
+export const INITIAL_TRANSCRIPT_WINDOW = 160;
+
+/** Keep the user prompt that starts the first visible turn in the window so
+ * its sticky header cannot disappear behind a pagination cut (ID-274). */
+export function stickySafeTranscriptStart(
+  history: ChatHistoryItemWithMessageId[],
+  visibleCount: number,
+): number {
+  const start = Math.max(0, history.length - visibleCount);
+  if (start === 0) return 0;
+  const firstVisible = history[start];
+  if (firstVisible?.message.role === "user" && !firstVisible.modelSwitch) {
+    return start;
+  }
+  for (let index = start - 1; index >= 0; index--) {
+    const item = history[index];
+    if (item?.message.role === "user" && !item.modelSwitch) {
+      return index;
+    }
+  }
+  return start;
+}
+/**
+ * The next history window when the reader reaches the top. Growing by one
+ * fixed step is not enough: the window start snaps back to the turn's user
+ * prompt, so a long autonomous turn (hundreds of items without a user message)
+ * made two consecutive windows start at the same row. Nothing was prepended,
+ * the viewport stayed at scrollTop 0, no further scroll event fired, and the
+ * rest of the session became unreachable (card 1e059c83). Grow until the start
+ * actually moves to an earlier turn, or the whole history is shown.
+ */
+export function nextTranscriptWindow(
+  history: ChatHistoryItemWithMessageId[],
+  visibleCount: number,
+): number {
+  const currentStart = stickySafeTranscriptStart(history, visibleCount);
+  if (currentStart === 0) return visibleCount;
+  let next = visibleCount + INITIAL_TRANSCRIPT_WINDOW;
+  while (
+    next < history.length &&
+    stickySafeTranscriptStart(history, next) >= currentStart
+  ) {
+    next += INITIAL_TRANSCRIPT_WINDOW;
+  }
+  return Math.min(next, history.length);
+}
+export const CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX = 40;
+export const CLAUDE_COMPOSER_BOTTOM_INSET_PX = 16;
+export const CUKII_STREAMING_LOADER_GAP_PX = 16;
+
+/**
+ * The transcript ends 40px above its scroll bottom while the overlaid composer
+ * ends 16px above the viewport bottom. Claude reserves the full composer
+ * height, leaving the resulting 24px visual band. While Cukii's explicit
+ * streaming row is visible, the owner requires the band below it to equal the
+ * measured 16px band above it, so only that state shortens the spacer by 8px.
+ */
+export function composerSpacerHeight(
+  composerHeight: number,
+  streamingLoaderVisible: boolean,
+): number {
+  const referenceGap =
+    CLAUDE_TRANSCRIPT_BOTTOM_PADDING_PX - CLAUDE_COMPOSER_BOTTOM_INSET_PX;
+  const desiredGap = streamingLoaderVisible
+    ? CUKII_STREAMING_LOADER_GAP_PX
+    : referenceGap;
+  return Math.max(0, composerHeight - referenceGap + desiredGap);
+}
 
 function fallbackRender({ error, resetErrorBoundary }: any) {
   // Call resetErrorBoundary() to reset the error boundary and retry the render.
@@ -107,49 +211,265 @@ export function Chat() {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
   const reduxStore = useStore<RootState>();
-  const onboardingCard = useOnboardingCard();
   const showSessionTabs = useAppSelector(
     (store) => store.config.config.ui?.showSessionTabs,
   );
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
-  const [stepsOpen] = useState<(boolean | undefined)[]>([]);
+  const isCancelling = useAppSelector((state) => state.session.isCancelling);
+  const hasPendingPermission = useAppSelector(
+    (state) =>
+      Object.keys(state.session.pendingClaudePermissions).length > 0 ||
+      Object.keys(state.session.pendingUserQuestions).length > 0,
+  );
+  const bridgeWait = useAppSelector((state) => state.session.bridgeWait);
   const mainTextInputRef = useRef<HTMLInputElement>(null);
   const stepsDivRef = useRef<HTMLDivElement>(null);
+  const mainInputShellRef = useRef<HTMLDivElement>(null);
+  const measuredComposerHeightRef = useRef(78);
+  const [composerHeight, setComposerHeight] = useState(78);
+  /** Distance-from-bottom snapshot taken before older rows are prepended,
+   * so the viewport can be re-pinned afterwards. */
+  const loadEarlierAnchorRef = useRef<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  // Sticky masks and the composer fade paint `--cukii-canvas`; it is measured
+  // from whatever actually paints behind the transcript, never re-declared.
+  useMeasuredCanvasBackground(stepsDivRef);
   const history = useAppSelector((state) => state.session.history);
+  const sessionId = useAppSelector((state) => state.session.id);
+  const isSessionLoading = useAppSelector(
+    (state) => state.session.isSessionLoading,
+  );
+  const [transcriptWindow, setTranscriptWindow] = useState(() => ({
+    sessionId,
+    visibleCount: INITIAL_TRANSCRIPT_WINDOW,
+  }));
+  const visibleTranscriptCount =
+    transcriptWindow.sessionId === sessionId
+      ? transcriptWindow.visibleCount
+      : INITIAL_TRANSCRIPT_WINDOW;
+  const transcriptStart = stickySafeTranscriptStart(
+    history,
+    visibleTranscriptCount,
+  );
+  const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+  const focusView = useAppSelector((state) => state.ui.focusView);
   const showChatScrollbar = useAppSelector(
     (state) => state.config.config.ui?.showChatScrollbar,
   );
   const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
-
-  const lastSessionId = useAppSelector((state) => state.session.lastSessionId);
   const hasDismissedExploreDialog = useAppSelector(
     (state) => state.ui.hasDismissedExploreDialog,
   );
-  const jetbrains = useMemo(() => {
-    return isJetBrains();
-  }, []);
 
-  useAutoScroll(stepsDivRef, history);
+  useAutoScroll(stepsDivRef, history, isStreaming, sessionId);
 
-  useEffect(() => {
-    // Cmd + Backspace to delete current step
-    const listener = (e: KeyboardEvent) => {
-      if (
-        e.key === "Backspace" &&
-        (jetbrains ? e.altKey : isMetaEquivalentKeyPressed(e)) &&
-        !e.shiftKey
-      ) {
-        void dispatch(cancelStream());
+  // Claude overlays the composer and appends a same-height spacer inside the
+  // transcript. Measure the real card because attachments and a long prompt
+  // change its height. If the reader is pinned to the bottom, keep that latch
+  // while the composer grows; otherwise leave their reading position alone.
+  useLayoutEffect(() => {
+    const shell = mainInputShellRef.current;
+    if (!shell || isSessionLoading) return;
+
+    const update = () => {
+      const next = Math.ceil(shell.getBoundingClientRect().height);
+      if (next <= 0 || next === measuredComposerHeightRef.current) return;
+      const transcript = stepsDivRef.current;
+      const wasPinned = transcript
+        ? transcript.scrollHeight -
+            transcript.scrollTop -
+            transcript.clientHeight <
+          2
+        : false;
+      measuredComposerHeightRef.current = next;
+      setComposerHeight(next);
+      if (wasPinned && transcript) {
+        requestAnimationFrame(() => {
+          transcript.scrollTop = transcript.scrollHeight;
+        });
       }
     };
-    window.addEventListener("keydown", listener);
+
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [isSessionLoading]);
+
+  // User receipts use the same measured MAX split as assistant times. The old
+  // unconditional ::after spacer wrapped to a full empty line for attachments
+  // and near-full final lines — exactly the oversized band from the owner's
+  // screenshot. Measure every rendered bubble and select inline/compact mode.
+  useLayoutEffect(() => {
+    const transcript = stepsDivRef.current;
+    if (!transcript) return;
+    const bubbles = Array.from(
+      transcript.querySelectorAll<HTMLElement>(".cukii-user-message-bubble"),
+    ).filter((bubble) => bubble.querySelector(".cukii-user-metadata"));
+    const apply = (bubble: HTMLElement) => {
+      const metaWidth = userMetaWidth(bubble);
+      if (metaWidth > 0) {
+        bubble.style.setProperty("--cukii-meta-reserve", `${metaWidth}px`);
+      }
+      bubble.classList.toggle(
+        "cukii-user-bubble--meta-inline",
+        userMetaFitsOnLastLine(bubble, metaWidth),
+      );
+    };
+    bubbles.forEach(apply);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach((entry) => apply(entry.target as HTMLElement));
+    });
+    bubbles.forEach((bubble) => observer.observe(bubble));
+    // Expanding a folded prompt removes max-height. Chromium does not promise
+    // a ResizeObserver delivery for that style transition, so observe the
+    // component's collapsed/expanded class as the authoritative state edge.
+    const mutationObserver = new MutationObserver((entries) => {
+      entries.forEach((entry) => apply(entry.target as HTMLElement));
+    });
+    bubbles.forEach((bubble) =>
+      mutationObserver.observe(bubble, {
+        attributeFilter: ["class", "data-cukii-collapsible"],
+        attributes: true,
+      }),
+    );
+    return () => {
+      mutationObserver.disconnect();
+      observer.disconnect();
+    };
+  }, [history, transcriptStart]);
+
+  // Loading earlier messages prepends rows at the top of the transcript.
+  // Re-pin the viewport by its distance from the bottom so the reading
+  // position does not jump, matching Claude's load-earlier behavior.
+  useLayoutEffect(() => {
+    const element = stepsDivRef.current;
+    const anchor = loadEarlierAnchorRef.current;
+    if (!element || anchor === null) return;
+    loadEarlierAnchorRef.current = null;
+    element.scrollTop = element.scrollHeight - anchor;
+    // No re-check needed here: nextTranscriptWindow always prepends at least
+    // one earlier turn, so after re-pinning the reader is below the top and
+    // the next upward scroll fires a scroll event again.
+  }, [transcriptStart]);
+
+  // Seamless history: approaching the top expands the window automatically.
+  // A dedicated pagination control used to occupy the sticky slot and hide
+  // user headers. jsdom reports 0×0 boxes; require a real layout box so unit
+  // tests do not drain the whole saved session on mount.
+  useEffect(() => {
+    const transcript = stepsDivRef.current;
+    if (!transcript || isSessionLoading) return;
+    const hiddenCount = Math.max(0, history.length - visibleTranscriptCount);
+    if (hiddenCount <= 0) return;
+
+    const expandIfAtTop = () => {
+      const element = stepsDivRef.current;
+      if (!element) return;
+      if (element.clientHeight <= 0 || element.scrollHeight <= 0) return;
+      if (element.scrollTop > 64) return;
+      loadEarlierAnchorRef.current = element.scrollHeight - element.scrollTop;
+      setTranscriptWindow((current) => ({
+        sessionId,
+        visibleCount: nextTranscriptWindow(
+          history,
+          current.sessionId === sessionId
+            ? current.visibleCount
+            : INITIAL_TRANSCRIPT_WINDOW,
+        ),
+      }));
+    };
+
+    transcript.addEventListener("scroll", expandIfAtTop, { passive: true });
+    return () => transcript.removeEventListener("scroll", expandIfAtTop);
+  }, [history, isSessionLoading, sessionId, visibleTranscriptCount]);
+
+  // Claude parity: wheeling over the composer's own chrome — the padding
+  // left/right of the editor, the toolbar backing zone below it — scrolls
+  // the transcript. A nested scrollable (long editor, code block, popover)
+  // keeps the wheel for itself, and Ctrl+wheel stays with the platform.
+  useEffect(() => {
+    const shell = mainInputShellRef.current;
+    const transcript = stepsDivRef.current;
+    if (!shell || !transcript) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      let node: Element | null =
+        event.target instanceof Element ? event.target : null;
+      while (node && node !== shell) {
+        const overflowY = getComputedStyle(node).overflowY;
+        if (
+          (overflowY === "auto" || overflowY === "scroll") &&
+          node.scrollHeight > node.clientHeight + 1
+        ) {
+          return;
+        }
+        node = node.parentElement;
+      }
+      const maxScroll = transcript.scrollHeight - transcript.clientHeight;
+      if (maxScroll <= 0) return;
+      const next = Math.max(
+        0,
+        Math.min(transcript.scrollTop + event.deltaY, maxScroll),
+      );
+      if (next === transcript.scrollTop) return;
+      event.preventDefault();
+      transcript.scrollTop = next;
+    };
+    shell.addEventListener("wheel", onWheel, { passive: false });
+    return () => shell.removeEventListener("wheel", onWheel);
+  }, [isSessionLoading]);
+
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => {
+      if (
+        shouldInterruptFromEscape(e, {
+          isStreaming,
+          isCancelling: Boolean(isCancelling),
+          hasPendingPermission,
+        })
+      ) {
+        dispatchResponseEscape(e, isStreaming, () => {
+          void dispatch(cancelStream());
+        });
+      }
+      if (
+        e.key.toLowerCase() === "o" &&
+        isMetaEquivalentKeyPressed(e) &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        dispatch(setThinkingCollapse(!thinkingCollapse.open));
+      }
+      if (
+        e.key.toLowerCase() === "f" &&
+        isMetaEquivalentKeyPressed(e) &&
+        e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        dispatch(setFocusView(!focusView));
+      }
+    };
+    // Capture before TipTap consumes Escape. Visible dialogs/menus are still
+    // protected by dispatchResponseEscape's visibility-aware overlay check.
+    window.addEventListener("keydown", listener, true);
 
     return () => {
-      window.removeEventListener("keydown", listener);
+      window.removeEventListener("keydown", listener, true);
     };
-  }, [isStreaming, jetbrains, isInEdit]);
+  }, [
+    isStreaming,
+    isCancelling,
+    hasPendingPermission,
+    isInEdit,
+    thinkingCollapse.open,
+    focusView,
+  ]);
 
   const { widget, highlights } = useFindWidget(
     stepsDivRef,
@@ -192,7 +512,9 @@ export function Chat() {
         ? (selectedModelByRole.edit ?? selectedModelByRole.chat)
         : selectedModelByRole.chat;
 
-      if (!model) {
+      // Broker turns are routed to a vendor CLI, not to a Continue model, so an
+      // empty config must not swallow the send. See streamResponse.ts.
+      if (!model && currentMode !== "broker") {
         return;
       }
 
@@ -211,20 +533,8 @@ export function Chat() {
         void dispatch(streamResponseThunk({ editorState, modifiers, index }));
 
         if (editorToClearOnSend) {
-          editorToClearOnSend.commands.clearContent();
+          editorToClearOnSend.commands.clearContent(true);
         }
-      }
-
-      // Increment localstorage counter for popup
-      const currentCount = getLocalStorage("mainTextEntryCounter");
-      if (currentCount) {
-        setLocalStorage("mainTextEntryCounter", currentCount + 1);
-        if (currentCount === 300) {
-          dispatch(setDialogMessage(<FeedbackDialog />));
-          dispatch(setShowDialog(true));
-        }
-      } else {
-        setLocalStorage("mainTextEntryCounter", 1);
       }
     },
     [dispatch, ideMessenger, reduxStore],
@@ -263,8 +573,32 @@ export function Chat() {
     [history],
   );
 
-  const renderChatHistoryItem = useCallback(
-    (item: ChatHistoryItemWithMessageId, index: number) => {
+  const latestSummaryIndex = useMemo(
+    () => findLatestSummaryIndex(history),
+    [history],
+  );
+  const activeTimelineToolId = useMemo(
+    () => getActiveTimelineToolId(history),
+    [history],
+  );
+  // Rendering belongs to the active stream, not to whether its latest event is
+  // a tool call. A tool may be quiet for seconds while the stream is alive.
+  const shouldRenderStreamingToolbar = isStreaming && !isInEdit && !bridgeWait;
+  const transcriptComposerSpacer = composerSpacerHeight(
+    composerHeight,
+    shouldRenderStreamingToolbar,
+  );
+
+  // Right-click on capsules uses the native webview context menu; session
+  // commands reach it through the extension's webview/context contribution.
+
+  const renderTranscriptRows = useCallback((): JSX.Element => {
+    const transcriptHistory = history.slice(transcriptStart);
+    const renderTranscriptEntry = (
+      item: ChatHistoryItemWithMessageId,
+      relativeIndex: number,
+    ): JSX.Element[] => {
+      const historyIndex = transcriptStart + relativeIndex;
       const {
         message,
         editorState,
@@ -273,181 +607,504 @@ export function Chat() {
         toolCallStates,
       } = item;
 
-      // Calculate once for the entire function
-      const latestSummaryIndex = findLatestSummaryIndex(history);
+      if (item.modelSwitch) {
+        const label = `Switched to ${item.modelSwitch.displayName}`;
+        return [
+          <div
+            key={message.id}
+            className="cukii-model-switch-divider shrink-0"
+            data-testid="cukii-model-switch"
+          >
+            <span aria-hidden="true" className="cukii-model-switch-wave" />
+            <span className="cukii-model-switch-label" title={label}>
+              <span className="cukii-model-switch-full">{label}</span>
+              <span className="cukii-model-switch-short">Switched model</span>
+            </span>
+            <span aria-hidden="true" className="cukii-model-switch-wave" />
+          </div>,
+        ];
+      }
+
+      if (message.role === "system" || message.role === "tool") {
+        return [];
+      }
+
       const isBeforeLatestSummary =
-        latestSummaryIndex !== -1 && index < latestSummaryIndex;
+        latestSummaryIndex !== -1 && historyIndex < latestSummaryIndex;
+      const errorBoundary = (content: ReactNode) => (
+        <ErrorBoundary
+          FallbackComponent={fallbackRender}
+          onReset={() => {
+            dispatch(newSession());
+          }}
+        >
+          {content}
+        </ErrorBoundary>
+      );
 
       if (message.role === "user") {
-        return (
-          <ContinueInputBox
-            onEnter={(editorState, modifiers) =>
-              sendInput(editorState, modifiers, index)
+        const agentReaction = readCukiiAgentReaction(message.metadata);
+        const reactionPlacement = agentReaction
+          ? reactionPlacementForMessage(message.content)
+          : undefined;
+        const sentTime = formatSteerSentTime(item.messageReceipt?.sentAt);
+        const receiptStatus = item.messageReceipt?.status;
+        const visualReceiptStatus =
+          receiptStatus === "read"
+            ? "read"
+            : receiptStatus === "queued" ||
+                receiptStatus === "delivered" ||
+                receiptStatus === "deferred"
+              ? "sent"
+              : undefined;
+        // Group against the neighboring *rendered* transcript row. Broker
+        // transport records (system/tool and empty stream placeholders) are
+        // intentionally invisible; treating one as a visual boundary made
+        // identical user sequences group on one side of the transcript but
+        // not the other.
+        const neighboringVisibleRole = (direction: -1 | 1) => {
+          for (
+            let index = historyIndex + direction;
+            index >= 0 && index < history.length;
+            index += direction
+          ) {
+            const neighbor = history[index];
+            if (neighbor.modelSwitch) return "boundary";
+            const role = neighbor.message.role;
+            if (role === "system" || role === "tool") continue;
+            if (
+              role === "thinking" &&
+              !renderChatMessage(neighbor.message).trim()
+            ) {
+              continue;
             }
-            isLastUserInput={isLastUserInput(index)}
-            isMainInput={false}
-            editorState={editorState ?? item.message.content}
-            contextItems={contextItems}
-            appliedRules={appliedRules}
-            inputId={message.id}
-          />
-        );
-      }
-
-      if (message.role === "tool") {
-        return null;
-      }
-
-      if (message.role === "assistant") {
-        return (
-          <>
-            {/* Always render assistant content through normal path */}
-            <div className="thread-message">
-              <TimelineItem
-                item={item}
-                iconElement={
-                  <ChatBubbleOvalLeftIcon width="16px" height="16px" />
+            if (
+              role === "assistant" &&
+              !assistantHasVisibleText(neighbor) &&
+              !neighbor.toolCallStates?.length
+            ) {
+              continue;
+            }
+            return role;
+          }
+          return undefined;
+        };
+        // MAX geometry: adjacent visible user turns form one visual group;
+        // corners facing a neighbor tighten while outer corners stay large.
+        const previousRole = neighboringVisibleRole(-1);
+        const nextRole = neighboringVisibleRole(1);
+        const groupedWithPrevious = previousRole === "user";
+        const groupedWithNext = nextRole === "user";
+        const groupClass =
+          groupedWithPrevious && groupedWithNext
+            ? "cukii-user-bubble--group-middle"
+            : groupedWithNext
+              ? "cukii-user-bubble--group-start"
+              : groupedWithPrevious
+                ? "cukii-user-bubble--group-end"
+                : "cukii-user-bubble--solo";
+        const rowGroupClass =
+          groupedWithPrevious && groupedWithNext
+            ? "cukii-user-row--group-middle"
+            : groupedWithNext
+              ? "cukii-user-row--group-start"
+              : groupedWithPrevious
+                ? "cukii-user-row--group-end"
+                : "cukii-user-row--solo";
+        // MAX receipt flow is measured after render: inline on a paragraph
+        // tail only when it fits, compact own-row for every other case.
+        return [
+          <div
+            key={message.id}
+            className={`cukii-user-row cukii-user-row--sticky ${rowGroupClass} shrink-0`}
+          >
+            <div className="cukii-user-message">
+              <CukiiStickyUserMessage
+                bubbleClassName={`cukii-user-message-bubble ${groupClass} ${
+                  sentTime ? "cukii-user-bubble--with-receipt" : ""
+                } ${visualReceiptStatus ? "cukii-user-bubble--receipt-checks" : ""} ${
+                  reactionPlacement === "embedded"
+                    ? "cukii-user-bubble--with-reaction"
+                    : ""
+                } ${
+                  reactionPlacement === "embedded" && sentTime
+                    ? "cukii-user-bubble--reaction-with-meta"
+                    : ""
+                }`}
+                foldableText={stripImages(message.content).trim().length > 0}
+                messageId={message.id}
+                reaction={
+                  agentReaction && reactionPlacement === "embedded" ? (
+                    <CukiiMessageReaction
+                      placement="embedded"
+                      reaction={agentReaction}
+                      surface="user"
+                    />
+                  ) : undefined
                 }
-                open={
-                  typeof stepsOpen[index] === "undefined"
-                    ? true
-                    : stepsOpen[index]!
+                metadata={
+                  sentTime ? (
+                    <span
+                      className="cukii-user-metadata"
+                      data-testid={`cukii-message-receipt-${message.id}`}
+                      aria-label={
+                        visualReceiptStatus === "read"
+                          ? `Sent ${sentTime}, read`
+                          : receiptStatus === "deferred"
+                            ? `Sent ${sentTime}, queued for the next turn`
+                            : visualReceiptStatus
+                              ? `Sent ${sentTime}, delivered`
+                              : `Sent ${sentTime}`
+                      }
+                    >
+                      <time>{sentTime}</time>
+                      {visualReceiptStatus && (
+                        <CukiiMessageReceiptStatus
+                          status={visualReceiptStatus}
+                        />
+                      )}
+                    </span>
+                  ) : undefined
                 }
-                onToggle={() => {}}
               >
-                <StepContainer
-                  index={index}
-                  isLast={index === history.length - 1}
-                  item={item}
-                  latestSummaryIndex={latestSummaryIndex}
+                {errorBoundary(
+                  <ContinueInputBox
+                    onEnter={(nextEditorState, modifiers) =>
+                      sendInput(nextEditorState, modifiers, historyIndex)
+                    }
+                    isLastUserInput={isLastUserInput(historyIndex)}
+                    isMainInput={false}
+                    editorState={
+                      editorState ?? messageContentToEditorDoc(message.content)
+                    }
+                    messageContent={message.content}
+                    contextItems={contextItems}
+                    appliedRules={appliedRules}
+                    inputId={message.id}
+                  />,
+                )}
+              </CukiiStickyUserMessage>
+              {agentReaction && reactionPlacement === "standalone" && (
+                <CukiiMessageReaction
+                  placement="standalone"
+                  reaction={agentReaction}
+                  surface="user"
                 />
-              </TimelineItem>
+              )}
             </div>
-
-            {toolCallStates && (
-              <ToolCallDiv
-                toolCallStates={toolCallStates}
-                historyIndex={index}
-              />
-            )}
-          </>
-        );
+          </div>,
+        ];
       }
 
       if (message.role === "thinking") {
         const thinkingContent = renderChatMessage(message);
         if (!thinkingContent?.trim()) {
-          return null;
+          return [];
         }
-        return (
-          <div className={isBeforeLatestSummary ? "opacity-50" : ""}>
-            <ThinkingBlockPeek
-              content={thinkingContent}
-              redactedThinking={message.redactedThinking}
-              index={index}
-              prevItem={index > 0 ? history[index - 1] : null}
-              inProgress={index === history.length - 1 && isStreaming}
-              signature={message.signature}
-            />
-          </div>
+
+        const inProgress =
+          isStreaming &&
+          (item.reasoning?.active ?? historyIndex === history.length - 1);
+        const nestedWorker = parseNestedWorkerThinking(
+          thinkingContent,
+          inProgress,
         );
+        const thinkingBody = nestedWorker ? (
+          <NestedWorkerCard view={nestedWorker} />
+        ) : (
+          <ThinkingBlockPeek
+            content={thinkingContent}
+            redactedThinking={message.redactedThinking}
+            index={historyIndex}
+            prevItem={historyIndex > 0 ? history[historyIndex - 1] : null}
+            inProgress={inProgress}
+            signature={message.signature}
+            durationMs={
+              item.reasoning?.startAt && item.reasoning.endAt
+                ? item.reasoning.endAt - item.reasoning.startAt
+                : undefined
+            }
+          />
+        );
+
+        const thinkingRows: JSX.Element[] = [
+          <div
+            key={message.id}
+            className={`cukii-timeline-item cukii-timeline-event cukii-timeline-thinking ${
+              inProgress ? "cukii-timeline-thinking-active" : ""
+            } shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+          >
+            {errorBoundary(thinkingBody)}
+          </div>,
+        ];
+
+        // A cancellation is a terminal event in the same transcript rail as
+        // thinking/text. Keeping it as a sibling timeline item preserves the
+        // dot, vertical connector and prose inset instead of a detached footer.
+        if (item.interrupted) {
+          thinkingRows.push(
+            <div
+              key={`${message.id}-interrupted`}
+              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-interrupted shrink-0 ${
+                isBeforeLatestSummary ? "opacity-50" : ""
+              }`}
+            >
+              <span
+                className="text-description-muted"
+                data-testid="turn-interrupted"
+              >
+                {TOOL_INTERRUPTED_MESSAGE}
+              </span>
+            </div>,
+          );
+        }
+
+        return thinkingRows;
       }
 
-      // Default case - regular assistant message
-      return (
-        <div className="thread-message">
-          <TimelineItem
-            item={item}
-            iconElement={<ChatBubbleOvalLeftIcon width="16px" height="16px" />}
-            open={
-              typeof stepsOpen[index] === "undefined" ? true : stepsOpen[index]!
-            }
-            onToggle={() => {}}
-          >
-            <StepContainer
-              index={index}
-              isLast={index === history.length - 1}
-              item={item}
-              latestSummaryIndex={latestSummaryIndex}
-            />
-          </TimelineItem>
-        </div>
-      );
-    },
-    [sendInput, isLastUserInput, history, stepsOpen, isStreaming],
-  );
+      if (message.role === "assistant") {
+        const rows: JSX.Element[] = [];
 
-  const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
+        if (assistantHasVisibleText(item)) {
+          const visibleText = renderChatMessage(message).trim();
+          if (isTimelineServiceMessage(visibleText)) {
+            rows.push(
+              <div
+                key={`${message.id}-text`}
+                className={`cukii-timeline-item cukii-timeline-event cukii-timeline-service shrink-0 ${
+                  isBeforeLatestSummary ? "opacity-50" : ""
+                }`}
+                data-testid="cukii-timeline-service"
+              >
+                {visibleText}
+              </div>,
+            );
+          } else {
+            rows.push(
+              <div
+                key={`${message.id}-text`}
+                className={`cukii-assistant-row shrink-0 ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+              >
+                {errorBoundary(
+                  <div className="thread-message">
+                    <StepContainer
+                      index={historyIndex}
+                      isLast={historyIndex === history.length - 1}
+                      // 🔴 Folded in here, not read from the store inside the
+                      // capsule. A `useSelector` in StepContainer subscribes
+                      // every visible row to the flag, and flipping it then
+                      // re-renders the whole window — 160 markdown leaves on a
+                      // restored transcript, which is precisely what memoising
+                      // that component prevents. As a prop it changes for the one
+                      // row that is actually streaming and for nobody else.
+                      isSettling={
+                        isStreaming && historyIndex === history.length - 1
+                      }
+                      item={item}
+                      latestSummaryIndex={latestSummaryIndex}
+                    />
+                  </div>,
+                )}
+              </div>,
+            );
+          }
+        }
+
+        toolCallStates?.forEach((toolCallState) => {
+          if (isCukiiServiceToolCall(toolCallState)) return;
+          rows.push(
+            <div
+              key={toolCallState.toolCallId}
+              data-cukii-active={
+                toolCallState.toolCallId === activeTimelineToolId
+                  ? "true"
+                  : undefined
+              }
+              className={`cukii-timeline-item shrink-0 ${getToolTimelineClass(
+                toolCallState.status,
+                toolCallState.toolCallId === activeTimelineToolId,
+              )} ${isBeforeLatestSummary ? "opacity-50" : ""}`}
+            >
+              {errorBoundary(
+                <SingleToolCallDiv
+                  toolCallState={toolCallState}
+                  historyIndex={historyIndex}
+                />,
+              )}
+            </div>,
+          );
+        });
+
+        // Always show turn cancellation as a normal timeline row, regardless
+        // of whether a tool has a separate per-tool interruption label.
+        if (item.interrupted) {
+          rows.push(
+            <div
+              key={`${message.id}-interrupted`}
+              className={`cukii-timeline-item cukii-timeline-event cukii-timeline-interrupted shrink-0 ${
+                isBeforeLatestSummary ? "opacity-50" : ""
+              }`}
+            >
+              <span
+                className="text-description-muted"
+                data-testid="turn-interrupted"
+              >
+                {TOOL_INTERRUPTED_MESSAGE}
+              </span>
+            </div>,
+          );
+        }
+
+        return rows;
+      }
+
+      return [];
+    };
+
+    const renderedEntries = transcriptHistory.map(renderTranscriptEntry);
+    const turns: Array<{ key: string; rows: JSX.Element[] }> = [];
+    let currentRows: JSX.Element[] = [];
+    // The leading continuation is the same logical turn while pagination
+    // reveals older rows. Its key must therefore stay stable: tying it to the
+    // moving window boundary remounts every already-visible saved response.
+    let currentKey = "continuation";
+
+    renderedEntries.forEach((rows, relativeIndex) => {
+      const item = transcriptHistory[relativeIndex];
+      const startsTurn = item.message.role === "user" && !item.modelSwitch;
+      if (startsTurn && currentRows.length > 0) {
+        turns.push({ key: currentKey, rows: currentRows });
+        currentRows = [];
+      }
+      if (startsTurn) currentKey = item.message.id;
+      currentRows.push(...rows);
+    });
+    if (currentRows.length > 0) {
+      turns.push({ key: currentKey, rows: currentRows });
+    }
+
+    // `.cukii-turns` clips the turns' eviction slack out of the scrollable
+    // overflow: a long prompt followed by less content than its slack would
+    // otherwise let the transcript scroll into a blank (see index.css).
+    return (
+      <div className="cukii-turns">
+        {turns.map(({ key, rows }) => (
+          <div
+            className="cukii-turn"
+            data-testid={`cukii-turn-${key}`}
+            key={key}
+          >
+            {/* 1px view-timeline subject: the sticky row's fold is a CSS
+            scroll-driven animation measured from this sentinel reaching the
+            scrollport top (see `.cukii-turn-sentinel` in index.css). */}
+            <div aria-hidden="true" className="cukii-turn-sentinel" />
+            {rows}
+            {/* Eviction slack: lets the next turn push the one-line capsule out
+            exactly when it reaches the painted row (`--cukii-turn-slack`). */}
+            <div aria-hidden="true" className="cukii-turn-slack" />
+          </div>
+        ))}
+      </div>
+    );
+  }, [
+    dispatch,
+    history,
+    isLastUserInput,
+    isStreaming,
+    activeTimelineToolId,
+    latestSummaryIndex,
+    sendInput,
+    transcriptStart,
+  ]);
+
+  // Claude ships no transcript scrollbar styling — the native webview bar is
+  // the parity target. Only an explicit legacy setting opts into thin mode.
+  const showScrollbar = Boolean(showChatScrollbar);
 
   return (
     <>
-      {!!showSessionTabs && !isInEdit && <TabBar ref={tabsRef} />}
+      {!!showSessionTabs && window.cukiiSurface !== "chat" && !isInEdit && (
+        <TabBar ref={tabsRef} />
+      )}
       {widget}
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"} ${history.length > 0 ? "min-h-0 flex-1 overflow-y-scroll" : "shrink-0"}`}
+        className={`cukii-transcript ${isStreaming ? "cukii-transcript-streaming" : ""} flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${showScrollbar ? "thin-scrollbar" : ""}`}
       >
-        <DeprecationBanner dismissable={true} />
         {highlights}
-        {history
-          .filter((item) => item.message.role !== "system")
-          .map((item, index: number) => (
-            <div
-              key={item.message.id}
-              style={{
-                minHeight: index === history.length - 1 ? "200px" : 0,
-              }}
-            >
-              <ErrorBoundary
-                FallbackComponent={fallbackRender}
-                onReset={() => {
-                  dispatch(newSession());
-                }}
-              >
-                {renderChatHistoryItem(item, index)}
-              </ErrorBoundary>
-              {index === history.length - 1 && <InlineErrorMessage />}
-            </div>
-          ))}
-      </StepsDiv>
-      <div className={"relative shrink-0"}>
-        <ContinueInputBox
-          isMainInput
-          isLastUserInput={false}
-          onEnter={(editorState, modifiers, editor) =>
-            sendInput(editorState, modifiers, undefined, editor)
-          }
-          inputId={MAIN_EDITOR_INPUT_ID}
-        />
-
-        <div
-          style={{
-            pointerEvents: isStreaming ? "none" : "auto",
-          }}
-        >
-          <div className="flex flex-row items-center justify-between pb-1 pl-0.5 pr-2">
-            <div className="xs:inline hidden">
-              {history.length === 0 && lastSessionId && !isInEdit && (
-                <NewSessionButton
-                  onClick={async () => {
-                    await dispatch(loadLastSession());
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <ArrowLeftIcon className="h-3 w-3" />
-                  <span className="text-xs">Last Session</span>
-                </NewSessionButton>
-              )}
-            </div>
+        {isSessionLoading ? (
+          <div
+            aria-live="polite"
+            className="flex min-h-0 flex-1 items-center justify-center gap-2 text-[13px] text-[var(--vscode-descriptionForeground)]"
+            data-testid="cukii-session-loading"
+            role="status"
+          >
+            <CukiiCrumbs />
+            <span>Loading…</span>
           </div>
-          <FatalErrorIndicator />
-          {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
-          {history.length === 0 && (
-            <EmptyChatBody showOnboardingCard={onboardingCard.show} />
-          )}
+        ) : (
+          <>
+            {history.length === 0 && <EmptyChatBody sessionId={sessionId} />}
+            {transcriptStart > 0 && (
+              <div
+                aria-hidden="true"
+                className="cukii-history-sentinel"
+                data-testid="cukii-history-sentinel"
+              />
+            )}
+            {renderTranscriptRows()}
+          </>
+        )}
+        <InlineErrorMessage />
+        {isStreaming &&
+          !isInEdit &&
+          (bridgeWait ? (
+            <CukiiWaitingReceipt wait={bridgeWait} />
+          ) : shouldRenderStreamingToolbar ? (
+            <div
+              className="cukii-spinner-row"
+              data-testid="cukii-spinner-row"
+              data-cukii-active="true"
+            >
+              <CukiiStreamingToolbar active />
+            </div>
+          ) : null)}
+        {!isSessionLoading && (
+          <div
+            aria-hidden="true"
+            className="cukii-composer-spacer"
+            style={{
+              height: transcriptComposerSpacer,
+              minHeight: transcriptComposerSpacer,
+            }}
+          />
+        )}
+      </StepsDiv>
+      {!isSessionLoading && (
+        <div aria-hidden="true" className="cukii-message-gradient" />
+      )}
+      {!isSessionLoading && (
+        <div ref={mainInputShellRef} className="cukii-main-input-shell">
+          <ContinueInputBox
+            isMainInput
+            isLastUserInput={false}
+            onEnter={(editorState, modifiers, editor) =>
+              sendInput(editorState, modifiers, undefined, editor)
+            }
+            inputId={MAIN_EDITOR_INPUT_ID}
+          />
+
+          <div
+            style={{
+              pointerEvents: isStreaming ? "none" : "auto",
+            }}
+          >
+            <FatalErrorIndicator />
+            {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

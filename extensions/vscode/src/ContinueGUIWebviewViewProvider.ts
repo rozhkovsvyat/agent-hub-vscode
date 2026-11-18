@@ -4,8 +4,10 @@ import { getTheme } from "./util/getTheme";
 import { getExtensionVersion, getvsCodeUriScheme } from "./util/util";
 import { getExtensionUri, getNonce, getUniqueId } from "./util/vscode";
 import { VsCodeWebviewProtocol } from "./webviewProtocol";
+import { getCukiiWebviewStateBootstrap } from "./cukiiWebviewState";
 
 import type { FileEdit } from "core";
+import type { BrokerVendorId } from "core/protocol/ideWebview";
 
 export class ContinueGUIWebviewViewProvider
   implements vscode.WebviewViewProvider
@@ -67,9 +69,14 @@ export class ContinueGUIWebviewViewProvider
   getSidebarContent(
     context: vscode.ExtensionContext | undefined,
     panel: vscode.WebviewPanel | vscode.WebviewView,
-    page: string | undefined = undefined,
     edits: FileEdit[] | undefined = undefined,
     isFullScreen = false,
+    protocol: VsCodeWebviewProtocol = this.webviewProtocol,
+    surface: "sidebar" | "chat" | "usage" = isFullScreen ? "chat" : "sidebar",
+    initialSessionId?: string,
+    panelId: string = surface,
+    suppressInitialChordCharacter = false,
+    initialVendor?: BrokerVendorId,
   ): string {
     const extensionUri = getExtensionUri();
     let scriptUri: string;
@@ -110,7 +117,7 @@ export class ContinueGUIWebviewViewProvider
     const nonce = getNonce();
 
     const currentTheme = getTheme();
-    vscode.workspace.onDidChangeConfiguration((e) => {
+    const themeListener = vscode.workspace.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration("workbench.colorTheme") ||
         e.affectsConfiguration("window.autoDetectColorScheme") ||
@@ -121,18 +128,45 @@ export class ContinueGUIWebviewViewProvider
         e.affectsConfiguration("workbench.preferredHighContrastLightColorTheme")
       ) {
         // Send new theme to GUI to update embedded Monaco themes
-        void this.webviewProtocol?.request("setTheme", { theme: getTheme() });
+        void protocol.request("setTheme", { theme: getTheme() });
       }
     });
+    panel.onDidDispose(() => themeListener.dispose());
 
-    this.webviewProtocol.webview = panel.webview;
+    protocol.webview = panel.webview;
+
+    const serializedPanelId = JSON.stringify(panelId).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
     <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script>const vscode = acquireVsCodeApi();</script>
+        <script>const vscode = acquireVsCodeApi(); window.cukiiVscode = vscode;</script>
+        ${
+          suppressInitialChordCharacter
+            ? `<script>
+          (() => {
+            const deadline = performance.now() + 750;
+            const suppress = (event) => {
+              const isChordSuffix =
+                performance.now() <= deadline &&
+                event.inputType === "insertText" &&
+                String(event.data || "").toLowerCase() === "u";
+              if (!isChordSuffix) return;
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              document.removeEventListener("beforeinput", suppress, true);
+            };
+            document.addEventListener("beforeinput", suppress, true);
+            setTimeout(
+              () => document.removeEventListener("beforeinput", suppress, true),
+              800,
+            );
+          })();
+        </script>`
+            : ""
+        }
         <link href="${styleMainUri}" rel="stylesheet">
 
         <title>Continue</title>
@@ -169,13 +203,18 @@ export class ContinueGUIWebviewViewProvider
           ) || [],
         )}</script>
         <script>window.isFullScreen = ${isFullScreen}</script>
+        <script>window.cukiiSurface = "${surface}"</script>
+        <script>window.cukiiPanelId = ${serializedPanelId}</script>
+        <script>window.cukiiVendor = ${JSON.stringify(initialVendor ?? null)}</script>
+        <script>
+          ${getCukiiWebviewStateBootstrap(initialSessionId)}
+        </script>
 
         ${
           edits
             ? `<script>window.edits = ${JSON.stringify(edits)}</script>`
             : ""
         }
-        ${page ? `<script>window.location.pathname = "${page}"</script>` : ""}
       </body>
     </html>`;
   }

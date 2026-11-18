@@ -5,9 +5,23 @@ import {
   RuleMetadata,
   SlashCommandSource,
 } from "core";
-import { memo, useMemo } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { defaultBorderRadius, vscBackground } from "..";
+import { CukiiActiveEditorSelectionState } from "../cukii/cukiiActiveEditorSelection";
+import { cukiiComposerPlaceholder } from "../cukii/cukiiComposerPlaceholder";
+import { CukiiUserAttachmentStrip } from "../cukii/CukiiUserAttachmentStrip";
+import { isFileAttachmentContextItem } from "../cukii/userAttachments";
 import { useAppSelector } from "../../redux/hooks";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { useWebviewListener } from "../../hooks/useWebviewListener";
 import { selectSlashCommandComboBoxInputs } from "../../redux/selectors";
 import { ContextItemsPeek } from "./belowMainInput/ContextItemsPeek";
 import { RulesPeek } from "./belowMainInput/RulesPeek";
@@ -25,6 +39,9 @@ interface ContinueInputBoxProps {
     editor: Editor,
   ) => void;
   editorState?: JSONContent;
+  /** Raw message content for transcript bubbles: history items without a
+   * saved editor state keep their image parts only here. */
+  messageContent?: unknown;
   contextItems?: ContextItemWithId[];
   appliedRules?: RuleMetadata[];
   hidden?: boolean;
@@ -53,6 +70,7 @@ const EDIT_ALLOWED_SLASH_COMMAND_SOURCES: SlashCommandSource[] = [
 ];
 
 function ContinueInputBox(props: ContinueInputBoxProps) {
+  const ideMessenger = useContext(IdeMessengerContext);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const availableSlashCommands = useAppSelector(
     selectSlashCommandComboBoxInputs,
@@ -61,7 +79,73 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
     (state) => state.config.config.contextProviders,
   );
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const historyLength = useAppSelector((store) => store.session.history.length);
+  const sessionId = useAppSelector((store) => store.session.id);
   const editModeState = useAppSelector((state) => state.editModeState);
+  const [hasActiveEditorSelection, setHasActiveEditorSelection] =
+    useState(false);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [isWebviewFocused, setIsWebviewFocused] = useState(() =>
+    document.hasFocus(),
+  );
+  const selectionState = useRef(new CukiiActiveEditorSelectionState());
+
+  useEffect(() => {
+    const onFocus = () => setIsWebviewFocused(true);
+    const onBlur = () => setIsWebviewFocused(false);
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  useWebviewListener(
+    "cukii/activeEditorSelectionChanged",
+    async ({ hasSelection }) => {
+      if (props.isMainInput) {
+        selectionState.current.applyLiveUpdate(hasSelection);
+        setHasActiveEditorSelection(hasSelection);
+      }
+    },
+    [props.isMainInput],
+    !props.isMainInput,
+  );
+
+  useEffect(() => {
+    if (!props.isMainInput) {
+      selectionState.current.clear();
+      setHasActiveEditorSelection(false);
+      return;
+    }
+
+    let disposed = false;
+    const epoch = selectionState.current.beginInitialQuery();
+    void ideMessenger
+      .request("cukii/getActiveEditorSelectionState", undefined)
+      .then((response) => {
+        if (
+          !disposed &&
+          response.status === "success" &&
+          selectionState.current.applyInitialResponse(
+            epoch,
+            response.content.hasSelection,
+          )
+        ) {
+          setHasActiveEditorSelection(response.content.hasSelection);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [ideMessenger, props.isMainInput]);
+
+  const handleComposerFocusChange = useCallback((isFocused: boolean) => {
+    setIsComposerFocused(isFocused);
+  }, []);
 
   const filteredSlashCommands = useMemo(() => {
     if (isInEdit) {
@@ -88,7 +172,29 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   }, [availableContextProviders, isInEdit]);
 
   const historyKey = isInEdit ? "edit" : "chat";
-  const placeholder = isInEdit ? "Edit selected code" : undefined;
+  const placeholder = useMemo(
+    () =>
+      cukiiComposerPlaceholder({
+        isInEdit,
+        isStreaming,
+        isMainInput: props.isMainInput ?? false,
+        historyLength,
+        sessionId,
+        hasActiveEditorSelection,
+        isComposerFocused,
+        isWebviewFocused,
+      }),
+    [
+      hasActiveEditorSelection,
+      historyLength,
+      isComposerFocused,
+      isWebviewFocused,
+      isInEdit,
+      isStreaming,
+      props.isMainInput,
+      sessionId,
+    ],
+  );
 
   const toolbarOptions: ToolbarOptions = useMemo(() => {
     if (isInEdit) {
@@ -106,42 +212,69 @@ function ContinueInputBox(props: ContinueInputBoxProps) {
   }, [isInEdit, editModeState.applyState.status]);
 
   const { appliedRules = [], contextItems = [] } = props;
+  const remainingContextItems = props.isMainInput
+    ? contextItems
+    : contextItems.filter((item) => !isFileAttachmentContextItem(item));
 
   return (
     <div
-      className={`${props.hidden ? "hidden" : ""}`}
+      className={`${props.hidden ? "hidden" : ""} ${
+        props.isMainInput ? "cukii-composer" : "cukii-user-bubble"
+      }`}
       data-testid={`continue-input-box-${props.inputId}`}
     >
-      <div className={`relative flex flex-col px-2`}>
+      {!props.isMainInput && (
+        <CukiiUserAttachmentStrip
+          contextItems={contextItems}
+          editorState={props.editorState}
+          messageContent={props.messageContent}
+        />
+      )}
+      <div className="relative flex flex-col">
         {props.isMainInput && <Lump />}
-        <GradientBorder
-          loading={isStreaming && (props.isLastUserInput || isInEdit) ? 1 : 0}
-          borderColor={
-            isStreaming && (props.isLastUserInput || isInEdit)
-              ? undefined
-              : vscBackground
-          }
-          borderRadius={defaultBorderRadius}
-        >
+        {props.isMainInput ? (
+          <GradientBorder
+            loading={isStreaming && (props.isLastUserInput || isInEdit) ? 1 : 0}
+            borderColor={
+              isStreaming && (props.isLastUserInput || isInEdit)
+                ? undefined
+                : vscBackground
+            }
+            borderRadius={defaultBorderRadius}
+          >
+            <TipTapEditor
+              editorState={props.editorState}
+              onEnter={props.onEnter}
+              placeholder={placeholder}
+              isMainInput={props.isMainInput ?? false}
+              availableContextProviders={filteredContextProviders}
+              availableSlashCommands={filteredSlashCommands}
+              historyKey={historyKey}
+              toolbarOptions={toolbarOptions}
+              inputId={props.inputId}
+              onComposerFocusChange={handleComposerFocusChange}
+            />
+          </GradientBorder>
+        ) : (
           <TipTapEditor
             editorState={props.editorState}
             onEnter={props.onEnter}
             placeholder={placeholder}
-            isMainInput={props.isMainInput ?? false}
+            isMainInput={false}
             availableContextProviders={filteredContextProviders}
             availableSlashCommands={filteredSlashCommands}
             historyKey={historyKey}
             toolbarOptions={toolbarOptions}
             inputId={props.inputId}
           />
-        </GradientBorder>
+        )}
       </div>
 
-      {(appliedRules.length > 0 || contextItems.length > 0) && (
+      {(appliedRules.length > 0 || remainingContextItems.length > 0) && (
         <div className="mt-2 flex flex-col">
           <RulesPeek appliedRules={props.appliedRules} />
           <ContextItemsPeek
-            contextItems={props.contextItems}
+            contextItems={remainingContextItems}
             isCurrentContextPeek={props.isLastUserInput}
           />
         </div>

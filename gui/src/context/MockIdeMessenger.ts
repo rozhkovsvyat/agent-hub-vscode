@@ -37,8 +37,198 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
     "file:///Users/user/workspace2",
   ],
   "history/list": [],
+  "cukii/getBrokerPreferences": {
+    brokerModel: "codex-5-6-terra",
+    brokerSubagent: "auto",
+    brokerEffort: "high",
+    brokerSpeed: "standard",
+    brokerAutocompact: "50",
+    thinkingEnabled: true,
+    brokerPermissionMode: "bypass",
+  },
+  "cukii/getActiveEditorSelectionState": { hasSelection: false },
+  "cukii/getActiveChatContext": null,
+  "cukii/listPermissionCapabilities": [
+    {
+      vendor: "claude",
+      supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
+    },
+    {
+      vendor: "codex",
+      supportedModes: ["bypass"],
+    },
+    {
+      vendor: "grok",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "cursor",
+      supportedModes: ["plan", "bypass"],
+    },
+    {
+      vendor: "kimi",
+      supportedModes: ["bypass"],
+    },
+    {
+      vendor: "qwen",
+      supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
+    },
+    { vendor: "deepseek", supportedModes: [] },
+  ],
+  "cukii/getPermissionCapabilities": {
+    vendor: "claude",
+    supportedModes: ["manual", "editAutomatically", "plan", "auto", "bypass"],
+    route: "mock-claude",
+    generation: 1,
+    helpSource: "mock-live",
+  },
+  "cukii/listVendorAccounts": [
+    {
+      id: "claude",
+      label: "Anthropic",
+      installed: true,
+      authenticated: true,
+      state: "connected",
+      accountLabel: "owner@example.com",
+      actions: ["logout"],
+    },
+    {
+      id: "deepseek",
+      label: "DeepSeek",
+      installed: false,
+      authenticated: false,
+      state: "postponed",
+      accountLabel: "Coming soon",
+      actions: [],
+    },
+    {
+      id: "yougile",
+      label: "YouGile",
+      group: "testing",
+      installed: true,
+      authenticated: false,
+      state: "disconnected",
+      actions: ["login"],
+    },
+  ],
+  "cukii/listBrokerModelCatalog": [
+    {
+      id: "qwen",
+      label: "Alibaba",
+      models: [
+        {
+          value: "qwen-3-8-max",
+          label: "Qwen 3.8 Max",
+          contextWindowLabel: "1M",
+        },
+      ],
+    },
+    {
+      id: "claude",
+      label: "Anthropic",
+      models: [
+        { value: "opus-5-5", label: "Opus 5.5", contextWindowLabel: "1M" },
+        { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
+        { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
+        { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
+        { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
+        {
+          value: "haiku-4-5",
+          label: "Haiku 4.5",
+          contextWindowLabel: "200K",
+        },
+      ],
+    },
+    {
+      id: "codex",
+      label: "OpenAI",
+      models: [
+        {
+          value: "codex:gpt-6-astra",
+          label: "GPT-6 Astra",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-sol",
+          label: "GPT-6 Sol",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex:gpt-6-luna",
+          label: "GPT-6 Luna",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex-5-6-sol",
+          label: "GPT-5.6 Sol",
+          contextWindowLabel: "272K",
+        },
+        {
+          value: "codex-5-6-terra",
+          label: "GPT-5.6 Terra",
+          contextWindowLabel: "272K",
+        },
+      ],
+    },
+    {
+      id: "kimi",
+      label: "MoonshotAI",
+      models: [
+        { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
+      ],
+    },
+  ],
+  "cukii/pickAttachmentFiles": [],
+  "cukii/getIssueReportCapability": {
+    available: false,
+    reason: "not_authenticated",
+  },
+  "cukii/prepareIssueReport": {
+    extensionVersion: "0.0.0-dev",
+    operatingSystem: "Mock OS",
+    remote: "local",
+    workspace: ["mock-workspace"],
+    sessionId: "mock-session",
+    brokerModel: "codex-5-6-terra",
+    logLines: ["Mock sanitized diagnostic line"],
+  },
+  "cukii/pickIssueImages": [],
+  "cukii/registerIssueClipboardImages": [],
+  "cukii/releaseIssueImages": undefined,
+  "cukii/submitIssueReport": {
+    reportId: "mock-report-id",
+    status: "sent",
+    taskId: "mock-task-id",
+    message: "Report sent to the Cukii Bugs board.",
+  },
+  "cukii/startVoiceRecording": {
+    recordingId: "mock-recording",
+    device: "Mock microphone",
+  },
+  "cukii/stopVoiceRecording": { text: "привет Куки" },
+  "cukii/cancelVoiceRecording": undefined,
+  "cukii/voiceRecordingStatus": { state: "listening" },
+  "cukii/runVendorAuthAction": {
+    opened: true,
+    message: "Authentication flow opened in the integrated terminal.",
+  },
+  "cukii/steerDuringStream": {
+    messageId: "mock-steer",
+    sessionId: "mock-session",
+    status: "delivered",
+  },
+  "cukii/steerInboxReceipt": {
+    messageId: "mock-steer",
+    sessionId: "mock-session",
+    status: "pending",
+  },
+  "cukii/cancelBridgeRun": {
+    requestId: "mock-cancel",
+    sessionId: "mock-session",
+    status: "cancelled",
+    interrupted: "turn",
+  },
   "docs/getIndexedPages": [],
-  "history/save": undefined,
   "config/getSerializedProfileInfo": {
     profileId: "local",
     profiles: [],
@@ -87,6 +277,9 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
       },
     ],
   },
+  "tools/runHook": {
+    blocked: false,
+  },
   "context/getSymbolsForFiles": {},
   "tools/preprocessArgs": {
     preprocessedArgs: undefined,
@@ -114,6 +307,34 @@ const DEFAULT_MOCK_CORE_RESPONSES: MockResponses = {
 };
 
 const DEFAULT_MOCK_CORE_RESPONSE_HANDLERS: MockResponseHandlers = {
+  "cukii/getPermissionCapabilities": async ({ vendor }) => ({
+    vendor,
+    supportedModes:
+      vendor === "claude" || vendor === "qwen"
+        ? ["manual", "editAutomatically", "plan", "auto", "bypass"]
+        : vendor === "grok" || vendor === "cursor"
+          ? ["plan", "bypass"]
+          : vendor === "kimi" || vendor === "codex"
+            ? ["bypass"]
+            : [],
+    route: `mock-${vendor}`,
+    generation: 1,
+    helpSource: "mock-live",
+  }),
+  "history/save": async (session) => session,
+  "history/rename": async ({ id, title }) => ({
+    sessionId: id,
+    title,
+    titleManuallySet: true,
+    workspaceDirectory: "",
+    history: [],
+  }),
+  "history/load": async ({ id }) => ({
+    sessionId: id,
+    title: "Mock session",
+    workspaceDirectory: "file:///Users/user/workspace1",
+    history: [],
+  }),
   "tools/evaluatePolicy": async (data) => {
     return {
       policy: data.basePolicy,

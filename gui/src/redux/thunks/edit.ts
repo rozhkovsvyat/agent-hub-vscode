@@ -70,6 +70,13 @@ export const streamEditThunk = createAsyncThunk<
         }
       }),
     );
+    // Steers captured while the edit run streamed sit in the durable outbox.
+    // Give the drain its chance exactly like a normal run's end; it stays a
+    // no-op while edit mode is still entered.
+    const { continueIfTrailingSteer } = await import(
+      "./continueIfTrailingSteer"
+    );
+    void dispatch(continueIfTrailingSteer());
   },
 );
 

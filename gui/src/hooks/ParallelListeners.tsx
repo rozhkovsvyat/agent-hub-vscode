@@ -15,15 +15,26 @@ import {
   addContextItemsAtIndex,
   newSession,
   setHasReasoningEnabled,
+  setIsSessionLoading,
   setIsSessionMetadataLoading,
   setMode,
+  setSteerStatus,
+  setUserMessageReaction,
+  setTitleManuallySet,
+  updateSessionTitle,
 } from "../redux/slices/sessionSlice";
 import { setTTSActive } from "../redux/slices/uiSlice";
 
 import { modelSupportsReasoning } from "core/llm/autodetect";
 import { cancelStream } from "../redux/thunks/cancelStream";
+import { isRestorableCukiiSession } from "./cukiiSessionRestore";
 import { handleApplyStateUpdate } from "../redux/thunks/handleApplyStateUpdate";
-import { loadSession, refreshSessionMetadata } from "../redux/thunks/session";
+import {
+  getSession,
+  refreshSessionMetadata,
+  saveCurrentSession,
+  selectChatModelForProfile,
+} from "../redux/thunks/session";
 import { updateFileSymbolsFromHistory } from "../redux/thunks/updateFileSymbols";
 import {
   setDocumentStylesFromLocalStorage,
@@ -39,6 +50,7 @@ function ParallelListeners() {
   const ideMessenger = useContext(IdeMessengerContext);
   const history = useAppSelector((store) => store.session.history);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const mode = useAppSelector((store) => store.session.mode);
   const selectedProfileId = useAppSelector(
     (store) => store.profiles.selectedProfileId,
   );
@@ -46,11 +58,90 @@ function ParallelListeners() {
     (store) => store.ui.reasoningSettings,
   );
   const hasDoneInitialConfigLoad = useRef(false);
+  const initialLoadInFlight = useRef(false);
 
   // Load symbols for chat on any session change
   const sessionId = useAppSelector((state) => state.session.id);
+  const sessionTitle = useAppSelector((state) => state.session.title);
+  const brokerModel = useAppSelector((state) => state.session.brokerModel);
+  const historyLength = useAppSelector((state) => state.session.history.length);
   const lastSessionId = useAppSelector((store) => store.session.lastSessionId);
-  const [initialSessionId] = useState(sessionId || lastSessionId);
+  const [initialSessionId] = useState(
+    window.cukiiSurface === "chat"
+      ? window.initialSessionId || undefined
+      : sessionId || lastSessionId,
+  );
+
+  useWebviewListener("cukii/getActiveSessionId", async () => sessionId || "");
+
+  useEffect(() => {
+    if (window.cukiiSurface !== "chat" || !brokerModel) return;
+    ideMessenger.post("cukii/panelModelChanged", { brokerModel });
+  }, [brokerModel, ideMessenger]);
+
+  useEffect(() => {
+    if (window.cukiiSurface !== "chat" || !sessionId || historyLength === 0) {
+      return;
+    }
+    window.cukiiVscode?.setState({
+      ...(window.cukiiVscode?.getState() ?? {}),
+      sessionId,
+      title: sessionTitle,
+      // The panel serializer revives this id after a window restart so the
+      // tab rehydrates its own persisted state instead of a foreign one.
+      panelId: window.cukiiPanelId,
+    });
+    ideMessenger.post("cukii/panelSessionChanged", {
+      sessionId,
+      title: sessionTitle,
+    });
+  }, [ideMessenger, sessionId, sessionTitle, historyLength]);
+
+  useWebviewListener(
+    "cukii/sessionTitleChanged",
+    async ({ sessionId: changedSessionId, title, titleManuallySet }) => {
+      if (changedSessionId !== sessionId) {
+        return;
+      }
+      dispatch(updateSessionTitle(title));
+      if (titleManuallySet) {
+        dispatch(setTitleManuallySet(true));
+      }
+    },
+    [dispatch, sessionId],
+  );
+
+  // The vendor agent claimed a queued steer bubble through broker_inbox while
+  // the run was still live: paint the messenger-style read receipt right away
+  // instead of holding the bubble at one checkmark until the turn settles.
+  useWebviewListener(
+    "cukii/steerInboxRead",
+    async ({ sessionId: readSessionId, messageId }) => {
+      if (readSessionId !== sessionId) {
+        return;
+      }
+      dispatch(setSteerStatus({ messageId, status: "read" }));
+    },
+    [dispatch, sessionId],
+  );
+
+  useWebviewListener(
+    "cukii/userMessageReaction",
+    async (reaction) => {
+      if (reaction.sessionId !== sessionId) return;
+      dispatch(setUserMessageReaction(reaction));
+      // Reactions are independent agent actions and can arrive well before a
+      // long answer finishes. Persist now instead of betting them on the
+      // stream's final save or a renderer surviving until turn completion.
+      await dispatch(
+        saveCurrentSession({
+          openNewSession: false,
+          generateTitle: false,
+        }),
+      );
+    },
+    [dispatch, sessionId],
+  );
 
   const handleConfigUpdate = useCallback(
     async (isInitial: boolean, result: FromCoreProtocol["configUpdate"][0]) => {
@@ -83,44 +174,83 @@ function ParallelListeners() {
         document.body.style.fontSize = `${configResult.config.ui.fontSize}px`;
       }
 
-      const chatModel = configResult.config?.selectedModelByRole.chat;
-      const supportsReasoning = modelSupportsReasoning(chatModel);
-      const isReasoningDisabled =
-        chatModel?.completionOptions?.reasoning === false;
-      const wasReasoningPreviouslyEnabled = chatModel?.title
-        ? reasoningSettings[chatModel.title] !== false
-        : true;
-      dispatch(
-        setHasReasoningEnabled(
-          supportsReasoning &&
-            !isReasoningDisabled &&
-            wasReasoningPreviouslyEnabled,
-        ),
-      );
+      if (mode !== "broker") {
+        const chatModel = configResult.config?.selectedModelByRole.chat;
+        const supportsReasoning = modelSupportsReasoning(chatModel);
+        const isReasoningDisabled =
+          chatModel?.completionOptions?.reasoning === false;
+        const wasReasoningPreviouslyEnabled = chatModel?.title
+          ? reasoningSettings[chatModel.title] !== false
+          : true;
+        dispatch(
+          setHasReasoningEnabled(
+            supportsReasoning &&
+              !isReasoningDisabled &&
+              wasReasoningPreviouslyEnabled,
+          ),
+        );
+      }
     },
-    [dispatch, hasDoneInitialConfigLoad, selectedProfileId, reasoningSettings],
+    [
+      dispatch,
+      hasDoneInitialConfigLoad,
+      mode,
+      selectedProfileId,
+      reasoningSettings,
+    ],
   );
 
   // Load config from the IDE
   useEffect(() => {
     async function initialLoadConfig() {
+      if (initialLoadInFlight.current) return;
+      initialLoadInFlight.current = true;
       dispatch(setIsSessionMetadataLoading(true));
       dispatch(setConfigLoading(true));
-      const result = await ideMessenger.request(
-        "config/getSerializedProfileInfo",
-        undefined,
-      );
-      if (result.status === "success") {
-        await handleConfigUpdate(true, result.content);
-      }
-      dispatch(setConfigLoading(false));
-      if (initialSessionId) {
-        await dispatch(
-          loadSession({
+      if (initialSessionId) dispatch(setIsSessionLoading(true));
+      try {
+        // Large saved chats can be tens of megabytes. Fetch config and history
+        // concurrently, while the chat shows one centered Loading… state.
+        const [configResult, sessionResult] = await Promise.all([
+          ideMessenger.request("config/getSerializedProfileInfo", undefined),
+          initialSessionId
+            ? getSession(ideMessenger, initialSessionId).then(
+                (session) => ({ session }),
+                (error: unknown) => ({ error }),
+              )
+            : Promise.resolve(undefined),
+        ]);
+        if (configResult.status === "success") {
+          await handleConfigUpdate(true, configResult.content);
+        }
+        if (
+          sessionResult &&
+          "session" in sessionResult &&
+          isRestorableCukiiSession(sessionResult.session)
+        ) {
+          dispatch(newSession(sessionResult.session));
+          if (sessionResult.session.chatModelTitle) {
+            void dispatch(
+              selectChatModelForProfile(sessionResult.session.chatModelTitle),
+            );
+          }
+        } else if (initialSessionId && sessionResult) {
+          // This panel was explicitly created for a persisted session. It
+          // must not silently become a blank tab (or replace any active
+          // session) if that session vanished after the extension preflight.
+          if ("error" in sessionResult) {
+            console.error("Failed to load Cukii session", sessionResult.error);
+          }
+          ideMessenger.post("cukii/initialSessionLoadFailed", {
             sessionId: initialSessionId,
-            saveCurrentSession: false,
-          }),
-        );
+          });
+        } else if (window.cukiiSurface === "chat") {
+          dispatch(newSession());
+        }
+      } finally {
+        dispatch(setConfigLoading(false));
+        dispatch(setIsSessionLoading(false));
+        initialLoadInFlight.current = false;
       }
     }
     void initialLoadConfig();
@@ -161,7 +291,7 @@ function ParallelListeners() {
   // ON LOAD
   useEffect(() => {
     // Override persisted state
-    void dispatch(cancelStream());
+    void dispatch(cancelStream({ source: "lifecycle" }));
 
     const jetbrains = isJetBrains();
     setDocumentStylesFromLocalStorage(jetbrains);
@@ -220,7 +350,7 @@ function ParallelListeners() {
   );
 
   useWebviewListener("setInactive", async () => {
-    void dispatch(cancelStream());
+    void dispatch(cancelStream({ source: "lifecycle" }));
   });
 
   useWebviewListener("setTTSActive", async (status) => {

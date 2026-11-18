@@ -16,6 +16,7 @@ export { requestRuleTool } from "./requestRule";
 export { runTerminalCommandTool } from "./runTerminalCommand";
 export { searchWebTool } from "./searchWeb";
 export { singleFindAndReplaceTool } from "./singleFindAndReplace";
+export { todoWriteTool } from "./todoWrite";
 export { viewDiffTool } from "./viewDiff";
 export { viewRepoMapTool } from "./viewRepoMap";
 export { viewSubdirectoryTool } from "./viewSubdirectory";

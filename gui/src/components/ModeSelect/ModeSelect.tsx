@@ -6,7 +6,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { MessageModes } from "core";
 import { isRecommendedAgentModel } from "core/llm/toolSupport";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useContext, useEffect, useMemo } from "react";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import { setMode } from "../../redux/slices/sessionSlice";
@@ -18,7 +19,20 @@ import { ModeIcon } from "./ModeIcon";
 
 export function ModeSelect() {
   const dispatch = useAppDispatch();
+  const ideMessenger = useContext(IdeMessengerContext);
   const mode = useAppSelector((store) => store.session.mode);
+  const brokerModel = useAppSelector((store) => store.session.brokerModel);
+  const brokerSubagent = useAppSelector(
+    (store) => store.session.brokerSubagent,
+  );
+  const brokerEffort = useAppSelector((store) => store.session.brokerEffort);
+  const brokerSpeed = useAppSelector((store) => store.session.brokerSpeed);
+  const brokerAutocompact = useAppSelector(
+    (store) => store.session.brokerAutocompact,
+  );
+  const thinkingEnabled = useAppSelector(
+    (store) => store.session.hasReasoningEnabled,
+  );
   const selectedModel = useAppSelector(selectSelectedChatModel);
 
   const isGoodAtAgentMode = useMemo(() => {
@@ -33,19 +47,51 @@ export function ModeSelect() {
     return getMetaKeyLabel();
   }, []);
 
+  const setAndPersistMode = useCallback(
+    (nextMode: MessageModes) => {
+      dispatch(setMode(nextMode));
+      if (nextMode === "background") {
+        return;
+      }
+      ideMessenger.post("cukii/setBrokerPreferences", {
+        brokerModel: brokerModel ?? "qwen-3-8-max",
+        brokerSubagent: brokerSubagent ?? "auto",
+        brokerEffort,
+        brokerSpeed,
+        brokerAutocompact,
+        thinkingEnabled,
+        mode: nextMode,
+      });
+    },
+    [
+      brokerEffort,
+      brokerModel,
+      brokerSpeed,
+      brokerAutocompact,
+      brokerSubagent,
+      dispatch,
+      ideMessenger,
+      thinkingEnabled,
+    ],
+  );
+
   const cycleMode = useCallback(() => {
+    let nextMode: MessageModes;
     if (mode === "chat") {
-      dispatch(setMode("plan"));
+      nextMode = "plan";
     } else if (mode === "plan") {
-      dispatch(setMode("agent"));
+      nextMode = "agent";
+    } else if (mode === "agent") {
+      nextMode = "broker";
     } else {
-      dispatch(setMode("chat"));
+      nextMode = "chat";
     }
+    setAndPersistMode(nextMode);
     // Only focus main editor if another one doesn't already have focus
     if (!document.activeElement?.classList?.contains("ProseMirror")) {
       mainEditor?.commands.focus();
     }
-  }, [mode, mainEditor]);
+  }, [mode, mainEditor, setAndPersistMode]);
 
   const selectMode = useCallback(
     (newMode: MessageModes) => {
@@ -53,11 +99,11 @@ export function ModeSelect() {
         return;
       }
 
-      dispatch(setMode(newMode));
+      setAndPersistMode(newMode);
 
       mainEditor?.commands.focus();
     },
-    [mode, mainEditor],
+    [mode, mainEditor, setAndPersistMode],
   );
 
   useEffect(() => {
@@ -86,6 +132,15 @@ export function ModeSelect() {
     </>
   );
 
+  const modeTitle =
+    mode === "chat"
+      ? "Chat"
+      : mode === "agent"
+        ? "Agent"
+        : mode === "broker"
+          ? "Broker"
+          : "Plan";
+
   return (
     <Listbox value={mode} onChange={selectMode}>
       <div className="relative">
@@ -94,9 +149,7 @@ export function ModeSelect() {
           className="xs:px-2 text-description bg-lightgray/20 gap-1 rounded-full border-none px-1.5 py-0.5 transition-colors duration-200 hover:brightness-110"
         >
           <ModeIcon mode={mode} />
-          <span className="hidden sm:block">
-            {mode === "chat" ? "Chat" : mode === "agent" ? "Agent" : "Plan"}
-          </span>
+          <span className="hidden sm:block">{modeTitle}</span>
           <ChevronDownIcon
             className="h-2 w-2 flex-shrink-0"
             aria-hidden="true"
@@ -161,6 +214,25 @@ export function ModeSelect() {
             {!isGoodAtAgentMode && notGreatAtAgent("Agent")}
             <CheckIcon
               className={`ml-auto h-3 w-3 ${mode === "agent" ? "" : "opacity-0"}`}
+            />
+          </ListboxOption>
+
+          <ListboxOption value="broker" className={"gap-1"}>
+            <div className="flex flex-row items-center gap-1.5">
+              <ModeIcon mode="broker" />
+              <span className="">Broker</span>
+              <ToolTip
+                style={{
+                  zIndex: 200001,
+                }}
+                content="Broker tools and subagent routing"
+              >
+                <InformationCircleIcon className="h-2.5 w-2.5 flex-shrink-0" />
+              </ToolTip>
+            </div>
+            {!isGoodAtAgentMode && notGreatAtAgent("Broker")}
+            <CheckIcon
+              className={`ml-auto h-3 w-3 ${mode === "broker" ? "" : "opacity-0"}`}
             />
           </ListboxOption>
 

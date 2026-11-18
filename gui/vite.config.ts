@@ -6,6 +6,13 @@ import { defineConfig } from "vitest/config";
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    // Keep GUI tests and dev builds on the checked-out protocol, rather than
+    // a stale file: dependency left by a previous package install.
+    alias: {
+      core: resolve(__dirname, "../core"),
+    },
+  },
   build: {
     sourcemap: true,
 

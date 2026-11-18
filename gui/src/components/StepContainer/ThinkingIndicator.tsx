@@ -1,43 +1,57 @@
+import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 import { ChatHistoryItem } from "core";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAppSelector } from "../../redux/hooks";
-import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 
 interface ThinkingIndicatorProps {
   historyItem: ChatHistoryItem;
 }
-/*
-    Thinking animation
-    Only for reasoning (long load time) models for now
-*/
-const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
-  // Animation for thinking ellipses
-  const [animation, setAnimation] = useState(2);
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAnimation((prevState) => (prevState === 2 ? 0 : prevState + 1));
-    }, 600);
-    return () => {
-      clearInterval(interval);
-    };
-  }, []);
 
-  const selectedModel = useAppSelector(selectSelectedChatModel);
+/**
+ * Надпись, что модель думает. Это не лоадер: живой лоадер — отдельная
+ * нижняя строка стрима. Раньше оба ряда рисовали один и тот же глиф,
+ * и в ленте появлялся дубль.
+ */
+const ThinkingIndicator = ({ historyItem }: ThinkingIndicatorProps) => {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const [open, setOpen] = useState(false);
 
   const hasContent = Array.isArray(historyItem.message.content)
     ? !!historyItem.message.content.length
     : !!historyItem.message.content;
-  const isO1 = selectedModel?.model.startsWith("o1");
   const isThinking =
     isStreaming && !historyItem.isGatheringContext && !hasContent;
-  if (!isThinking || !isO1) {
+  if (!isThinking) {
     return null;
   }
 
   return (
-    <div className="px-2 py-2">
-      <span className="text-lightgray">{`Thinking.${".".repeat(animation)}`}</span>
+    <div className="px-2 py-2 text-xs">
+      <button
+        type="button"
+        className="cukii-thinking-summary cukii-thinking-summary-active flex min-w-0 items-center gap-1.5 rounded-full px-2"
+        data-testid="cukii-thinking-label"
+        aria-label="Reasoning in progress"
+        aria-expanded={open}
+        aria-controls="cukii-thinking-indicator-details"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="cukii-thinking-status-dot" aria-hidden="true" />
+        <span className="sr-only">Reasoning in progress</span>
+        {open ? (
+          <ChevronUpIcon className="h-3 w-3" aria-hidden="true" />
+        ) : (
+          <ChevronDownIcon className="h-3 w-3" aria-hidden="true" />
+        )}
+      </button>
+      {open && (
+        <div
+          id="cukii-thinking-indicator-details"
+          className="text-description-muted pl-2 pt-1"
+        >
+          Reasoning in progress
+        </div>
+      )}
     </div>
   );
 };

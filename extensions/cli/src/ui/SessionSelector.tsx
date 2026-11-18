@@ -47,13 +47,22 @@ export function SessionSelector({
 
   // Load the selected session for preview
   useEffect(() => {
+    let cancelled = false;
     const selectedSession = sessions[selectedIndex];
     if (selectedSession && !selectedSession.isRemote) {
-      const session = loadSessionById(selectedSession.sessionId);
-      setPreviewSession(session);
+      void loadSessionById(selectedSession.sessionId)
+        .then((session) => {
+          if (!cancelled) setPreviewSession(session);
+        })
+        .catch(() => {
+          if (!cancelled) setPreviewSession(null);
+        });
     } else {
       setPreviewSession(null);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [selectedIndex, sessions]);
 
   // Calculate how many sessions we can display based on terminal height and scrolling

@@ -1,4 +1,5 @@
 import { ToolCallState } from "core";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { UnifiedTerminalCommand } from "../../../components/UnifiedTerminal/UnifiedTerminal";
 
 interface RunTerminalCommandToolCallProps {
@@ -11,12 +12,16 @@ export function RunTerminalCommand(props: RunTerminalCommandToolCallProps) {
   // For errored status, show any output (error messages)
   // Otherwise look for terminal output specifically
   const isErrored = props.toolCallState.status === "errored";
-  const outputItem = isErrored
-    ? props.toolCallState.output?.[0] // Get first output item for errors
-    : props.toolCallState.output?.find((item) => item.name === "Terminal");
+  const isCanceled = props.toolCallState.status === "canceled";
+  const outputItem =
+    isErrored || isCanceled
+      ? props.toolCallState.output?.[0] // Get first output item for errors / interrupt
+      : props.toolCallState.output?.find((item) => item.name === "Terminal");
 
   const terminalContent = outputItem?.content || "";
-  const statusMessage = outputItem?.status || "";
+  const statusMessage = isCanceled
+    ? TOOL_INTERRUPTED_MESSAGE
+    : outputItem?.status || "";
   const isRunning = props.toolCallState.status === "calling";
 
   // Determine status type
@@ -24,7 +29,7 @@ export function RunTerminalCommand(props: RunTerminalCommandToolCallProps) {
     "completed";
   if (isRunning) {
     statusType = "running";
-  } else if (isErrored || statusMessage?.includes("failed")) {
+  } else if (isErrored || isCanceled || statusMessage?.includes("failed")) {
     statusType = "failed";
   } else if (statusMessage?.includes("background")) {
     statusType = "background";

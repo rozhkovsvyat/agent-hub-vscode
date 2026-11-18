@@ -10,6 +10,9 @@ import { handleLLMError } from "./util/errorHandling";
 export class VsCodeWebviewProtocol
   implements IMessenger<FromWebviewProtocol, ToWebviewProtocol>
 {
+  private readonly disposeListeners = new Set<
+    (protocol: VsCodeWebviewProtocol) => void
+  >();
   listeners = new Map<
     keyof FromWebviewProtocol,
     ((message: Message) => any)[]
@@ -58,6 +61,10 @@ export class VsCodeWebviewProtocol
 
       const handlers =
         this.listeners.get(msg.messageType as keyof FromWebviewProtocol) || [];
+      Object.defineProperty(msg, "__cukiiWebviewProtocol", {
+        value: this,
+        enumerable: false,
+      });
       for (const handler of handlers) {
         try {
           const response = await handler(msg);
@@ -105,11 +112,11 @@ export class VsCodeWebviewProtocol
 
           if (e.cause) {
             if (e.cause.name === "ConnectTimeoutError") {
-              message = `Connection timed out. If you expect it to take a long time to connect, you can increase the timeout in your config by setting "requestOptions": { "timeout": 10000 }. You can find the full config reference here: https://docs.continue.dev/reference/config`;
+              message = `Connection timed out. If you expect it to take a long time to connect, you can increase the timeout in your config by setting "requestOptions": { "timeout": 10000 }. You can find the full config reference here: https://github.com/rozhkovsvyat/agent-hub-vscode`;
             } else if (e.cause.code === "ECONNREFUSED") {
-              message = `Connection was refused. This likely means that there is no server running at the specified URL. If you are running your own server you may need to set the "apiBase" parameter in config.json. For example, you can set up an OpenAI-compatible server like here: https://docs.continue.dev/reference/Model%20Providers/openai#openai-compatible-servers--apis`;
+              message = `Connection was refused. This likely means that there is no server running at the specified URL. If you are running your own server you may need to set the "apiBase" parameter in config.json. For more information, see: https://github.com/rozhkovsvyat/agent-hub-vscode`;
             } else {
-              message = `The request failed with "${e.cause.name}": ${e.cause.message}. If you're having trouble setting up Continue, please see the troubleshooting guide for help.`;
+              message = `The request failed with "${e.cause.name}": ${e.cause.message}. If you're having trouble setting up Cukii, please see the troubleshooting guide for help.`;
             }
           }
         }
@@ -117,6 +124,37 @@ export class VsCodeWebviewProtocol
     };
 
     this._webviewListener = this._webview.onDidReceiveMessage(handleMessage);
+  }
+
+  /**
+   * Create an independent transport with the same request handlers.
+   *
+   * Handlers are immutable registrations after extension activation, while the
+   * webview binding is deliberately *not* shared. This lets every Cukii editor
+   * tab talk to the core without stealing the sidebar's onDidReceiveMessage
+   * listener (the old singleton failure mode).
+   */
+  cloneHandlers(): VsCodeWebviewProtocol {
+    const clone = new VsCodeWebviewProtocol();
+    for (const [messageType, handlers] of this.listeners) {
+      clone.listeners.set(messageType, [...handlers]);
+    }
+    for (const listener of this.disposeListeners) {
+      clone.disposeListeners.add(listener);
+    }
+    return clone;
+  }
+
+  onDispose(listener: (protocol: VsCodeWebviewProtocol) => void): void {
+    this.disposeListeners.add(listener);
+  }
+
+  dispose(): void {
+    for (const listener of this.disposeListeners) listener(this);
+    this.disposeListeners.clear();
+    this._webviewListener?.dispose();
+    this._webviewListener = undefined;
+    this._webview = undefined;
   }
 
   constructor() {}

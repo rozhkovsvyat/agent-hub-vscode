@@ -5,8 +5,8 @@ import { ChatHistoryItem } from "core";
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 
-import { AnimatedEllipsis } from "../../AnimatedEllipsis";
 import StyledMarkdownPreview from "../../StyledMarkdownPreview";
+import { useAppSelector } from "../../../redux/hooks";
 import { Button } from "../../ui";
 
 const MarkdownWrapper = styled.div`
@@ -23,6 +23,7 @@ interface ThinkingBlockPeekProps {
   inProgress?: boolean;
   signature?: string;
   tokens?: number;
+  durationMs?: number;
 }
 
 function ThinkingBlockPeek({
@@ -32,10 +33,24 @@ function ThinkingBlockPeek({
   prevItem,
   inProgress,
   tokens,
+  durationMs,
 }: ThinkingBlockPeekProps) {
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>("");
+  const thinkingCollapse = useAppSelector((state) => state.ui.thinkingCollapse);
+  const focusView = useAppSelector((state) => state.ui.focusView);
+
+  useEffect(() => {
+    if (focusView) {
+      setOpen(false);
+      return;
+    }
+    if (thinkingCollapse.version === 0) {
+      return;
+    }
+    setOpen(thinkingCollapse.open);
+  }, [thinkingCollapse.version, thinkingCollapse.open, focusView]);
 
   const duplicateRedactedThinkingBlock =
     prevItem &&
@@ -47,38 +62,52 @@ function ThinkingBlockPeek({
     if (inProgress) {
       setStartTime(Date.now());
       setElapsedTime("");
-    } else if (startTime) {
+    } else if (durationMs === undefined && startTime) {
       const endTime = Date.now();
       const diff = endTime - startTime;
-      const diffString = `${(diff / 1000).toFixed(1)}s`;
+      const diffString = `${Math.max(1, Math.round(diff / 1000))}s`;
       setElapsedTime(diffString);
     }
-  }, [inProgress]);
+  }, [durationMs, inProgress]);
+
+  const durationLabel =
+    durationMs === undefined
+      ? elapsedTime
+      : `${Math.max(1, Math.round(durationMs / 1000))}s`;
 
   return duplicateRedactedThinkingBlock ? null : (
     <div className="thread-message">
       <div className="mt-1 flex flex-col px-4">
         <div>
           <Button
-            variant="outline"
-            className="text-description flex-0 border-border m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full border-[0.5px] border-solid px-3 text-xs transition-colors duration-200 ease-in-out hover:brightness-125"
+            // ghost, а не outline: у Клода пилюля размышлений без рамки —
+            // видна только надпись, а фон появляется лишь на hover.
+            variant="ghost"
+            className={`cukii-thinking-summary ${
+              inProgress
+                ? "cukii-thinking-summary-active"
+                : "cukii-thinking-summary-completed"
+            } flex-0 m-0 mb-2 flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-full px-2 transition-colors duration-200 ease-in-out hover:brightness-125`}
             data-testid="thinking-block-peek"
+            aria-label={
+              inProgress ? "Reasoning in progress" : "Toggle reasoning"
+            }
             aria-expanded={open}
             aria-controls={`thinking-block-content-${index}`}
             onClick={() => setOpen(!open)}
           >
-            {inProgress ? (
-              <span>
-                {redactedThinking ? "Redacted Thinking" : "Thinking"}
-                <AnimatedEllipsis />
-              </span>
-            ) : redactedThinking ? (
-              "Redacted Thinking"
-            ) : (
-              "Thought" +
-              (elapsedTime ? ` for ${elapsedTime}` : "") +
-              (tokens ? ` (${tokens} tokens)` : "")
+            {inProgress && (
+              <span className="cukii-thinking-status-dot" aria-hidden="true" />
             )}
+            {inProgress
+              ? redactedThinking
+                ? "Redacted reasoning"
+                : ""
+              : redactedThinking
+                ? "Redacted reasoning"
+                : "Thought" +
+                  (durationLabel ? ` for ${durationLabel}` : "") +
+                  (tokens ? ` (${tokens} tokens)` : "")}
             {open ? (
               <ChevronUpIcon className="h-3 w-3" />
             ) : (
@@ -93,11 +122,11 @@ function ThinkingBlockPeek({
           }`}
         >
           {redactedThinking ? (
-            <div className="text-description pl-5 text-xs italic">
+            <div className="text-description-muted pl-5 text-xs italic">
               Thinking content redacted due to safety reasons.
             </div>
           ) : (
-            <MarkdownWrapper>
+            <MarkdownWrapper className="text-description-muted">
               <StyledMarkdownPreview
                 isRenderingInStepContainer
                 source={content}

@@ -45,7 +45,7 @@ export interface IMessenger<
     messageType: T,
     data: ToProtocol[T][0],
     messageId?: string,
-  ): ToProtocol[T][1];
+  ): ToProtocol[T][1] | Promise<ToProtocol[T][1]>;
 }
 
 export class InProcessMessenger<
@@ -75,7 +75,7 @@ export class InProcessMessenger<
     messageType: T,
     data: ToProtocol[T][0],
     messageId?: string,
-  ): ToProtocol[T][1] {
+  ): ToProtocol[T][1] | Promise<ToProtocol[T][1]> {
     const listener = this.myTypeListeners.get(messageType);
     if (!listener) {
       return;
@@ -116,7 +116,9 @@ export class InProcessMessenger<
 
   on<T extends keyof ToProtocol>(
     messageType: T,
-    handler: (message: Message<ToProtocol[T][0]>) => ToProtocol[T][1],
+    handler: (
+      message: Message<ToProtocol[T][0]>,
+    ) => ToProtocol[T][1] | Promise<ToProtocol[T][1]>,
   ): void {
     this.myTypeListeners.set(messageType, handler);
   }

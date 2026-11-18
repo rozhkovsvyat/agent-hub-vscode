@@ -3,7 +3,27 @@ import { renderChatMessage } from "core/util/messageContent";
 import { v4 as uuidv4 } from "uuid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addToolCallDeltaToState } from "../../util/toolCallState";
-import { ChatHistoryItemWithMessageId, sessionSlice } from "./sessionSlice";
+import {
+  ChatHistoryItemWithMessageId,
+  appendUserSteerMessage,
+  cancelQueuedSteers,
+  clearDanglingMessages,
+  markSteerRead,
+  newSession,
+  sessionSlice,
+  setActive,
+  setBridgeWait,
+  setBrokerModel,
+  switchBrokerModel,
+  setBrokerPermissionMode,
+  setInactive,
+  markLatestUserReceiptDelivered,
+  setSteerStatus,
+  setUserMessageReaction,
+  abortStream,
+  streamUpdate,
+  submitEditorAndInitAtIndex,
+} from "./sessionSlice";
 
 // Mock dependencies
 vi.mock("uuid");
@@ -51,6 +71,7 @@ describe("sessionSlice streamUpdate", () => {
 
   const createInitialState = () => ({
     lastSessionId: undefined,
+    isSessionLoading: false,
     allSessionMetadata: [],
     history: [
       {
@@ -64,10 +85,18 @@ describe("sessionSlice streamUpdate", () => {
     ] as ChatHistoryItemWithMessageId[],
     isStreaming: false,
     title: "Test Session",
+    titleManuallySet: false,
+    revision: 0,
     id: "test-session-id",
     streamAborter: new AbortController(),
     symbols: {},
     mode: "chat" as const,
+    brokerEffort: "high" as const,
+    brokerSpeed: "standard" as const,
+    brokerAutocompact: "50" as const,
+    brokerModelScope: "best" as const,
+    brokerPermissionMode: "manual" as const,
+    hasReasoningEnabled: true,
     isInEdit: false,
     codeBlockApplyStates: {
       states: [],
@@ -76,6 +105,243 @@ describe("sessionSlice streamUpdate", () => {
     newestToolbarPreviewForInput: {},
     isSessionMetadataLoading: false,
     compactionLoading: {},
+    pendingClaudePermissions: {},
+    pendingUserQuestions: {},
+  });
+
+  it("attaches a run-bound agent reaction only to its exact user message", () => {
+    const initialState = createInitialState();
+    const reacted = sessionSlice.reducer(
+      initialState,
+      setUserMessageReaction({
+        sessionId: "test-session-id",
+        runId: "run-a",
+        reactionId: "reaction-a",
+        messageId: "initial-user-message",
+        emoji: "❤️",
+        reactedAt: 42,
+      }),
+    );
+    expect(reacted.history[0].message.metadata?.cukiiReaction).toEqual({
+      reactionId: "reaction-a",
+      emoji: "❤️",
+      reactedAt: 42,
+      source: "agent",
+    });
+
+    const foreign = sessionSlice.reducer(
+      initialState,
+      setUserMessageReaction({
+        sessionId: "another-session",
+        runId: "run-a",
+        reactionId: "reaction-b",
+        messageId: "initial-user-message",
+        emoji: "😂",
+        reactedAt: 43,
+      }),
+    );
+    expect(foreign.history[0].message.metadata).toBeUndefined();
+  });
+
+  it("restores controls per session and resets new tabs to defaults", () => {
+    const restored = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "effort-speed-session",
+        title: "Independent controls",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "codex-5-6-terra",
+        brokerSubagent: "auto",
+        brokerEffort: "medium",
+        brokerSpeed: "fast",
+        brokerModelScope: "all",
+        brokerPermissionMode: "auto",
+        hasReasoningEnabled: false,
+      }),
+    );
+    expect(restored.brokerEffort).toBe("medium");
+    expect(restored.brokerSpeed).toBe("fast");
+    expect(restored.brokerModelScope).toBe("all");
+    expect(restored.brokerPermissionMode).toBe("auto");
+    expect(restored.hasReasoningEnabled).toBe(false);
+    expect(restored.titleManuallySet).toBe(false);
+
+    const blank = sessionSlice.reducer(restored, newSession(undefined));
+    expect(blank.brokerEffort).toBe("high");
+    expect(blank.brokerSpeed).toBe("standard");
+    expect(blank.brokerModelScope).toBe("best");
+    expect(blank.brokerPermissionMode).toBe("bypass");
+    expect(blank.hasReasoningEnabled).toBe(true);
+  });
+
+  it("keeps a pending mode on a model switch until the live probe reconciles it", () => {
+    const initial = sessionSlice.getInitialState();
+    const withEditAutomatically = sessionSlice.reducer(
+      initial,
+      setBrokerPermissionMode("editAutomatically"),
+    );
+    const codex = sessionSlice.reducer(
+      withEditAutomatically,
+      setBrokerModel("codex-5-6-terra"),
+    );
+
+    // Reducers have no native CLI facts. The bridge rejects this combination
+    // until PermissionModeControl receives a real capability response.
+    expect(codex.brokerPermissionMode).toBe("editAutomatically");
+  });
+
+  it("records only real model transitions in order, including rapid cross-vendor switches", () => {
+    const initial = sessionSlice.getInitialState();
+    const terra = sessionSlice.reducer(
+      initial,
+      switchBrokerModel({
+        model: "codex-5-6-terra",
+        displayName: "GPT-5.6 Terra",
+      }),
+    );
+    const sameModel = sessionSlice.reducer(
+      terra,
+      switchBrokerModel({
+        model: "codex-5-6-terra",
+        displayName: "GPT-5.6 Terra",
+      }),
+    );
+    const grok = sessionSlice.reducer(
+      sameModel,
+      switchBrokerModel({ model: "grok-4-6", displayName: "Grok 4.6" }),
+    );
+    const nextTurn = sessionSlice.reducer(
+      grok,
+      submitEditorAndInitAtIndex({
+        index: grok.history.length,
+        editorState: { type: "doc" },
+      }),
+    );
+
+    expect(grok.history.map((item) => item.modelSwitch?.displayName)).toEqual([
+      "GPT-5.6 Terra",
+      "Grok 4.6",
+    ]);
+    expect(grok.history.map((item) => item.message.role)).toEqual([
+      "system",
+      "system",
+    ]);
+    expect(nextTurn.history.map((item) => item.message.role)).toEqual([
+      "system",
+      "system",
+      "user",
+      "assistant",
+    ]);
+  });
+
+  it("does not guess permission capability during a model transition", () => {
+    const manualClaude = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBrokerPermissionMode("manual"),
+    );
+    const kimi = sessionSlice.reducer(
+      manualClaude,
+      switchBrokerModel({ model: "kimi-k3", displayName: "Kimi K3" }),
+    );
+
+    expect(kimi.brokerModel).toBe("kimi-k3");
+    expect(kimi.brokerPermissionMode).toBe("manual");
+    // The live capability snapshot owned by the extension reconciles this
+    // later; a pure reducer must not trust bundled CLI help.
+    expect(kimi).toMatchObject({
+      brokerModel: "kimi-k3",
+      brokerPermissionMode: "manual",
+    });
+
+    const claudePlan = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBrokerPermissionMode("plan"),
+    );
+    const sonnet = sessionSlice.reducer(
+      claudePlan,
+      switchBrokerModel({ model: "sonnet-5", displayName: "Sonnet 5" }),
+    );
+    expect(sonnet.brokerPermissionMode).toBe("plan");
+  });
+
+  it("preserves restored modes until the live host snapshot is available", () => {
+    const restoredKimi = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-kimi-manual",
+        title: "Restored Kimi session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "kimi-k3",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+
+    expect(restoredKimi).toMatchObject({
+      brokerModel: "kimi-k3",
+      brokerPermissionMode: "manual",
+    });
+
+    const restoredCodex = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-codex-manual",
+        title: "Restored Codex session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "codex-5-6-terra",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+    expect(restoredCodex).toMatchObject({
+      brokerModel: "codex-5-6-terra",
+      brokerPermissionMode: "manual",
+    });
+
+    const restoredClaude = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "restored-claude-manual",
+        title: "Restored Claude session",
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+        brokerModel: "sonnet-5",
+        brokerSubagent: "auto",
+        brokerEffort: "high",
+        brokerSpeed: "standard",
+        brokerPermissionMode: "manual",
+        hasReasoningEnabled: true,
+      }),
+    );
+    expect(restoredClaude.brokerPermissionMode).toBe("manual");
+  });
+
+  it("restores a manual title and clears its lock for a fresh tab", () => {
+    const restored = sessionSlice.reducer(
+      undefined,
+      newSession({
+        sessionId: "manually-renamed-session",
+        title: "Windows lifecycle investigation",
+        titleManuallySet: true,
+        workspaceDirectory: "D:/Brain/vault",
+        history: [],
+      }),
+    );
+
+    expect(restored.title).toBe("Windows lifecycle investigation");
+    expect(restored.titleManuallySet).toBe(true);
+
+    const blank = sessionSlice.reducer(restored, newSession(undefined));
+    expect(blank.titleManuallySet).toBe(false);
   });
 
   describe("Basic Chat Message", () => {
@@ -450,5 +716,338 @@ describe("sessionSlice streamUpdate", () => {
       expect(newState.history[1].message.role).toBe("assistant");
       expect(newState.history[1].toolCallStates).toHaveLength(1);
     });
+  });
+});
+
+describe("sessionSlice mid-task steer messages", () => {
+  it("adds one-check receipt to a normal initial user turn before it can be read", () => {
+    const submitted = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      submitEditorAndInitAtIndex({ index: 0, editorState: { type: "doc" } }),
+    );
+    const delivered = sessionSlice.reducer(
+      submitted,
+      markLatestUserReceiptDelivered(),
+    );
+    expect(delivered.history[0].messageReceipt).toMatchObject({
+      status: "delivered",
+    });
+    const read = sessionSlice.reducer(
+      delivered,
+      markSteerRead({ messageId: delivered.history[0].message.id }),
+    );
+    expect(read.history[0].messageReceipt?.status).toBe("read");
+  });
+  it("ignores steer while idle", () => {
+    const next = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      appendUserSteerMessage({ content: "too late", messageId: "late" }),
+    );
+    expect(next.history).toHaveLength(0);
+  });
+
+  it("appends every user follow-up to history while streaming", () => {
+    const streaming = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    const first = sessionSlice.reducer(
+      streaming,
+      appendUserSteerMessage({ content: "one", messageId: "one" }),
+    );
+    const second = sessionSlice.reducer(
+      first,
+      appendUserSteerMessage({ content: "two", messageId: "two" }),
+    );
+    expect(second.history.map((item) => item.message.content)).toEqual([
+      "one",
+      "two",
+    ]);
+    expect(second.history.every((item) => item.message.role === "user")).toBe(
+      true,
+    );
+    expect(second.history.every((item) => item.isSteer)).toBe(true);
+    expect(
+      second.history.every((item) => Number.isFinite(item.steerSentAt)),
+    ).toBe(true);
+  });
+
+  it("upgrades exactly an accepted follow-up from one check to two", () => {
+    const streaming = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    const queued = sessionSlice.reducer(
+      streaming,
+      appendUserSteerMessage({ content: "read me", messageId: "receipt-1" }),
+    );
+    const accepted = sessionSlice.reducer(
+      queued,
+      setSteerStatus({ messageId: "receipt-1", status: "delivered" }),
+    );
+    const read = sessionSlice.reducer(
+      accepted,
+      markSteerRead({ messageId: "receipt-1" }),
+    );
+    expect(read.history[0].steerStatus).toBe("read");
+
+    const failed = sessionSlice.reducer(
+      queued,
+      setSteerStatus({ messageId: "receipt-1", status: "failed" }),
+    );
+    expect(
+      sessionSlice.reducer(failed, markSteerRead({ messageId: "receipt-1" }))
+        .history[0].steerStatus,
+    ).toBe("failed");
+  });
+
+  it("restores persisted receipts and never invents legacy receipt data", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "saved", role: "user", content: "saved" },
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "read",
+        steerSentAt: 1_700_000_000_000,
+      },
+      {
+        message: { id: "legacy", role: "user", content: "legacy" },
+        contextItems: [],
+        isSteer: true,
+      },
+    ];
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "receipt-history",
+        title: "Receipt history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history,
+      }),
+    );
+    expect(restored.history[0]).toMatchObject({
+      steerStatus: "read",
+      steerSentAt: 1_700_000_000_000,
+    });
+    expect(restored.history[1]).toMatchObject({ steerStatus: "failed" });
+    expect(restored.history[1].steerSentAt).toBeUndefined();
+  });
+
+  it("restores persisted model switches and safely ignores malformed legacy receipts", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "switch", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: {
+          model: "codex-5-6-terra",
+          displayName: "GPT-5.6 Terra",
+        },
+      },
+      {
+        message: { id: "legacy", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: { model: "", displayName: "" },
+      },
+    ];
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "model-switch-history",
+        title: "Model switch history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history,
+      }),
+    );
+
+    expect(restored.history[0].modelSwitch).toEqual({
+      model: "codex-5-6-terra",
+      displayName: "GPT-5.6 Terra",
+    });
+    expect(restored.history[1].modelSwitch).toBeUndefined();
+  });
+
+  it("brands a legacy Kimi model-switch receipt when restoring history", () => {
+    const history: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "kimi-switch", role: "system", content: "" },
+        contextItems: [],
+        modelSwitch: { model: "kimi-k3", displayName: "K3" },
+      },
+    ];
+    const restored = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "kimi-model-switch-history",
+        title: "Kimi history",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history,
+      }),
+    );
+
+    expect(restored.history[0].modelSwitch).toEqual({
+      model: "kimi-k3",
+      displayName: "Kimi K3",
+    });
+  });
+
+  it("newSession drops in-flight steer messages with the rest of history", () => {
+    const streaming = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    const steered = sessionSlice.reducer(
+      streaming,
+      appendUserSteerMessage({ content: "steer", messageId: "steer" }),
+    );
+    const next = sessionSlice.reducer(steered, newSession(undefined));
+    expect(next.history).toHaveLength(0);
+    expect(next.isStreaming).toBe(false);
+  });
+});
+
+describe("sessionSlice explicit Stop steer semantics", () => {
+  const streamingWithOutbox = () => {
+    let state = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setActive(),
+    );
+    state = sessionSlice.reducer(
+      state,
+      appendUserSteerMessage({ content: "first", messageId: "s1" }),
+    );
+    state = sessionSlice.reducer(
+      state,
+      setSteerStatus({ messageId: "s1", status: "deferred" }),
+    );
+    state = sessionSlice.reducer(
+      state,
+      appendUserSteerMessage({ content: "second", messageId: "s2" }),
+    );
+    return state;
+  };
+
+  it("cancelQueuedSteers cancels queued and deferred follow-ups with their receipts", () => {
+    const cancelled = sessionSlice.reducer(
+      streamingWithOutbox(),
+      cancelQueuedSteers(),
+    );
+    expect(cancelled.history.map((item) => item.steerStatus)).toEqual([
+      "cancelled",
+      "cancelled",
+    ]);
+    expect(
+      cancelled.history.map((item) => item.messageReceipt?.status),
+    ).toEqual(["cancelled", "cancelled"]);
+  });
+
+  it("cancelQueuedSteers leaves accepted follow-ups untouched", () => {
+    const withDelivered = sessionSlice.reducer(
+      streamingWithOutbox(),
+      setSteerStatus({ messageId: "s2", status: "delivered" }),
+    );
+    const cancelled = sessionSlice.reducer(withDelivered, cancelQueuedSteers());
+    expect(cancelled.history.map((item) => item.steerStatus)).toEqual([
+      "cancelled",
+      "delivered",
+    ]);
+  });
+
+  it("setSteerStatus never revives a cancelled follow-up into the outbox", () => {
+    const cancelled = sessionSlice.reducer(
+      streamingWithOutbox(),
+      cancelQueuedSteers(),
+    );
+    for (const status of ["queued", "deferred"] as const) {
+      const revived = sessionSlice.reducer(
+        cancelled,
+        setSteerStatus({ messageId: "s1", status }),
+      );
+      expect(revived.history[0].steerStatus).toBe("cancelled");
+      expect(revived.history[0].messageReceipt?.status).toBe("cancelled");
+    }
+    const read = sessionSlice.reducer(
+      cancelled,
+      setSteerStatus({ messageId: "s1", status: "read" }),
+    );
+    expect(read.history[0].steerStatus).toBe("read");
+  });
+
+  it("clearDanglingMessages keeps cancelled steer bubbles in the transcript", () => {
+    const stopHistory: ChatHistoryItemWithMessageId[] = [
+      {
+        message: { id: "u1", role: "user", content: "work" },
+        contextItems: [],
+      },
+      {
+        message: { id: "a1", role: "assistant", content: "working" },
+        contextItems: [],
+      },
+      {
+        message: { id: "s1", role: "user", content: "queued" },
+        contextItems: [],
+        isSteer: true,
+        steerStatus: "queued",
+        messageReceipt: { sentAt: 1, status: "queued" },
+      },
+    ];
+    const state = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      newSession({
+        sessionId: "stop-keeps-bubbles",
+        title: "Stop keeps bubbles",
+        workspaceDirectory: "D:/Scratch/cukii-release-2.0.67",
+        history: stopHistory,
+      }),
+    );
+    const cancelled = sessionSlice.reducer(state, cancelQueuedSteers());
+    const cleaned = sessionSlice.reducer(
+      cancelled,
+      clearDanglingMessages("turn"),
+    );
+    expect(cleaned.history.map((item) => item.message.id)).toEqual([
+      "u1",
+      "a1",
+      "s1",
+    ]);
+    expect(cleaned.history[2].steerStatus).toBe("cancelled");
+    expect(cleaned.history[1].interrupted).toBe(true);
+  });
+});
+
+describe("sessionSlice native bridge wait state", () => {
+  const receipt = {
+    condition: "Sleeping for 12 seconds",
+    deadline: "2026-08-31T12:00:12.000Z",
+  };
+
+  it("enters wait and clears it on the next factual activity", () => {
+    const waiting = sessionSlice.reducer(
+      sessionSlice.reducer(sessionSlice.getInitialState(), setActive()),
+      setBridgeWait(receipt),
+    );
+    expect(waiting.bridgeWait).toEqual(receipt);
+
+    const activeAgain = sessionSlice.reducer(
+      waiting,
+      streamUpdate([{ role: "thinking", content: "Working again" }]),
+    );
+    expect(activeAgain.bridgeWait).toBeUndefined();
+  });
+
+  it("never restores stale wait state after completion, interruption, or a new session", () => {
+    const waiting = sessionSlice.reducer(
+      sessionSlice.getInitialState(),
+      setBridgeWait(receipt),
+    );
+
+    expect(
+      sessionSlice.reducer(waiting, setInactive()).bridgeWait,
+    ).toBeUndefined();
+    expect(
+      sessionSlice.reducer(waiting, abortStream()).bridgeWait,
+    ).toBeUndefined();
+    expect(
+      sessionSlice.reducer(waiting, newSession(undefined)).bridgeWait,
+    ).toBeUndefined();
   });
 });

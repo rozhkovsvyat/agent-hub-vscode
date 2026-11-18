@@ -1,0 +1,160 @@
+{
+  "version": "2.0.102",
+  "vsix_sha256": "1db3d4cc0494f36cf89075d3234ea9d3427ac3dc2164399199b777ac0450031d",
+  "commit": "fb3878353",
+  "measured_at": "2026-09-06T03:45:00+03:00",
+  "how": "Замеры сняты с УСТАНОВЛЕННОГО расширения в отдельном доверенном инстансе VS Code (свои user-data/extensions под D:\\Scratch\\cukii-parity-2.0.102, CDP 9334, --no-sandbox --disable-gpu --disable-workspace-trust), а не с исходников и не на глаз. Каждый пункт — computed styles и getBoundingClientRect.",
+  "gate": {
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=9698MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.102",
+    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls"
+  },
+  "items": [
+    {
+      "id": "assistant-capsule-geometry",
+      "reference": "пользовательская капсула в том же треде; жалоба владельца: правый борт прилип к краю экрана",
+      "verdict": "PASS",
+      "numbers": {
+        "boxSizing": "border-box",
+        "padding": "8px 10px 10px",
+        "borderRadius": "16px",
+        "topInset": 9,
+        "overflowPastRow": 0,
+        "scrollWidth": 249,
+        "clientWidth": 249
+      },
+      "before": {
+        "boxSizing": "content-box",
+        "topInset": 22,
+        "overflowPastRow": 22,
+        "scrollWidth": 276,
+        "clientWidth": 274
+      }
+    },
+    {
+      "id": "assistant-prose-rhythm",
+      "reference": "живой Claude Code 2.1.261, снято тем же способом: margin 0/2.6 + 1.3/0 при line-height 19.5px",
+      "verdict": "PASS",
+      "numbers": {
+        "lineHeight": "19.5px",
+        "paragraphMargins": [
+          { "top": "0px", "bottom": "2.6px" },
+          { "top": "1.3px", "bottom": "0px" }
+        ],
+        "measuredGapPx": 3,
+        "firstChildMarginTop": "0px",
+        "lastChildMarginBottom": "0px"
+      },
+      "before": { "measuredGapPx": 13 }
+    },
+    {
+      "id": "model-picker-lane",
+      "reference": "полоса композера .cukii-main-input-shell; жалоба владельца: пикер растягивается на всю ширину окна",
+      "verdict": "PASS",
+      "numbers": {
+        "viewportWidth": 850,
+        "composer": { "x": 68, "width": 714, "right": 782 },
+        "pickerLane": {
+          "x": 68,
+          "width": 714,
+          "right": 782,
+          "maxWidth": "714px"
+        },
+        "pickerPanel": { "x": 85, "width": 681, "right": 766 },
+        "lanePadding": "0px 16px 0px 17px",
+        "lanePointerEvents": "none",
+        "panelPointerEvents": "auto"
+      },
+      "note": "Колея совпадает с композером один в один; панель ужата на его же паддинги 17/16, то есть стоит по ширине поля ввода, а не окна (850)."
+    },
+    {
+      "id": "picker-autocompact-row",
+      "reference": "порядок строк в меню «/»",
+      "verdict": "PASS",
+      "numbers": {
+        "autocompact": { "text": "Autocompact(50%)", "y": 760 },
+        "effort": { "text": "Effort(High)", "y": 786 },
+        "autocompactAboveEffort": true
+      }
+    },
+    {
+      "id": "cursor-section-order",
+      "reference": "требование владельца: вендоры по алфавиту без подписей, внутри вендора по бутылкам от максимума к минимуму",
+      "verdict": "PASS",
+      "observed": [
+        "Fable 5.1",
+        "Opus 5",
+        "Composer 2.5",
+        "Kimi K3",
+        "GPT-5.6 Sol",
+        "GPT-5.6 Terra",
+        "Grok 4.6"
+      ],
+      "note": "Anthropic (Fable > Opus) → Cursor (Composer) → Moonshot (Kimi K3) → OpenAI (Sol > Terra) → xAI (Grok). Подписей апстрим-вендоров в секции нет."
+    },
+    {
+      "id": "catalog-labels-and-milky",
+      "reference": "требование владельца: снять префиксы Claude/Cursor, убрать Kimi K3-256 и Opus 4.5-4.8 из Milky",
+      "verdict": "PASS",
+      "observed": {
+        "milkyScopeOn": true,
+        "labels": ["Fable 5.1", "Opus 5", "Grok 4.6"],
+        "absent": ["Kimi K3-256", "Claude Opus 4.5", "Claude Opus 4.8"]
+      }
+    },
+    {
+      "id": "session-navigator",
+      "reference": "жалоба владельца: 0 сессий",
+      "verdict": "PASS",
+      "observed": {
+        "activeChip": "Active · 0",
+        "sessionsRendered": [
+          "Харнесс",
+          "Память",
+          "Плагин",
+          "SSH",
+          "Рефлексер",
+          "Железо",
+          "Хуки",
+          "Работа",
+          "Багхантер",
+          "Багфиксер",
+          "Маршрутка",
+          "HRTEK",
+          "ГО"
+        ]
+      },
+      "note": "Список полон при чипе Active · 0 — фильтр больше не переживает перезагрузку."
+    },
+    {
+      "id": "accounts-groups",
+      "reference": "требование владельца: две группы с заголовками как в пикере, YouGile в Testing ведёт себя как вендор",
+      "verdict": "PASS",
+      "observed": {
+        "vendorsHeading": "Vendors",
+        "vendorsRows": [
+          "Alibaba rozhkovsvyat@gmail.com Log out",
+          "Anthropic rozhkovsvyat@gmail.com Log out",
+          "Cursor rozhkovsvyat@gmail.com Log out",
+          "DeepSeek Coming soon",
+          "MoonshotAI HR DOT Log out",
+          "OpenAI anabion@tuta.io Log out",
+          "xAI rozhkovsvyat@gmail.com Log out"
+        ],
+        "testingHeading": "Testing",
+        "testingRows": ["YouGile rozhkovsvyat@gmail.com Log in"]
+      },
+      "note": "На 2.0.101 эта же строка показывала голое «YouGile» и «Log in» при state=connected — машинный токен подхватился, но чей аккаунт, не говорилось. Проба переехала на /users/me; кнопка остаётся «Log in», потому что ключ машинный и плагин не вправе его удалять."
+    }
+  ],
+  "blocked": [
+    {
+      "id": "remote-install",
+      "why": "Remote-SSH хост macbook-035 офлайн в tailnet (last seen перед прогоном). Установка на сервер и runtime receipt ui_submit → bridge_dispatch → vendor_completed не выполнены, поэтому release/PASS про remote не заявляется."
+    }
+  ],
+  "rollback": {
+    "vsix": "extensions/vscode/build/cukii-vscode-2.0.100.vsix",
+    "sha256": "ECAA5A87C2F788B6FD2224B150E9609E18D65FCE545A459FD7739CAC00B10F08"
+  }
+}

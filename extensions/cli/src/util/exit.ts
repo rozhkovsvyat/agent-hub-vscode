@@ -1,7 +1,7 @@
 import type { ChatHistoryItem } from "core/index.js";
 
 import { backgroundJobService } from "../services/BackgroundJobService.js";
-import { getSessionUsage } from "../session.js";
+import { flushSessionPersistence, getSessionUsage } from "../session.js";
 import { telemetryService } from "../telemetry/telemetryService.js";
 
 import { hadUnhandledError } from "./errorState.js";
@@ -193,6 +193,12 @@ function displaySessionUsage(): void {
 export async function gracefulExit(code: number = 0): Promise<void> {
   // Display session usage breakdown in verbose mode
   displaySessionUsage();
+
+  try {
+    await flushSessionPersistence();
+  } catch (err) {
+    logger.error("Session persistence flush failed on exit", err);
+  }
 
   try {
     const runningJobs = backgroundJobService.getRunningJobCount();

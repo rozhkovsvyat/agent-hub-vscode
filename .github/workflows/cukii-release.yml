@@ -1,0 +1,349 @@
+name: cukii-release
+
+# Tag-driven promotion, mirroring the vacation repo pipeline:
+#   rc-X.Y.Z  -> pre-release VSIX, GitHub pre-release, Marketplace preview channel
+#   vX.Y.Z    -> stable VSIX, GitHub release, Marketplace stable (manual gate)
+on:
+  workflow_dispatch:
+    inputs:
+      marketplace_resume_version:
+        description: "Existing stable GitHub Release version to publish to Marketplace"
+        required: false
+        type: string
+  push:
+    branches:
+      - "cukii/release-smoke/**"
+    tags:
+      - "rc-*"
+      - "v*"
+
+jobs:
+  checks:
+    if: inputs.marketplace_resume_version == ''
+    uses: ./.github/workflows/cukii-ci.yml
+    # A called workflow only sees the secrets listed here; cukii-ci.yml needs the
+    # read-only deploy key to fetch the private vendor-bridge library.
+    secrets:
+      VENDOR_BRIDGE_DEPLOY_KEY: ${{ secrets.VENDOR_BRIDGE_DEPLOY_KEY }}
+
+  macos-vendor-bootstrap:
+    needs: checks
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      # `npm ci` in extensions/vscode pulls the private @cukii/vendor-bridge
+      # library over git+ssh; authorize the read-only deploy key first.
+      - name: Authorize vendor-bridge deploy key
+        shell: bash
+        env:
+          VENDOR_BRIDGE_DEPLOY_KEY: ${{ secrets.VENDOR_BRIDGE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VENDOR_BRIDGE_DEPLOY_KEY" ]; then
+            echo "::error::VENDOR_BRIDGE_DEPLOY_KEY is not available to this job"
+            exit 1
+          fi
+          # RUNNER_TEMP carries Windows backslashes; ssh and git want forward slashes.
+          keydir="${RUNNER_TEMP//\\//}/vendor-bridge-ci-key"
+          mkdir -p "$keydir"
+          printf '%s\n' "$VENDOR_BRIDGE_DEPLOY_KEY" > "$keydir/id_ed25519"
+          chmod 600 "$keydir/id_ed25519"
+          ssh-keyscan -t ed25519,rsa github.com > "$keydir/known_hosts"
+          if [ ! -s "$keydir/known_hosts" ]; then
+            echo "::error::ssh-keyscan returned no github.com host keys"
+            exit 1
+          fi
+          git config --global core.sshCommand "ssh -i $keydir/id_ed25519 -o UserKnownHostsFile=$keydir/known_hosts -o IdentitiesOnly=yes"
+          printf 'GIT_SSH_COMMAND=ssh -i %s/id_ed25519 -o UserKnownHostsFile=%s/known_hosts -o IdentitiesOnly=yes\n' "$keydir" "$keydir" >> "$GITHUB_ENV"
+          # Prove read access to the library now, so a key problem cannot
+          # surface later as an opaque npm install failure.
+          git ls-remote git@github.com:rozhkovsvyat/vendor-bridge.git HEAD > /dev/null
+          echo "vendor-bridge deploy key authorized (read-only)"
+
+      - name: Build shared packages
+        run: node ./scripts/build-packages.js
+
+      - name: Install extension test dependencies
+        working-directory: extensions/vscode
+        run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 🔴 The macOS installer smoke moved into @cukii/vendor-bridge with the
+      # 2.0.142 extraction; the old in-repo path made vitest exit with
+      # "No test files found", which skipped every carrier build. Run it from a
+      # library checkout pinned to the revision the extension lock resolved, so
+      # the smoke proves the code the carriers actually bundle.
+      - name: Run the real Anthropic bootstrap through Cukii on macOS
+        shell: bash
+        env:
+          CUKII_REAL_VENDOR_INSTALL_SMOKE: "1"
+        run: |
+          set -euo pipefail
+          SPEC=$(node -p "require('./extensions/vscode/package.json').dependencies['@cukii/vendor-bridge']")
+          LOCK_SHA=$(node -p "require('./extensions/vscode/package-lock.json').packages['node_modules/@cukii/vendor-bridge'].resolved.split('#')[1]")
+          REF="${SPEC##*#}"
+          echo "vendor-bridge spec=$SPEC ref=$REF lock=$LOCK_SHA"
+          lib="${RUNNER_TEMP//\\//}/vendor-bridge-smoke"
+          rm -rf "$lib"
+          git clone --quiet --depth 1 --branch "$REF" \
+            git@github.com:rozhkovsvyat/vendor-bridge.git "$lib"
+          HEAD_SHA=$(git -C "$lib" rev-parse HEAD)
+          if [ "$HEAD_SHA" != "$LOCK_SHA" ]; then
+            echo "::error::vendor-bridge smoke checkout $HEAD_SHA != lock $LOCK_SHA"
+            exit 1
+          fi
+          echo "vendor-bridge smoke checkout: $REF ($HEAD_SHA)"
+          cd "$lib"
+          npm ci --no-audit --no-fund
+          npm test -- src/vendorCliInstaller.macos.vitest.ts
+
+  build:
+    needs: [checks, macos-vendor-bootstrap]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must match manifest version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        working-directory: extensions/vscode
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER=$(node -p "require('./package.json').version")
+          case "$TAG" in
+            rc-*) EXPECT="rc-${VER}" ;;
+            v*)   EXPECT="v${VER}" ;;
+            *)    echo "unsupported tag: $TAG"; exit 1 ;;
+          esac
+          if [ "$TAG" != "$EXPECT" ]; then
+            echo "tag $TAG does not match manifest version $EXPECT"; exit 1
+          fi
+          echo "tag $TAG matches manifest $VER"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      # `npm ci` in extensions/vscode pulls the private @cukii/vendor-bridge
+      # library over git+ssh; authorize the read-only deploy key first.
+      - name: Authorize vendor-bridge deploy key
+        shell: bash
+        env:
+          VENDOR_BRIDGE_DEPLOY_KEY: ${{ secrets.VENDOR_BRIDGE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VENDOR_BRIDGE_DEPLOY_KEY" ]; then
+            echo "::error::VENDOR_BRIDGE_DEPLOY_KEY is not available to this job"
+            exit 1
+          fi
+          # RUNNER_TEMP carries Windows backslashes; ssh and git want forward slashes.
+          keydir="${RUNNER_TEMP//\\//}/vendor-bridge-ci-key"
+          mkdir -p "$keydir"
+          printf '%s\n' "$VENDOR_BRIDGE_DEPLOY_KEY" > "$keydir/id_ed25519"
+          chmod 600 "$keydir/id_ed25519"
+          ssh-keyscan -t ed25519,rsa github.com > "$keydir/known_hosts"
+          if [ ! -s "$keydir/known_hosts" ]; then
+            echo "::error::ssh-keyscan returned no github.com host keys"
+            exit 1
+          fi
+          git config --global core.sshCommand "ssh -i $keydir/id_ed25519 -o UserKnownHostsFile=$keydir/known_hosts -o IdentitiesOnly=yes"
+          printf 'GIT_SSH_COMMAND=ssh -i %s/id_ed25519 -o UserKnownHostsFile=%s/known_hosts -o IdentitiesOnly=yes\n' "$keydir" "$keydir" >> "$GITHUB_ENV"
+          # Prove read access to the library now, so a key problem cannot
+          # surface later as an opaque npm install failure.
+          git ls-remote git@github.com:rozhkovsvyat/vendor-bridge.git HEAD > /dev/null
+          echo "vendor-bridge deploy key authorized (read-only)"
+
+      - name: Build packages
+        shell: bash
+        run: node ./scripts/build-packages.js
+
+      - name: Install build dependencies
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: |
+          npm --prefix extensions/vscode ci
+          npm --prefix gui ci
+          npm --prefix core ci
+
+      - name: Build all target carriers
+        shell: bash
+        working-directory: extensions/vscode
+        run: |
+          if [ "${{ startsWith(github.ref_name, 'rc-') }}" = "true" ]; then
+            npm run package-all -- --pre-release
+          else
+            npm run package-all
+          fi
+
+      - name: Verify every target carrier
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          $targets = @('win32-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64')
+          foreach ($target in $targets) {
+            $vsix = "extensions/vscode/build/cukii-vscode-$target-$version.vsix"
+            pwsh -NoProfile -File scripts/assert-cukii-cross-target-vsix.ps1 `
+              -VsixPath $vsix -ExpectedTarget $target -ExpectedVersion $version
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Install pinned VS Code for activation smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.129.1'
+          $archive = Join-Path $env:RUNNER_TEMP "vscode-$version.zip"
+          $root = Join-Path $env:RUNNER_TEMP "vscode-$version"
+          Invoke-WebRequest `
+            -Uri "https://update.code.visualstudio.com/$version/win32-x64-archive/stable" `
+            -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $codeExe = Join-Path $root 'Code.exe'
+          $codeBin = Join-Path $root 'bin'
+          $codeCli = Join-Path $codeBin 'code.cmd'
+          if (-not (Test-Path -LiteralPath $codeCli -PathType Leaf)) {
+            throw "pinned VS Code CLI is absent: $codeCli"
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $codeExe
+          if ($signature.Status -ne 'Valid' -or
+              [string]$signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+            throw "pinned VS Code Authenticode verification failed: status=$($signature.Status) signer=$($signature.SignerCertificate.Subject)"
+          }
+          $observed = @(& $codeCli --version)[0]
+          if ($observed -cne $version) {
+            throw "pinned VS Code version mismatch: expected=$version observed=$observed"
+          }
+          $codeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Activation capacity preflight
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'D:\Scratch' | Out-Null
+          pwsh -NoProfile -File scripts/cukii-release/assert-cukii-release-capacity.ps1
+
+      - name: Activate packaged Windows carrier
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          pwsh -NoProfile -File scripts/cukii-release/test-cukii-vsix-activation.ps1 `
+            -VsixPath "extensions/vscode/build/cukii-vscode-win32-x64-$version.vsix" `
+            -SourceManifestPath extensions/vscode/package.json `
+            -CodeCli "$env:RUNNER_TEMP/vscode-1.129.1/bin/code.cmd" `
+            -ScratchParent 'D:\Scratch'
+
+      - name: Reject invalid release candidates
+        shell: pwsh
+        run: |
+          $version = (Get-Content extensions/vscode/package.json | ConvertFrom-Json).version
+          pwsh -NoProfile -File scripts/cukii-release/test-cukii-release-gate.ps1 `
+            -VsixPath "extensions/vscode/build/cukii-vscode-win32-x64-$version.vsix" `
+            -SourceManifestPath extensions/vscode/package.json
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: all-targets-vsix
+          path: extensions/vscode/build/cukii-vscode-*-*.vsix
+          if-no-files-found: error
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: all-targets-vsix
+          path: vsix
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          prerelease: ${{ startsWith(github.ref_name, 'rc-') }}
+          files: vsix/*.vsix
+
+  publish-marketplace:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    # `marketplace` is an environment with required reviewers: a stable tag
+    # waits for a human approval, exactly like the portal's prod gate.
+    environment: ${{ startsWith(github.ref_name, 'rc-') && 'marketplace-preview' || 'marketplace' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Download VSIX
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: all-targets-vsix
+          path: vsix
+
+      - name: Publish to VS Code Marketplace
+        working-directory: extensions/vscode
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ARGS=(scripts/publish-marketplace.js --vsix-dir ../../vsix --version "$VERSION")
+          if [ "$PRE" = "true" ]; then ARGS+=(--pre-release); fi
+          node "${ARGS[@]}"
+        env:
+          PRE: ${{ startsWith(github.ref_name, 'rc-') }}
+
+  resume-marketplace:
+    if: github.event_name == 'workflow_dispatch' && inputs.marketplace_resume_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: marketplace
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Download immutable GitHub Release carriers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.marketplace_resume_version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid stable release version"
+            exit 1
+          fi
+          mkdir -p vsix
+          gh release download "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "cukii-vscode-*-$VERSION.vsix" \
+            --dir vsix
+
+      - name: Resume VS Code Marketplace publication
+        working-directory: extensions/vscode
+        shell: bash
+        env:
+          VERSION: ${{ inputs.marketplace_resume_version }}
+        run: node scripts/publish-marketplace.js --vsix-dir ../../vsix --version "$VERSION"

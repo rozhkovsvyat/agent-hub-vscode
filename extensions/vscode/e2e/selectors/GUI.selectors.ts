@@ -96,10 +96,6 @@ export class GUISelectors {
     return SelectorUtils.getElementByDataTestId(view, "rules-peek-item");
   }
 
-  public static getNthHistoryTableRow(view: WebView, index: number) {
-    return SelectorUtils.getElementByDataTestId(view, `history-row-${index}`);
-  }
-
   public static getNthMessageDeleteButton(view: WebView, index: number) {
     return SelectorUtils.getElementByDataTestId(view, `delete-button-${index}`);
   }
@@ -145,10 +141,6 @@ export class GUISelectors {
     return view.findWebElement(
       By.xpath(`//*[@class="thread-message"]//*[contains(text(), "${text}")]`),
     );
-  }
-
-  public static getHistoryNavButton(view: WebView) {
-    return SelectorUtils.getElementByAriaLabel(view, "View History");
   }
 
   public static getSettingsNavButton(view: WebView) {

@@ -1,6 +1,36 @@
 import "@testing-library/jest-dom";
+import { cleanup } from "@testing-library/react";
+
+// Node 22+ exposes a broken experimental global localStorage unless
+// --localstorage-file is set. Unqualified `localStorage.getItem` then throws
+// during module init (Tooltip → fontSize) before jsdom's window.localStorage
+// is used. Seed a memory backend first.
+const localStorageMemory = new Map<string, string>();
+const localStorageMock: Storage = {
+  get length() {
+    return localStorageMemory.size;
+  },
+  clear: () => localStorageMemory.clear(),
+  getItem: (key: string) => localStorageMemory.get(key) ?? null,
+  key: (index: number) => Array.from(localStorageMemory.keys())[index] ?? null,
+  removeItem: (key: string) => {
+    localStorageMemory.delete(key);
+  },
+  setItem: (key: string, value: string) => {
+    localStorageMemory.set(key, String(value));
+  },
+};
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
 
 afterEach(() => {
+  // Vitest's single-fork mode caches @testing-library/react between test
+  // files. Its import-time auto-cleanup hook is then owned by only the first
+  // file, so later files can leak rendered providers and portals into each
+  // other. Keep cleanup in the global setup where every test receives it.
+  cleanup();
   vi.clearAllMocks();
 });
 

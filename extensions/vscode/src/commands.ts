@@ -1,14 +1,20 @@
 /* eslint-disable @typescript-eslint/naming-convention */
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 
 import { ContextMenuConfig, ILLM, ModelInstaller } from "core";
 import { CompletionProvider } from "core/autocomplete/CompletionProvider";
 import { ConfigHandler } from "core/config/ConfigHandler";
 import { EXTENSION_NAME } from "core/util/constants";
+import {
+  cukiiVendorLabel,
+  type BrokerVendorId,
+} from "core/cukiiVendorRegistry";
 import { Core } from "core/core";
 import { walkDirAsync } from "core/indexing/walkDir";
 import { isModelInstaller } from "core/llm";
 import { NextEditLoggingService } from "core/nextEdit/NextEditLoggingService";
+import { isLegacyHistoryRoute } from "core/util/legacyHistoryRoute";
 import { startLocalLemonade } from "core/util/lemonadeHelper";
 import { startLocalOllama } from "core/util/ollamaHelper";
 import {
@@ -35,6 +41,22 @@ import {
 } from "./autocomplete/statusBar";
 import { ContinueConsoleWebviewViewProvider } from "./ContinueConsoleWebviewViewProvider";
 import { ContinueGUIWebviewViewProvider } from "./ContinueGUIWebviewViewProvider";
+import {
+  activeCukiiChatContext,
+  cukiiPanelRegistry as fullScreenPanels,
+  CUKII_BLANK_PANEL_TITLE,
+  getCukiiRenameTarget,
+  isPersistableCukiiTitle,
+  listCukiiRenameTargets,
+  listOpenCukiiPanels,
+  syncCukiiPanelTitleForSession,
+  type CukiiPanelHost,
+} from "./cukiiPanelRegistry";
+import {
+  cukiiMemoryAccountForContext,
+  describeDisciplineOutcome,
+} from "./extension/cukiiMemoryAccount";
+import { cukiiSessionAttention } from "./extension/cukiiSessionAttention";
 import { processDiff } from "./diff/processDiff";
 import { VerticalDiffManager } from "./diff/vertical/manager";
 import EditDecorationManager from "./quickEdit/EditDecorationManager";
@@ -46,40 +68,188 @@ import {
 } from "./util/addCode";
 import { Battery } from "./util/battery";
 import { getMetaKeyLabel } from "./util/util";
-import { openEditorAndRevealRange } from "./util/vscode";
+import { getExtensionUri, openEditorAndRevealRange } from "./util/vscode";
 import { VsCodeIde } from "./VsCodeIde";
 
-let fullScreenPanel: vscode.WebviewPanel | undefined;
+export const FULL_SCREEN_VIEW_TYPE = "cukii.fullScreenChat";
 
-function getFullScreenTab() {
-  const tabs = vscode.window.tabGroups.all.flatMap((tabGroup) => tabGroup.tabs);
-  return tabs.find((tab) =>
-    (tab.input as any)?.viewType?.endsWith("continue.continueGUIView"),
+// All Cukii webviews share one localStorage origin, and the GUI's persisted
+// state is namespaced by panel id. A restart-reset counter handed a new tab
+// the persisted state (session identity included) of an earlier tab with the
+// same number, cross-binding tabs to foreign sessions: renames then hit two
+// panels at once and "new session" tabs opened as the previous one. Random
+// ids never collide with stale persisted keys.
+function newCukiiPanelId(): string {
+  return `cukii-panel-${randomUUID()}`;
+}
+
+/** Serializer state is untrusted input; accept only ids we could have minted. */
+function reviveCukiiPanelId(candidate: unknown): string | undefined {
+  return typeof candidate === "string" &&
+    /^cukii-panel-[0-9a-fA-F-]{8,64}$/.test(candidate)
+    ? candidate
+    : undefined;
+}
+
+/**
+ * Наполняет полноэкранную панель и берёт её под учёт.
+ *
+ * Общий код для двух путей: создание по команде и **восстановление** таба,
+ * который VS Code вернул после перезапуска окна. Второй путь раньше
+ * отсутствовал вовсе, и восстановленный таб оставался навсегда пустым.
+ */
+function applyCukiiPanelChrome(panel: vscode.WebviewPanel, title?: string) {
+  panel.iconPath = {
+    light: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
+    dark: vscode.Uri.joinPath(getExtensionUri(), "media", "cukii-title.svg"),
+  };
+  panel.title = isPersistableCukiiTitle(title)
+    ? title.trim()
+    : CUKII_BLANK_PANEL_TITLE;
+}
+
+function attachFullScreenPanel(
+  panel: vscode.WebviewPanel,
+  extensionContext: vscode.ExtensionContext,
+  sidebar: ContinueGUIWebviewViewProvider,
+  initialSessionId?: string,
+  initialTitle?: string,
+  suppressInitialChordCharacter = false,
+  panelId: string = newCukiiPanelId(),
+) {
+  const protocol = sidebar.webviewProtocol.cloneHandlers();
+  fullScreenPanels.add(panelId, { panel, protocol }, initialSessionId);
+  applyCukiiPanelChrome(panel, initialTitle);
+
+  const notifyPanelList = () => {
+    sidebar.webviewProtocol.send(
+      "cukii/openChatPanelsChanged",
+      listOpenCukiiPanels(),
+    );
+    sidebar.webviewProtocol.send(
+      "cukii/activeChatContextChanged",
+      activeCukiiChatContext(),
+    );
+  };
+
+  notifyPanelList();
+
+  if (isPersistableCukiiTitle(initialTitle)) {
+    fullScreenPanels.updateTitle(panelId, initialTitle.trim());
+  }
+
+  protocol.on("cukii/panelSessionChanged", ({ data }) => {
+    fullScreenPanels.updateSession(panelId, data.sessionId);
+    if (isPersistableCukiiTitle(data.title)) {
+      fullScreenPanels.updateTitle(panelId, data.title.trim());
+      panel.title = data.title.trim();
+    }
+    notifyPanelList();
+  });
+
+  protocol.on("cukii/panelModelChanged", ({ data }) => {
+    fullScreenPanels.updateModel(panelId, data.brokerModel);
+    notifyPanelList();
+  });
+
+  // A session can disappear after the command verified it but before the
+  // freshly-created webview finishes loading it. Dispose this provisional
+  // panel instead of turning it into a misleading blank Cukii tab.
+  protocol.on("cukii/initialSessionLoadFailed", ({ data }) => {
+    if (fullScreenPanels.get(panelId)?.sessionId === data.sessionId) {
+      panel.dispose();
+    }
+  });
+
+  panel.webview.html = sidebar.getSidebarContent(
+    extensionContext,
+    panel,
+    undefined,
+    true,
+    protocol,
+    "chat",
+    initialSessionId,
+    panelId,
+    suppressInitialChordCharacter,
+  );
+
+  panel.onDidChangeViewState(({ webviewPanel }) => {
+    if (webviewPanel.active) {
+      fullScreenPanels.markActive(panelId);
+      notifyPanelList();
+    }
+  });
+
+  panel.onDidDispose(
+    () => {
+      // Closing the tab kills the run and denies the prompts, but neither
+      // teardown is guaranteed to report back; drop the session's attention
+      // here so a closed tab can never leave the drawer counting it as Active.
+      const closedSessionId = fullScreenPanels.get(panelId)?.sessionId;
+      protocol.dispose();
+      fullScreenPanels.remove(panelId);
+      if (closedSessionId) cukiiSessionAttention.forgetSession(closedSessionId);
+      notifyPanelList();
+    },
+    null,
+    extensionContext.subscriptions,
+  );
+}
+
+/**
+ * Восстановление полноэкранного таба после перезапуска окна.
+ *
+ * Без сериализатора VS Code возвращает оболочку таба, но HTML в неё уже никто
+ * не кладёт: панель остаётся пустой серой, и это переживает и reload, и
+ * рестарт. Регистрируется на активации, иначе VS Code выбросит восстановленный
+ * webview до того, как мы о нём узнаем.
+ */
+export function registerFullScreenPanelSerializer(
+  context: vscode.ExtensionContext,
+  extensionContext: vscode.ExtensionContext,
+  sidebar: ContinueGUIWebviewViewProvider,
+) {
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(FULL_SCREEN_VIEW_TYPE, {
+      async deserializeWebviewPanel(
+        panel: vscode.WebviewPanel,
+        state:
+          | { sessionId?: string; title?: string; panelId?: string }
+          | undefined,
+      ) {
+        panel.webview.options = { enableScripts: true };
+        // A restored tab keeps its own panel id so its persisted GUI state
+        // (tool permissions, model controls) is rehydrated from its own key.
+        attachFullScreenPanel(
+          panel,
+          extensionContext,
+          sidebar,
+          state?.sessionId,
+          state?.title,
+          false,
+          reviveCukiiPanelId(state?.panelId),
+        );
+      },
+    }),
   );
 }
 
 function focusGUI() {
-  const fullScreenTab = getFullScreenTab();
-  if (fullScreenTab) {
-    // focus fullscreen
-    fullScreenPanel?.reveal();
-  } else {
-    // focus sidebar
-    vscode.commands.executeCommand("continue.continueGUIView.focus");
-    // vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
+  const activePanel = fullScreenPanels.lastActive();
+  if (activePanel) {
+    activePanel.panel.panel.reveal();
+    return;
   }
+  vscode.commands.executeCommand("continue.continueGUIView.focus");
 }
 
 function hideGUI() {
-  const fullScreenTab = getFullScreenTab();
-  if (fullScreenTab) {
-    // focus fullscreen
-    fullScreenPanel?.dispose();
-  } else {
-    // focus sidebar
-    vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
-    // vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar");
+  const activePanel = fullScreenPanels.lastActive();
+  if (activePanel) {
+    activePanel.panel.panel.dispose();
+    return;
   }
+  vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
 }
 
 function waitForSidebarReady(
@@ -128,6 +298,27 @@ const getCommandsMap: (
   core,
   editDecorationManager,
 ) => {
+  const notifyPanelState = () => {
+    sidebar.webviewProtocol.send(
+      "cukii/openChatPanelsChanged",
+      listOpenCukiiPanels(),
+    );
+    sidebar.webviewProtocol.send(
+      "cukii/activeChatContextChanged",
+      activeCukiiChatContext(),
+    );
+  };
+
+  async function ensureActiveChatPanel(): Promise<CukiiPanelHost | undefined> {
+    const active = fullScreenPanels.lastActive();
+    if (active) {
+      active.panel.panel.reveal();
+      return active.panel;
+    }
+    await vscode.commands.executeCommand("continue.openInNewWindow");
+    return fullScreenPanels.lastActive()?.panel;
+  }
+
   /**
    * Streams an inline edit to the vertical diff manager.
    *
@@ -227,101 +418,56 @@ const getCommandsMap: (
       streamInlineEdit("docstring", prompt, range);
     },
     "continue.codebaseForceReIndex": async () => {
-      core.invoke("index/forceReIndex", undefined);
+      void core.invoke("index/forceReIndex", undefined);
     },
     "continue.rebuildCodebaseIndex": async () => {
-      core.invoke("index/forceReIndex", { shouldClearIndexes: true });
+      void core.invoke("index/forceReIndex", { shouldClearIndexes: true });
     },
     "continue.docsIndex": async () => {
-      core.invoke("context/indexDocs", { reIndex: false });
+      void core.invoke("context/indexDocs", { reIndex: false });
     },
     "continue.docsReIndex": async () => {
-      core.invoke("context/indexDocs", { reIndex: true });
+      void core.invoke("context/indexDocs", { reIndex: true });
     },
     "continue.focusContinueInput": async () => {
-      const isContinueInputFocused = await sidebar.webviewProtocol.request(
-        "isContinueInputFocused",
+      const host = await ensureActiveChatPanel();
+      if (!host) {
+        return;
+      }
+      void host.protocol.request(
+        "focusContinueInputWithNewSession",
         undefined,
         false,
       );
-
-      // This is a temporary fix—sidebar.webviewProtocol.request is blocking
-      // when the GUI hasn't yet been setup and we should instead be
-      // immediately throwing an error, or returning a Result object
-      focusGUI();
-      if (!sidebar.isReady) {
-        const isReady = await waitForSidebarReady(sidebar, 5000, 100);
-        if (!isReady) {
-          return;
-        }
-      }
-
-      const historyLength = await sidebar.webviewProtocol.request(
-        "getWebviewHistoryLength",
-        undefined,
-        false,
-      );
-
-      if (isContinueInputFocused) {
-        if (historyLength === 0) {
-          hideGUI();
-        } else {
-          void sidebar.webviewProtocol?.request(
-            "focusContinueInputWithNewSession",
-            undefined,
-            false,
-          );
-        }
-      } else {
-        focusGUI();
-        sidebar.webviewProtocol?.request(
-          "focusContinueInputWithNewSession",
-          undefined,
-          false,
-        );
-        void addHighlightedCodeToContext(sidebar.webviewProtocol);
-      }
+      void addHighlightedCodeToContext(host.protocol);
     },
     "continue.focusContinueInputWithoutClear": async () => {
-      const isContinueInputFocused = await sidebar.webviewProtocol.request(
-        "isContinueInputFocused",
-        undefined,
-        false,
+      const host = await ensureActiveChatPanel();
+      if (!host) {
+        return;
+      }
+      void host.protocol.request("focusContinueInputWithoutClear", undefined);
+      void addHighlightedCodeToContext(host.protocol);
+    },
+    "continue.focusCuKiiInput": async () => {
+      await vscode.commands.executeCommand("continue.focusContinueInput");
+    },
+    "continue.focusCuKiiInputWithoutClear": async () => {
+      await vscode.commands.executeCommand(
+        "continue.focusContinueInputWithoutClear",
       );
-
-      // This is a temporary fix—sidebar.webviewProtocol.request is blocking
-      // when the GUI hasn't yet been setup and we should instead be
-      // immediately throwing an error, or returning a Result object
-      focusGUI();
-      if (!sidebar.isReady) {
-        const isReady = await waitForSidebarReady(sidebar, 5000, 100);
-        if (!isReady) {
-          return;
-        }
-      }
-
-      if (isContinueInputFocused) {
-        hideGUI();
-      } else {
-        focusGUI();
-
-        sidebar.webviewProtocol?.request(
-          "focusContinueInputWithoutClear",
-          undefined,
-        );
-
-        void addHighlightedCodeToContext(sidebar.webviewProtocol);
-      }
     },
     // QuickEditShowParams are passed from CodeLens, temp fix
     // until we update to new params specific to Edit
     "continue.focusEdit": async (args?: QuickEditShowParams) => {
-      focusGUI();
-      sidebar.webviewProtocol?.request("focusEdit", undefined);
+      const host = await ensureActiveChatPanel();
+      void host?.protocol.request("focusEdit", undefined);
     },
     "continue.exitEditMode": async () => {
       editDecorationManager.clear();
-      void sidebar.webviewProtocol?.request("exitEditMode", undefined);
+      void fullScreenPanels
+        .lastActive()
+        ?.panel.protocol.request("exitEditMode", undefined);
     },
     "continue.writeCommentsForCode": async () => {
       streamInlineEdit(
@@ -377,7 +523,7 @@ const getCommandsMap: (
       sidebar.webviewProtocol?.request("addModel", undefined);
     },
     "continue.newSession": () => {
-      sidebar.webviewProtocol?.request("newSession", undefined);
+      void vscode.commands.executeCommand("continue.openInNewWindow");
     },
 
     "continue.shareSession": async (sessionId: string | undefined) => {
@@ -416,8 +562,10 @@ const getCommandsMap: (
         void vscode.window.showErrorMessage(errorMessage);
       }
     },
+    // Kept unlisted so persisted invocations from pre-navigator releases land
+    // in the current Cukii session navigator instead of a removed history view.
     "continue.viewHistory": () => {
-      vscode.commands.executeCommand("continue.navigateTo", "/history", true);
+      void vscode.commands.executeCommand("continue.continueGUIView.focus");
     },
     "continue.focusContinueSessionId": async (
       sessionId: string | undefined,
@@ -614,7 +762,7 @@ const getCommandsMap: (
           autocompleteModels.some((model) => model.title === selectedOption)
         ) {
           if (core.configHandler.currentProfile?.profileDescription.id) {
-            core.invoke("config/updateSelectedModel", {
+            void core.invoke("config/updateSelectedModel", {
               profileId:
                 core.configHandler.currentProfile?.profileDescription.id,
               role: "autocomplete",
@@ -634,6 +782,10 @@ const getCommandsMap: (
       quickPick.show();
     },
     "continue.navigateTo": (path: string, toggle: boolean) => {
+      if (isLegacyHistoryRoute(path)) {
+        void vscode.commands.executeCommand("continue.continueGUIView.focus");
+        return;
+      }
       sidebar.webviewProtocol?.request("navigateTo", { path, toggle });
       focusGUI();
     },
@@ -687,7 +839,9 @@ const getCommandsMap: (
         .then(async (selection) => {
           if (selection === "Read the docs") {
             await vscode.env.openExternal(
-              vscode.Uri.parse("https://docs.continue.dev/yaml-migration"),
+              vscode.Uri.parse(
+                "https://github.com/rozhkovsvyat/agent-hub-vscode",
+              ),
             );
           }
         });
@@ -705,7 +859,7 @@ const getCommandsMap: (
       }
 
       try {
-        const isValid = core.invoke("mdm/setLicenseKey", {
+        const isValid = await core.invoke("mdm/setLicenseKey", {
           licenseKey,
         });
 
@@ -748,71 +902,239 @@ const getCommandsMap: (
         vscode.ConfigurationTarget.Global,
       );
     },
-    "continue.openInNewWindow": async () => {
-      focusGUI();
-
-      const sessionId = await sidebar.webviewProtocol.request(
-        "getCurrentSessionId",
-        undefined,
-      );
-      // Check if full screen is already open by checking open tabs
-      const fullScreenTab = getFullScreenTab();
-
-      if (fullScreenTab && fullScreenPanel) {
-        // Full screen open, but not focused - focus it
-        fullScreenPanel.reveal();
-        return;
+    "continue.openInNewWindow": async (
+      options: {
+        panelId?: string;
+        sessionId?: string;
+        title?: string;
+        forceNew?: boolean;
+        suppressInitialChordCharacter?: boolean;
+      } = {},
+    ) => {
+      if (options.panelId) {
+        const existing = fullScreenPanels.get(options.panelId);
+        // panelId is only a focus hint from the sidebar. Never let a stale
+        // panel id focus a tab whose bound session differs from the clicked
+        // row; fall through to the authoritative session lookup instead.
+        if (
+          existing &&
+          (!options.sessionId || existing.sessionId === options.sessionId)
+        ) {
+          existing.panel.panel.reveal();
+          fullScreenPanels.markActive(existing.id);
+          notifyPanelState();
+          return;
+        }
       }
 
-      // Clear the sidebar to prevent overwriting changes made in fullscreen
-      vscode.commands.executeCommand("continue.newSession");
+      // Navigator clicks focus the already-open tab for that persisted
+      // session. The command/chord path has no session id and therefore always
+      // creates another independent blank tab.
+      if (options.sessionId && !options.forceNew) {
+        const existing = fullScreenPanels.forSession(options.sessionId);
+        if (existing) {
+          existing.panel.panel.reveal();
+          fullScreenPanels.markActive(existing.id);
+          notifyPanelState();
+          return;
+        }
+      }
 
-      // Full screen not open - open it
-      // Create the full screen panel
-      let panel = vscode.window.createWebviewPanel(
-        "continue.continueGUIView",
-        "Continue",
-        vscode.ViewColumn.One,
+      let initialSessionId = options.sessionId;
+      let initialTitle = options.title;
+      if (initialSessionId && !options.forceNew) {
+        // Do not create a tab merely to discover that its saved session was
+        // deleted/missing. Saved Cukii sessions are only navigable after their
+        // first history entry, so presence in the index with a non-zero message
+        // count answers both questions this check asks — does it exist, and
+        // what is its title.
+        //
+        // 🔴 This used to call `history/load`, and that made opening a session
+        // cost seconds of blank screen. That handler is not the cheap lookup
+        // its old comment claimed: it parses the whole session body (37MB on
+        // this machine's largest chat) and then runs `startHookSession`, which
+        // spawns the SessionStart lifecycle hooks. Because the hook start is
+        // idempotent per session, the webview's own `history/load` right
+        // afterwards became a no-op — so the entire hook cost was paid HERE,
+        // before the tab even existed, with nothing on screen. Measured on the
+        // installed 2.0.103: 7.9s of the 10.5s click-to-first-capsule went to
+        // this line, and the session body was parsed twice. The index carries
+        // title and message count without touching either.
+        let metadata;
+        try {
+          // 🔴 The explicit limit is not decoration: `history/list` defaults to
+          // the 100 most recent sessions, so without it the 101st session in
+          // the navigator would find no index entry and the click would become
+          // a silent no-op. The old `history/load` was addressed by id and had
+          // no such horizon.
+          metadata = await core.invoke("history/list", { limit: 1_000_000 });
+        } catch {
+          return;
+        }
+        const known = metadata?.find(
+          (entry) => entry.sessionId === initialSessionId,
+        );
+        // 🔴 `messageCount` counts ASSISTANT messages only, and the field is
+        // optional on the metadata type. A missing field therefore means "this
+        // record does not say", not "this session is empty" — treating the two
+        // alike would refuse to open a perfectly good session, so only an
+        // explicit zero closes the door.
+        if (!known || known.messageCount === 0) {
+          return;
+        }
+
+        // Several navigator clicks can all pass the first synchronous lookup
+        // while the shared async index request is in flight. Re-check against
+        // the authoritative registry after that await: the first continuation
+        // creates the panel, every later continuation focuses it without
+        // starting another body load or another webview.
+        const racedExisting = fullScreenPanels.forSession(initialSessionId);
+        if (racedExisting) {
+          racedExisting.panel.panel.reveal();
+          fullScreenPanels.markActive(racedExisting.id);
+          notifyPanelState();
+          return;
+        }
+        initialTitle = known.title;
+
+        // 🔴 Started here and deliberately NOT awaited. Measured like for like
+        // on the same sessions, moving the body load off the precheck did not
+        // make the open shorter — it moved the wait: on 2.0.103 the precheck
+        // paid 7.9s and the webview's own load then cost 0.7s, because
+        // `startHookSession` is idempotent per session and the second load
+        // found the work done. So the cost is one load either way, and the only
+        // thing left to win is overlap: kicked off now, it runs while the
+        // ~3.9MB webview bundle boots instead of after it, and the webview's
+        // own `history/load` lands on an already-warm session.
+        void Promise.resolve(
+          core.invoke("history/load", { id: initialSessionId }),
+        ).catch(() => undefined);
+      }
+
+      const panel = vscode.window.createWebviewPanel(
+        FULL_SCREEN_VIEW_TYPE,
+        CUKII_BLANK_PANEL_TITLE,
+        vscode.ViewColumn.Beside,
         {
           retainContextWhenHidden: true,
           enableScripts: true,
         },
       );
-      fullScreenPanel = panel;
 
-      // Add content to the panel
+      attachFullScreenPanel(
+        panel,
+        extensionContext,
+        sidebar,
+        initialSessionId,
+        initialTitle,
+        options.suppressInitialChordCharacter,
+      );
+    },
+    "cukii.openVendorUsageDetails": async ({
+      vendor,
+    }: {
+      vendor: BrokerVendorId;
+    }) => {
+      const protocol = sidebar.webviewProtocol.cloneHandlers();
+      const panelId = `usage-${vendor}-${randomUUID()}`;
+      const panel = vscode.window.createWebviewPanel(
+        "cukii.vendorUsage",
+        `Account & Usage — ${cukiiVendorLabel(vendor)}`,
+        vscode.ViewColumn.Beside,
+        { retainContextWhenHidden: true, enableScripts: true },
+      );
       panel.webview.html = sidebar.getSidebarContent(
         extensionContext,
         panel,
         undefined,
-        undefined,
         true,
+        protocol,
+        "usage",
+        undefined,
+        panelId,
+        false,
+        vendor,
       );
-
-      const sessionLoader = panel.onDidChangeViewState(() => {
-        vscode.commands.executeCommand("continue.newSession");
-        if (sessionId) {
-          vscode.commands.executeCommand(
-            "continue.focusContinueSessionId",
-            sessionId,
-          );
-        }
-        panel.reveal();
-        sessionLoader.dispose();
+      protocol.on("cukii/closeVendorUsageDetails", () => {
+        panel.dispose();
       });
-
-      // When panel closes, reset the webview and focus
-      panel.onDidDispose(
-        () => {
-          sidebar.resetWebviewProtocolWebview();
-          vscode.commands.executeCommand("continue.focusContinueInput");
+      panel.onDidDispose(() => protocol.dispose());
+    },
+    // A machine that ended up without the memory contract has to be fixable and
+    // explainable by its owner, not only by someone reading the extension host.
+    "cukii.installMemoryDiscipline": async () => {
+      const outcome =
+        await cukiiMemoryAccountForContext(
+          extensionContext,
+        ).installDisciplineNow();
+      const text = `Cukii: ${describeDisciplineOutcome(outcome)}`;
+      if (outcome.error || outcome.failed.length > 0) {
+        void vscode.window.showErrorMessage(text);
+        return;
+      }
+      void vscode.window.showInformationMessage(text);
+    },
+    "cukii.renameChatPanel": async () => {
+      const targets = listCukiiRenameTargets(fullScreenPanels);
+      if (targets.length === 0) {
+        return;
+      }
+      // Always require a click in QuickPick. A context-menu invocation on a
+      // blank Cukii tab has no session identity either, even when there is
+      // only one persisted tab elsewhere in the editor.
+      const target = await vscode.window.showQuickPick(
+        targets.map((candidate) => ({
+          label: candidate.title,
+          description: candidate.sessionId,
+          detail: "Cukii editor tab",
+          panelId: candidate.panelId,
+          sessionId: candidate.sessionId,
+        })),
+        {
+          title: "Choose Cukii Chat editor tab to rename",
+          placeHolder: "Select the tab you opened the context menu from",
+          matchOnDescription: true,
         },
-        null,
-        extensionContext.subscriptions,
       );
-
-      vscode.commands.executeCommand("workbench.action.copyEditorToNewWindow");
-      vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+      if (!target) {
+        return;
+      }
+      const entry = getCukiiRenameTarget(target.panelId, fullScreenPanels);
+      if (!entry || entry.sessionId !== target.sessionId) {
+        return;
+      }
+      // Prefill only from the persisted session title. Falling back to the
+      // editor-tab chrome title leaked the blank-panel placeholder "Cukii"
+      // into the input and let it be saved as a manual session title.
+      const currentTitle = entry.displayTitle?.trim() ?? "";
+      const nextTitle = await vscode.window.showInputBox({
+        title: "Rename Cukii Chat session",
+        value: currentTitle,
+        validateInput: (value) =>
+          value.trim() ? undefined : "Title cannot be empty",
+      });
+      const trimmed = nextTitle?.trim();
+      if (!trimmed || trimmed === currentTitle) {
+        return;
+      }
+      const saved = await core.invoke("history/rename", {
+        id: entry.sessionId,
+        title: trimmed,
+      });
+      if (!saved) return;
+      // A stale Rename command must display the title selected by the CAS
+      // boundary if another explicit rename committed first.
+      const effectiveTitle = saved.title;
+      syncCukiiPanelTitleForSession(entry.sessionId, effectiveTitle);
+      entry.panel.protocol.send("cukii/sessionTitleChanged", {
+        sessionId: entry.sessionId,
+        title: effectiveTitle,
+        titleManuallySet: Boolean(saved.titleManuallySet),
+      });
+      sidebar.webviewProtocol.send(
+        "cukii/openChatPanelsChanged",
+        listOpenCukiiPanels(),
+      );
     },
     "continue.forceNextEdit": async () => {
       // This is basically the same logic as forceAutocomplete.
@@ -879,6 +1201,10 @@ export function registerAllCommands(
   core: Core,
   editDecorationManager: EditDecorationManager,
 ) {
+  // До регистрации команд: VS Code отдаёт восстановленные webview сразу после
+  // активации, и без сериализатора к этому моменту таб уже осиротел.
+  registerFullScreenPanelSerializer(context, extensionContext, sidebar);
+
   for (const [command, callback] of Object.entries(
     getCommandsMap(
       ide,

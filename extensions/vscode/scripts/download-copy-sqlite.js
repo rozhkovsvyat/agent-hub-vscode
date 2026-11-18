@@ -1,4 +1,4 @@
-const { fork } = require("child_process");
+const { execFileSync, fork } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -6,6 +6,16 @@ const { ProxyAgent } = require("undici");
 const { rimrafSync } = require("rimraf");
 
 const { execCmdSync } = require("../../../scripts/util");
+
+const {
+  isForkedChildOperation,
+  runChildOperation,
+  sendChildResult,
+} = require("./child-operation");
+const {
+  assertRipgrepArchiveSignature,
+  ripgrepExtractionPlan,
+} = require("./cross-target-packaging");
 
 /**
  * download a file using fetch API
@@ -53,13 +63,43 @@ async function downloadSqlite(target, targetDir) {
   await downloadFile(downloadUrl, targetDir);
 }
 
-async function installAndCopySqlite(target) {
+async function installAndCopySqlite(
+  target,
+  {
+    execute = execFileSync,
+    platform = process.platform,
+    environment = process.env,
+    download = downloadSqlite,
+    sqliteDir: suppliedSqliteDir,
+  } = {},
+) {
   // Replace the installed with pre-built
   console.log("[info] Downloading pre-built sqlite3 binary");
-  rimrafSync("../../core/node_modules/sqlite3/build");
-  await downloadSqlite(target, "../../core/node_modules/sqlite3/build.tar.gz");
-  execCmdSync("cd ../../core/node_modules/sqlite3 && tar -xvzf build.tar.gz");
-  fs.unlinkSync("../../core/node_modules/sqlite3/build.tar.gz");
+  // pnpm installs `core/node_modules/sqlite3` as a symlink into the store, and
+  // GNU tar refuses to write through one ("Cannot extract through symlink"),
+  // which failed the whole prepackage. Resolve to the real store directory
+  // first; on a plain npm tree realpath is a no-op.
+  const sqliteDir = suppliedSqliteDir
+    ? fs.realpathSync(suppliedSqliteDir)
+    : fs.realpathSync("../../core/node_modules/sqlite3");
+  rimrafSync(path.join(sqliteDir, "build"));
+  const archive = path.join(sqliteDir, "build.tar.gz");
+  await download(target, archive);
+  assertRipgrepArchiveSignature(archive);
+  // Git Bash prepends GNU tar to PATH on Windows; with a drive-letter argument
+  // it interprets `D:\...` as a remote host. Use the same trusted, local-only
+  // extraction plan as ripgrep: System32 bsdtar on Windows, basename in cwd on
+  // every platform, and no shell parsing.
+  const extraction = ripgrepExtractionPlan(sqliteDir, archive, {
+    platform,
+    environment,
+  });
+  execute(extraction.command, extraction.args, {
+    cwd: extraction.cwd,
+    stdio: "inherit",
+    shell: false,
+  });
+  fs.unlinkSync(archive);
 }
 
 async function installAndCopyEsbuild(target) {
@@ -75,73 +115,67 @@ async function installAndCopyEsbuild(target) {
   fs.unlinkSync("node_modules/@esbuild/esbuild.zip");
 }
 
-process.on("message", (msg) => {
-  const { operation, target } = msg.payload;
-  if (operation === "sqlite") {
-    installAndCopySqlite(target)
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-  if (operation === "esbuild") {
-    installAndCopyEsbuild(target)
-      .then(() => process.send({ done: true }))
-      .catch((error) => {
-        console.error(error); // show the error in the parent process
-        process.send({ error: true });
-      });
-  }
-});
-
-/**
- * @param {string} target the platform to build for
- */
-async function copySqlite(target) {
-  const child = fork(__filename, { stdio: "inherit", cwd: process.cwd() });
-  child.send({
-    payload: {
-      operation: "sqlite",
-      target,
-    },
-  });
-
-  return new Promise((resolve, reject) => {
-    child.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      } else {
-        resolve();
+// `copySqlite`/`copyEsbuild` run the work in `fork(__filename)`, so this handler
+// belongs to the forked child alone. Registering it unconditionally put it on every
+// process that merely *requires* this module for its exports, where it then crashed
+// on the first unrelated IPC message ("Cannot destructure property 'operation' of
+// 'msg.payload'") - a vitest worker talks to its parent over the same channel, and
+// the handler then answered vitest's own traffic with `process.send({error:true})`.
+//
+// The fork is identified by the shared env marker rather than `require.main ===
+// module`: under a custom module loader (vite-node, ts-node, jest) `require.main`
+// is not the real entry point, so that test passed inside a vitest worker and the
+// handler was installed anyway. See `child-operation.js` for the full rationale.
+if (isForkedChildOperation(__filename)) {
+  process.once("message", async (msg) => {
+    try {
+      if (!msg?.payload) {
+        throw new Error("Child operation payload is required");
       }
-    });
+      const { operation, target } = msg.payload;
+      if (operation === "sqlite") {
+        await installAndCopySqlite(target);
+      } else if (operation === "esbuild") {
+        await installAndCopyEsbuild(target);
+      } else {
+        throw new Error(`Unknown download-copy operation: ${String(operation)}`);
+      }
+      sendChildResult({ done: true }, 0);
+    } catch (error) {
+      console.error(error);
+      sendChildResult({ error: true, message: String(error) }, 1);
+    }
   });
 }
 
 /**
  * @param {string} target the platform to build for
  */
-async function copyEsbuild(target) {
-  const child = fork(__filename, { stdio: "inherit", cwd: process.cwd() });
-  child.send({
-    payload: {
-      operation: "esbuild",
-      target,
-    },
+async function copySqlite(target, options = {}) {
+  return runChildOperation({
+    forkChild: options.forkChild ?? fork,
+    modulePath: __filename,
+    cwd: options.cwd ?? process.cwd(),
+    payload: { operation: "sqlite", target },
+    timeoutMs: options.timeoutMs,
   });
+}
 
-  return new Promise((resolve, reject) => {
-    child.on("message", (msg) => {
-      if (msg.error) {
-        reject();
-      } else {
-        resolve();
-      }
-    });
+/**
+ * @param {string} target the platform to build for
+ */
+async function copyEsbuild(target, options = {}) {
+  return runChildOperation({
+    forkChild: options.forkChild ?? fork,
+    modulePath: __filename,
+    cwd: options.cwd ?? process.cwd(),
+    payload: { operation: "esbuild", target },
+    timeoutMs: options.timeoutMs,
   });
 }
 
 module.exports = {
+  installAndCopySqlite,
   downloadSqlite,
   copySqlite,
   copyEsbuild,

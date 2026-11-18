@@ -290,7 +290,11 @@ declare global {
   export interface MessagePart {
     type: "text" | "imageUrl";
     text?: string;
-    imageUrl?: { url: string };
+    imageUrl?: {
+      url: string;
+      inlineArgvUrl?: string;
+      transportPreviewUrl?: string;
+    };
   }
   
   export type MessageContent = string | MessagePart[];
@@ -389,7 +393,7 @@ declare global {
     completion: string;
   }
   
-  type MessageModes = "chat" | "edit";
+  type MessageModes = "chat" | "agent" | "plan" | "broker" | "background" | "edit";
   
   export type ToolStatus =
     | "generating"
@@ -1174,7 +1178,7 @@ declare global {
   
   // config.ts - give users simplified interfaces
   export interface Config {
-    /** If set to true, Continue will collect anonymous usage data to improve the product. If set to false, we will collect nothing. Read here to learn more: https://docs.continue.dev/telemetry */
+    /** If set to true, Cukii will collect anonymous usage data to improve the product. If set to false, we will collect nothing. Read here to learn more: https://github.com/rozhkovsvyat/agent-hub-vscode */
     allowAnonymousTelemetry?: boolean;
     /** Each entry in this array will originally be a ModelDescription, the same object from your config.json, but you may add CustomLLMs.
      * A CustomLLM requires you only to define an AsyncGenerator that calls the LLM and yields string updates. You can choose to define either \`streamCompletion\` or \`streamChat\` (or both).

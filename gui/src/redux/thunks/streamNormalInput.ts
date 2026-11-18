@@ -36,6 +36,7 @@ import { callToolById } from "./callToolById";
 import { evaluateToolPolicies } from "./evaluateToolPolicies";
 import { preprocessToolCalls } from "./preprocessToolCallArgs";
 import { streamResponseAfterToolCall } from "./streamResponseAfterToolCall";
+import { streamBrokerBridgeInput } from "./streamBrokerBridgeInput";
 
 /**
  * Builds completion options with reasoning configuration based on session state and model capabilities.
@@ -88,6 +89,12 @@ export const streamNormalInput = createAsyncThunk<
       throw new Error(message);
     }
     const state = getState();
+
+    if (state.session.mode === "broker") {
+      unwrapResult(await dispatch(streamBrokerBridgeInput()));
+      return;
+    }
+
     const selectedChatModel = selectSelectedChatModel(state);
 
     if (!selectedChatModel) {
@@ -137,6 +144,8 @@ export const streamNormalInput = createAsyncThunk<
       state.session.mode,
       selectedChatModel,
       activeTools,
+      state.session.brokerModel,
+      state.session.brokerSubagent,
     );
 
     const systemMessage = systemToolsFramework
@@ -198,6 +207,7 @@ export const streamNormalInput = createAsyncThunk<
     try {
       let gen = extra.ideMessenger.llmStreamChat(
         {
+          sessionId: state.session.id,
           completionOptions,
           title: selectedChatModel.title,
           messages: compiledChatMessages,
@@ -315,12 +325,14 @@ export const streamNormalInput = createAsyncThunk<
     }
     const generatedCalls3 = selectPendingToolCalls(state3);
     const toolPolicies = state3.ui.toolSettings;
+    const allowAllPermissions = state3.ui.allowAllPermissions;
     const policies = await evaluateToolPolicies(
       dispatch,
       extra.ideMessenger,
       activeTools,
       generatedCalls3,
       toolPolicies,
+      allowAllPermissions,
     );
     const autoApprovedPolicies = policies.filter(
       ({ policy }) => policy === "allowedWithoutPermission",

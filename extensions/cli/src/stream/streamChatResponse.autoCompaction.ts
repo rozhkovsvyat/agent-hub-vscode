@@ -198,7 +198,7 @@ export async function handleAutoCompaction(
     });
 
     // Save the compacted session
-    updateSessionHistory(result.compactedHistory);
+    await updateSessionHistory(result.compactedHistory);
 
     // Handle success notification
     handleCompactionSuccess(result, isHeadless, callbacks);

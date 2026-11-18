@@ -48,29 +48,29 @@ const statusBarItemText = (
   error?: boolean,
 ) => {
   if (error) {
-    return "$(alert) Continue (config error)";
+    return "$(alert) Cukii Chat (config error)";
   }
 
   let text: string;
   switch (status) {
     case undefined:
       if (loading) {
-        text = "$(loading~spin) Continue";
+        text = "$(loading~spin) Cukii Chat";
       } else {
-        text = "Continue";
+        text = "Cukii Chat";
       }
       break;
     case StatusBarStatus.Disabled:
-      text = "$(circle-slash) Continue";
+      text = "$(circle-slash) Cukii Chat";
       break;
     case StatusBarStatus.Enabled:
-      text = "$(check) Continue";
+      text = "$(check) Cukii Chat";
       break;
     case StatusBarStatus.Paused:
-      text = "$(debug-pause) Continue";
+      text = "$(debug-pause) Cukii Chat";
       break;
     default:
-      text = "Continue";
+      text = "Cukii Chat";
   }
 
   // Append Next Edit indicator if enabled.
@@ -98,6 +98,14 @@ const statusBarItemTooltip = (status: StatusBarStatus | undefined) => {
       return "Tab autocomplete is paused";
   }
 };
+
+export function statusBarItemVisible(
+  status: StatusBarStatus | undefined,
+): boolean {
+  return (
+    status === StatusBarStatus.Enabled || status === StatusBarStatus.Paused
+  );
+}
 
 let statusBarStatus: StatusBarStatus | undefined = undefined;
 let statusBarItem: vscode.StatusBarItem | undefined = undefined;
@@ -149,9 +157,16 @@ export function setupStatusBar(
   statusBarItem.tooltip = statusBarItemTooltip(status ?? statusBarStatus);
   statusBarItem.command = "continue.openTabAutocompleteConfigMenu";
 
-  statusBarItem.show();
   if (status !== undefined) {
     statusBarStatus = status;
+  }
+  // Tab autocomplete is off by default in Cukii Chat (chat runs on the vendor
+  // CLIs). A permanent "⊘ Cukii Chat" item read as "the plugin is disabled",
+  // so the item exists only while autocomplete is actually on or paused.
+  if (statusBarItemVisible(statusBarStatus)) {
+    statusBarItem.show();
+  } else {
+    statusBarItem.hide();
   }
 
   // Guard: only register this listener once. Previously it was registered on

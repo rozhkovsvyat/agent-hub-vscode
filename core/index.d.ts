@@ -285,8 +285,28 @@ export interface Session {
   mode?: MessageModes;
   /** Optional: title of the selected chat model for this session */
   chatModelTitle?: string | null;
+  /** Cukii vendor/model route preserved with this session. */
+  brokerModel?: import("./protocol/ideWebview").BrokerModel;
+  /** Optional subagent route preserved with this session. */
+  brokerSubagent?: import("./protocol/ideWebview").BrokerSubagent;
+  /** Cukii effort budget preserved independently for every session/tab. */
+  brokerEffort?: import("./protocol/ideWebview").BrokerEffort;
+  /** Cukii service speed preserved independently for every session/tab. */
+  brokerSpeed?: import("./protocol/ideWebview").BrokerSpeed;
+  /** Autocompact threshold preserved independently for every session/tab. */
+  brokerAutocompact?: import("./protocol/ideWebview").BrokerAutocompact;
+  /** Model picker scope ("best" curated list or full catalog) per session. */
+  brokerModelScope?: import("./protocol/ideWebview").BrokerModelScope;
+  /** Native reasoning enablement preserved independently for every session/tab. */
+  hasReasoningEnabled?: boolean;
+  /** Cukii permission mode preserved independently for every session/tab. */
+  brokerPermissionMode?: import("./protocol/ideWebview").CukiiPermissionMode;
   /** Optional: cumulative usage and cost for all LLM API calls in this session */
   usage?: SessionUsage;
+  /** When true, auto-title generation must not overwrite this title. */
+  titleManuallySet?: boolean;
+  /** Monotonic per-session revision used for compare-and-merge persistence. */
+  revision?: number;
 }
 
 export interface BaseSessionMetadata {
@@ -295,6 +315,8 @@ export interface BaseSessionMetadata {
   dateCreated: string;
   workspaceDirectory: string;
   messageCount?: number;
+  /** Monotonic persistence revision used to reject stale sidebar snapshots. */
+  revision?: number;
 }
 
 export interface RangeInFile {
@@ -346,7 +368,13 @@ export type TextMessagePart = {
 
 export type ImageMessagePart = {
   type: "imageUrl";
-  imageUrl: { url: string };
+  imageUrl: {
+    url: string;
+    /** Alternate copy bounded for Grok's Windows inline-argv carrier. */
+    inlineArgvUrl?: string;
+    /** Bounded visual copy for native transports that retain image context. */
+    transportPreviewUrl?: string;
+  };
 };
 
 export type MessagePart = TextMessagePart | ImageMessagePart;
@@ -492,7 +520,7 @@ export interface PromptLog {
   completion: string;
 }
 
-export type MessageModes = "chat" | "agent" | "plan" | "background";
+export type MessageModes = "chat" | "agent" | "plan" | "broker" | "background";
 
 export type ToolStatus =
   | "generating" // Tool call arguments are being streamed from the LLM
@@ -1770,7 +1798,7 @@ export type ContinueRcJson = Partial<SerializedContinueConfig> & {
 
 // config.ts - give users simplified interfaces
 export interface Config {
-  /** If set to true, Continue will collect anonymous usage data to improve the product. If set to false, we will collect nothing. Read here to learn more: https://docs.continue.dev/telemetry */
+  /** If set to true, Cukii will collect anonymous usage data to improve the product. If set to false, we will collect nothing. Read here to learn more: https://github.com/rozhkovsvyat/agent-hub-vscode */
   allowAnonymousTelemetry?: boolean;
   /** Each entry in this array will originally be a JSONModelDescription, the same object from your config.json, but you may add CustomLLMs.
    * A CustomLLM requires you only to define an AsyncGenerator that calls the LLM and yields string updates. You can choose to define either `streamCompletion` or `streamChat` (or both).

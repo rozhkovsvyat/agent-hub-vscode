@@ -1,0 +1,577 @@
+import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
+import { ChatMessage, PromptLog } from "core";
+import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
+import type { CukiiBridgeStreamDisposition } from "core/protocol/ideWebview";
+import { v4 as uuidv4 } from "uuid";
+import {
+  hasImageAttachments,
+  renderChatMessage,
+  stripImages,
+} from "core/util/messageContent";
+import {
+  acceptToolCall,
+  addPromptCompletionPair,
+  claimBridgeRun,
+  clearSteerInterrupt,
+  clearUserStop,
+  errorToolCall,
+  markSteerRead,
+  markLatestUserReceiptDelivered,
+  setActive,
+  setBridgeWait,
+  setContextPercentage,
+  setInactive,
+  setInlineErrorMessage,
+  setIsPruned,
+  settleBridgeRun,
+  setSteerStatus,
+  setToolCallCalling,
+  streamUpdate,
+  updateToolCallOutput,
+  type ChatHistoryItemWithMessageId,
+} from "../slices/sessionSlice";
+import { RootState, ThunkApiType } from "../store";
+import { stoppedRequestTexts } from "../util/stoppedRequests";
+
+type CukiiBridgeMessage = ChatMessage & {
+  cukiiBridgeWait?: {
+    condition: string;
+    deadline?: string;
+  };
+  cukiiTerminalError?: true;
+  /** Private transport receipt emitted only for a matching vendor user echo. */
+  cukiiSteerReadMessageId?: string;
+  /** First factual stdout from the native CLI, never a local launch status. */
+  cukiiVendorActivity?: true;
+};
+
+type RaceResult<T> =
+  | {
+      kind: "value";
+      value: IteratorResult<
+        T,
+        PromptLog | CukiiBridgeStreamDisposition | undefined
+      >;
+    }
+  | { kind: "cancelled" };
+
+function isBridgeStreamDisposition(
+  value: PromptLog | CukiiBridgeStreamDisposition,
+): value is CukiiBridgeStreamDisposition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "cukiiBridgeDisposition" in value
+  );
+}
+
+function isBridgeTerminalMessage(message: ChatMessage): boolean {
+  return (
+    (message as ChatMessage & { cukiiTerminal?: true }).cukiiTerminal === true
+  );
+}
+
+function isBridgeTerminalError(message: ChatMessage): boolean {
+  return (message as CukiiBridgeMessage).cukiiTerminalError === true;
+}
+
+/**
+ * Native CLIs can repeat a failed-turn receipt as assistant text, a decorated
+ * warning, or one concatenated frame.  Compare the message semantics rather
+ * than a vendor's wording or a particular quota error.
+ */
+export function normalizeTerminalError(message: ChatMessage): string {
+  return renderChatMessage(message)
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^(?:(?:⚠️|warning|error)\s*[:：\-–—]?\s*)+/iu, "")
+    .trim();
+}
+
+function isOneOrMoreCopies(value: string, unit: string): boolean {
+  if (!value || !unit) return false;
+
+  let remainder = value;
+  do {
+    if (!remainder.startsWith(unit)) return false;
+    remainder = remainder.slice(unit.length).trimStart();
+  } while (remainder);
+
+  return true;
+}
+
+export function isSameTerminalError(
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  const normalizedFirst = normalizeTerminalError(first);
+  const normalizedSecond = normalizeTerminalError(second);
+  return (
+    normalizedFirst === normalizedSecond ||
+    isOneOrMoreCopies(normalizedFirst, normalizedSecond) ||
+    isOneOrMoreCopies(normalizedSecond, normalizedFirst)
+  );
+}
+
+/**
+ * Позволяет выйти из await gen.next(), если стрим отменили (кнопка Stop / Esc).
+ * Без этого GUI мог застрять в ожидании зависшего нативного worker-а и не сбросить
+ * isStreaming — лоадер продолжал крутиться после остановки сессии.
+ */
+function raceNextOrCancellation<T>(
+  nextPromise: Promise<
+    IteratorResult<T, PromptLog | CukiiBridgeStreamDisposition | undefined>
+  >,
+  signal: AbortSignal,
+): Promise<RaceResult<T>> {
+  if (signal.aborted) return Promise.resolve({ kind: "cancelled" });
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      resolve({ kind: "cancelled" });
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void nextPromise.then(
+      (value) => {
+        cleanup();
+        resolve({ kind: "value", value });
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Инструменты, которые пришли из моста, УЖЕ выполнены нативным worker-ом.
+ *
+ * Без этого их состояние осталось бы «сгенерирован», и лента предложила бы
+ * запустить локально то, что уже сделано в чужом процессе. Поэтому tool-call
+ * сразу переводится в done, а пришедший результат прикрепляется как вывод.
+ */
+function settleObservedToolCalls(
+  messages: ChatMessage[],
+  dispatch: (action: any) => void,
+): void {
+  for (const message of messages) {
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      for (const call of message.toolCalls) {
+        if (call.id) {
+          // «Выполняется», а не сразу «готово»: результат придёт отдельным
+          // событием, и до него карточка обязана показывать движение. Сразу
+          // выставленный done выглядел как зависшая галочка.
+          dispatch(setToolCallCalling({ toolCallId: call.id }));
+        }
+      }
+    }
+    if (message.role === "tool" && message.toolCallId) {
+      dispatch(
+        (message as ChatMessage & { cukiiToolError?: boolean }).cukiiToolError
+          ? errorToolCall({ toolCallId: message.toolCallId })
+          : acceptToolCall({ toolCallId: message.toolCallId }),
+      );
+      dispatch(
+        updateToolCallOutput({
+          toolCallId: message.toolCallId,
+          contextItems: [
+            {
+              name: "Tool output",
+              description: "Вывод инструмента нативного worker-а",
+              content:
+                typeof message.content === "string"
+                  ? message.content
+                  : JSON.stringify(message.content),
+            },
+          ],
+        }),
+      );
+    }
+  }
+}
+
+/**
+ * A remembered native session contains only turns seen by that vendor. On the
+ * first request after a model switch it is stale by definition: intervening
+ * Cukii turns may belong to another vendor, so the shared transcript must be
+ * replayed once before native resume is safe again.
+ */
+export function bridgeTurnNeedsColdStart(
+  history: ChatHistoryItemWithMessageId[],
+): boolean {
+  const switchIndex = history.findLastIndex((item) =>
+    Boolean(item.modelSwitch),
+  );
+  if (switchIndex < 0) return false;
+  return !history
+    .slice(switchIndex + 1)
+    .some((item) => !item.modelSwitch && item.message.role === "assistant");
+}
+
+export const streamBrokerBridgeInput = createAsyncThunk<
+  void,
+  | {
+      /** @deprecated Compatibility with callers built before batch delivery. */
+      queuedFollowUpMessageId?: string;
+      queuedFollowUpMessageIds?: string[];
+    }
+  | undefined,
+  ThunkApiType
+>(
+  "chat/streamBrokerBridgeInput",
+  async (options, { dispatch, extra, getState }) => {
+    const state = getState();
+    const sessionId = state.session.id;
+    const runId = uuidv4();
+    const explicitlyQueuedFollowUpMessageIds = Array.from(
+      new Set(
+        (
+          options?.queuedFollowUpMessageIds ??
+          (options?.queuedFollowUpMessageId
+            ? [options.queuedFollowUpMessageId]
+            : [])
+        ).filter(Boolean),
+      ),
+    );
+    // A restored webview starts its trailing drain asynchronously. A new
+    // submit can otherwise win that race and silently filter every durable
+    // queued/deferred bubble out of the vendor request. Ordinary turns adopt
+    // the complete pending snapshot themselves so resume never depends on MCP
+    // availability or on which thunk happened to start first.
+    const implicitlyRecoveredFollowUps =
+      explicitlyQueuedFollowUpMessageIds.length === 0
+        ? state.session.history.filter(
+            (item) =>
+              item.isSteer &&
+              item.message.role === "user" &&
+              (item.steerStatus === "queued" ||
+                item.steerStatus === "deferred") &&
+              (stripImages(item.message.content).trim().length > 0 ||
+                hasImageAttachments(item.message.content)),
+          )
+        : [];
+    const queuedFollowUpMessageIds =
+      explicitlyQueuedFollowUpMessageIds.length > 0
+        ? explicitlyQueuedFollowUpMessageIds
+        : implicitlyRecoveredFollowUps.map((item) => item.message.id);
+    const hasImplicitRecovery = implicitlyRecoveredFollowUps.length > 0;
+    const queuedFollowUpMessageId = queuedFollowUpMessageIds[0];
+    // Same default as a new session; never fall back to a paid flagship.
+    const brokerModel = state.session.brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
+    const brokerSubagent = state.session.brokerSubagent ?? "auto";
+    const brokerEffort = state.session.brokerEffort;
+    const brokerSpeed = state.session.brokerSpeed;
+    const brokerAutocompact = state.session.brokerAutocompact;
+    const forceColdStart = bridgeTurnNeedsColdStart(state.session.history);
+    const thinkingEnabled = state.session.hasReasoningEnabled;
+    const streamAborter = state.session.streamAborter;
+    const initialUserReceiptId =
+      explicitlyQueuedFollowUpMessageIds.length > 0
+        ? undefined
+        : state.session.history.findLast(
+            (item) => item.message.role === "user" && !item.isSteer,
+          )?.message.id;
+
+    const queuedFollowUps = queuedFollowUpMessageIds.map((messageId) =>
+      state.session.history.find(
+        (item) => item.isSteer && item.message.id === messageId,
+      ),
+    );
+    const missingFollowUpIndex = queuedFollowUps.findIndex((item) => !item);
+    if (missingFollowUpIndex >= 0) {
+      throw new Error(
+        `Queued follow-up ${queuedFollowUpMessageIds[missingFollowUpIndex]} is absent from session ${state.session.id}.`,
+      );
+    }
+    // A steer that the vendor could not accept live interrupted the previous
+    // turn so it could be redelivered here. Tell the bridge so the broker
+    // prompt asks the model to resume the interrupted task instead of reading
+    // the follow-up as a brand-new request.
+    const steerInterrupt =
+      queuedFollowUpMessageIds.length > 0 &&
+      Boolean(state.session.steerInterruptPending);
+    if (state.session.steerInterruptPending) {
+      dispatch(clearSteerInterrupt());
+    }
+    const previousTurnStopped = Boolean(state.session.userStopPending);
+    const stoppedRequests = stoppedRequestTexts(state.session.history);
+    if (previousTurnStopped) dispatch(clearUserStop());
+    const currentSubmitId = hasImplicitRecovery
+      ? initialUserReceiptId
+      : undefined;
+    const messages: ChatMessage[] = state.session.history
+      // A model switch is a local timeline receipt. It must not become a
+      // system turn in the next vendor request, even on the direct bridge path.
+      .filter(
+        (item) =>
+          !item.modelSwitch &&
+          !queuedFollowUpMessageIds.includes(item.message.id) &&
+          item.message.id !== currentSubmitId &&
+          !(
+            item.isSteer &&
+            (item.steerStatus === "queued" ||
+              item.steerStatus === "deferred") &&
+            !queuedFollowUpMessageIds.includes(item.message.id)
+          ) &&
+          !(
+            item.isSteer &&
+            // An explicit Stop cancelled this follow-up before the vendor
+            // accepted it. It must never reach a later turn either.
+            item.steerStatus === "cancelled"
+          ),
+      )
+      .map((item) => item.message)
+      .filter((message) => message.role !== "thinking");
+    // Pending input was not visible to the old vendor output that may follow
+    // its bubbles in the UI timeline. Move the complete FIFO batch behind all
+    // previously produced output, then keep the user's new submit last.
+    for (const queuedFollowUp of queuedFollowUps) {
+      if (queuedFollowUp) messages.push(queuedFollowUp.message);
+    }
+    if (currentSubmitId) {
+      const currentSubmit = state.session.history.find(
+        (item) => item.message.id === currentSubmitId,
+      );
+      if (currentSubmit) messages.push(currentSubmit.message);
+    }
+    const historyLengthAtRunStart = state.session.history.length;
+    // Long broker turns must not bet the whole tail on the end-of-turn save:
+    // a reload, crash, or Remote-SSH reconnect mid-turn loses everything
+    // since the last persist. Re-persist at most every 30 s while new entries
+    // arrive; the core fast-forwards a lagging revision for this exact race.
+    let lastPeriodicSaveAt = Date.now();
+    let lastPeriodicSavedLen = historyLengthAtRunStart;
+    const seenTerminalErrors = new Set<string>();
+    let terminalSettled = false;
+    let superseded = false;
+
+    const settleTerminal = () => {
+      if (
+        !terminalSettled &&
+        getState().session.id === sessionId &&
+        getState().session.activeBridgeRunId === runId
+      ) {
+        terminalSettled = true;
+        dispatch(settleBridgeRun({ runId }));
+      }
+    };
+
+    const ownsBridgeRun = () => {
+      const current = getState().session;
+      return (
+        current.id === sessionId &&
+        current.activeBridgeRunId === runId &&
+        current.streamAborter === streamAborter
+      );
+    };
+
+    const markAcceptedAndPersist = async (messageIds: string[]) => {
+      const current = getState().session;
+      if (!ownsBridgeRun()) return;
+      let changed = false;
+      for (const messageId of messageIds) {
+        const item = current.history.find(
+          (entry) => entry.message.id === messageId,
+        );
+        if (item?.steerStatus === "read") continue;
+        if (
+          item?.isSteer &&
+          (item.steerStatus === "queued" || item.steerStatus === "deferred")
+        ) {
+          dispatch(setSteerStatus({ messageId, status: "delivered" }));
+        }
+        dispatch(markSteerRead({ messageId }));
+        changed = true;
+      }
+      if (!changed) return;
+      const { saveCurrentSession } = await import("./session");
+      if (!ownsBridgeRun()) return;
+      unwrapResult(
+        await dispatch(
+          saveCurrentSession({
+            openNewSession: false,
+            generateTitle: false,
+          }),
+        ),
+      );
+    };
+
+    const isDuplicateTerminalError = (message: ChatMessage) => {
+      const normalized = normalizeTerminalError(message);
+      if (!normalized || seenTerminalErrors.has(normalized)) return true;
+
+      const appearedThisRun = getState()
+        .session.history.slice(historyLengthAtRunStart)
+        .some(
+          (item) =>
+            item.message.role === "assistant" &&
+            isSameTerminalError(item.message, message),
+        );
+      seenTerminalErrors.add(normalized);
+      return appearedThisRun;
+    };
+
+    dispatch(claimBridgeRun({ runId }));
+    dispatch(markLatestUserReceiptDelivered());
+    dispatch(setInlineErrorMessage(undefined));
+    dispatch(setIsPruned(false));
+    dispatch(setContextPercentage(0));
+
+    const { saveCurrentSession } = await import("./session");
+    try {
+      const gen = extra.ideMessenger.streamRequest(
+        "cukii/streamBridgeChat",
+        {
+          sessionId: state.session.id,
+          runId,
+          messages,
+          brokerModel,
+          brokerSubagent,
+          brokerEffort,
+          brokerSpeed,
+          brokerAutocompact,
+          thinkingEnabled,
+          brokerPermissionMode: state.session.brokerPermissionMode,
+          queuedFollowUpMessageId,
+          queuedFollowUpMessageIds,
+          currentSubmitMessageId: currentSubmitId,
+          steerInterrupt,
+          previousTurnStopped,
+          ...(stoppedRequests.length > 0 ? { stoppedRequests } : {}),
+          forceColdStart,
+        },
+        streamAborter.signal,
+      );
+
+      let completed = false;
+      try {
+        streamLoop: while (true) {
+          const result = await raceNextOrCancellation(
+            gen.next(),
+            streamAborter.signal,
+          );
+          if (result.kind === "cancelled") {
+            await gen.return(undefined);
+            break;
+          }
+          if (result.value.done) {
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break;
+            }
+            completed = true;
+            const finalValue = result.value.value;
+            if (finalValue && isBridgeStreamDisposition(finalValue)) {
+              if (finalValue.cukiiBridgeDisposition === "superseded") {
+                // A newer submit owns the shared session activity indicator.
+                // This stale thunk must not turn it off or record a fake
+                // prompt log for a vendor process that never started.
+                superseded = true;
+                break;
+              }
+              throw new Error(
+                `Native bridge run replacement is blocked for session ${finalValue.sessionId}.`,
+              );
+            }
+            if (finalValue) {
+              dispatch(addPromptCompletionPair([finalValue]));
+            }
+            break;
+          }
+          if (!ownsBridgeRun()) {
+            await gen.return(undefined);
+            break;
+          }
+
+          let hasTerminalReceipt = false;
+          const bridgeMessages = result.value.value as CukiiBridgeMessage[];
+          const batchReceiptIds = Array.from(
+            new Set(
+              bridgeMessages
+                .map((message) => message.cukiiSteerReadMessageId)
+                .filter((messageId): messageId is string => Boolean(messageId)),
+            ),
+          );
+          if (batchReceiptIds.length > 0) {
+            await markAcceptedAndPersist(batchReceiptIds);
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break;
+            }
+          }
+          for (const message of bridgeMessages) {
+            if (!ownsBridgeRun()) {
+              await gen.return(undefined);
+              break streamLoop;
+            }
+            if (isBridgeTerminalMessage(message)) {
+              hasTerminalReceipt = true;
+              break;
+            }
+            if (message.cukiiSteerReadMessageId) {
+              continue;
+            }
+            if (isBridgeTerminalError(message)) {
+              if (!isDuplicateTerminalError(message)) {
+                dispatch(streamUpdate([message]));
+              }
+              hasTerminalReceipt = true;
+              break;
+            }
+            if (message.cukiiBridgeWait) {
+              // Positively identified native wait metadata, never a model string
+              // and never an inference from quiet stdout.
+              dispatch(setBridgeWait(message.cukiiBridgeWait));
+              continue;
+            }
+            if (message.cukiiVendorActivity) {
+              // Queued follow-ups require their exact private receipt. A
+              // generic activity frame may belong only to the ordinary current
+              // submit while another queued id is still owned by a foreign
+              // inbox reader; marking the whole requested batch here loses it.
+              if (initialUserReceiptId) {
+                dispatch(markSteerRead({ messageId: initialUserReceiptId }));
+              }
+            }
+            dispatch(streamUpdate([message]));
+            settleObservedToolCalls([message], dispatch);
+          }
+          const liveSession = getState().session;
+          if (
+            liveSession.id === sessionId &&
+            !liveSession.isInEdit &&
+            liveSession.history.length > lastPeriodicSavedLen &&
+            Date.now() - lastPeriodicSaveAt >= 30_000
+          ) {
+            // Fire-and-forget: the next check is gated by the watermark, and
+            // a stale-revision receipt is healed by the core fast-forward.
+            lastPeriodicSaveAt = Date.now();
+            lastPeriodicSavedLen = liveSession.history.length;
+            void dispatch(
+              saveCurrentSession({
+                openNewSession: false,
+                generateTitle: false,
+              }),
+            ).catch(() => undefined);
+          }
+          if (hasTerminalReceipt) {
+            // Hide activity synchronously on the native terminal receipt. The
+            // generator return still performs process cleanup, but a slow child
+            // close must never leave the user looking at a false loader.
+            settleTerminal();
+            completed = true;
+            await gen.return(undefined);
+            break;
+          }
+        }
+      } finally {
+        if (!completed) await gen.return(undefined);
+      }
+    } finally {
+      if (!superseded) settleTerminal();
+    }
+  },
+);

@@ -93,7 +93,7 @@ export async function initializeChatHistory(
   // Fork from an existing session if --fork flag is used
   if (options.fork) {
     const { loadSessionById, startNewSession } = await import("../session.js");
-    const sessionToFork = loadSessionById(options.fork);
+    const sessionToFork = await loadSessionById(options.fork);
     if (sessionToFork) {
       logger.info(chalk.yellow("Forking from existing session..."));
       const newSession = startNewSession(sessionToFork.history);
@@ -318,7 +318,7 @@ async function handleTitleGeneration(
     );
 
     if (generatedTitle) {
-      updateSessionTitle(generatedTitle);
+      await updateSessionTitle(generatedTitle);
       logger.debug("Generated session title:", generatedTitle);
     }
   } catch (error) {
@@ -401,7 +401,7 @@ async function processMessage(
     processAndOutputResponse(finalResponse, isHeadless, silent, format);
 
     // Save session after each successful response
-    updateSessionHistory(services.chatHistory.getHistory());
+    await updateSessionHistory(services.chatHistory.getHistory());
   } catch (e: any) {
     const error = e instanceof Error ? e : new Error(String(e));
 

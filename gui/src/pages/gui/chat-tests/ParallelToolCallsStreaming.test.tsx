@@ -4,6 +4,7 @@ import { renderWithProviders } from "../../../util/test/render";
 import { sendInputWithMockedResponse } from "../../../util/test/utils";
 import { Chat } from "../Chat";
 import { updateConfig } from "../../../redux/slices/configSlice";
+import { setMode } from "../../../redux/slices/sessionSlice";
 
 describe("Parallel Tool Calls - Streaming", () => {
   test("should handle streaming deltas for multiple tool calls", async () => {
@@ -93,6 +94,10 @@ describe("Parallel Tool Calls - Streaming", () => {
         ],
       },
     ];
+
+    // The default session mode is "broker", which streams through the native
+    // bridge. These scenarios exercise the classic chat streaming path.
+    store.dispatch(setMode("chat"));
 
     await sendInputWithMockedResponse(
       ideMessenger,

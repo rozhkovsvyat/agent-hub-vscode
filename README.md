@@ -1,63 +1,51 @@
-<h1 align="center">Continue</h1>
-
-<p align="center">Pioneering open-source coding agent</p>
-
 <div align="center">
 
-<a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" /></a>
-<a href="https://docs.continue.dev"><img src="https://img.shields.io/badge/Docs-docs.continue.dev-blue" /></a>
-<a href="https://github.com/continuedev/continue/releases"><img src="https://img.shields.io/badge/Changelog-GitHub_Releases-blue" /></a>
+![Cukii Chat](https://raw.githubusercontent.com/rozhkovsvyat/agent-hub-vscode/cukii/trunk/extensions/vscode/media/icon.png)
+
+<h1 align="center">Cukii Chat</h1>
+
+**One chat for every AI coding CLI you already pay for**
+
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=cukii.cukii-vscode)
 
 </div>
 
-<p align="center">
-  <img src="media/github-readme.png" alt="Banner" />
-</p>
+Cukii Chat is a VS Code extension that puts the official command-line agents — Claude Code, Codex, Qwen Code, Grok, Cursor and Kimi — behind one chat panel. It runs the unmodified vendor CLIs under your own accounts; it does not proxy your traffic or resell access.
 
-## What is Continue?
+The user guide is the [extension README](./extensions/vscode/README.md). This file is for people working on the code.
 
-> _Note: The `continuedev/continue` repository is no longer actively maintained and is read-only for all users._
+## Repository layout
 
-Continue is a coding agent available as a [CLI](#cli), [VS Code extension](#vs-code), and [JetBrains plugin](#jetbrains).
+| Path                                                             | What lives there                                                                                    |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `extensions/vscode/`                                             | The VS Code extension host side: activation, vendor runs, accounts, usage, bug reports              |
+| `gui/`                                                           | The chat webview (React + Vite)                                                                     |
+| `core/`                                                          | Shared runtime, inherited from Continue and being trimmed down                                      |
+| `packages/`                                                      | Small shared packages (config types, fetch, …)                                                      |
+| [`vendor-bridge`](https://github.com/rozhkovsvyat/vendor-bridge) | Separate repository, pinned by tag: spawns the vendor CLIs and turns their streams into chat events |
 
-## Documentation
+## Build and test
 
-To learn how to configure Continue, how it works, and how to customize it, check out the [Continue Docs](https://docs.continue.dev).
+Requires Node.js 20+.
 
-## Final 2.0.0 Release
+```sh
+npm install                      # root
+(cd core && npm install)
+(cd gui && npm install && npm run build)
+(cd extensions/vscode && npm install)
 
-We polished Continue and did a final 2.0.0 release of the VS Code extension, CLI, and JetBrains plugin.
+(cd gui && npx vitest run)                       # GUI tests
+(cd extensions/vscode && npx vitest run)         # extension tests
+(cd extensions/vscode && npm run tsc:check)      # types
+(cd extensions/vscode && node scripts/package-cross-target.js --target darwin-arm64)  # a VSIX
+```
 
-This included removing anonymous telemetry, pulling out authentication, squashing bugs, and more.
+Run the extension from source with the `Launch extension` debug configuration in VS Code.
 
-### VS Code
+## Feedback
 
-[![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-007ACC?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=Continue.continue) [![OpenVSX Registry](https://img.shields.io/badge/OpenVSX_Registry-C160EF?logo=eclipseide&logoColor=white)](https://open-vsx.org/extension/Continue/continue) [![View source](https://img.shields.io/badge/View_source-181717?logo=github&logoColor=white)](extensions/vscode)
+Use **Report a bug** inside the chat — it attaches sanitised diagnostics. Security issues: see [SECURITY.md](./SECURITY.md).
 
-### CLI
+## License and origin
 
-[![npm](https://img.shields.io/badge/npm-CB3837?logo=npm&logoColor=white)](https://www.npmjs.com/package/@continuedev/cli) [![View source](https://img.shields.io/badge/View_source-181717?logo=github&logoColor=white)](extensions/cli)
-
-### JetBrains
-
-> _Note: We recommend using the Continue CLI instead of the JetBrains plugin._
-
-[![GitHub Releases](https://img.shields.io/badge/GitHub_Releases-181717?logo=github&logoColor=white)](https://github.com/continuedev/continue/releases) [![View source](https://img.shields.io/badge/View_source-181717?logo=github&logoColor=white)](extensions/intellij)
-
-## Contributors
-
-Thank you to the entire Continue community for helping us create a pioneering coding agent.
-
-What we built together pushed the boundaries of what AI developer tooling could be.
-
-We hope this codebase continues to serve as a foundation for others.
-
-## Code friends
-
-<a href="https://github.com/continuedev/continue/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=continuedev/continue&max=500" />
-</a>
-
-## License
-
-Apache 2.0 © 2023-2026 Continue Dev, Inc.
+Apache-2.0 — see [LICENSE](./LICENSE) and [NOTICE](./extensions/vscode/NOTICE). Cukii Chat started as a fork of [Continue](https://github.com/continuedev/continue) and is not affiliated with it, nor with any of the vendors whose CLIs it runs.

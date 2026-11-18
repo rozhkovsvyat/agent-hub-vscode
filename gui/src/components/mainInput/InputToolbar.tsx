@@ -1,30 +1,102 @@
 import {
-  AtSymbolIcon,
-  LightBulbIcon as LightBulbIconOutline,
-  PhotoIcon,
+  ArrowPathIcon,
+  ArrowUpTrayIcon,
+  ArrowUpIcon,
+  DocumentPlusIcon,
+  PencilIcon,
 } from "@heroicons/react/24/outline";
-import { LightBulbIcon as LightBulbIconSolid } from "@heroicons/react/24/solid";
 import { InputModifiers } from "core";
+import { CUKII_DEFAULT_BROKER_MODEL } from "core/cukiiAlibabaCatalog";
 import {
-  modelSupportsImages,
-  modelSupportsReasoning,
-} from "core/llm/autodetect";
-import { memo, useContext, useRef } from "react";
+  brokerVendorForModel,
+  resolvePermissionModeForVendor,
+} from "core/cukiiPermissionModes";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { brokerModelLabel } from "../../redux/util/getBaseSystemMessage";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { selectUseActiveFile } from "../../redux/selectors";
-import { selectSelectedChatModel } from "../../redux/slices/configSlice";
-import { setHasReasoningEnabled } from "../../redux/slices/sessionSlice";
-import { setReasoningSetting } from "../../redux/slices/uiSlice";
+import {
+  newSession,
+  reconcileRestoredPermissionMode,
+  setBrokerAutocompact,
+  setBrokerEffort,
+  setBrokerModel,
+  switchBrokerModel,
+  setBrokerModelScope,
+  setBrokerPermissionMode,
+  setBrokerSpeed,
+  setBrokerSubagent,
+  setHasReasoningEnabled,
+} from "../../redux/slices/sessionSlice";
+import type {
+  BrokerAutocompact,
+  BrokerEffort,
+  BrokerModel,
+  BrokerModelScope,
+  BrokerSpeed,
+  BrokerSubagent,
+  CukiiPermissionMode,
+} from "../../redux/slices/sessionSlice";
+import type {
+  BrokerVendorId,
+  BrokerVendorModelCatalog,
+  CukiiIssueReportCapability,
+  CukiiPickedFile,
+} from "core/protocol/ideWebview";
+import { cancelStream } from "../../redux/thunks/cancelStream";
 import { exitEdit } from "../../redux/thunks/edit";
-import { getMetaKeyLabel, isMetaEquivalentKeyPressed } from "../../util";
+import { saveCurrentSession } from "../../redux/thunks/session";
+import { isMetaEquivalentKeyPressed } from "../../util";
+import { shouldPlaceModelPillOnOwnRow } from "./composerFooterLayout";
 import { ToolTip } from "../gui/Tooltip";
-import ModelSelect from "../modelSelection/ModelSelect";
-import { ModeSelect } from "../ModeSelect";
-import { Button } from "../ui";
+import { ModelPickerModal } from "../modelSelection/ModelPickerModal";
+import { ReportIssueModal } from "../reportIssue/ReportIssueModal";
+import { VendorAccountsModal } from "../vendorAccounts/VendorAccountsModal";
+import {
+  displayModelLabel,
+  EFFORT_LABELS,
+  applyRuntimeVendorCatalog,
+  modelInfo,
+  normalizeEffortForModel,
+  supportsNativeSpeed,
+  supportsNativeThinking,
+} from "../modelSelection/vendors";
+import { Button, Popover, PopoverButton, PopoverPanel } from "../ui";
 import { useFontSize } from "../ui/font";
-import ContextStatus from "./ContextStatus";
-import HoverItem from "./InputToolbar/HoverItem";
+import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
+import {
+  autocompactPillLabel,
+  CukiiAutocompactRow,
+} from "../cukii/CukiiAutocompactRow";
+import { PermissionModeControl } from "./PermissionModeControl";
+
+const ISSUE_CAPABILITY_REFRESH_MS = 60_000;
+const ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS = [2_000, 5_000, 15_000] as const;
+
+export function availableModelForBlankSession(
+  current: BrokerModel | undefined,
+  catalog: BrokerVendorModelCatalog[],
+): BrokerModel | undefined {
+  const available = catalog.flatMap((vendor) =>
+    vendor.models.filter((model) => !model.disabled),
+  );
+  if (current && available.some((model) => model.value === current)) {
+    return current;
+  }
+  return available[0]?.value;
+}
 
 export interface ToolbarOptions {
   hideUseCodebase?: boolean;
@@ -37,215 +109,954 @@ export interface ToolbarOptions {
 interface InputToolbarProps {
   onEnter?: (modifiers: InputModifiers) => void;
   onAddContextItem?: () => void;
+  onFilesSelected?: (files: CukiiPickedFile[]) => void;
   onClick?: () => void;
-  onImageFileSelected?: (file: File) => void;
   hidden?: boolean;
   activeKey: string | null;
   toolbarOptions?: ToolbarOptions;
   disabled?: boolean;
   isMainInput?: boolean;
+  isInputEmpty?: boolean;
+}
+
+const menuItemClass =
+  "cukii-menu-item flex w-full min-w-0 items-center justify-between gap-3 text-left text-[13px] text-[var(--vscode-foreground)] hover:bg-[var(--vscode-list-hoverBackground)] disabled:cursor-default disabled:opacity-45";
+
+const commandSectionHeaderClass =
+  "cukii-command-section-header px-3 pb-1 pt-2 text-xs font-normal leading-4 text-[var(--vscode-descriptionForeground)]";
+const commandSectionDividerClass =
+  "cukii-command-section-divider mx-0 my-1 border-0 border-t border-solid border-[var(--vscode-menu-separatorBackground)]";
+const activeCommandItemClass =
+  "cukii-command-menu-item-active bg-[var(--vscode-list-activeSelectionBackground)] text-[var(--vscode-list-activeSelectionForeground)]";
+
+function CommandSectionHeader(props: { children: string; divided?: boolean }) {
+  return (
+    <>
+      {props.divided && (
+        <div
+          aria-hidden="true"
+          className={commandSectionDividerClass}
+          data-testid="cukii-command-section-divider"
+        />
+      )}
+      <div
+        className={commandSectionHeaderClass}
+        data-command-section={props.children}
+      >
+        {props.children}
+      </div>
+    </>
+  );
+}
+
+function AddControlIcon() {
+  return (
+    <svg className="cukii-footer-icon" viewBox="0 0 20 20" fill="none">
+      <path
+        d="M10 5C10.2761 5 10.5 5.22386 10.5 5.5V9.5H14.5C14.7761 9.5 15 9.72386 15 10C15 10.2417 14.8286 10.4437 14.6006 10.4902L14.5 10.5H10.5V14.5C10.5 14.7761 10.2761 15 10 15C9.72386 15 9.5 14.7761 9.5 14.5V10.5H5.5L5.39941 10.4902C5.17145 10.4437 5 10.2417 5 10C5 9.75829 5.17145 9.55629 5.39941 9.50977L5.5 9.5H9.5V5.5C9.5 5.22386 9.72386 5 10 5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function CommandControlIcon() {
+  return (
+    <svg className="cukii-footer-icon" viewBox="0 0 20 20" fill="none">
+      <path
+        d="M14 4.5C14.8284 4.5 15.5 5.17157 15.5 6V14C15.5 14.8284 14.8284 15.5 14 15.5H6C5.17157 15.5 4.5 14.8284 4.5 14V6C4.5 5.17157 5.17157 4.5 6 4.5H14ZM6 5.5C5.72386 5.5 5.5 5.72386 5.5 6V14L5.50977 14.1006C5.55629 14.3286 5.75829 14.5 6 14.5H14L14.1006 14.4902C14.2961 14.4503 14.4503 14.2961 14.4902 14.1006L14.5 14V6C14.5 5.75829 14.3286 5.55629 14.1006 5.50977L14 5.5H6ZM11.0527 6.77734C11.1762 6.53042 11.4767 6.4294 11.7236 6.55273C11.9704 6.67627 12.0706 6.97676 11.9473 7.22363L8.94727 13.2236C8.82381 13.4701 8.52409 13.5701 8.27734 13.4473C8.03042 13.3238 7.9294 13.0233 8.05273 12.7764L11.0527 6.77734Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
 }
 
 function InputToolbar(props: InputToolbarProps) {
   const dispatch = useAppDispatch();
   const ideMessenger = useContext(IdeMessengerContext);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const defaultModel = useAppSelector(selectSelectedChatModel);
   const useActiveFile = useAppSelector(selectUseActiveFile);
-  const isInEdit = useAppSelector((store) => store.session.isInEdit);
-  const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
-  const hasReasoningEnabled = useAppSelector(
-    (store) => store.session.hasReasoningEnabled,
+  const isInEdit = useAppSelector((state) => state.session.isInEdit);
+  const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const historyLength = useAppSelector((state) => state.session.history.length);
+  const brokerModel = useAppSelector((state) => state.session.brokerModel);
+  const sessionId = useAppSelector((state) => state.session.id);
+  const brokerSubagent = useAppSelector(
+    (state) => state.session.brokerSubagent,
   );
-  const isEnterDisabled =
-    props.disabled || (isInEdit && codeToEdit.length === 0);
+  const brokerEffort = useAppSelector((state) => state.session.brokerEffort);
+  const brokerSpeed = useAppSelector((state) => state.session.brokerSpeed);
+  const brokerAutocompact = useAppSelector(
+    (state) => state.session.brokerAutocompact,
+  );
+  const brokerModelScope = useAppSelector(
+    (state) => state.session.brokerModelScope ?? "best",
+  );
+  const hasReasoningEnabled = useAppSelector(
+    (state) => state.session.hasReasoningEnabled,
+  );
+  const brokerPermissionMode = useAppSelector(
+    (state) => state.session.brokerPermissionMode,
+  );
+  const codeToEdit = useAppSelector((state) => state.editModeState.codeToEdit);
+  const restoredPanelDraft = useRef(false);
+  const [panelDraftResolved, setPanelDraftResolved] = useState(false);
+  const reconciledCatalogSession = useRef<string>();
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelCatalogAvailability, setModelCatalogAvailability] = useState<
+    "loading" | "available" | "empty" | "unavailable"
+  >("loading");
+  const selectedVendor = brokerVendorForModel(
+    brokerModel ?? CUKII_DEFAULT_BROKER_MODEL,
+  );
+  const [permissionCapabilities, setPermissionCapabilities] = useState<{
+    vendor: BrokerVendorId;
+    supportedModes: CukiiPermissionMode[];
+    route?: string;
+    generation?: number;
+  } | null>(null);
+  const [vendorAccountsOpen, setVendorAccountsOpen] = useState(false);
+  const [catalogRefreshGeneration, setCatalogRefreshGeneration] = useState(0);
+  const [reportIssueOpen, setReportIssueOpen] = useState(false);
+  const [issueCapability, setIssueCapability] =
+    useState<CukiiIssueReportCapability>();
+  const [reportIssueAvailableForOpenMenu, setReportIssueAvailableForOpenMenu] =
+    useState(false);
+  const issueCapabilityGeneration = useRef(0);
+  const issueCapabilityRetryAttempt = useRef(0);
+  const [actionQuery, setActionQuery] = useState("");
+  const [activeCommandAction, setActiveCommandAction] = useState<string | null>(
+    null,
+  );
+  const commandMenuRef = useRef<HTMLDivElement | null>(null);
+  const commandMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const primaryActionsRef = useRef<HTMLDivElement | null>(null);
+  const [modelPillOnOwnRow, setModelPillOnOwnRow] = useState(false);
 
-  const supportsImages =
-    defaultModel &&
-    modelSupportsImages(
-      defaultModel.provider,
-      defaultModel.model,
-      defaultModel.title,
-      defaultModel.capabilities,
+  const refreshIssueCapability = useCallback(
+    async (force = false) => {
+      if (!props.isMainInput) return;
+      const generation = ++issueCapabilityGeneration.current;
+      try {
+        const response = await ideMessenger.request(
+          "cukii/getIssueReportCapability",
+          { force },
+        );
+        if (
+          generation === issueCapabilityGeneration.current &&
+          response.status === "success"
+        ) {
+          setIssueCapability(response.content);
+        }
+      } catch {
+        if (generation === issueCapabilityGeneration.current) {
+          setIssueCapability({ available: false, reason: "unreachable" });
+        }
+      }
+    },
+    [ideMessenger, props.isMainInput],
+  );
+
+  useEffect(() => {
+    void refreshIssueCapability();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        void refreshIssueCapability();
+      }
+    };
+    const interval = window.setInterval(
+      refreshWhenVisible,
+      ISSUE_CAPABILITY_REFRESH_MS,
     );
+    window.addEventListener("focus", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      issueCapabilityGeneration.current += 1;
+    };
+  }, [refreshIssueCapability]);
 
-  const supportsReasoning = modelSupportsReasoning(defaultModel);
+  useEffect(() => {
+    if (!props.isMainInput) return;
+    if (issueCapability?.reason !== "unreachable") {
+      issueCapabilityRetryAttempt.current = 0;
+      return;
+    }
+
+    const attempt = issueCapabilityRetryAttempt.current;
+    const delay =
+      ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS[
+        Math.min(attempt, ISSUE_CAPABILITY_UNREACHABLE_RETRY_MS.length - 1)
+      ];
+    const timeout = window.setTimeout(() => {
+      issueCapabilityRetryAttempt.current = attempt + 1;
+      void refreshIssueCapability(true);
+    }, delay);
+    return () => window.clearTimeout(timeout);
+  }, [issueCapability, props.isMainInput, refreshIssueCapability]);
+
+  useEffect(() => {
+    if (modelCatalogAvailability !== "available") {
+      setPermissionCapabilities(null);
+      return;
+    }
+    let cancelled = false;
+    setPermissionCapabilities(null);
+    void ideMessenger
+      .request("cukii/getPermissionCapabilities", { vendor: selectedVendor })
+      .then((response) => {
+        if (cancelled || response.status !== "success") return;
+        if (response.content.vendor !== selectedVendor) return;
+        setPermissionCapabilities(response.content);
+      })
+      .catch(() => {
+        // Keep the current preference, but advertise no unverified mode.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ideMessenger, modelCatalogAvailability, selectedVendor]);
+
+  const updateBrokerPreferences = (
+    nextModel: BrokerModel,
+    nextSubagent: BrokerSubagent,
+    nextEffort: BrokerEffort = brokerEffort,
+    nextSpeed: BrokerSpeed = brokerSpeed,
+    nextThinking: boolean = hasReasoningEnabled,
+    nextAutocompact: BrokerAutocompact = brokerAutocompact,
+    nextPermissionMode: CukiiPermissionMode = brokerPermissionMode,
+  ) => {
+    const resolvedEffort = normalizeEffortForModel(nextModel, nextEffort);
+    const vendor = brokerVendorForModel(nextModel);
+    const capability =
+      permissionCapabilities?.vendor === vendor
+        ? permissionCapabilities
+        : undefined;
+    // An empty snapshot means discovery failed, not that the vendor has no
+    // modes: never resolve the user's intent down against it. Route dispatch
+    // performs the same live probe before process creation.
+    const verifiedCapability =
+      capability && capability.supportedModes.length > 0
+        ? capability
+        : undefined;
+    const targetCapabilities = {
+      vendor,
+      supportedModes: verifiedCapability?.supportedModes ?? [],
+      helpSource: verifiedCapability ? "live" : "pending",
+    };
+    // While the probe is pending preserve intent without claiming support.
+    const resolvedPermissionMode = !verifiedCapability
+      ? nextPermissionMode
+      : resolvePermissionModeForVendor(targetCapabilities, nextPermissionMode);
+    dispatch(
+      switchBrokerModel({
+        model: nextModel,
+        displayName: modelInfo(nextModel)?.label ?? nextModel,
+      }),
+    );
+    dispatch(setBrokerSubagent(nextSubagent));
+    dispatch(setBrokerEffort(resolvedEffort));
+    dispatch(setBrokerSpeed(nextSpeed));
+    dispatch(setBrokerAutocompact(nextAutocompact));
+    dispatch(setHasReasoningEnabled(nextThinking));
+    dispatch(setBrokerPermissionMode(resolvedPermissionMode));
+    // VS Code webview state is scoped to this panel/tab. It deliberately
+    // carries a blank-tab draft without writing history metadata or sharing
+    // it through extension globalState with another blank tab.
+    window.cukiiVscode?.setState({
+      ...(window.cukiiVscode?.getState() ?? {}),
+      cukiiBrokerDraft: {
+        brokerModel: nextModel,
+        brokerSubagent: nextSubagent,
+        brokerEffort: resolvedEffort,
+        brokerSpeed: nextSpeed,
+        brokerAutocompact: nextAutocompact,
+        brokerModelScope,
+        thinkingEnabled: nextThinking,
+        brokerPermissionMode: resolvedPermissionMode,
+      },
+    });
+    if (historyLength > 0) {
+      ideMessenger.post("cukii/setBrokerPreferences", {
+        brokerModel: nextModel,
+        brokerSubagent: nextSubagent,
+        brokerEffort: resolvedEffort,
+        brokerSpeed: nextSpeed,
+        brokerAutocompact: nextAutocompact,
+        thinkingEnabled: nextThinking,
+        brokerPermissionMode: resolvedPermissionMode,
+        mode: "broker",
+      });
+      void dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (restoredPanelDraft.current) return;
+    if (historyLength > 0) {
+      restoredPanelDraft.current = true;
+      setPanelDraftResolved(true);
+      return;
+    }
+    restoredPanelDraft.current = true;
+    const draft = window.cukiiVscode?.getState()?.cukiiBrokerDraft as
+      | Partial<{
+          brokerModel: BrokerModel;
+          brokerSubagent: BrokerSubagent;
+          brokerEffort: BrokerEffort;
+          brokerSpeed: BrokerSpeed;
+          brokerAutocompact: BrokerAutocompact;
+          brokerModelScope: BrokerModelScope;
+          thinkingEnabled: boolean;
+          brokerPermissionMode: CukiiPermissionMode;
+        }>
+      | undefined;
+    if (!draft) {
+      setPanelDraftResolved(true);
+      return;
+    }
+    const restoredModel =
+      draft.brokerModel ?? brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
+    if (draft.brokerModel) dispatch(setBrokerModel(draft.brokerModel));
+    if (draft.brokerSubagent) dispatch(setBrokerSubagent(draft.brokerSubagent));
+    if (draft.brokerEffort) dispatch(setBrokerEffort(draft.brokerEffort));
+    if (draft.brokerSpeed) dispatch(setBrokerSpeed(draft.brokerSpeed));
+    if (draft.brokerAutocompact) {
+      dispatch(setBrokerAutocompact(draft.brokerAutocompact));
+    }
+    if (draft.brokerModelScope === "all" || draft.brokerModelScope === "best") {
+      dispatch(setBrokerModelScope(draft.brokerModelScope));
+    }
+    if (typeof draft.thinkingEnabled === "boolean") {
+      dispatch(setHasReasoningEnabled(draft.thinkingEnabled));
+    }
+    if (draft.brokerPermissionMode) {
+      const reconciled = reconcileRestoredPermissionMode(
+        restoredModel,
+        draft.brokerPermissionMode,
+      );
+      dispatch(setBrokerPermissionMode(reconciled));
+      if (reconciled !== draft.brokerPermissionMode) {
+        window.cukiiVscode?.setState({
+          ...(window.cukiiVscode?.getState() ?? {}),
+          cukiiBrokerDraft: { ...draft, brokerPermissionMode: reconciled },
+        });
+      }
+    }
+    setPanelDraftResolved(true);
+  }, [brokerModel, dispatch, historyLength]);
+
+  useEffect(() => {
+    if (
+      !props.isMainInput ||
+      !panelDraftResolved ||
+      reconciledCatalogSession.current === sessionId
+    ) {
+      return;
+    }
+    let cancelled = false;
+    setModelCatalogAvailability("loading");
+    void ideMessenger
+      .request("cukii/listBrokerModelCatalog", undefined)
+      .then((response) => {
+        if (cancelled || response.status !== "success") return;
+        applyRuntimeVendorCatalog(response.content);
+        const available = availableModelForBlankSession(
+          brokerModel,
+          response.content,
+        );
+        reconciledCatalogSession.current = sessionId;
+        setModelCatalogAvailability(available ? "available" : "empty");
+        if (historyLength === 0 && available && available !== brokerModel) {
+          updateBrokerPreferences(available, "auto");
+        }
+      })
+      .catch(() => {
+        // A failed catalog probe is not evidence that another model is usable.
+        if (!cancelled) {
+          reconciledCatalogSession.current = sessionId;
+          setModelCatalogAvailability("unavailable");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    brokerModel,
+    catalogRefreshGeneration,
+    historyLength,
+    ideMessenger,
+    panelDraftResolved,
+    props.isMainInput,
+    sessionId,
+  ]);
+
+  const isEnterDisabled =
+    !isStreaming && (props.disabled || (isInEdit && codeToEdit.length === 0));
+  const isRetry = props.toolbarOptions?.enterText === "Retry";
+  const showStop = isStreaming && (props.isInputEmpty ?? true);
+  const hasLiveBrokerModel = modelCatalogAvailability === "available";
+  const currentModel = brokerModel ?? CUKII_DEFAULT_BROKER_MODEL;
+  const currentModelInfo = modelInfo(currentModel);
+  // Cursor re-serves Anthropic/Moonshot/xAI models under the same names; the
+  // pill must say which route runs, or a Cursor quota error reads as a broken
+  // Opus (card 6f333f93).
+  // A model can drop out of the live catalog (Alibaba without a key) while
+  // the session still runs on it: name it, never another model.
+  const currentLabel =
+    (currentModelInfo
+      ? displayModelLabel(currentModelInfo)
+      : brokerModelLabel(currentModel)) +
+    (currentModel.startsWith("cursor:") ? " · Cursor" : "");
+  const nativeFastAvailable = supportsNativeSpeed(currentModel);
+  const nativeThinkingAvailable = supportsNativeThinking(currentModel);
+  /**
+   * Everything the pill says after the model name: effort, then "Fast" only
+   * when the route actually has an accelerated tier and it is on, then the
+   * autocompact share unless it is left at Default. Absent facts are dropped
+   * rather than rendered as placeholders — a pill reading "Fast" when fast is
+   * unavailable would be a lie, and "Default" adds nothing.
+   */
+  const pillDetail = [
+    EFFORT_LABELS[normalizeEffortForModel(currentModel, brokerEffort)],
+    nativeFastAvailable && brokerSpeed === "fast" ? "Fast" : "",
+    autocompactPillLabel(brokerAutocompact),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // Claude moves the model pill to a dedicated row at its final fit stage.
+  // Cukii's first implementation let the left group wrap but kept the right
+  // controls vertically centred, so the two rows physically overlapped.  The
+  // wrapped height is the reliable signal because labels/theme fonts vary.
+  useLayoutEffect(() => {
+    const actions = primaryActionsRef.current;
+    if (!actions || isInEdit) {
+      setModelPillOnOwnRow(false);
+      return;
+    }
+    const update = () => {
+      setModelPillOnOwnRow((currentlyWrapped) =>
+        shouldPlaceModelPillOnOwnRow(
+          actions.getBoundingClientRect().height,
+          currentlyWrapped,
+        ),
+      );
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, [isInEdit, currentLabel, pillDetail]);
 
   const smallFont = useFontSize(-2);
-  const tinyFont = useFontSize(-3);
+  const showAction = (label: string) =>
+    label.toLowerCase().includes(actionQuery.trim().toLowerCase());
+  useEffect(() => setActiveCommandAction(null), [actionQuery]);
+  const commandActionProps = (label: string) => ({
+    "data-cukii-command-action": label,
+    className: `${menuItemClass} cukii-command-menu-action ${activeCommandAction === label ? activeCommandItemClass : ""}`,
+    onMouseEnter: () => setActiveCommandAction(label),
+    onMouseLeave: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (document.activeElement !== event.currentTarget) {
+        setActiveCommandAction(null);
+      }
+    },
+    onFocus: () => setActiveCommandAction(label),
+  });
+  const onCommandMenuKeyDown = (event: ReactKeyboardEvent) => {
+    const actions = [
+      ...(commandMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button[data-cukii-command-action]:not(:disabled)",
+      ) ?? []),
+    ];
+    if ((event.key === "Enter" || event.key === " ") && activeCommandAction) {
+      const active = actions.find(
+        (item) => item.dataset.cukiiCommandAction === activeCommandAction,
+      );
+      if (active) {
+        event.preventDefault();
+        active.click();
+      }
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!actions.length) return;
+    event.preventDefault();
+    const currentIndex = actions.findIndex(
+      (item) => item.dataset.cukiiCommandAction === activeCommandAction,
+    );
+    const nextIndex =
+      event.key === "ArrowDown"
+        ? currentIndex < 0
+          ? 0
+          : (currentIndex + 1) % actions.length
+        : currentIndex < 0
+          ? actions.length - 1
+          : (currentIndex - 1 + actions.length) % actions.length;
+    actions[nextIndex].focus();
+  };
+
+  const pickFiles = async () => {
+    const result = await ideMessenger.request(
+      "cukii/pickAttachmentFiles",
+      undefined,
+    );
+    if (result.status === "success" && result.content.length > 0) {
+      props.onFilesSelected?.(result.content);
+    }
+  };
 
   return (
     <>
       <div
         onClick={props.onClick}
-        className={`find-widget-skip bg-vsc-input-background flex select-none flex-row items-center justify-between gap-1 pt-1 ${props.hidden ? "pointer-events-none h-0 cursor-default opacity-0" : "pointer-events-auto mt-2 cursor-text opacity-100"}`}
-        style={{
-          fontSize: smallFont,
-        }}
+        className={`cukii-input-footer find-widget-skip flex min-w-0 select-none items-center justify-between gap-2 border-t border-[var(--vscode-panel-border)] px-2 pb-1 pt-2 ${
+          modelPillOnOwnRow ? "cukii-input-footer--model-row" : ""
+        } ${
+          props.hidden
+            ? "pointer-events-none h-0 opacity-0"
+            : "pointer-events-auto mt-2 opacity-100"
+        }`}
+        style={{ fontSize: smallFont }}
       >
-        <div className="xs:gap-1.5 flex flex-row items-center gap-1">
-          {!isInEdit && (
-            <ToolTip place="top" content="Select Mode">
-              <HoverItem className="!p-0">
-                <ModeSelect />
-              </HoverItem>
-            </ToolTip>
-          )}
-          <ToolTip place="top" content="Select Model">
-            <HoverItem className="!p-0">
-              <ModelSelect />
-            </HoverItem>
-          </ToolTip>
-          <div className="xs:flex text-description -mb-1 hidden items-center transition-colors duration-200">
-            {props.toolbarOptions?.hideImageUpload ||
-              (supportsImages && (
-                <>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    style={{ display: "none" }}
-                    accept=".jpg,.jpeg,.png,.gif,.svg,.webp"
-                    onChange={(e) => {
-                      const files = e.target?.files ?? [];
-                      for (const file of files) {
-                        props.onImageFileSelected?.(file);
-                      }
-                      if (fileInputRef.current) {
-                        fileInputRef.current.value = "";
-                      }
-                    }}
-                  />
-
-                  <ToolTip place="top" content="Attach Image">
-                    <HoverItem className="">
-                      <PhotoIcon
-                        className="h-3 w-3 hover:brightness-125"
-                        onClick={(e) => {
-                          fileInputRef.current?.click();
-                        }}
-                      />
-                    </HoverItem>
-                  </ToolTip>
-                </>
-              ))}
-            {props.toolbarOptions?.hideAddContext || (
-              <ToolTip place="top" content="Attach Context">
-                <HoverItem onClick={props.onAddContextItem}>
-                  <AtSymbolIcon className="h-3 w-3 hover:brightness-125" />
-                </HoverItem>
-              </ToolTip>
-            )}
-            {supportsReasoning && (
-              <HoverItem
-                onClick={() => {
-                  dispatch(setHasReasoningEnabled(!hasReasoningEnabled));
-                  if (defaultModel?.title) {
-                    dispatch(
-                      setReasoningSetting({
-                        modelTitle: defaultModel.title,
-                        enabled: !hasReasoningEnabled,
-                      }),
-                    );
-                  }
-                }}
-              >
-                <ToolTip
-                  place="top"
-                  content={
-                    hasReasoningEnabled
-                      ? "Disable model reasoning"
-                      : "Enable model reasoning"
-                  }
-                >
-                  {hasReasoningEnabled ? (
-                    <LightBulbIconSolid className="h-3 w-3 brightness-200 hover:brightness-150" />
-                  ) : (
-                    <LightBulbIconOutline className="h-3 w-3 hover:brightness-150" />
-                  )}
-                </ToolTip>
-              </HoverItem>
-            )}
-          </div>
-        </div>
-
+        {/* Claude fit-stage parity: controls never overlap — the pill wraps
+            to its own line inside the left group when the width runs out. */}
         <div
-          className="text-description flex items-center gap-2 whitespace-nowrap"
-          style={{
-            fontSize: tinyFont,
-          }}
+          ref={primaryActionsRef}
+          className="cukii-footer-primary-actions flex min-w-0 flex-1 flex-wrap items-center gap-1 gap-y-[3px]"
         >
-          {!isInEdit && <ContextStatus />}
-          {!props.toolbarOptions?.hideUseCodebase && !isInEdit && (
-            <div className="hidden transition-colors duration-200 hover:underline md:flex">
-              <HoverItem
-                className={
-                  props.activeKey === "Meta" ||
-                  props.activeKey === "Control" ||
-                  props.activeKey === "Alt"
-                    ? "underline"
-                    : ""
-                }
-                onClick={(e) =>
-                  props.onEnter?.({
-                    useCodebase: false,
-                    noContext: !useActiveFile,
-                  })
-                }
+          {!isInEdit && (
+            <Popover className="relative">
+              <PopoverButton
+                data-testid="cukii-attach-menu-button"
+                className="cukii-icon-button flex items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+                aria-label="Attach"
+                title="Add"
               >
-                <ToolTip
-                  place="top-end"
-                  content={`${
-                    useActiveFile
-                      ? "Send Without Active File"
-                      : "Send With Active File"
-                  } (${getMetaKeyLabel()}⏎)`}
-                >
-                  <span>
-                    {getMetaKeyLabel()}⏎{" "}
-                    {useActiveFile ? "No active file" : "Active file"}
-                  </span>
-                </ToolTip>
-              </HoverItem>
-            </div>
+                <AddControlIcon />
+              </PopoverButton>
+              <PopoverPanel className="cukii-menu-surface absolute bottom-full left-0 z-[1000] mb-2 w-64 rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-xl">
+                {({ close }) => (
+                  <>
+                    <button
+                      className={menuItemClass}
+                      type="button"
+                      onClick={() => {
+                        close();
+                        void pickFiles();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <ArrowUpTrayIcon className="h-[17px] w-[17px]" /> Upload
+                        from computer
+                      </span>
+                    </button>
+                    <button
+                      className={menuItemClass}
+                      type="button"
+                      onClick={() => {
+                        close();
+                        props.onAddContextItem?.();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <DocumentPlusIcon className="h-[17px] w-[17px]" /> Add
+                        context
+                      </span>
+                    </button>
+                  </>
+                )}
+              </PopoverPanel>
+            </Popover>
           )}
+
+          {!isInEdit && (
+            <Popover className="relative">
+              <PopoverButton
+                ref={commandMenuButtonRef}
+                data-testid="broker-menu-button"
+                onClick={() => {
+                  setActionQuery("");
+                  setActiveCommandAction(null);
+                  // Freeze membership for this opening. Capability probes run
+                  // ahead of the interaction and replace state atomically; an
+                  // async response must never insert/remove a row underneath
+                  // the pointer while the menu is already open.
+                  setReportIssueAvailableForOpenMenu(
+                    issueCapability?.available === true,
+                  );
+                }}
+                className="cukii-icon-button flex items-center justify-center rounded text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+                aria-label="Commands and model"
+                title="Show command menu (/)"
+              >
+                <CommandControlIcon />
+              </PopoverButton>
+              <PopoverPanel className="cukii-command-menu cukii-menu-surface absolute bottom-full left-[-28px] z-[1000] mb-2 max-h-[min(62vh,520px)] overflow-y-auto overflow-x-hidden rounded-md border border-[var(--vscode-widget-border)] bg-[var(--vscode-menu-background)] p-1 shadow-2xl">
+                {({ close }) => (
+                  <div
+                    ref={commandMenuRef}
+                    data-testid="cukii-slash-menu"
+                    onKeyDown={onCommandMenuKeyDown}
+                  >
+                    <div className="sticky top-0 z-10 bg-[var(--vscode-menu-background)] p-1">
+                      <input
+                        autoFocus
+                        value={actionQuery}
+                        onChange={(event) => setActionQuery(event.target.value)}
+                        placeholder="Filter actions..."
+                        className="cukii-menu-filter w-full rounded border border-[var(--vscode-input-border)] bg-[var(--vscode-input-background)] px-3 py-2 text-[13px] text-[var(--vscode-input-foreground)] outline-none focus:border-[var(--vscode-focusBorder)]"
+                      />
+                    </div>
+                    <CommandSectionHeader>Context</CommandSectionHeader>
+                    {showAction("Attach file") && (
+                      <button
+                        {...commandActionProps("Attach file")}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          void pickFiles();
+                        }}
+                      >
+                        Attach file…
+                      </button>
+                    )}
+                    {showAction("Mention file from this project") && (
+                      <button
+                        {...commandActionProps(
+                          "Mention file from this project",
+                        )}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          props.onAddContextItem?.();
+                        }}
+                      >
+                        Mention file from this project…
+                      </button>
+                    )}
+                    {showAction("Clear conversation") && (
+                      <button
+                        {...commandActionProps("Clear conversation")}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          dispatch(newSession());
+                        }}
+                      >
+                        Clear conversation
+                      </button>
+                    )}
+                    <CommandSectionHeader divided>Model</CommandSectionHeader>
+                    {hasLiveBrokerModel && showAction("Switch model") && (
+                      <button
+                        data-testid="broker-switch-model"
+                        {...commandActionProps("Switch model")}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          setModelPickerOpen(true);
+                        }}
+                      >
+                        <span className="min-w-0 truncate">Switch model…</span>
+                        <span className="min-w-0 shrink truncate text-[var(--vscode-descriptionForeground)]">
+                          {currentLabel}
+                        </span>
+                      </button>
+                    )}
+                    {hasLiveBrokerModel && showAction("Autocompact") && (
+                      <CukiiAutocompactRow
+                        className={menuItemClass}
+                        autocompact={brokerAutocompact}
+                        onAutocompactChange={(nextAutocompact) =>
+                          updateBrokerPreferences(
+                            currentModel,
+                            brokerSubagent ?? "auto",
+                            brokerEffort,
+                            brokerSpeed,
+                            undefined,
+                            nextAutocompact,
+                          )
+                        }
+                      />
+                    )}
+                    {hasLiveBrokerModel && showAction("Effort") && (
+                      <CukiiEffortRow
+                        className={`${menuItemClass} cukii-effort-menu-row`}
+                        model={currentModel}
+                        effort={brokerEffort}
+                        onEffortChange={(nextEffort) =>
+                          updateBrokerPreferences(
+                            currentModel,
+                            brokerSubagent ?? "auto",
+                            nextEffort,
+                            brokerSpeed,
+                          )
+                        }
+                      />
+                    )}
+                    {hasLiveBrokerModel &&
+                      nativeThinkingAvailable &&
+                      showAction("Thinking") && (
+                        <button
+                          data-testid="cukii-thinking-toggle"
+                          {...commandActionProps("Thinking")}
+                          type="button"
+                          role="switch"
+                          aria-checked={hasReasoningEnabled}
+                          title="Enable or disable the vendor's native reasoning mode"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateBrokerPreferences(
+                              currentModel,
+                              brokerSubagent ?? "auto",
+                              brokerEffort,
+                              brokerSpeed,
+                              !hasReasoningEnabled,
+                            );
+                          }}
+                        >
+                          <span>Thinking</span>
+                          <span
+                            data-testid="cukii-thinking-track"
+                            className={`cukii-toggle-track ${hasReasoningEnabled ? "cukii-toggle-track-on" : ""}`}
+                          >
+                            <span className="cukii-toggle-thumb" />
+                          </span>
+                        </button>
+                      )}
+                    {/* A route without a native accelerated tier shows no row
+                        at all instead of a permanently disabled one. */}
+                    {hasLiveBrokerModel &&
+                      nativeFastAvailable &&
+                      showAction("Fast mode") && (
+                        <button
+                          data-testid="cukii-speed-toggle"
+                          {...commandActionProps("Fast mode")}
+                          type="button"
+                          role="switch"
+                          aria-checked={brokerSpeed === "fast"}
+                          title="Use the vendor's native accelerated service tier"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            updateBrokerPreferences(
+                              currentModel,
+                              brokerSubagent ?? "auto",
+                              brokerEffort,
+                              brokerSpeed === "fast" ? "standard" : "fast",
+                            );
+                          }}
+                        >
+                          <span>Fast mode</span>
+                          <span
+                            data-testid="cukii-speed-track"
+                            className={`cukii-toggle-track ${brokerSpeed === "fast" ? "cukii-toggle-track-on" : ""}`}
+                          >
+                            <span className="cukii-toggle-thumb" />
+                          </span>
+                        </button>
+                      )}
+                    {showAction("Manage accounts") && (
+                      <button
+                        {...commandActionProps("Manage accounts")}
+                        type="button"
+                        onClick={() => {
+                          close();
+                          setVendorAccountsOpen(true);
+                        }}
+                      >
+                        Manage accounts…
+                      </button>
+                    )}
+                    {props.isMainInput &&
+                      reportIssueAvailableForOpenMenu &&
+                      showAction("Report an issue") && (
+                        <button
+                          data-testid="cukii-report-issue-menu-item"
+                          {...commandActionProps("Report an issue")}
+                          type="button"
+                          onClick={(event) => {
+                            // The toolbar lives inside InputBoxDiv, whose click
+                            // handler focuses TipTap. Letting this command click
+                            // bubble schedules a requestAnimationFrame focus
+                            // after the modal has focused Title, so native
+                            // selects instantly close and text fields blur.
+                            event.preventDefault();
+                            event.stopPropagation();
+                            close();
+                            setReportIssueOpen(true);
+                          }}
+                        >
+                          Report an issue…
+                        </button>
+                      )}
+                  </div>
+                )}
+              </PopoverPanel>
+            </Popover>
+          )}
+
+          {/* MAX/Claude-style model pill rides right next to the "/" command
+              control; it opens the same picker as "Switch model…". */}
+          {!isInEdit && hasLiveBrokerModel && (
+            <button
+              type="button"
+              data-testid="cukii-model-pill"
+              /* Geometry measured on the live Claude Code pill
+                 (.modelPill_gGYT1w): 18px tall, 11.05px text, 0 8px padding,
+                 4px between the name and the dimmed detail. Ours was 26px /
+                 13px / 16px — a visibly heavier capsule than the reference. */
+              className="cukii-model-pill flex h-[18px] max-w-[280px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.05px] leading-[18px] text-[var(--vscode-foreground)]"
+              title={`Model: ${currentLabel}${pillDetail ? ` · ${pillDetail}` : ""}. Click to switch`}
+              aria-label={`Selected model: ${currentLabel}${pillDetail ? `, ${pillDetail}` : ""}`}
+              onClick={() => setModelPickerOpen(true)}
+            >
+              {/* Model name carries the foreground colour; everything after it
+                  is a detail and stays muted, the way the reference client
+                  renders its own pill. */}
+              <span className="min-w-0 truncate">{currentLabel}</span>
+              {pillDetail && (
+                <span
+                  data-testid="cukii-model-pill-detail"
+                  className="shrink-0 whitespace-nowrap text-[var(--vscode-descriptionForeground)]"
+                >
+                  {pillDetail}
+                </span>
+              )}
+            </button>
+          )}
+
           {isInEdit && (
-            <HoverItem
-              className="hidden hover:underline sm:flex"
-              onClick={async () => {
+            <button
+              className={menuItemClass}
+              type="button"
+              onClick={() => {
                 void dispatch(exitEdit({}));
                 ideMessenger.post("focusEditor", undefined);
               }}
             >
-              <span>
-                <i>Esc</i> to exit Edit
-              </span>
-            </HoverItem>
+              Esc to exit Edit
+            </button>
           )}
-          <ToolTip place="top" content="Send (⏎)">
+        </div>
+
+        <div className="cukii-footer-secondary-actions flex shrink-0 items-center gap-2">
+          {!isInEdit && hasLiveBrokerModel && (
+            <PermissionModeControl
+              brokerModel={currentModel}
+              permissionMode={brokerPermissionMode}
+              effort={brokerEffort}
+              onChange={(mode) => {
+                updateBrokerPreferences(
+                  currentModel,
+                  brokerSubagent ?? "auto",
+                  brokerEffort,
+                  brokerSpeed,
+                  hasReasoningEnabled,
+                  brokerAutocompact,
+                  mode,
+                );
+              }}
+              onEffortChange={(effort) => {
+                updateBrokerPreferences(
+                  currentModel,
+                  brokerSubagent ?? "auto",
+                  effort,
+                  brokerSpeed,
+                  hasReasoningEnabled,
+                  brokerAutocompact,
+                  brokerPermissionMode,
+                );
+              }}
+            />
+          )}
+
+          <ToolTip
+            place="top"
+            content={showStop ? "Stop response" : "Send message"}
+          >
             <Button
               variant={props.isMainInput ? "primary" : "secondary"}
               size="sm"
+              className={`cukii-submit-button cukii-ui-button ${
+                showStop ? "cukii-submit-button--stop" : ""
+              }`}
               data-testid="submit-input-button"
-              onClick={async (e) => {
-                if (props.onEnter) {
-                  props.onEnter({
-                    useCodebase: false,
-                    noContext: useActiveFile
-                      ? isMetaEquivalentKeyPressed(e as any) || e.altKey
-                      : !(isMetaEquivalentKeyPressed(e as any) || e.altKey),
-                  });
+              aria-label={showStop ? "Stop response" : "Send message"}
+              onClick={(event) => {
+                if (showStop) {
+                  void dispatch(cancelStream());
+                  return;
                 }
+                props.onEnter?.({
+                  useCodebase: false,
+                  noContext: useActiveFile
+                    ? isMetaEquivalentKeyPressed(event as any) || event.altKey
+                    : !(
+                        isMetaEquivalentKeyPressed(event as any) || event.altKey
+                      ),
+                });
               }}
               disabled={isEnterDisabled}
             >
-              <span className="hidden md:inline">
-                ⏎ {props.toolbarOptions?.enterText ?? "Enter"}
-              </span>
-              <span className="md:hidden">⏎</span>
+              {showStop ? (
+                <span className="cukii-submit-stop-icon h-2.5 w-2.5 rounded-[1px]" />
+              ) : isInEdit ? (
+                isRetry ? (
+                  <ArrowPathIcon className="h-4 w-4" />
+                ) : (
+                  <PencilIcon className="h-4 w-4" />
+                )
+              ) : (
+                <ArrowUpIcon className="h-4 w-4" />
+              )}
             </Button>
           </ToolTip>
         </div>
       </div>
+
+      {modelPickerOpen && hasLiveBrokerModel && (
+        <ModelPickerModal
+          onClose={() => setModelPickerOpen(false)}
+          onSelect={(model) =>
+            updateBrokerPreferences(
+              model,
+              brokerSubagent ?? "auto",
+              brokerEffort,
+              brokerSpeed,
+              hasReasoningEnabled,
+              brokerAutocompact,
+              "bypass",
+            )
+          }
+        />
+      )}
+      {vendorAccountsOpen && (
+        <VendorAccountsModal
+          onClose={() => {
+            setVendorAccountsOpen(false);
+            reconciledCatalogSession.current = undefined;
+            setCatalogRefreshGeneration((generation) => generation + 1);
+            void refreshIssueCapability(true);
+          }}
+        />
+      )}
+      {reportIssueOpen && (
+        <ReportIssueModal
+          sessionId={sessionId}
+          brokerModel={currentModel}
+          returnFocusRef={commandMenuButtonRef}
+          onClose={() => {
+            setReportIssueOpen(false);
+            void refreshIssueCapability(true);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -268,6 +1079,7 @@ export default memo(
     prev.hidden === next.hidden &&
     prev.disabled === next.disabled &&
     prev.isMainInput === next.isMainInput &&
+    prev.isInputEmpty === next.isInputEmpty &&
     prev.activeKey === next.activeKey &&
     shallowToolbarOptionsEqual(prev.toolbarOptions, next.toolbarOptions),
 );

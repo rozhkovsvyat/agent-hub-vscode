@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Woven Network — design preview</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 48px; background: #eef2f7; color: #111827; font-family: Inter, system-ui, sans-serif; }
+      h1 { margin: 0 0 8px; font-size: 32px; }
+      p { margin: 0 0 32px; color: #475569; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 900px; }
+      .card { border-radius: 18px; padding: 26px; background: #fff; box-shadow: 0 8px 25px #0f172a14; }
+      .card.dark { background: #111827; color: #f8fafc; }
+      .card h2 { margin: 0 0 20px; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+      .icon { display: grid; place-items: center; min-height: 190px; color: #334155; }
+      .dark .icon { color: #e2e8f0; }
+      .icon img { width: 132px; height: 132px; }
+      .favicon img { width: 58px; height: 58px; }
+      .wide { grid-column: 1 / -1; }
+      .lockup { display: grid; place-items: center; min-height: 120px; }
+      .lockup img { width: 360px; max-width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h1>Woven Network</h1>
+    <p>Draft concept — centre, eight independent threads, and intentionally broken memory rings.</p>
+    <div class="grid">
+      <section class="card"><h2>Mark / light</h2><div class="icon"><img src="weft-mark.svg" /></div></section>
+      <section class="card dark"><h2>Mark / dark</h2><div class="icon"><img src="weft-mark.svg" /></div></section>
+      <section class="card"><h2>Favicon / 16px logic</h2><div class="icon favicon"><img src="weft-favicon.svg" /></div></section>
+      <section class="card"><h2>Colour mark</h2><div class="icon"><img src="weft-mark-color.svg" /></div></section>
+      <section class="card wide"><h2>Temporary lockup</h2><div class="lockup"><img src="weft-lockup.svg" /></div></section>
+    </div>
+  </body>
+</html>

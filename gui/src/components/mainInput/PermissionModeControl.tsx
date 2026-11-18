@@ -1,0 +1,400 @@
+import { CheckIcon } from "@heroicons/react/24/outline";
+import {
+  CUKII_PERMISSION_MODE_COPY,
+  brokerVendorForModel,
+  cyclePermissionMode,
+  resolvePermissionModeForVendor,
+  visiblePermissionModes,
+  type CukiiPermissionMode,
+} from "core/cukiiPermissionModes";
+import type { BrokerModel, BrokerVendorId } from "core/protocol/ideWebview";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
+import type { BrokerEffort } from "../../redux/slices/sessionSlice";
+import { CukiiEffortRow } from "../cukii/CukiiEffortRow";
+import { Popover, PopoverButton, PopoverPanel } from "../ui";
+
+const modeRowClass =
+  "cukii-permission-mode-row flex w-full items-center text-left";
+
+/** The permissions sheet is anchored to a toolbar button; on narrow sidebars
+ * its 300px panel can escape the viewport and clip the mode copy. Shift the
+ * panel back inside instead of letting it ride off-window. */
+function useViewportClampedPanel() {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const clamp = useCallback(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    el.style.transform = "";
+    const gutter = 8;
+    const rect = el.getBoundingClientRect();
+    let dx = 0;
+    if (rect.left < gutter) {
+      dx = gutter - rect.left;
+    } else if (rect.right > window.innerWidth - gutter) {
+      dx = window.innerWidth - gutter - rect.right;
+    }
+    el.style.transform = dx !== 0 ? `translateX(${dx}px)` : "";
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [clamp]);
+
+  return useCallback(
+    (el: HTMLDivElement | null) => {
+      panelRef.current = el;
+      if (el) requestAnimationFrame(clamp);
+    },
+    [clamp],
+  );
+}
+
+export function PermissionModeIcon({ mode }: { mode: CukiiPermissionMode }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="cukii-permission-mode-icon shrink-0"
+      data-testid={`cukii-permission-icon-${mode}`}
+      fill="none"
+      viewBox="0 0 20 20"
+    >
+      {mode === "manual" && (
+        <path
+          d="M10.25 2C11.0283 2 11.6867 2.50842 11.9141 3.21094C12.1623 3.07581 12.4475 3 12.75 3C13.7165 3 14.5 3.7835 14.5 4.75V6.16992C14.7275 6.06176 14.9814 6 15.25 6C16.2165 6 17 6.7835 17 7.75V11.25C17 14.9779 13.9779 18 10.25 18C6.52208 18 3.5 14.9779 3.5 11.25V8C3.5 7.44772 3.94772 7 4.5 7H5C5.36464 7 5.70563 7.09906 6 7.26953V4.75C6 3.7835 6.7835 3 7.75 3C8.05224 3 8.33688 3.07606 8.58496 3.21094C8.81229 2.50827 9.47163 2 10.25 2ZM10.25 3C9.83579 3 9.5 3.33579 9.5 3.75V9.5C9.5 9.77614 9.27614 10 9 10C8.72386 10 8.5 9.77614 8.5 9.5V4.75C8.5 4.33579 8.16421 4 7.75 4C7.33579 4 7 4.33579 7 4.75V11.002C8.32553 11.0277 9.48461 11.8814 9.90918 13.1221L9.98535 13.3789L10 13.4785C10.0102 13.711 9.85565 13.9267 9.62109 13.9854C9.38677 14.0438 9.1493 13.9264 9.04883 13.7168L9.01465 13.6211L8.96289 13.4463C8.66901 12.5877 7.85929 12 6.93848 12H6.5C6.22386 12 6 11.7761 6 11.5V9C6 8.44772 5.55228 8 5 8H4.5V11.25C4.5 14.4256 7.07436 17 10.25 17C13.4256 17 16 14.4256 16 11.25V7.75C16 7.33579 15.6642 7 15.25 7C14.8358 7 14.5 7.33579 14.5 7.75V10.5C14.5 10.7761 14.2761 11 14 11C13.7239 11 13.5 10.7761 13.5 10.5V4.75C13.5 4.33579 13.1642 4 12.75 4C12.3358 4 12 4.33579 12 4.75V9.5C12 9.77614 11.7761 10 11.5 10C11.2239 10 11 9.77614 11 9.5V3.75C11 3.33579 10.6642 3 10.25 3Z"
+          fill="currentColor"
+        />
+      )}
+      {mode === "editAutomatically" && (
+        <path
+          d="M11.6318 4.01755C11.898 4.0903 12.055 4.36553 11.9824 4.63181L8.98242 15.6318C8.90966 15.8981 8.63449 16.0551 8.36816 15.9824C8.10193 15.9096 7.94495 15.6345 8.01758 15.3682L11.0176 4.36814C11.0904 4.10198 11.3656 3.94496 11.6318 4.01755ZM13.124 6.17088C13.3059 5.96324 13.6213 5.94229 13.8291 6.124L17.8291 9.62401L17.9014 9.70213C17.9647 9.78753 18 9.8918 18 9.99999C18 10.1441 17.9375 10.281 17.8291 10.376L13.8291 13.876L13.7471 13.9346C13.5449 14.0498 13.2833 14.011 13.124 13.8291C12.9649 13.6472 12.9606 13.3824 13.1016 13.1973L13.1709 13.124L16.7412 9.99999L13.1709 6.87596C12.9632 6.69409 12.9422 6.37865 13.124 6.17088ZM6.25293 6.06541C6.45509 5.95024 6.71675 5.98907 6.87598 6.17088C7.03513 6.35277 7.03933 6.61758 6.89844 6.80271L6.8291 6.87596L3.25879 9.99999L6.8291 13.124C7.03682 13.3058 7.05771 13.6213 6.87598 13.8291C6.69413 14.0368 6.37869 14.0578 6.1709 13.876L2.1709 10.376L2.09863 10.2978C2.03528 10.2124 2 10.1082 2 9.99999C2.00005 9.8559 2.06247 9.71891 2.1709 9.62401L6.1709 6.124L6.25293 6.06541Z"
+          fill="currentColor"
+        />
+      )}
+      {mode === "plan" && (
+        <>
+          <path
+            d="M13.04 7.30371C13.1486 7.05001 13.4425 6.93174 13.6963 7.04004C13.95 7.14863 14.0683 7.44253 13.96 7.69629C13.6651 8.38527 13.089 9 12.2998 9C11.8132 8.99994 11.408 8.76633 11.0996 8.42578C10.7913 8.76607 10.3867 8.99987 9.90039 9C9.41365 9 9.00769 8.76648 8.69922 8.42578C8.39083 8.76606 7.98636 9 7.5 9C7.22386 9 7 8.77614 7 8.5C7 8.22386 7.22386 8 7.5 8C7.71245 8 8.01918 7.8199 8.24023 7.30371C8.31897 7.11975 8.50009 7 8.7002 7C8.90022 7.00008 9.08145 7.11981 9.16016 7.30371C9.38121 7.8198 9.68796 8 9.90039 8C10.1128 7.99978 10.4197 7.81969 10.6406 7.30371L10.6748 7.2373C10.7649 7.09147 10.9248 7.00014 11.0996 7C11.2997 7 11.4808 7.11975 11.5596 7.30371C11.7806 7.8198 12.0874 7.99989 12.2998 8C12.5122 8 12.819 7.81985 13.04 7.30371Z"
+            fill="currentColor"
+          />
+          <path
+            clipRule="evenodd"
+            d="M14 3C15.1046 3 16 3.89543 16 5V13H17.5C17.7761 13 18 13.2239 18 13.5V15C18 16.1046 17.1046 17 16 17H7C5.89543 17 5 16.1046 5 15V4H4C3.44772 4 3 4.44772 3 5C3 5.25644 3.09624 5.48974 3.25488 5.66699C3.43863 5.87277 3.42144 6.18901 3.21582 6.37305C3.01006 6.5572 2.69393 6.53877 2.50977 6.33301C2.1934 5.97951 2 5.51189 2 5C2 3.89543 2.89543 3 4 3H14ZM6 15C6 15.5523 6.44772 16 7 16C7.55228 16 8 15.5523 8 15V13.5C8 13.2239 8.22386 13 8.5 13H15V5C15 4.44772 14.5523 4 14 4H6V15ZM9 15C9 15.3646 8.90094 15.7056 8.73047 16H16C16.5523 16 17 15.5523 17 15V14H9V15Z"
+            fill="currentColor"
+            fillRule="evenodd"
+          />
+        </>
+      )}
+      {mode === "auto" && (
+        <path
+          d="M8.95808 2.62966C9.93062 1.31904 12.0004 2.28461 11.6212 3.87186L10.6339 7.99985H15.0128C16.2452 7.99985 16.9519 9.40362 16.2179 10.3934L11.0421 17.3701C10.0696 18.6811 7.99935 17.7154 8.37898 16.1279L9.36629 11.9999H4.98734C3.75494 11.9999 3.04807 10.5961 3.78225 9.60632L8.95808 2.62966ZM10.6485 3.63944C10.7748 3.11051 10.085 2.78874 9.76083 3.22537L4.58499 10.202C4.3405 10.532 4.57663 10.9999 4.98734 10.9999H10.0001C10.1531 10.9999 10.2978 11.0703 10.3927 11.1903C10.4873 11.3104 10.5218 11.4674 10.4864 11.6161L9.35164 16.3603C9.22504 16.8895 9.91515 17.2114 10.2393 16.7744L15.4152 9.79773C15.6594 9.46781 15.4235 8.99987 15.0128 8.99987H10.0001C9.84702 8.99986 9.70232 8.92961 9.6075 8.80944C9.51291 8.68933 9.47822 8.53235 9.51375 8.38365L10.6485 3.63944Z"
+          fill="currentColor"
+        />
+      )}
+      {mode === "bypass" && (
+        <path
+          d="M5 2.5C5.93171 2.5 6.71235 3.13768 6.93457 4H13.75C15.5449 4 17 5.45507 17 7.25C17 9.04493 15.5449 10.5 13.75 10.5H12.707L10.3535 12.8535C10.1583 13.0488 9.84175 13.0488 9.64648 12.8535L7.29297 10.5H6.25C5.00736 10.5 4 11.5074 4 12.75C4 13.9926 5.00736 15 6.25 15H13.0654C13.2877 14.1377 14.0683 13.5 15 13.5C16.1046 13.5 17 14.3954 17 15.5C17 16.6046 16.1046 17.5 15 17.5C14.0683 17.5 13.2877 16.8623 13.0654 16H6.25C4.45507 16 3 14.5449 3 12.75C3 10.9551 4.45507 9.5 6.25 9.5H7.29297L9.64648 7.14648L9.72461 7.08203C9.91869 6.95387 10.1827 6.97562 10.3535 7.14648L12.707 9.5H13.75C14.9926 9.5 16 8.49264 16 7.25C16 6.00736 14.9926 5 13.75 5H6.93457C6.71235 5.86232 5.93171 6.5 5 6.5C3.89543 6.5 3 5.60457 3 4.5C3 3.39543 3.89543 2.5 5 2.5ZM15 14.5C14.4477 14.5 14 14.9477 14 15.5C14 16.0523 14.4477 16.5 15 16.5C15.5523 16.5 16 16.0523 16 15.5C16 14.9477 15.5523 14.5 15 14.5ZM8.20703 10L10 11.793L11.793 10L10 8.20703L8.20703 10ZM5 3.5C4.44772 3.5 4 3.94772 4 4.5C4 5.05228 4.44772 5.5 5 5.5C5.55228 5.5 6 5.05228 6 4.5C6 3.94772 5.55228 3.5 5 3.5Z"
+          fill="currentColor"
+        />
+      )}
+    </svg>
+  );
+}
+
+type CapabilitySnapshot = {
+  vendor: BrokerVendorId;
+  supportedModes: CukiiPermissionMode[];
+  route?: string;
+  generation?: number;
+};
+
+type ProbeStatus = "pending" | "verified" | "degraded";
+
+/** A failed capability probe must heal itself after a load spike instead of
+ * leaving every window in Manual until a reload. */
+export const PERMISSION_PROBE_RETRY_MS = 8_000;
+
+let probeRetryMs = PERMISSION_PROBE_RETRY_MS;
+
+export function setPermissionProbeRetryMsForTests(ms: number): void {
+  probeRetryMs = ms;
+}
+
+/** Permission modes plus Claude's shared bottom effort row. */
+export function PermissionModeControl({
+  brokerModel,
+  permissionMode,
+  onChange,
+  effort = "high",
+  onEffortChange = () => undefined,
+}: {
+  brokerModel: BrokerModel;
+  permissionMode: CukiiPermissionMode;
+  onChange: (mode: CukiiPermissionMode) => void;
+  effort?: BrokerEffort;
+  onEffortChange?: (effort: BrokerEffort) => void;
+}) {
+  const ideMessenger = useContext(IdeMessengerContext);
+  const vendor = brokerVendorForModel(brokerModel);
+  const clampPanel = useViewportClampedPanel();
+  const [capabilities, setCapabilities] = useState<CapabilitySnapshot | null>(
+    null,
+  );
+  const [probeStatus, setProbeStatus] = useState<ProbeStatus>("pending");
+
+  const effortRow = (
+    <div
+      className="cukii-permission-effort-row"
+      data-testid="cukii-permission-effort-row"
+    >
+      <CukiiEffortRow
+        className="cukii-effort-menu-row cukii-menu-item flex w-full min-w-0 items-center justify-between text-left"
+        model={brokerModel}
+        effort={effort}
+        onEffortChange={onEffortChange}
+      />
+    </div>
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setCapabilities(null);
+    setProbeStatus("pending");
+
+    const attempt = async (): Promise<boolean> => {
+      try {
+        const response = await ideMessenger.request(
+          "cukii/getPermissionCapabilities",
+          { vendor },
+        );
+        if (cancelled || response.status !== "success") return false;
+        if (response.content.vendor !== vendor) return false;
+        setCapabilities(response.content);
+        if (response.content.supportedModes.length > 0) {
+          setProbeStatus("verified");
+          return true;
+        }
+      } catch {
+        // No live snapshot: keep the selected mode and retry discovery.
+      }
+      if (!cancelled) setProbeStatus("degraded");
+      return false;
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled || timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void attempt().then((verified) => {
+          if (!verified && !cancelled) scheduleRetry();
+        });
+      }, probeRetryMs);
+    };
+
+    void attempt().then((verified) => {
+      if (!verified && !cancelled) scheduleRetry();
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [ideMessenger, vendor]);
+
+  const visibleModes = useMemo(() => {
+    const isVerified =
+      probeStatus === "verified" && capabilities?.vendor === vendor;
+    const supportedModes = isVerified ? capabilities.supportedModes : [];
+    return visiblePermissionModes({
+      vendor,
+      supportedModes,
+      helpSource: isVerified ? "live" : "pending-live-probe",
+    });
+  }, [capabilities, probeStatus, vendor]);
+
+  const resolvedPermissionMode = useMemo(() => {
+    // Only a probe that verified at least one native mode may demote the
+    // user's selection. An empty snapshot means discovery itself failed and
+    // must never cascade a Manual downgrade into shared preferences.
+    if (probeStatus !== "verified" || capabilities?.vendor !== vendor) {
+      return permissionMode;
+    }
+    if (visibleModes.includes(permissionMode)) return permissionMode;
+    if (visibleModes.length === 1 && visibleModes[0] === "bypass") {
+      return "bypass";
+    }
+    return resolvePermissionModeForVendor(
+      { vendor, supportedModes: visibleModes, helpSource: "displayed" },
+      permissionMode,
+    );
+  }, [capabilities, permissionMode, probeStatus, vendor, visibleModes]);
+
+  // A model can be changed while the capability request is still in flight.
+  // Once the actual native CLI has answered, never leave the session pointing
+  // at a mode that this concrete bridge cannot honour.
+  useEffect(() => {
+    if (
+      probeStatus === "verified" &&
+      capabilities?.vendor === vendor &&
+      resolvedPermissionMode !== permissionMode
+    ) {
+      onChange(resolvedPermissionMode);
+    }
+  }, [
+    capabilities,
+    onChange,
+    permissionMode,
+    probeStatus,
+    resolvedPermissionMode,
+    vendor,
+  ]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Tab" ||
+        !event.shiftKey ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest("input, textarea") &&
+        !target.closest(".cukii-permission-button")
+      ) {
+        return;
+      }
+      if (visibleModes.length === 0) return;
+      event.preventDefault();
+      onChange(cyclePermissionMode(permissionMode, visibleModes));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onChange, permissionMode, visibleModes]);
+
+  if (probeStatus === "pending") {
+    return null;
+  }
+
+  if (probeStatus === "degraded") {
+    const degradedCopy = CUKII_PERMISSION_MODE_COPY[permissionMode];
+    return (
+      <Popover className="relative">
+        <PopoverButton
+          type="button"
+          className="cukii-permission-button cukii-permission-button-degraded flex items-center gap-2 rounded px-2 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+          title={`${degradedCopy.description}. Native permission modes are not verified on this host yet; Cukii keeps retrying discovery.`}
+          aria-label="Toggle permission mode"
+        >
+          <PermissionModeIcon mode={permissionMode} />
+          <span className="cukii-permission-label">{degradedCopy.title}</span>
+        </PopoverButton>
+        <PopoverPanel
+          ref={clampPanel}
+          className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[300px]"
+          data-testid="cukii-permission-popover"
+        >
+          <div className="cukii-permission-header flex items-center justify-between text-[var(--vscode-descriptionForeground)]">
+            <span className="cukii-permission-header-title">Modes</span>
+          </div>
+          <div
+            className="cukii-permission-degraded-note"
+            data-testid="cukii-permission-degraded-note"
+          >
+            Native permission modes could not be verified on this host. The
+            selected mode is preserved; Cukii retries discovery automatically.
+          </div>
+          {effortRow}
+        </PopoverPanel>
+      </Popover>
+    );
+  }
+
+  const hasSelectedVisibleMode = visibleModes.includes(resolvedPermissionMode);
+  const currentCopy = hasSelectedVisibleMode
+    ? CUKII_PERMISSION_MODE_COPY[resolvedPermissionMode]
+    : {
+        title: "Select permission mode",
+        description: "Select a verified permission mode",
+      };
+
+  return (
+    <Popover className="relative">
+      <PopoverButton
+        type="button"
+        className="cukii-permission-button flex items-center gap-2 rounded px-2 text-xs text-[var(--vscode-foreground)] hover:bg-[var(--vscode-toolbar-hoverBackground)]"
+        title={`${currentCopy.description}. Click to change, or press Shift+Tab to cycle.`}
+        aria-label="Toggle permission mode"
+      >
+        {hasSelectedVisibleMode && (
+          <PermissionModeIcon mode={resolvedPermissionMode} />
+        )}
+        <span className="cukii-permission-label">{currentCopy.title}</span>
+      </PopoverButton>
+      <PopoverPanel
+        ref={clampPanel}
+        className="cukii-permission-popover cukii-menu-surface absolute bottom-full right-0 z-[1000] mb-2 w-[300px]"
+        data-testid="cukii-permission-popover"
+      >
+        {({ close }) => (
+          <>
+            <div className="cukii-permission-header flex items-center justify-between text-[var(--vscode-descriptionForeground)]">
+              <span className="cukii-permission-header-title">Modes</span>
+              <span
+                aria-label="Shift+Tab"
+                className="cukii-permission-header-hint"
+              >
+                ⇧ + tab to switch
+              </span>
+            </div>
+            {visibleModes.map((mode) => {
+              const copy = CUKII_PERMISSION_MODE_COPY[mode];
+              const selected =
+                hasSelectedVisibleMode && mode === resolvedPermissionMode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`${modeRowClass} ${
+                    selected ? "cukii-permission-mode-selected" : ""
+                  }`}
+                  data-testid={`cukii-permission-mode-${mode}`}
+                  onClick={() => {
+                    onChange(mode);
+                    close();
+                  }}
+                >
+                  <PermissionModeIcon mode={mode} />
+                  <span className="cukii-permission-mode-text min-w-0 flex-1">
+                    <span className="cukii-permission-mode-title block">
+                      {copy.title}
+                    </span>
+                    <span className="cukii-permission-mode-description block">
+                      {copy.description}
+                    </span>
+                  </span>
+                  {selected && (
+                    <CheckIcon className="cukii-permission-mode-check shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+            {effortRow}
+          </>
+        )}
+      </PopoverPanel>
+    </Popover>
+  );
+}

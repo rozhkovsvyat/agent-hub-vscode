@@ -53,6 +53,8 @@ describe("UnifiedTerminalCommand", () => {
 
     // Should show terminal header
     expect(screen.getByText("Terminal")).toBeInTheDocument();
+    const toolbar = screen.getByText("Terminal").closest("div")?.parentElement;
+    expect(toolbar?.className ?? "").not.toMatch(/\bsticky\b/);
 
     // Should show completed status icon (green dot)
     const terminalContainer = screen.getByTestId("terminal-container");

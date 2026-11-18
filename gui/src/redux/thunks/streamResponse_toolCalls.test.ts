@@ -101,6 +101,7 @@ describe("streamResponseThunk - tool calls", () => {
       [grepName]: "allowedWithoutPermission", // Auto-approve this tool
     };
     initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     initialState.config.config.tools = [grepTool];
     const mockStoreWithToolSettings = createMockStore(initialState);
     const mockIdeMessengerWithTool = mockStoreWithToolSettings.mockIdeMessenger;
@@ -252,18 +253,40 @@ describe("streamResponseThunk - tool calls", () => {
     const actionTypes = dispatchedActions.map((action: any) => action.type);
     expect(actionTypes).toEqual([
       "chat/streamResponse/pending",
-      "chat/streamWrapper/pending",
       "session/submitEditorAndInitAtIndex",
       "session/resetNextCodeBlockToApplyIndex",
+      "chat/streamWrapper/pending",
+      // Pre-stream persist of the previous turns.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/saveCurrent/fulfilled",
       "symbols/updateFromContextItems/pending",
       "session/updateHistoryItemAtIndex",
+      // First-turn persist with the new user message.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "symbols/updateFromContextItems/fulfilled",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/saveCurrent/fulfilled",
       "chat/streamNormalInput/pending",
       "session/setAppliedRulesAtIndex",
       "session/setActive",
       "session/setInlineErrorMessage",
       "session/setIsPruned",
       "session/setContextPercentage",
-      "symbols/updateFromContextItems/fulfilled",
       "session/streamUpdate",
       "session/streamUpdate",
       "session/addPromptCompletionPair",
@@ -274,6 +297,17 @@ describe("streamResponseThunk - tool calls", () => {
       "session/acceptToolCall",
       "chat/streamAfterToolCall/pending",
       "chat/streamWrapper/pending",
+      // The inner wrapper also pre-persists before its vendor round-trip.
+      "session/saveCurrent/pending",
+      "session/update/pending",
+      "session/updateSessionMetadata",
+      "session/setSessionRevision",
+      "session/refreshMetadata/pending",
+      "session/setIsSessionMetadataLoading",
+      "session/setAllSessionMetadata",
+      "session/refreshMetadata/fulfilled",
+      "session/update/fulfilled",
+      "session/saveCurrent/fulfilled",
       "session/resetNextCodeBlockToApplyIndex",
       "session/streamUpdate",
       "chat/streamNormalInput/pending",
@@ -289,6 +323,7 @@ describe("streamResponseThunk - tool calls", () => {
       "session/saveCurrent/pending",
       "session/update/pending",
       "session/updateSessionMetadata",
+      "session/setSessionRevision",
       "session/refreshMetadata/pending",
       "session/setIsSessionMetadataLoading",
       "session/setAllSessionMetadata",
@@ -302,6 +337,7 @@ describe("streamResponseThunk - tool calls", () => {
       "session/saveCurrent/pending",
       "session/update/pending",
       "session/updateSessionMetadata",
+      "session/setSessionRevision",
       "session/refreshMetadata/pending",
       "session/setIsSessionMetadataLoading",
       "session/setAllSessionMetadata",
@@ -309,6 +345,8 @@ describe("streamResponseThunk - tool calls", () => {
       "session/update/fulfilled",
       "session/saveCurrent/fulfilled",
       "chat/streamWrapper/fulfilled",
+      "chat/continueIfTrailingSteer/pending",
+      "chat/continueIfTrailingSteer/fulfilled",
       "chat/streamResponse/fulfilled",
     ]);
 
@@ -401,11 +439,13 @@ describe("streamResponseThunk - tool calls", () => {
         },
       ],
       options: {
-        tools: [grepTool],
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
       },
     });
 
     expect(requestSpy).toHaveBeenCalledWith("tools/call", {
+      sessionId: expect.any(String),
       toolCall: {
         id: "tool-call-1",
         type: "function",
@@ -440,6 +480,9 @@ describe("streamResponseThunk - tool calls", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         history: [
           {
             contextItems: [],
@@ -458,9 +501,14 @@ describe("streamResponseThunk - tool calls", () => {
               role: "user",
               content: "Hello, please help me with this code",
             },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
+            },
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             message: {
               content: "I'll search the codebase for you.",
               id: expect.any(String),
@@ -497,6 +545,7 @@ describe("streamResponseThunk - tool calls", () => {
                 },
                 parsedArgs: { query: "test function" },
                 status: "done",
+                mcpUiState: undefined,
                 output: [
                   {
                     name: "Search Results",
@@ -521,6 +570,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "Search completed.",
@@ -541,7 +591,7 @@ describe("streamResponseThunk - tool calls", () => {
         streamAborter: expect.any(AbortController),
         contextPercentage: 0.9,
         isPruned: false,
-        title: "Session summary",
+        title: "Please search the codebase",
         inlineErrorMessage: undefined,
       },
     });
@@ -561,6 +611,7 @@ describe("streamResponseThunk - tool calls", () => {
       },
     ];
     initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     initialState.ui.toolSettings = {
       [grepName]: "allowedWithPermission", // Requires manual approval
     };
@@ -661,15 +712,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        type: "chat/streamWrapper/pending",
-        meta: {
-          arg: expect.any(Function),
-          requestId: expect.any(String),
-          requestStatus: "pending",
-        },
-        payload: undefined,
-      },
-      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -678,6 +720,115 @@ describe("streamResponseThunk - tool calls", () => {
       },
       {
         type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
+        type: "chat/streamWrapper/pending",
+        meta: {
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Please search the codebase",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
         payload: undefined,
       },
       {
@@ -702,6 +853,110 @@ describe("streamResponseThunk - tool calls", () => {
             },
           },
         },
+      },
+      {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Please search the codebase",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: {
+          arg: [],
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
       },
       {
         type: "chat/streamNormalInput/pending",
@@ -736,15 +991,6 @@ describe("streamResponseThunk - tool calls", () => {
       {
         type: "session/setContextPercentage",
         payload: 0.9,
-      },
-      {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: {
-          arg: [],
-          requestId: expect.any(String),
-          requestStatus: "fulfilled",
-        },
-        payload: undefined,
       },
       {
         type: "session/streamUpdate",
@@ -819,13 +1065,14 @@ describe("streamResponseThunk - tool calls", () => {
         },
         payload: undefined,
       },
+
       {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -837,7 +1084,14 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -872,7 +1126,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -895,7 +1149,30 @@ describe("streamResponseThunk - tool calls", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -941,12 +1218,18 @@ describe("streamResponseThunk - tool calls", () => {
           ],
         },
       ],
-      options: { tools: [grepTool] },
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
 
     expect(mockIdeMessengerManual.llmStreamChat).toHaveBeenCalledWith(
       {
-        completionOptions: { tools: [grepTool] },
+        completionOptions: {
+          reasoning: true,
+          reasoningBudgetTokens: 2048,
+        },
         legacySlashCommandData: undefined,
         messageOptions: { precompiled: true },
         messages: [
@@ -955,9 +1238,10 @@ describe("streamResponseThunk - tool calls", () => {
             content: "Please search the codebase",
           },
         ],
+        sessionId: "session-123",
         title: "Claude 3.5 Sonnet",
       },
-      expect.any(AbortSignal),
+      expect.anything(),
     );
 
     // Should NOT call tools/call since tool requires approval
@@ -975,6 +1259,9 @@ describe("streamResponseThunk - tool calls", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         history: [
           {
             contextItems: [],
@@ -993,9 +1280,14 @@ describe("streamResponseThunk - tool calls", () => {
               id: expect.any(String),
               role: "user",
             },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
+            },
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "I'll search the codebase for you.",
@@ -1041,7 +1333,7 @@ describe("streamResponseThunk - tool calls", () => {
         streamAborter: expect.any(AbortController),
         contextPercentage: 0.9,
         isPruned: false,
-        title: "Session summary",
+        title: "Please search the codebase",
         inlineErrorMessage: undefined,
       },
       ui: {
@@ -1070,6 +1362,7 @@ describe("streamResponseThunk - tool calls", () => {
       [grepName]: "allowedWithPermission", // Requires manual approval
     };
     initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     initialState.config.config.tools = [grepTool];
 
     const mockStoreWithApproval = createMockStore(initialState);
@@ -1215,15 +1508,6 @@ describe("streamResponseThunk - tool calls", () => {
         payload: undefined,
       },
       {
-        type: "chat/streamWrapper/pending",
-        meta: {
-          arg: expect.any(Function),
-          requestId: expect.any(String),
-          requestStatus: "pending",
-        },
-        payload: undefined,
-      },
-      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -1232,6 +1516,115 @@ describe("streamResponseThunk - tool calls", () => {
       },
       {
         type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
+        type: "chat/streamWrapper/pending",
+        meta: {
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Please search the codebase for test functions",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
         payload: undefined,
       },
       {
@@ -1256,6 +1649,110 @@ describe("streamResponseThunk - tool calls", () => {
             },
           },
         },
+      },
+      {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Please search the codebase for test functions",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: {
+          arg: [],
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
       },
       {
         type: "chat/streamNormalInput/pending",
@@ -1290,15 +1787,6 @@ describe("streamResponseThunk - tool calls", () => {
       {
         type: "session/setContextPercentage",
         payload: 0.85,
-      },
-      {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: {
-          arg: [],
-          requestId: expect.any(String),
-          requestStatus: "fulfilled",
-        },
-        payload: undefined,
       },
       {
         type: "session/streamUpdate",
@@ -1373,13 +1861,14 @@ describe("streamResponseThunk - tool calls", () => {
         },
         payload: undefined,
       },
+
       {
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1391,7 +1880,14 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase for test functions",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -1426,7 +1922,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1449,7 +1945,30 @@ describe("streamResponseThunk - tool calls", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -1537,6 +2056,102 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.any(Function),
           requestId: expect.any(String),
           requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        // The inner wrapper also pre-persists before its vendor round-trip.
+        // The semantic title is already live, so no title restore follows.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Please search the codebase for test functions",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Please search the codebase for test functions",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
         },
         payload: undefined,
       },
@@ -1640,7 +2255,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1652,7 +2267,14 @@ describe("streamResponseThunk - tool calls", () => {
         type: "session/updateSessionMetadata",
         payload: {
           sessionId: "session-123",
-          title: "Session summary",
+          title: "Please search the codebase for test functions",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -1687,7 +2309,7 @@ describe("streamResponseThunk - tool calls", () => {
           arg: expect.objectContaining({
             history: expect.any(Array),
             sessionId: "session-123",
-            title: "Session summary",
+            title: "Please search the codebase for test functions",
             workspaceDirectory: "",
           }),
           requestId: expect.any(String),
@@ -1741,6 +2363,7 @@ describe("streamResponseThunk - tool calls", () => {
 
     // Verify IDE messenger calls for tool execution
     expect(requestSpy).toHaveBeenCalledWith("tools/call", {
+      sessionId: expect.any(String),
       toolCall: {
         id: "tool-approval-flow-1",
         type: "function",
@@ -1760,7 +2383,10 @@ describe("streamResponseThunk - tool calls", () => {
       ...initialState,
       session: {
         ...initialState.session,
-        title: "Session summary",
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
+        title: "Please search the codebase for test functions",
         history: [
           {
             contextItems: [],
@@ -1779,9 +2405,14 @@ describe("streamResponseThunk - tool calls", () => {
               id: expect.any(String),
               role: "user",
             },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
+            },
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "I'll search for test functions in the codebase.",
@@ -1819,6 +2450,7 @@ describe("streamResponseThunk - tool calls", () => {
                 },
                 parsedArgs: { query: "test function" },
                 status: "done", // Tool call completed successfully
+                mcpUiState: undefined,
                 output: [
                   {
                     name: "Search Results",
@@ -1845,6 +2477,7 @@ describe("streamResponseThunk - tool calls", () => {
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content:
@@ -1892,6 +2525,7 @@ describe("streamResponseThunk - tool calls", () => {
         [terminalName]: "allowedWithoutPermission",
       };
       initialState.config.config.tools = [grepTool];
+      initialState.session.mode = "chat";
       const mockStore = createMockStore(initialState);
 
       const mockIdeMessenger = mockStore.mockIdeMessenger;
@@ -1983,6 +2617,7 @@ describe("streamResponseThunk - tool calls", () => {
         [terminalName]: "allowedWithPermission",
       };
       initialState.config.config.tools = [terminalTool];
+      initialState.session.mode = "chat";
       const mockStore = createMockStore(initialState);
       const mockIdeMessenger = mockStore.mockIdeMessenger;
       const requestSpy = vi.spyOn(mockIdeMessenger, "request");
@@ -2092,6 +2727,7 @@ describe("streamResponseThunk - tool calls", () => {
       initialState.ui.toolSettings = {
         some_tool: "allowedWithoutPermission",
       };
+      initialState.session.mode = "chat";
 
       const mockStore = createMockStore(initialState);
       const mockIdeMessenger = mockStore.mockIdeMessenger;
@@ -2195,6 +2831,7 @@ describe("streamResponseThunk - tool calls", () => {
       initialState.ui.toolSettings = {
         runTerminalCommand: "allowedWithPermission",
       };
+      initialState.session.mode = "chat";
       const mockStoreWithTerminalTool = createMockStore(initialState);
 
       const mockTerminalIdeMessenger =

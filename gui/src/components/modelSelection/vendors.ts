@@ -1,0 +1,450 @@
+import type {
+  BrokerVendorId,
+  BrokerVendorModelCatalog,
+  BrokerEffort,
+  BrokerModel,
+  BrokerSubagent,
+} from "core/protocol/ideWebview";
+import { alibabaChatCatalog } from "core/cukiiAlibabaCatalog";
+import { CUKII_VENDOR_REGISTRY } from "core/cukiiVendorRegistry";
+import {
+  canonicalCukiiModelDescription,
+  canonicalCukiiModelLabel,
+  cukiiCapabilityRating,
+  cukiiModelUpstreamVendor,
+  observeCukiiLatestGeneration,
+} from "core/cukiiModelPresentation";
+
+export type VendorId = BrokerVendorId;
+
+export interface ModelInfo {
+  value: BrokerModel;
+  label: string;
+  contextWindowLabel: string;
+  description: string;
+  /** If true, the model is shown but cannot be selected (e.g. not wired yet). */
+  disabled?: boolean;
+  /** From the live catalog: the route has a native accelerated tier. */
+  nativeFast?: boolean;
+}
+
+export interface VendorInfo {
+  id: VendorId;
+  label: string;
+  models: ModelInfo[];
+}
+
+type BootstrapVendorInfo = Omit<VendorInfo, "models"> & {
+  models: Array<Omit<ModelInfo, "description"> & { description?: string }>;
+};
+
+const FALLBACK_VENDORS: BootstrapVendorInfo[] = [
+  {
+    id: "claude",
+    label: "Anthropic",
+    models: [
+      { value: "opus-5-5", label: "Opus 5.5", contextWindowLabel: "1M" },
+      { value: "fable-5-1", label: "Fable 5.1", contextWindowLabel: "1M" },
+      { value: "opus-5", label: "Opus 5", contextWindowLabel: "1M" },
+      { value: "sonnet-5", label: "Sonnet 5", contextWindowLabel: "1M" },
+      { value: "fable-5", label: "Fable 5", contextWindowLabel: "1M" },
+      {
+        value: "haiku-4-5",
+        label: "Haiku 4.5",
+        contextWindowLabel: "200K",
+      },
+    ],
+  },
+  {
+    id: "codex",
+    label: "OpenAI",
+    models: [
+      {
+        value: "codex:gpt-6-astra",
+        label: "GPT-6 Astra",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex:gpt-6-sol",
+        label: "GPT-6 Sol",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex:gpt-6-luna",
+        label: "GPT-6 Luna",
+        contextWindowLabel: "272K",
+      },
+      // Older Codex routes stay visible in All; live metadata can raise latest.
+      {
+        value: "codex-5-6-sol",
+        label: "GPT-5.6 Sol",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-6-terra",
+        label: "GPT-5.6 Terra",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-6-luna",
+        label: "GPT-5.6 Luna",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-5",
+        label: "GPT-5.5",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-4",
+        label: "GPT-5.4",
+        contextWindowLabel: "272K",
+      },
+      {
+        value: "codex-5-4-mini",
+        label: "GPT-5.4 Mini",
+        contextWindowLabel: "272K",
+      },
+    ],
+  },
+  {
+    id: "grok",
+    label: "xAI",
+    models: [
+      { value: "grok-4-7", label: "Grok 4.7", contextWindowLabel: "500K" },
+      { value: "grok-4-6", label: "Grok 4.6", contextWindowLabel: "500K" },
+      { value: "grok-4-5", label: "Grok 4.5", contextWindowLabel: "500K" },
+    ],
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    models: [
+      {
+        value: "cursor:grok-4.7",
+        label: "Grok 4.7",
+        contextWindowLabel: "500K",
+      },
+      {
+        value: "cursor:grok-4.6",
+        label: "Grok 4.6",
+        contextWindowLabel: "500K",
+      },
+      {
+        value: "composer-2-5",
+        label: "Composer 2.5",
+        contextWindowLabel: "200K",
+      },
+    ],
+  },
+  {
+    id: "kimi",
+    label: "MoonshotAI",
+    models: [
+      {
+        value: "kimi-k2",
+        label: "Kimi K2.7 Coding",
+        contextWindowLabel: "256K",
+      },
+      {
+        value: "kimi-k2-highspeed",
+        label: "Kimi K2.7 Coding Highspeed",
+        contextWindowLabel: "256K",
+      },
+      { value: "kimi-k3", label: "Kimi K3", contextWindowLabel: "1M" },
+      {
+        value: "kimi-k3-256k",
+        label: "Kimi K3-256K",
+        contextWindowLabel: "256K",
+      },
+    ],
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    models: [
+      {
+        value: "deepseek-v4-pro",
+        label: "V4 Pro",
+        contextWindowLabel: "1M",
+        disabled: true,
+      },
+    ],
+  },
+  {
+    id: "qwen",
+    label: "Alibaba",
+    models: alibabaChatCatalog(),
+  },
+];
+
+/** Alphabetical vendor order, matching the Manage accounts screen. */
+function sortVendorsByLabel(vendors: VendorInfo[]): VendorInfo[] {
+  return [...vendors].sort((left, right) =>
+    left.label.localeCompare(right.label, "en", { sensitivity: "base" }),
+  );
+}
+
+export const VENDORS: VendorInfo[] = sortVendorsByLabel(
+  CUKII_VENDOR_REGISTRY.map((registered) => {
+    const vendor = FALLBACK_VENDORS.find(
+      (candidate) => candidate.id === registered.id,
+    );
+    if (!vendor) throw new Error(`Missing Cukii vendor ${registered.id}`);
+    return {
+      ...vendor,
+      label: registered.label,
+      models: presentVendorModels(vendor.models),
+    };
+  }),
+);
+
+export const ALL_MODELS: ModelInfo[] = VENDORS.flatMap((v) => v.models);
+
+export const BROKER_MODEL_OPTIONS = ALL_MODELS.filter((m) => !m.disabled);
+
+export function isBestModel(
+  model: Pick<ModelInfo, "value" | "label">,
+): boolean {
+  return cukiiCapabilityRating(model) > 0;
+}
+
+export const BROKER_SUBAGENT_OPTIONS: Array<{
+  value: BrokerSubagent;
+  label: string;
+}> = [
+  { value: "auto", label: "Auto" },
+  ...BROKER_MODEL_OPTIONS.map((model) => ({
+    value: model.value,
+    label: displayModelLabel(model),
+  })),
+];
+
+export function applyRuntimeVendorCatalog(
+  catalog: BrokerVendorModelCatalog[],
+): void {
+  const byId = new Map(catalog.map((vendor) => [vendor.id, vendor]));
+  const assembled = CUKII_VENDOR_REGISTRY.map((registered) => {
+    const live = byId.get(registered.id);
+    const fallback = FALLBACK_VENDORS.find(
+      (vendor) => vendor.id === registered.id,
+    );
+    const liveModels = live?.models ?? fallback?.models ?? [];
+    const models =
+      registered.id === "codex" && live
+        ? [
+            ...(fallback?.models.filter(
+              (model) => model.value === "codex:gpt-6-astra",
+            ) ?? []),
+            ...liveModels.filter(
+              (model) => model.value !== "codex:gpt-6-astra",
+            ),
+          ]
+        : liveModels;
+    return {
+      id: registered.id,
+      label: registered.label,
+      models,
+      groupByUpstreamVendor: registered.id === "cursor",
+    };
+  }).filter((vendor) => vendor.models.length > 0);
+  if (assembled.length === 0) return;
+  observeCukiiLatestGeneration(assembled.flatMap((vendor) => vendor.models));
+  const next = sortVendorsByLabel(
+    assembled.map((vendor) => ({
+      id: vendor.id,
+      label: vendor.label,
+      models: presentVendorModels(vendor.models, {
+        groupByUpstreamVendor: vendor.groupByUpstreamVendor,
+      }),
+    })),
+  );
+  VENDORS.splice(0, VENDORS.length, ...next);
+  ALL_MODELS.splice(0, ALL_MODELS.length, ...VENDORS.flatMap((v) => v.models));
+  BROKER_MODEL_OPTIONS.splice(
+    0,
+    BROKER_MODEL_OPTIONS.length,
+    ...ALL_MODELS.filter((model) => !model.disabled),
+  );
+  BROKER_SUBAGENT_OPTIONS.splice(
+    0,
+    BROKER_SUBAGENT_OPTIONS.length,
+    { value: "auto", label: "Auto" },
+    ...BROKER_MODEL_OPTIONS.map((model) => ({
+      value: model.value,
+      label: displayModelLabel(model),
+    })),
+  );
+}
+
+export function displayModelLabel(model: ModelInfo): string {
+  return model.label;
+}
+
+/** Product-level capability tier, independent of vendor pricing and context. */
+export { cukiiCapabilityRating };
+
+/**
+ * Normalizes catalog metadata and orders a vendor's models by Cukii bottle
+ * rating. The original catalog index breaks ties, preserving canonical/live
+ * vendor order without imposing a name or locale sort.
+ *
+ * `groupByUpstreamVendor` is for a CLI that resells other makers — Cursor
+ * lists Anthropic, OpenAI, xAI, Google and more in one flat catalog. There the
+ * maker leads (alphabetically, unlabelled: one section stays one section) and
+ * bottles order the models inside it.
+ */
+export function presentVendorModels(
+  models: BootstrapVendorInfo["models"],
+  options: { groupByUpstreamVendor?: boolean } = {},
+): ModelInfo[] {
+  return models
+    .map((model) => {
+      const label = canonicalCukiiModelLabel(model.value, model.label);
+      return {
+        ...model,
+        label,
+        contextWindowLabel: model.contextWindowLabel.trim() || "Unavailable",
+        description:
+          model.description?.trim() ||
+          canonicalCukiiModelDescription(model.value, label),
+      };
+    })
+    .map((model, canonicalIndex) => ({ model, canonicalIndex }))
+    .sort((left, right) => {
+      if (options.groupByUpstreamVendor) {
+        const leftVendor = cukiiModelUpstreamVendor(left.model);
+        const rightVendor = cukiiModelUpstreamVendor(right.model);
+        if (leftVendor !== rightVendor) {
+          // An unrecognised maker has no place in the alphabet; it goes last.
+          if (!leftVendor) return 1;
+          if (!rightVendor) return -1;
+          return leftVendor.localeCompare(rightVendor, "en", {
+            sensitivity: "base",
+          });
+        }
+      }
+      return (
+        cukiiCapabilityRating(right.model) -
+          cukiiCapabilityRating(left.model) ||
+        left.canonicalIndex - right.canonicalIndex
+      );
+    })
+    .map(({ model }) => model);
+}
+
+export function vendorForModel(model: BrokerModel): VendorInfo | undefined {
+  return VENDORS.find((vendor) => vendor.models.some((m) => m.value === model));
+}
+
+export function modelInfo(model: BrokerModel): ModelInfo | undefined {
+  return ALL_MODELS.find((m) => m.value === model);
+}
+
+/**
+ * Native vendor acceleration, as opposed to a prompt-level approximation.
+ * Keep aligned with vendor-bridge `supportsNativeSpeed`: a switch here that
+ * the bridge cannot pass is decoration (card 951a8b40). Claude Opus uses
+ * `fastMode`, Codex `service_tier=priority`, Composer its `-fast` id. Cursor
+ * sells Fast per family, so a `cursor:` model has it only when the live
+ * catalog found a `-fast` id for it (`nativeFast`). Native Grok, Kimi, Qwen,
+ * Sonnet, Fable and Haiku have no tier.
+ */
+export function supportsNativeSpeed(model: BrokerModel): boolean {
+  if (model.startsWith("cursor:")) return modelInfo(model)?.nativeFast === true;
+  return (
+    model === "opus-5-5" ||
+    model === "opus-5" ||
+    model.startsWith("codex-") ||
+    model.startsWith("codex:") ||
+    model === "composer-2-5"
+  );
+}
+
+/** Native reasoning on/off, separate from the effort level. */
+export function supportsNativeThinking(model: BrokerModel): boolean {
+  return (
+    model === "opus-5-5" ||
+    model === "opus-5" ||
+    model === "sonnet-5" ||
+    model.startsWith("codex-") ||
+    model.startsWith("codex:") ||
+    model.startsWith("cursor:claude-")
+  );
+}
+
+const FULL_EFFORT_LEVELS: readonly BrokerEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+];
+
+/** Display copy for every broker effort tier; shared by the "/" menu slider
+ * and the permissions menu's bottom effort row. */
+export const EFFORT_LABELS: Record<BrokerEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+/** Levels the selected route can express without silently clamping a dot. */
+export function effortLevelsForModel(
+  model: BrokerModel,
+): readonly BrokerEffort[] {
+  if (
+    model === "codex-5-6-sol" ||
+    model === "codex-5-6-terra" ||
+    /(?:^|:)gpt-5\.6-(?:sol|terra)$/.test(model) ||
+    /(?:^|:)gpt-6(?:-|$)/.test(model)
+  ) {
+    return FULL_EFFORT_LEVELS;
+  }
+  if (
+    model === "codex-5-6-luna" ||
+    /(?:^|:)gpt-5\.6-luna$/.test(model) ||
+    model === "opus-5-5" ||
+    model === "opus-5" ||
+    model === "sonnet-5" ||
+    model === "fable-5" ||
+    model === "fable-5-1" ||
+    model === "haiku-4-5" ||
+    model.startsWith("cursor:claude-")
+  ) {
+    return FULL_EFFORT_LEVELS.slice(0, 5);
+  }
+  if (
+    model === "codex-5-5" ||
+    model === "codex-5-4" ||
+    model === "codex-5-4-mini" ||
+    /(?:^|:)gpt-5\.[45](?:-|$)/.test(model) ||
+    model === "grok-4-6" ||
+    model === "grok-4-5" ||
+    model.startsWith("grok:")
+  ) {
+    return FULL_EFFORT_LEVELS.slice(0, 4);
+  }
+  // Kimi, Qwen and Composer currently expose no verified native effort argv.
+  // Retain the useful broker-contract range without painting fake extra tiers.
+  return FULL_EFFORT_LEVELS.slice(0, 3);
+}
+
+export function normalizeEffortForModel(
+  model: BrokerModel,
+  effort: BrokerEffort,
+): BrokerEffort {
+  const levels = effortLevelsForModel(model);
+  const requested = FULL_EFFORT_LEVELS.indexOf(effort);
+  return (
+    [...levels]
+      .reverse()
+      .find(
+        (candidate) => FULL_EFFORT_LEVELS.indexOf(candidate) <= requested,
+      ) ?? levels[0]
+  );
+}

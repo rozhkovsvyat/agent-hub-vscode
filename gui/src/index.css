@@ -24,20 +24,10 @@ html,
 body,
 #root {
   height: 100%;
-  line-height: 1.3;
+  line-height: 1.5;
   background-color: var(--vscode-editor-background);
   font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    "Open Sans",
-    "Helvetica Neue",
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 body {
@@ -143,4 +133,3760 @@ body {
   color: rgba(255, 0, 0, 0.9);
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+:root {
+  --cukii-canvas: #1f1f1d;
+  --cukii-sidebar: #242321;
+  --cukii-shell: #3a3835;
+  --cukii-shell-raised: #42403c;
+  --cukii-surface: #f4eadb;
+  --cukii-surface-muted: #eadbca;
+  --cukii-line: #5a5550;
+  --cukii-line-strong: #b98068;
+  --cukii-text: #2c241c;
+  --cukii-on-dark: #eee9df;
+  --cukii-muted: var(--vscode-input-placeholderForeground, #a6a6a6);
+  --cukii-accent: #e3a867;
+  --cukii-accent-strong: #c9873f;
+  --cukii-accent-soft: #ead7c5;
+  --cukii-primary-action-background: #e3a867;
+  --cukii-primary-action-background-hover: #c9873f;
+  --cukii-primary-action-icon: #5c3a28;
+  --cukii-thinking: #f4814d;
+  --cukii-shadow: 0 16px 38px rgba(0, 0, 0, 0.32);
+}
+
+body,
+#root {
+  /* Был хардкод #1f1f1d (тёплый тёмный бренда). По просьбе владельца заливка
+     приведена к заливке Клода — это фон редактора VS Code (#1e1e1e в Dark+),
+     взятый токеном, чтобы менялся вместе с темой пользователя. */
+  background: var(--vscode-editor-background, #1e1e1e) !important;
+  color: var(--vscode-foreground, #cccccc);
+}
+
+/* Runtime oracle: Claude's dark sidebar is #191a1b; its first editor is
+   #121314 and the next is #191a1b.  These are extension-surface colors, not
+   VS Code theme fallbacks: binding them to --vscode-* made Cukii drift to
+   #1e1e1e in Dark+. */
+:root {
+  --cukii-chat-dark: #121314;
+  --cukii-chat-light: #191a1b;
+  --cukii-chat-background: var(--vscode-editor-background, #1e1e1e);
+}
+
+html[data-cukii-surface="sidebar"],
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"] {
+  --cukii-chat-background: var(--cukii-chat-light);
+}
+
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] {
+  --cukii-chat-background: var(--cukii-chat-dark);
+}
+
+html[data-cukii-surface="sidebar"],
+html[data-cukii-surface="sidebar"] body,
+html[data-cukii-surface="sidebar"] #root,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"],
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"] body,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="light"] #root {
+  background: var(--cukii-chat-background) !important;
+}
+
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"],
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] body,
+html[data-cukii-surface="chat"][data-cukii-panel-tone="dark"] #root {
+  background: var(--cukii-chat-background) !important;
+}
+
+.cukii-ui-button,
+.cukii-icon-button,
+.cukii-permission-button,
+.cukii-menu-item,
+.cukii-session-action,
+.cukii-session-button,
+.cukii-session-menu-button,
+[role="button"].cukii-ui-button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.bg-vsc-input-background,
+.bg-input,
+.bg-background,
+.bg-vsc-background,
+.bg-vsc-editor-background {
+  background-color: var(--vscode-editor-background, #1e1e1e) !important;
+}
+
+.text-vsc-foreground,
+.text-foreground,
+.text-description {
+  color: var(--vscode-foreground, #cccccc) !important;
+}
+
+.text-description-muted {
+  color: var(--cukii-muted) !important;
+}
+
+.border-border,
+.border-command-border,
+.border-description {
+  border-color: var(
+    --vscode-widget-border,
+    rgba(204, 204, 204, 0.2)
+  ) !important;
+}
+
+.ProseMirror {
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--cukii-muted) !important;
+}
+
+.cukii-main-input-shell [data-testid^="continue-input-box-"] > div.relative {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+[data-testid^="continue-input-box-"] [contenteditable="true"] {
+  caret-color: var(--cukii-accent);
+}
+
+[data-testid^="continue-input-box-"] .find-widget-skip {
+  background: transparent !important;
+}
+
+.cukii-main-input-shell .cukii-input-box {
+  background: var(--vscode-menu-background, #252526) !important;
+  border: 1px solid var(--vscode-widget-border, #2a2b2c) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  min-height: 78px;
+  padding: 0 !important;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+/* Historical user turns: Claude userMessage — inline bubble, not the composer shell.
+   Messenger recolor: the user capsule wears the cookie-orange brand tokens of
+   the send/stop buttons, with dark ink inside for readability on orange. */
+.cukii-user-bubble .cukii-input-box {
+  background: var(--cukii-primary-action-background, #e3a867) !important;
+  border: 1px solid var(--cukii-primary-action-background-hover, #c9873f) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transform: none !important;
+  display: inline-flex !important;
+  flex-direction: column;
+  min-height: 0;
+  width: fit-content;
+  max-width: min(100%, 640px);
+  padding: 4px 6px;
+}
+
+.cukii-user-bubble > div.relative {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.cukii-user-bubble .cukii-editor-stack {
+  padding: 0 !important;
+}
+
+/* Sent turns are prose, not a second composer. The footer's hidden utility
+   still left its min-height/padding in layout, producing a 100px one-line
+   bubble. Keep it completely out of the historical-message flow. */
+.cukii-user-bubble .cukii-input-footer {
+  display: none !important;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  transform: none;
+}
+
+/* A sent user message is transcript prose, not an editor viewport. Let it
+   grow to its full wrapped height at every width; a nested scrollbar hides
+   part of the user's own message and breaks the bubble's natural height. */
+.cukii-user-bubble .scroll-container {
+  height: auto !important;
+  max-height: none !important;
+  max-width: 100%;
+  overflow: visible !important;
+}
+
+.cukii-user-bubble .ProseMirror {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  /* Dark ink on the cookie-orange capsule; beats the generic `.ProseMirror`
+     theme-foreground rule by specificity. */
+  color: var(--cukii-text, #2c241c);
+}
+
+.cukii-user-bubble .ProseMirror p {
+  margin: 0;
+}
+
+.cukii-main-input-shell {
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 20;
+  isolation: isolate;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  width: auto;
+  max-width: 680px;
+  margin-right: auto;
+  margin-left: auto;
+  padding: 0;
+}
+
+.cukii-main-input-shell *,
+.cukii-menu-surface *,
+.cukii-model-picker-backdrop * {
+  box-sizing: border-box;
+}
+
+.cukii-editor-stack,
+.find-widget-skip {
+  min-width: 0;
+}
+
+.cukii-main-input-shell .cukii-input-box:focus-within {
+  border-color: #e3a867 !important;
+  box-shadow: 0 0 0 1px #e3a867 !important;
+  transform: none;
+}
+
+/* Validation is semantic state, not focus decoration, and therefore wins
+   even while the editor retains focus. */
+.cukii-main-input-shell .cukii-input-box[aria-invalid="true"],
+.cukii-main-input-shell .cukii-input-box[data-invalid="true"],
+.cukii-main-input-shell[data-invalid="true"] .cukii-input-box {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+  box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder, #be1100) !important;
+}
+
+/* Claude textarea metrics: 10px top/bottom, 14px left, 36px right (the
+   right band is reserved for the mic button). */
+.cukii-main-input-shell .cukii-editor-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 !important;
+}
+
+.cukii-main-input-shell .cukii-editor-stack > .scroll-container {
+  box-sizing: content-box;
+  min-height: 1.5em;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 10px 36px 10px 14px;
+}
+
+/* TipTap wraps even an empty editor in a paragraph with 4px block margins.
+   Claude's plaintext editor has no such wrapper, so those margins inflated a
+   one-line card by 8px and made the submit button's bottom inset exceed its
+   right inset. The card owns the full 10px text inset. */
+.cukii-main-input-shell .ProseMirror > p {
+  margin: 0;
+}
+
+.cukii-voice-button {
+  position: absolute;
+  z-index: 2;
+  top: 5.5px;
+  right: 5px;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.cukii-voice-button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-voice-button[aria-pressed="true"] {
+  color: var(--cukii-accent);
+}
+
+.cukii-voice-button-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.cukii-toggle-track {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--vscode-input-border, #5a5a5a);
+  transition: background 150ms ease-out;
+}
+
+.cukii-toggle-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--vscode-button-foreground, #ffffff);
+  transform: translateX(0);
+  transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+
+.cukii-vendor-state-connected {
+  background: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.cukii-vendor-state-disconnected,
+.cukii-vendor-state-unavailable {
+  background: var(--vscode-testing-iconFailed, #f14c4c);
+}
+
+.cukii-vendor-state-postponed,
+.cukii-vendor-state-unknown {
+  background: var(--vscode-descriptionForeground, #999);
+}
+
+.cukii-toggle-track-on {
+  background: #d97757 !important;
+}
+
+.cukii-toggle-track-on .cukii-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.cukii-toggle-track-disabled {
+  opacity: 0.45;
+}
+
+.cukii-toggle-track-disabled .cukii-toggle-thumb {
+  background: var(--vscode-descriptionForeground, #8b8b8b);
+}
+
+/* Claude effort slider metrics: 76×18 track (9px radius), 14px thumb,
+   theme-driven colors — the fill is inputOption-activeBorder and the track
+   is the shared input border, never a hardcoded blue. */
+.cukii-effort-slider {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 18px;
+  /* Flush with the toggle tracks in the same menu: .cukii-toggle-track carries
+     no margin, so the old `0 5px` pushed Effort 5px off the right edge and it
+     read as misaligned against every other row. */
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  /* Track, fill, notch and thumb below are the reference client's own values,
+     resolved through the tokens its `--app-*` aliases point at (`P1HaRA` in
+     `claude-parity-spec.md`). They were hard-coded hexes here, so the control
+     stayed blue-on-grey in every theme while everything around it followed the
+     theme. */
+  background: var(
+    --vscode-inlineChatInput-border,
+    var(--vscode-input-border, var(--vscode-widget-border, #7f7f7f66))
+  );
+  color: var(--vscode-foreground, #bfbfbf);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.cukii-effort-slider:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.cukii-effort-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--vscode-inputOption-activeBorder, #007acc);
+  transition: width 150ms;
+}
+
+.cukii-effort-notch {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #cccccc) 40%,
+    transparent
+  );
+  transform: translate(-50%, -50%);
+}
+
+/* The reference paints the ultra stop on the fill, not on the notch: at 4px a
+   notch cannot carry a colour meaning. */
+.cukii-effort-fill-ultra {
+  background: var(--vscode-charts-purple, #a855f7);
+}
+
+.cukii-effort-notch-ultra {
+  background: color-mix(
+    in srgb,
+    var(--vscode-charts-purple, #a855f7) 70%,
+    transparent
+  );
+}
+
+.cukii-effort-thumb {
+  position: absolute;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--vscode-foreground, #cccccc);
+  transform: translateX(-50%);
+  transition: left 150ms;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.cukii-input-footer {
+  box-sizing: border-box;
+  position: relative;
+  z-index: 3;
+  min-height: 36px;
+  margin-top: auto !important;
+  padding: 5px !important;
+  border-top: 1px solid rgba(204, 204, 204, 0.2) !important;
+  font-size: 13px !important;
+  line-height: 19.5px !important;
+  color: var(--vscode-descriptionForeground, #8c8c8c) !important;
+  transform: none;
+}
+
+.cukii-input-footer > .flex:first-child {
+  gap: 2px !important;
+}
+
+/* Claude fit-stage 2: once the primary controls wrap, the permission/send
+   pair stays on the first row and the model pill gets the next row without
+   intersecting it.  Removing the pill's 6px wide-layout offset reproduces
+   Claude's `.modelPillRow ... padding:0 5px 5px` left edge. */
+.cukii-input-footer--model-row {
+  align-items: flex-start !important;
+}
+
+.cukii-input-footer--model-row .cukii-footer-secondary-actions {
+  align-self: flex-start;
+}
+
+.cukii-input-footer--model-row .cukii-model-pill {
+  margin-left: 0;
+}
+
+.cukii-icon-button,
+.cukii-submit-button {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 16px !important;
+  background: transparent !important;
+  color: var(--vscode-foreground, #cccccc) !important;
+  box-shadow: none !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 13px !important;
+}
+
+.cukii-user-question {
+  position: fixed;
+  right: 16px;
+  bottom: 108px;
+  left: 16px;
+  /* Stay above transcript/sticky capsules (15/16), but below the composer
+     shell and every menu it owns (20+). The question remains usable without
+     swallowing +, slash or model-picker interactions. */
+  z-index: 18;
+  box-sizing: border-box;
+  width: auto;
+  max-width: 680px;
+  max-height: min(60vh, calc(100vh - 140px));
+  margin-inline: auto;
+  overflow: auto;
+  /* Plugin-dark sheet, not the cream pill surface: --cukii-surface is the
+     brand accent for model pills (dark text on cream), and reusing it here
+     left menu-foreground gray unreadable on cream (owner screenshot). */
+  border: 1px solid var(--cukii-line, #5a5550);
+  border-radius: 16px;
+  background: var(--cukii-shell-raised, #42403c);
+  color: var(--cukii-on-dark, #eee9df);
+  box-shadow: var(--cukii-shadow, 0 16px 38px rgba(0, 0, 0, 0.32));
+  padding: 12px 14px;
+}
+
+.cukii-user-question-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--cukii-on-dark, #eee9df);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.cukii-user-question-count {
+  border: 1px solid var(--cukii-line, #5a5550);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--cukii-muted, #a6a6a6);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cukii-user-question-list {
+  display: grid;
+  gap: 12px;
+}
+
+.cukii-user-question fieldset {
+  display: grid;
+  gap: 5px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.cukii-user-question-list fieldset + fieldset {
+  border-top: 1px solid var(--cukii-line, #5a5550);
+  padding-top: 12px;
+}
+
+.cukii-user-question legend span,
+.cukii-user-question legend strong,
+.cukii-user-question-option span,
+.cukii-user-question-option small {
+  display: block;
+}
+
+.cukii-user-question legend span,
+.cukii-user-question-option small {
+  color: var(--cukii-muted, #a6a6a6);
+  font-size: 11px;
+}
+
+.cukii-user-question legend strong {
+  margin: 2px 0 6px;
+  color: var(--cukii-on-dark, #eee9df);
+  font-size: 13px;
+}
+
+.cukii-user-question legend span strong.cukii-user-question-step {
+  display: inline-block;
+  margin: 0 6px 0 0;
+  border: 1px solid var(--cukii-line, #5a5550);
+  border-radius: 8px;
+  padding: 0 6px;
+  color: var(--cukii-muted, #a6a6a6);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.cukii-user-question-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 6px 10px;
+  color: var(--cukii-on-dark, #eee9df);
+  cursor: pointer;
+}
+
+.cukii-user-question-option:hover {
+  background: rgba(227, 168, 103, 0.08);
+}
+
+.cukii-user-question-option input[type="radio"] {
+  accent-color: var(--cukii-accent-strong, #c9873f);
+}
+
+.cukii-user-question-option:has(input:checked) {
+  border-color: var(--cukii-accent-strong, #c9873f);
+  background: rgba(227, 168, 103, 0.16);
+}
+
+.cukii-user-question-other {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--cukii-line, #5a5550);
+  border-radius: 4px;
+  background: var(--cukii-shell, #3a3835);
+  color: var(--cukii-on-dark, #eee9df);
+  padding: 6px 8px;
+}
+
+.cukii-user-question-other:focus {
+  border-color: var(--cukii-accent-strong, #c9873f);
+  outline: none;
+}
+
+.cukii-user-question-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.cukii-user-question-actions button {
+  min-width: 78px;
+  border: 1px solid var(--cukii-line, #5a5550);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--cukii-on-dark, #eee9df);
+  padding: 5px 12px;
+}
+
+.cukii-user-question-actions button[type="submit"] {
+  border-color: transparent;
+  background: var(--cukii-primary-action-background, #e3a867);
+  color: var(--cukii-primary-action-icon, #5c3a28);
+  font-weight: 600;
+}
+
+.cukii-user-question-actions button[type="submit"]:hover:not(:disabled) {
+  background: var(--cukii-primary-action-background-hover, #c9873f);
+}
+
+.cukii-user-question-actions button[type="submit"]:disabled {
+  opacity: 0.45;
+}
+
+.cukii-footer-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+}
+
+.cukii-icon-button:hover,
+.cukii-permission-button:hover {
+  background: var(
+    --vscode-toolbar-hoverBackground,
+    rgba(90, 93, 94, 0.31)
+  ) !important;
+}
+
+.cukii-permission-button {
+  justify-content: center;
+  gap: 0 !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 8px 0 0 !important;
+  border: 0 !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--vscode-foreground, #cccccc) !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 11px !important;
+  line-height: normal !important;
+  white-space: nowrap;
+}
+
+.cukii-permission-button > svg {
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  padding: 5px;
+}
+
+.cukii-permission-label {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 26px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Permission modes are a single Claude-style surface: no per-option light
+   cards, no gaps, and no modes that the current bridge did not advertise. */
+.cukii-permission-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  width: 300px;
+  max-width: none;
+  padding: 6px 0 4px;
+  border: 1px solid
+    color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+  border-radius: 8px;
+  background: var(--vscode-menu-background, #252526) !important;
+  color: var(--vscode-menu-foreground, #cccccc);
+  box-shadow: none;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cukii-permission-header {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+}
+
+.cukii-permission-header-title {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11.05px; /* .85em of the 13px chat font */
+}
+
+.cukii-permission-header-hint {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 9.75px; /* .75em */
+  opacity: 0.7;
+}
+
+.cukii-permission-mode-row {
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  padding: 4px 8px;
+  gap: 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11.7px; /* .9em, Claude's mode-item size */
+  line-height: normal;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.cukii-permission-mode-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.cukii-permission-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cukii-permission-mode-title {
+  font-weight: 500;
+}
+
+.cukii-permission-mode-row:hover,
+.cukii-permission-mode-row:focus-visible {
+  background: var(--vscode-list-hoverBackground, #3a3d41) !important;
+  color: var(--vscode-list-hoverForeground, #ffffff) !important;
+}
+
+.cukii-permission-mode-row:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+
+.cukii-permission-mode-row .cukii-permission-mode-description {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+}
+
+.cukii-permission-mode-row.cukii-permission-mode-selected,
+.cukii-permission-mode-row.cukii-permission-mode-selected:hover,
+.cukii-permission-mode-row.cukii-permission-mode-selected:focus-visible {
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
+.cukii-permission-mode-check {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-left: auto;
+}
+
+.cukii-permission-mode-selected .cukii-permission-mode-description {
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* Claude's effort row is a regular list item that never wraps: label left,
+   slider right, 12px apart. */
+.cukii-permission-effort-row {
+  border-top: 1px solid var(--vscode-widget-border, rgba(204, 204, 204, 0.2));
+  margin: 4px 0 0;
+  padding: 4px 0 0;
+}
+
+.cukii-permission-effort-row .cukii-menu-item {
+  width: calc(100% - 8px) !important;
+}
+
+html[data-cukii-panel-tone="light"] .cukii-permission-popover {
+  background: var(--vscode-menu-background, #ffffff) !important;
+  color: var(--vscode-menu-foreground, #333333);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+@media screen and (max-width: 300px) {
+  .cukii-permission-button {
+    width: 26px !important;
+    min-width: 26px !important;
+    padding: 0 !important;
+  }
+
+  /* Native Cukii permission sheet: stable geometry, keyboard focus and a
+     scrollable code preview rather than an overflowing raw JSON line. */
+  .cukii-permission-request {
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid var(--vscode-widget-border, #454545);
+    border-radius: 8px;
+    background: var(--vscode-menu-background, #252526);
+    color: var(--vscode-menu-foreground, #cccccc);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+    padding: 12px;
+  }
+
+  .cukii-permission-request-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .cukii-permission-request-preview {
+    box-sizing: border-box;
+    max-width: 100%;
+    max-height: 160px;
+    overflow: auto;
+    margin: 10px 0 0;
+    padding: 8px;
+    border: 1px solid var(--vscode-textBlockQuote-border, transparent);
+    border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background, #1e1e1e);
+    color: var(--vscode-descriptionForeground, #a0a0a0);
+    font: 12px/1.4 var(--vscode-editor-font-family, monospace);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+  .cukii-permission-request-preview:focus-visible,
+  .cukii-permission-request button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder, #007fd4);
+    outline-offset: 1px;
+  }
+  .cukii-permission-request-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .cukii-permission-request-actions button {
+    min-width: 72px;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12px;
+  }
+  .cukii-permission-request-deny {
+    border: 1px solid var(--vscode-button-border, #454545);
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+  }
+  .cukii-permission-request-deny:hover {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  }
+  .cukii-permission-request-allow {
+    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+  }
+  .cukii-permission-request-allow:hover {
+    background: var(--vscode-button-hoverBackground, #1177bb);
+  }
+
+  .cukii-permission-label {
+    display: none;
+  }
+}
+
+.cukii-submit-button {
+  display: inline-flex !important;
+  margin: 0 !important;
+  align-items: center;
+  justify-content: center;
+  background: var(--cukii-primary-action-background) !important;
+  color: var(--cukii-primary-action-icon) !important;
+}
+
+.cukii-submit-button:disabled {
+  opacity: 0.4 !important;
+}
+
+.cukii-menu-surface {
+  background: var(--vscode-menu-background, #252526) !important;
+  border: 1px solid var(--vscode-widget-border, rgba(204, 204, 204, 0.2)) !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* New composer controls must never fall back to the platform's light native
+   button face: every control owns its background explicitly. */
+.cukii-model-pill,
+.cukii-permission-button,
+.cukii-scope-toggle button:not(.cukii-scope-switch) {
+  background: transparent;
+}
+
+/* 1:1 with the live Claude "Switch model" pill (.modelPill_gGYT1w): no border,
+   a 10% foreground tint fill (18% on hover), 9999px radius, pointer cursor and
+   a 6px gap to its left neighbour. Its SIZE lives on the element itself in
+   InputToolbar.tsx — 18px tall, 11.05px text, 8px sides — because Tailwind owns
+   the box there. Both places quote the same measurement of the live pill and
+   must not drift apart: this comment claimed 4px 16px padding and 13px text
+   long after the element had been brought down to Claude's real numbers. */
+.cukii-model-pill {
+  border: 0;
+  cursor: pointer;
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+
+.cukii-model-pill:hover {
+  background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+}
+
+/* Milky (-0): one label + knob switch pinned to the picker's right edge,
+   symmetric with the "Select a model" title. ON (orange) is the default and
+   shows only Milky-rated models. The label keeps a constant weight — only
+   its color shifts — so the switch never jumps when toggled. */
+.cukii-scope-label {
+  padding: 1px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.cukii-scope-label-on {
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-scope-switch {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(204, 204, 204, 0.25);
+  cursor: pointer;
+}
+
+.cukii-scope-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--vscode-foreground, #cccccc);
+  transition: transform 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cukii-scope-switch-on {
+  background: #d97757;
+}
+
+.cukii-scope-switch-on .cukii-scope-switch-knob {
+  transform: translateX(12px);
+}
+
+/* The command launcher lives in the composer toolbar, so its panel must not
+ * borrow the viewport width or participate in sizing that toolbar.  The
+ * negative offset aligns it with the composer edge; this bound leaves an
+ * eight-pixel viewport gutter even at the 320px remote/narrow breakpoint. */
+.cukii-command-menu {
+  width: min(360px, calc(100vw - 16px)) !important;
+  max-width: calc(100vw - 16px) !important;
+  min-width: 0 !important;
+}
+
+.cukii-command-menu .cukii-menu-item > :first-child {
+  min-width: 0;
+}
+
+/* Claude list-item metrics shared by the "/" command menu, the model
+   picker and the permissions popover: 4px 8px padding, 4px side margin,
+   4px corners, pointer cursor. */
+.cukii-menu-item {
+  margin: 0 4px !important;
+  padding: 4px 8px !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+  box-shadow: none !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  cursor: pointer;
+}
+
+.cukii-menu-item:hover:not(:disabled) {
+  background: var(
+    --vscode-list-hoverBackground,
+    rgba(90, 93, 94, 0.31)
+  ) !important;
+}
+
+.cukii-menu-item:disabled {
+  background: transparent !important;
+  color: var(--vscode-disabledForeground, rgba(204, 204, 204, 0.5)) !important;
+}
+
+.cukii-menu-filter {
+  appearance: none;
+  border: 1px solid var(--vscode-input-border, rgba(204, 204, 204, 0.2)) !important;
+  background: var(--vscode-input-background, #3c3c3c) !important;
+  color: var(--vscode-input-foreground, #cccccc) !important;
+  font: inherit;
+}
+
+.cukii-model-picker-backdrop {
+  background: transparent !important;
+}
+
+.cukii-account-overlay {
+  background: rgb(0 0 0 / 75%);
+}
+
+.cukii-account-dialog {
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  border: 1px solid
+    var(--vscode-sideBarActivityBarTop-border, var(--vscode-widget-border));
+  font-family: var(--vscode-chat-font-family, var(--vscode-font-family));
+  font-size: var(--vscode-chat-font-size, 13px);
+  line-height: 19.5px;
+  outline: 0;
+  user-select: text;
+}
+
+/* Report-an-issue follows the same compact VS Code/Claude surface language as
+   Accounts and the model picker.  The report body alone scrolls; its title and
+   actions remain reachable even when the webview is short. */
+.cukii-report-overlay {
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 16px;
+  background: rgb(0 0 0 / 75%);
+}
+
+.cukii-report-dialog {
+  width: min(480px, 100%);
+  max-height: min(680px, 100%);
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  border: 1px solid
+    var(--vscode-sideBarActivityBarTop-border, var(--vscode-widget-border));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 38%);
+  font-family: var(--vscode-chat-font-family, var(--vscode-font-family));
+  font-size: var(--vscode-chat-font-size, 13px);
+  line-height: 19.5px;
+}
+
+.cukii-report-header {
+  min-height: 48px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+}
+
+.cukii-report-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.cukii-report-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 11px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 12px 14px;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+  scrollbar-width: thin;
+}
+
+.cukii-report-intro,
+.cukii-report-error,
+.cukii-report-muted,
+.cukii-report-result p,
+.cukii-report-diagnostics p {
+  margin: 0;
+}
+
+.cukii-report-intro,
+.cukii-report-muted {
+  color: var(--vscode-descriptionForeground);
+}
+
+.cukii-report-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cukii-report-field > span,
+.cukii-report-assets-heading strong {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.cukii-report-field > span strong {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.cukii-report-field input,
+.cukii-report-field textarea,
+.cukii-report-field select {
+  width: 100%;
+  box-sizing: border-box;
+  appearance: none;
+  border: 1px solid var(--vscode-input-border, rgb(204 204 204 / 20%));
+  border-radius: 3px;
+  outline: none;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+}
+
+.cukii-report-field input,
+.cukii-report-field select {
+  height: 28px;
+  padding: 3px 8px;
+}
+
+.cukii-report-field select {
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 11px,
+    calc(100% - 9px) 11px;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+}
+
+.cukii-report-field textarea {
+  min-height: 132px;
+  max-height: 260px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.cukii-report-field input:focus,
+.cukii-report-field textarea:focus,
+.cukii-report-field select:focus,
+.cukii-report-field input:focus-visible,
+.cukii-report-field textarea:focus-visible,
+.cukii-report-field select:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+  border-color: var(--vscode-focusBorder, #007fd4);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007fd4);
+}
+
+.cukii-report-field input:disabled,
+.cukii-report-field textarea:disabled,
+.cukii-report-field select:disabled {
+  opacity: 0.62;
+}
+
+.cukii-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 180px);
+}
+
+.cukii-report-assets {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+.cukii-report-assets-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cukii-report-assets-heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.cukii-report-assets-heading span {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.cukii-report-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+}
+
+.cukii-report-preview-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+  border-radius: 5px;
+  background: var(--vscode-editor-background);
+}
+
+.cukii-report-preview-image {
+  display: flex;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  background: rgb(127 127 127 / 8%);
+  font-size: 11px;
+}
+
+.cukii-report-preview-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cukii-report-preview-caption {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px 3px 2px 7px;
+}
+
+.cukii-report-preview-caption > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cukii-report-diagnostics {
+  border: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+  border-radius: 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.cukii-report-diagnostics summary {
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+  font-weight: 500;
+  user-select: none;
+}
+
+.cukii-report-diagnostics > div,
+.cukii-report-diagnostics > p {
+  padding: 0 8px 8px;
+}
+
+.cukii-report-diagnostics dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0 0 8px;
+}
+
+.cukii-report-diagnostics dt {
+  font-weight: 600;
+}
+
+.cukii-report-diagnostics dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cukii-report-diagnostics pre {
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  padding: 7px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgb(0 0 0 / 18%));
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cukii-report-footer {
+  display: flex;
+  min-height: 50px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px 9px 14px;
+  border-top: 1px solid var(--vscode-widget-border, rgb(127 127 127 / 25%));
+}
+
+.cukii-report-primary,
+.cukii-report-secondary,
+.cukii-report-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cukii-report-primary,
+.cukii-report-secondary {
+  min-height: 28px;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.cukii-report-primary {
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+.cukii-report-primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.cukii-report-secondary {
+  border: 1px solid var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.cukii-report-secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.cukii-report-primary:focus-visible,
+.cukii-report-secondary:focus-visible,
+.cukii-report-icon-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.cukii-report-primary:disabled,
+.cukii-report-secondary:disabled,
+.cukii-report-icon-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.cukii-report-secondary svg {
+  width: 15px;
+  height: 15px;
+}
+
+.cukii-report-icon-button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+
+.cukii-report-icon-button:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.cukii-report-icon-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cukii-report-error {
+  padding: 7px 8px;
+  border-left: 2px solid var(--vscode-errorForeground, #f48771);
+  color: var(--vscode-errorForeground, #f48771);
+  background: rgb(244 135 113 / 8%);
+  overflow-wrap: anywhere;
+}
+
+.cukii-report-result {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 28px;
+  scrollbar-gutter: stable;
+  text-align: center;
+}
+
+.cukii-report-result h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cukii-report-result-mark {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--vscode-testing-iconPassed, #73c991);
+  background: rgb(115 201 145 / 12%);
+  font-size: 22px;
+}
+
+@media (max-width: 440px) {
+  .cukii-report-overlay {
+    padding: 12px;
+  }
+
+  .cukii-report-dialog {
+    width: 100%;
+    max-height: 100%;
+  }
+
+  .cukii-report-footer,
+  .cukii-report-assets-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cukii-report-footer > div {
+    align-self: flex-end;
+  }
+}
+
+@media (max-height: 360px) {
+  .cukii-report-result {
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 12px;
+  }
+
+  .cukii-report-result-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
+  }
+}
+
+.cukii-account-section-title {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 18px;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.cukii-account-row {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.cukii-account-state {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.cukii-account-icon-button,
+.cukii-vendor-action {
+  appearance: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--vscode-descriptionForeground) !important;
+  background: transparent !important;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.cukii-account-icon-button {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px !important;
+  border-radius: 4px;
+}
+
+.cukii-account-icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cukii-vendor-action {
+  border-radius: 4px;
+  padding: 4px 8px !important;
+  font-size: 13px;
+  line-height: 19.5px;
+}
+
+.cukii-account-icon-button:hover,
+.cukii-vendor-action:hover:not(:disabled) {
+  color: var(--vscode-foreground) !important;
+  background: var(--vscode-toolbar-hoverBackground) !important;
+}
+
+.cukii-account-icon-button:focus-visible,
+.cukii-vendor-action:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.cukii-vendor-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Claude marks the current model with the right-hand check column only —
+   the selected row keeps the plain background shared by every row. */
+.cukii-model-option-selected {
+  background: transparent !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+}
+
+/* Live Claude Code parity: the current model is indicated only by the check
+   column while a POINTER-HOVERED row wears the active-selection blue.  Do not
+   use list-hoverBackground here: in the VS Code dark theme it is a translucent
+   grey and made the model hover effectively disappear. */
+.cukii-model-picker-list .cukii-menu-item:hover:not(:disabled) {
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
+/* The menu hangs off the composer's top edge, exactly as in Claude Code
+   2.1.261 (`position: absolute; bottom: 100%; margin-bottom: 8px` on its input
+   fieldset). It used to sit `bottom: 86px` from the *viewport* inside the
+   `fixed inset-0` backdrop, which overlapped a 103px composer by 17px and grew
+   worse with every extra line of input.
+
+   The containing block is the composer's own positioned box
+   (`.cukii-editor-stack`, measured `position: relative`, top identical to
+   `.cukii-main-input-shell`, no clipping ancestor between them), and the ±1px
+   cancels the input field's 1px border so the panel keeps the exact width of
+   the field — the lane contract closed in 2.0.101.
+
+   z-index beats the backdrop's 100000: both are now siblings inside the
+   composer's stacking context (`.cukii-main-input-shell` is `isolation:
+   isolate`), and the panel must stay above the click catcher. */
+.cukii-model-picker-lane {
+  position: absolute;
+  right: -1px;
+  bottom: 100%;
+  left: -1px;
+  z-index: 100001;
+  margin-bottom: 8px;
+}
+
+/* Claude model-picker internals: a column-scrolled list capped at 300px,
+   .9em half-opacity section headers, .85em half-opacity descriptions and a
+   constant 24px check column on every row. */
+.cukii-model-picker {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.cukii-model-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+/* Rows carry the shared 4px side margin AND Tailwind's `w-full`: the 100% is
+   measured from the list's content width, then margin-left pushes the box 4px
+   right, so its right edge overhangs by exactly 4px. Declaring `overflow-y:
+   auto` alone computes `overflow-x` to `auto` as well, and that overhang
+   became a real horizontal scrollbar which also ate 15px of list height.
+   `width: auto` would NOT do: Chromium sizes a `<button>` at max-content even
+   with `display: flex`, so the rows would collapse to their text and the check
+   column would leave the right edge. */
+.cukii-model-picker-list .cukii-menu-item {
+  width: calc(100% - 8px) !important;
+}
+
+.cukii-picker-section-header {
+  padding: 4px 12px;
+  color: var(--vscode-menu-foreground, #cccccc);
+  font-size: 11.7px; /* .9em of the 13px chat font */
+  opacity: 0.5;
+}
+
+.cukii-model-description {
+  color: var(--vscode-menu-foreground, #cccccc);
+  font-size: 11.05px; /* .85em */
+  opacity: 0.5;
+}
+
+.cukii-model-check-col {
+  display: flex;
+  width: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.cukii-model-check-col svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* The shared effort row renders at Claude's .9em and never wraps. */
+.cukii-effort-menu-row {
+  gap: 12px;
+  font-size: 11.7px !important;
+  white-space: nowrap;
+}
+
+.cukii-capability-rating {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  opacity: 0.88;
+}
+
+.cukii-capability-milk {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+}
+
+.cukii-model-option-selected .cukii-capability-rating {
+  color: currentColor;
+  opacity: 0.76;
+}
+
+[data-testid="mode-select-button"],
+[data-testid="broker-model-select-button"],
+[data-testid="model-select-button"],
+[data-testid="broker-subagent-select-button"] {
+  background: var(--cukii-surface) !important;
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  color: var(--cukii-text) !important;
+  min-height: 22px;
+  min-width: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.28) inset;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.cukii-broker-segmented {
+  max-width: min(68vw, 372px);
+}
+
+.cukii-broker-segmented [data-testid="broker-model-select-button"],
+.cukii-broker-segmented [data-testid="broker-subagent-select-button"] {
+  max-width: min(34vw, 186px) !important;
+}
+
+.cukii-broker-segmented .cukii-segment-left {
+  border-radius: 999px 0 0 999px !important;
+  border-right-color: #d8c5ad !important;
+}
+
+.cukii-broker-segmented .cukii-segment-right {
+  border-radius: 0 999px 999px 0 !important;
+  margin-left: -1px;
+}
+
+@media (max-width: 360px) {
+  .cukii-broker-segmented {
+    max-width: calc(100vw - 126px);
+  }
+
+  .cukii-broker-segmented [data-testid="broker-model-select-button"],
+  .cukii-broker-segmented [data-testid="broker-subagent-select-button"] {
+    max-width: calc((100vw - 128px) / 2) !important;
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+  }
+}
+
+[data-testid="mode-select-button"]:hover,
+[data-testid="broker-model-select-button"]:hover,
+[data-testid="model-select-button"]:hover,
+[data-testid="broker-subagent-select-button"]:hover {
+  background: var(--cukii-accent-soft) !important;
+  border-color: var(--cukii-line-strong) !important;
+  transform: translateY(-1px);
+}
+
+[data-headlessui-state] {
+  outline-color: var(--cukii-accent);
+}
+
+[role="listbox"] {
+  background: var(--vscode-menu-background, #252526) !important;
+  border-color: var(
+    --vscode-widget-border,
+    rgba(204, 204, 204, 0.2)
+  ) !important;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32) !important;
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+}
+
+[role="listbox"] .text-foreground,
+[role="listbox"] .text-description {
+  color: var(--vscode-menu-foreground, #cccccc) !important;
+}
+
+[role="listbox"] .text-description-muted {
+  color: var(
+    --vscode-descriptionForeground,
+    rgba(204, 204, 204, 0.7)
+  ) !important;
+}
+
+[role="option"] {
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+[role="option"]:hover,
+[role="option"][data-headlessui-state~="active"] {
+  background: var(
+    --vscode-list-hoverBackground,
+    rgba(90, 93, 94, 0.31)
+  ) !important;
+  color: var(--vscode-list-hoverForeground, #cccccc) !important;
+}
+
+button.bg-primary,
+.bg-primary {
+  background: var(--cukii-accent) !important;
+  color: #fffaf2 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 7px !important;
+}
+
+button.bg-primary:hover,
+.bg-primary:hover {
+  background: var(--cukii-accent-strong) !important;
+  filter: none;
+}
+
+button.cukii-submit-button,
+button.cukii-submit-button:hover {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 16px !important;
+  background: var(--cukii-primary-action-background) !important;
+  box-shadow: none !important;
+  color: var(--cukii-primary-action-icon) !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+button.cukii-submit-button:hover,
+button.cukii-submit-button:focus-visible,
+button.cukii-submit-button:active {
+  background: var(--cukii-primary-action-background-hover) !important;
+  color: var(--cukii-primary-action-icon) !important;
+  filter: none !important;
+}
+
+.cukii-submit-stop-icon {
+  background: var(--cukii-primary-action-icon);
+}
+
+/* Keep this state after every generic button rule: cascade order is part of
+   the stop-button contract. Ordinary send/disabled states remain untouched. */
+button.cukii-submit-button--stop,
+button.cukii-submit-button--stop:hover {
+  background: var(--cukii-primary-action-background) !important;
+  color: var(--cukii-primary-action-icon) !important;
+}
+
+button.cukii-submit-button--stop:hover,
+button.cukii-submit-button--stop:focus-visible {
+  background: var(--cukii-primary-action-background-hover) !important;
+  box-shadow: 0 0 0 1px var(--cukii-primary-action-background-hover) !important;
+}
+
+button.cukii-submit-button--stop:active {
+  background: var(--cukii-primary-action-background-hover) !important;
+  box-shadow: 0 0 0 1px var(--cukii-primary-action-background-hover) !important;
+}
+
+.cukii-command-menu
+  .cukii-menu-item.cukii-command-menu-action:hover:not(:disabled),
+.cukii-command-menu .cukii-menu-item.cukii-command-menu-item-active,
+.cukii-command-menu
+  .cukii-menu-item.cukii-command-menu-item-active:hover:not(:disabled) {
+  /* Claude applies one list-active color from the first hover frame. Using a
+     generic list-hover utility first caused a light flash before React added
+     the blue roving-selection class. */
+  background: var(--vscode-list-activeSelectionBackground, #04395e) !important;
+  color: var(--vscode-list-activeSelectionForeground, #ffffff) !important;
+}
+
+.thread-message {
+  animation: cukiiMessageIn 220ms ease-out;
+}
+
+.thread-message > div,
+.thread-message .bg-background:not(.cukii-assistant-bubble) {
+  background: transparent !important;
+}
+
+/* Messenger capsules: the assistant answers in the slate capsule the user
+   turns used to wear, while the user moved to cookie-orange (see
+   `.cukii-user-bubble`). Geometry is unified with the user capsule (MAX
+   bubble metrics); only the fill and the left alignment differ. A longread
+   answer may use the full transcript width. */
+.cukii-assistant-bubble {
+  background: var(--vscode-input-background, var(--cukii-shell)) !important;
+  border: 1px solid var(--vscode-input-border, var(--cukii-line));
+  border-radius: 16px;
+  padding: 8px 10px 10px !important;
+  /* The default here is content-box, under which `width: 100%` on the longread
+     variant means 100% of the row PLUS the 10px sides and the border — the
+     capsule then hung 22px past its row, ate the transcript's right gutter and
+     gave the whole transcript a horizontal scrollbar. The user capsule never
+     showed it because it is `fit-content`. Both capsules now end on the same
+     inset from the right edge as they start from the left. */
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: 0;
+  max-width: 70%;
+  color: var(--vscode-foreground, var(--cukii-on-dark));
+}
+
+/* Markdown gives its first block a 1em top margin and its last a 1em bottom
+   one. Both collapse straight through the styled wrapper into the capsule's
+   own 8/10/10 inset, so the answer sat ~13px lower than the user's prose does
+   in its capsule and left a second blank band above the reply time. The
+   capsule's padding is the whole gutter, exactly as on the user side. */
+.cukii-assistant-bubble > * > :first-child {
+  margin-top: 0 !important;
+}
+
+.cukii-assistant-bubble > * > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Prose rhythm measured in the shipped Claude Code webview 2.1.261: a
+   paragraph is `1.3px 0 2.6px` (0.1em/0.2em) against a 19.5px line box, so
+   consecutive paragraphs sit almost as close as wrapped lines. Ours carried a
+   full 1em above and below, which inside a capsule reads as double spacing. */
+.cukii-assistant-bubble p {
+  margin: 1.3px 0 2.6px;
+}
+
+.cukii-assistant-bubble--longread {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* The markdown surface ships its own canvas fill; inside the capsule it
+   reads as a second, inner square. The capsule alone is the fill. */
+.cukii-assistant-bubble .wmde-markdown,
+.cukii-assistant-bubble .wmde-markdown-var {
+  background-color: transparent !important;
+  /* The capsule owns the inset; the markdown canvas must not add a second
+     wall of padding inside it. */
+  padding: 0 !important;
+  min-width: 0;
+}
+
+/* The capsule hugs its content (fit-content); a wide code block must scroll
+   inside the bubble instead of forcing it past the column edge. */
+.cukii-assistant-bubble .wmde-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Inline code (paths, guids) ships its own dark square too; inside the
+   capsule only the capsule fill remains. */
+.cukii-assistant-bubble .wmde-markdown code,
+.cukii-assistant-bubble .wmde-markdown tt {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+/* The markdown wrapper (StyledMarkdownPreview's styled div) declares
+   `padding: 0 8px` of its own, one level above `.wmde-markdown` whose padding
+   is already zeroed. That inner wall put the answer's glyphs 18.8px from the
+   capsule edge while the user's prose sits at 10.8px — the left/bottom
+   mismatch the owner reported. Two classes on purpose: styled-components
+   injects its sheet AFTER index.css and matches with a single class, so a
+   one-class rule here would lose the cascade and change nothing. */
+.cukii-assistant-bubble > .cukii-assistant-prose {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* A second block on purpose: the geometry contract in cukiiGuiContracts.test.ts
+   pins a fixed 330-character window from the first `.cukii-assistant-bubble {`
+   and has 16 characters of slack left, so anything added above would push
+   `max-width: 70%;` out of it. The user capsule splits its own declarations
+   the same way (see `--cukii-meta-reserve` further down). */
+.cukii-assistant-bubble {
+  position: relative;
+  /* Fallback only. StepContainer measures the rendered <time> and overwrites
+     this per capsule, so a wider clock format cannot push the time under the
+     text the way a hard-coded reserve would. */
+  --cukii-meta-reserve: 31px;
+}
+
+/* Reply time in the capsule's bottom-right corner, on the same 10px right
+   inset as the user checks. This is the SAFE default: a compact row of its own
+   in the flow. An assistant answer may end in a code block, a table, a heading
+   or a list, and none of those can carry a reserved slot for the time —
+   pinning it absolutely there would drop the digits onto the last glyphs.
+
+   The negative bottom margin is what makes the row compact rather than merely
+   separate: it lets the row sit INSIDE the capsule's own 10px bottom band, so
+   the time lands 4px above the capsule edge — the same place it occupies when
+   it rides the last line. Without it the band cost 31px against the reference's
+   "compact own row"; with it, 20px. */
+.cukii-assistant-metadata {
+  display: flex;
+  justify-content: flex-end;
+  margin: 2px 0 -6px;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* MAX mechanism, mirrored from the user capsule: when the time still fits at
+   the end of the answer's last line, it rides that line. An inline ::after
+   spacer holds its width while the time itself is absolute in the bottom-right
+   corner, so the capsule's 10px bottom band is the time's band and nothing
+   else — bottom inset 11.9px, the user capsule's number.
+
+   The mode is a measured class, not a selector: `:has(> p:last-child)` can
+   tell a paragraph tail from a code block, but it cannot tell whether the time
+   FITS, and a spacer that wraps opens a full 19.5px line box (the paragraph's
+   strut is the floor). That wrapped line is exactly the oversized band the
+   owner reported. StepContainer measures instead — see
+   `assistantMetaFitsOnLastLine`. */
+.cukii-assistant-bubble--meta-inline > .cukii-assistant-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+.cukii-assistant-bubble--meta-inline
+  > .cukii-assistant-prose
+  > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: var(--cukii-meta-reserve);
+  height: 14px;
+}
+
+/* Assistant capsules live OFF the timeline rail: the row is a plain block at
+   the transcript's own gutter — the same inset the user capsule keeps from
+   the right edge — so no dot and no connector line ride along, and the rail
+   starts and ends strictly between messages. */
+.cukii-assistant-row {
+  display: block;
+  min-width: 0;
+  margin: 10px 0;
+}
+
+/* Claude sticky mode keeps the scrollport's top edge at zero and supplies the
+   initial 20px breathing room as a flex pseudo-item. Unlike padding, that
+   spacer scrolls away, so a sticky turn can reach the true top of the page. */
+.cukii-transcript {
+  isolation: isolate;
+  /* A sticky capsule deliberately shrinks its own flow box pixel by pixel.
+     Native scroll anchoring would compensate that shrink and make the viewport
+     oscillate; Cukii owns transcript anchoring explicitly when history is
+     prepended, so disable the browser's competing adjustment here. */
+  overflow-anchor: none;
+  padding: 0 20px 40px;
+}
+
+.cukii-transcript::before {
+  content: "";
+  flex-shrink: 0;
+  height: 20px;
+}
+
+/* Claude keeps the transcript full-height and floats the composer above it.
+   The last child reserves the measured composer height in scroll geometry;
+   the 150px scrim softens content behind the overlaid card. */
+.cukii-composer-spacer {
+  width: 100%;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.cukii-message-gradient {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  height: 150px;
+  /* Same rule as the sticky mask: one measured colour, alpha mask for the
+     fade. A colour stop here is what made the composer sit on a lighter
+     rectangle whose rounded corners stopped reading. */
+  background-color: var(--cukii-canvas, var(--cukii-chat-background));
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
+  pointer-events: none;
+}
+
+.cukii-history-sentinel {
+  flex-shrink: 0;
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+}
+
+/* Claude-style transcript pagination is a quiet secondary action. Keep every
+   state explicit so Electron never falls back to the platform's white button. */
+.cukii-load-earlier {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border: 1px solid var(--vscode-widget-border, var(--cukii-line));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.cukii-load-earlier:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-load-earlier:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.cukii-load-earlier:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cukii-user-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0 16px;
+  min-width: 0;
+}
+
+/* Claude Code 2.1.263 groups each prompt with its response and constrains the
+   sticky header to that turn. The next turn therefore pushes the previous
+   prompt away instead of stacking multiple sticky cards at the top. */
+.cukii-turn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  /* The sentinel's named view timeline is hoisted to the turn so the sticky
+     row (a sibling, not a descendant) can animate against it. */
+  timeline-scope: --cukii-turn;
+  /* Eviction slack lives inside the turn's box (so the sticky row keeps its
+     containing block until the next capsule reaches the one-line row) and
+     is pulled back out of the flow here, so it is never visible. */
+  margin-bottom: calc(-1 * var(--cukii-turn-slack, 0px));
+}
+
+/* Scroll-driven fold (owner videos 29.09/01.10). The previous JavaScript
+   fold tracked `scrollTop`, a pin edge and a terminal latch, and every one of
+   those became a feedback loop once streamed content, auto-scroll or scroll
+   clamping moved the transcript under the pinned capsule: the row jumped
+   between one line and full height several times a second. Now the fold is
+   a pure function of scroll position evaluated by the compositor: a 1px
+   sentinel at the top of each turn is the view-timeline subject, and the
+   sticky row animates `--cukii-fold-px` from 0 to 4000px over the 4000px of
+   scroll that follow the sentinel crossing the scrollport top. Nothing here
+   changes layout; the capsule is clipped with `clip-path`, which cannot move
+   the content below it. */
+@property --cukii-fold-px {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@keyframes cukii-sticky-fold {
+  from {
+    --cukii-fold-px: 0px;
+  }
+  to {
+    --cukii-fold-px: 4000px;
+  }
+}
+
+.cukii-turn-sentinel {
+  flex: 0 0 1px;
+  height: 1px;
+  margin-bottom: -1px;
+  view-timeline: --cukii-turn block;
+  pointer-events: none;
+}
+
+.cukii-turn-slack {
+  flex: 0 0 auto;
+  height: var(--cukii-turn-slack, 0px);
+  pointer-events: none;
+}
+
+/* Eviction slack keeps a turn's box tall enough for its sticky row to stay
+   pinned until the next capsule reaches the one-line row, and the negative
+   margin hides it from the flow. When everything after a turn is shorter than
+   its slack (long prompt, short answer, short follow-up), that box still
+   reached past the real end of the transcript and the reader could scroll
+   into a prompt-sized blank. `overflow-y: clip` is not a scroll container,
+   so sticky pinning and the view timeline still resolve against the
+   transcript, but the clipped slack no longer counts as scrollable overflow.
+   The x axis stays visible for capsule shadows. */
+.cukii-turns {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
+/* The last turn keeps its slack too. Without it the sticky row's tall box
+   (full prompt height, only the top strip painted) rode up with the end of
+   the turn and the one-line capsule left the top although no next capsule
+   had arrived (2.0.167: rowTop -323 at max scroll; card 8cfde09e). The
+   prompt-sized blank that once made the last turn special (2.0.155) is now
+   prevented by `.cukii-turns { overflow-y: clip }`: measured, the scroll
+   range stays 1645px with the slack on. */
+
+/* Transcript layer scale. Upstream code-block and tool-call headers ship as
+   `sticky -top-2 z-10`, so a capsule at the old z-index 2 was painted over by
+   the answer's own `Apply` toolbar as it scrolled underneath. The capsule must
+   outrank every sticky element that scrolls beneath it, yet stay under the
+   composer shell (z-index 20); `.cukii-transcript`'s isolate guarantees the
+   second half, so these numbers can never leak into the page's overlays. */
+.cukii-user-row--sticky {
+  --cukii-user-row-padding-top: 14px;
+  --cukii-user-row-padding-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  box-sizing: border-box;
+  align-items: flex-start;
+  margin: 0;
+  padding-top: var(--cukii-user-row-padding-top);
+  padding-bottom: var(--cukii-user-row-padding-bottom);
+  pointer-events: none;
+  /* `exit 100%` of the 1px sentinel is the frame its bottom edge meets the
+     scrollport top; minus 1px that is the row's own top edge: the pin. */
+  animation: cukii-sticky-fold linear both;
+  animation-timeline: --cukii-turn;
+  animation-range: exit calc(100% - 1px) exit calc(100% + 3999px);
+  /* Effective fold. The row is only pinned while the rest of its turn is
+     still below it; `--cukii-fold-cap` (measured by CukiiStickyUserMessage)
+     is exactly that distance, so once the row starts riding up with the end
+     of its turn the clip stops growing and the painted edge stays glued to
+     the content that follows. Without the cap a long last prompt kept
+     folding while it scrolled away and left a prompt-sized blank above the
+     answer. */
+  --cukii-fold: min(var(--cukii-fold-px), var(--cukii-fold-cap, 100000px));
+}
+
+/* Short prompts have no fold and expanded capsules keep their full paint
+   until the chevron closes them again. */
+.cukii-user-row--sticky:not(:has([data-cukii-long-prompt="true"])),
+.cukii-user-row--sticky.cukii-user-row--expanded {
+  animation: none;
+}
+
+/* Remaining painted height of the capsule: the fold removes one pixel per
+   scrolled pixel down to the single 20px text row plus the bubble inset. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px;
+  clip-path: inset(
+    0 0 min(var(--cukii-fold, 0px), calc(100% - 38px)) 0 round
+      var(--cukii-bubble-radius)
+  );
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-start[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 16px 6px 16px;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-middle[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 6px 6px 16px;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-bubble--group-end[data-cukii-long-prompt="true"] {
+  --cukii-bubble-radius: 16px 6px 16px 16px;
+}
+
+/* The fold is pixel-synchronous with scroll: every scrolled pixel past the
+   pin removes exactly one painted pixel (`--cukii-fold-px`, declared on the
+   turn above). The row keeps its natural flow box; only the paint is clipped,
+   so the following answer never moves because of the fold itself. */
+
+/* The sticky mask must equal whatever actually paints behind the transcript.
+   Naming a token twice is what kept breaking this: `sideBar-background` was
+   too light, and `--cukii-chat-background` (html/body/#root) is too dark
+   because a styled-component between #root and the transcript repaints the
+   canvas. `--cukii-canvas` is measured from that real ancestor at runtime and
+   refreshed on theme/tone changes, so the strip cannot drift again.
+
+   The colour lives in exactly one declaration: the soft bottom edge is an
+   alpha mask, not a second colour stop. Keeping the fade inside the row's own
+   box preserves the grouped-row geometry — a strip below the row would tint
+   the top of the next capsule. */
+.cukii-user-row--sticky::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: calc(
+    100% -
+      min(
+        var(--cukii-fold, 0px),
+        calc(
+          100% - var(--cukii-user-row-padding-top) -
+            var(--cukii-user-row-padding-bottom) - 38px
+        )
+      )
+  );
+  background-color: var(--cukii-canvas, var(--cukii-chat-background));
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+}
+
+.cukii-user-row--sticky:has([aria-expanded="true"]) {
+  z-index: 16;
+}
+
+.cukii-user-row--sticky .cukii-user-message,
+.cukii-user-row--sticky .cukii-user-message-bubble {
+  box-sizing: border-box;
+}
+
+/* Sticky positioning must not erase MAX's right-lane width cap. The previous
+   width:100%/max-width:none override turned long single-line prompts into a
+   full-transcript orange strip. */
+.cukii-user-row--sticky .cukii-user-message {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 70%;
+  pointer-events: auto;
+}
+
+.cukii-user-row--sticky .cukii-user-message-bubble {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* MAX-style grouping: adjacent visible messages share a compact 2px seam.
+   Both sides of the seam participate; changing only margin-top left the
+   sticky row's 14px/12px padding intact and produced the oversized gaps from
+   the live transcript. */
+.cukii-user-row--group-start,
+.cukii-user-row--group-middle {
+  --cukii-user-row-padding-bottom: 0px;
+}
+
+.cukii-user-row--group-middle,
+.cukii-user-row--group-end {
+  --cukii-user-row-padding-top: 0px;
+}
+
+/* MAX-style message bubble: user turns own the right lane while the timeline
+   for assistant/tool/thinking remains untouched on the left. MAX measures
+   the sent bubble at 70% of the chat column. */
+.cukii-user-message {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 70%;
+  margin-left: auto;
+}
+
+/* MAX Web reaction placement has two distinct modes. Text messages own their
+   reaction inside the painted message body. Only media without text uses a
+   separate standalone pill below the media bubble. */
+.cukii-message-reactions {
+  z-index: 2;
+  display: flex;
+  width: fit-content;
+  flex-flow: row wrap;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.cukii-message-reactions--embedded {
+  position: static;
+  min-height: 28px;
+  margin: 0 -10px -10px;
+  padding: 8px 10px;
+}
+
+/* MAX keeps an embedded reaction and the delivery metadata in one bottom
+   band. The reaction stays in normal flow; an inline flex item reserves the
+   exact measured width of the absolutely painted time/checks. This mode is
+   enabled only when metadata exists, so reaction-only bubbles do not acquire
+   a phantom empty slot. */
+.cukii-user-bubble--reaction-with-meta
+  .cukii-message-reactions--embedded::after {
+  content: "";
+  display: block;
+  flex: 0 0 var(--cukii-meta-reserve, 31px);
+  width: var(--cukii-meta-reserve, 31px);
+  height: 14px;
+  align-self: flex-end;
+}
+
+.cukii-user-bubble--reaction-with-meta > .cukii-user-metadata,
+.cukii-user-bubble--reaction-with-meta > .cukii-user-fold-footer {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+/* A long sticky prompt's footer also owns the 14px chevron and its 2px gap.
+   Reserve those pixels in the same bottom row while the reaction is visible;
+   the terminal one-line sticky clip still hides the body/reaction together. */
+.cukii-user-bubble--reaction-with-meta[data-cukii-long-prompt="true"]
+  .cukii-message-reactions--embedded::after {
+  flex-basis: calc(var(--cukii-meta-reserve, 31px) + 16px);
+  width: calc(var(--cukii-meta-reserve, 31px) + 16px);
+}
+
+.cukii-message-reactions--standalone {
+  position: static;
+  width: 100%;
+  min-height: 28px;
+  justify-content: flex-end;
+  padding: 4px 0 8px;
+}
+
+.cukii-message-reaction {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 10px;
+  overflow: visible;
+  border: 0;
+  border-radius: 20px;
+  animation: cukii-reaction-pill-in 180ms ease-out both;
+}
+
+/* The reaction surface is intentionally the opposite participant's capsule:
+   agent-on-user is slate with the user's orange count; user-on-agent is
+   orange with the agent's white count. This mirrors the MAX side distinction
+   while preserving Cukii's established palette. */
+.cukii-message-reactions--user .cukii-message-reaction {
+  color: var(--cukii-primary-action-background, #e3a867);
+  background: var(--vscode-input-background, var(--cukii-shell));
+  --cukii-reaction-ripple: color-mix(
+    in srgb,
+    var(--cukii-primary-action-background, #e3a867) 38%,
+    transparent
+  );
+}
+
+.cukii-message-reactions--assistant .cukii-message-reaction {
+  color: #ffffff;
+  background: var(--cukii-primary-action-background, #e3a867);
+  --cukii-reaction-ripple: color-mix(in srgb, #ffffff 38%, transparent);
+}
+
+.cukii-message-reaction::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 10px;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  background: var(--cukii-reaction-ripple);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.25);
+  animation: cukii-reaction-ripple-in 360ms ease-out both;
+}
+
+.cukii-message-reaction-emoji {
+  z-index: 1;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-size: 18px;
+  line-height: 20px;
+  transform-origin: center;
+  animation: cukii-reaction-emoji-in 360ms cubic-bezier(0.2, 0.9, 0.24, 1.25)
+    both;
+}
+
+.cukii-message-reaction-art {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  user-select: none;
+}
+
+.cukii-message-reaction-fallback {
+  font: inherit;
+}
+
+.cukii-message-reaction-counter {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.15px;
+}
+
+.cukii-message-reactions--user .cukii-message-reaction-counter {
+  color: var(--cukii-primary-action-background, #e3a867);
+}
+
+.cukii-message-reactions--assistant .cukii-message-reaction-counter {
+  color: #ffffff;
+}
+
+@keyframes cukii-reaction-pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cukii-reaction-emoji-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(-10deg);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.18) rotate(3deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes cukii-reaction-ripple-in {
+  0% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(0.25);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cukii-message-reaction,
+  .cukii-message-reaction::after,
+  .cukii-message-reaction-emoji {
+    animation: none;
+  }
+}
+
+.cukii-user-message-bubble {
+  position: relative;
+  display: inline-block;
+  width: fit-content;
+  min-width: 54px;
+  max-width: 100%;
+  /* Folding is clipped by `.cukii-user-message-content`, not by the painted
+     bubble. The outer clip cut the embedded reaction's pop/ripple against the
+     orange capsule even though the reaction was correctly nested in the DOM. */
+  overflow: visible;
+  /* Measured MAX bubble inset: 8px top, 10px sides, 10px bottom. The bottom
+     band doubles as the home of the absolutely positioned receipt. */
+  padding: 8px 10px 10px;
+  /* Messenger recolor: the sent capsule wears the same cookie-orange as the
+     send/stop buttons; dark ink inside (see `.cukii-user-metadata` below). */
+  background: var(--cukii-primary-action-background, #e3a867);
+  border: 1px solid var(--cukii-primary-action-background-hover, #c9873f);
+  /* MAX geometry: large outer corners by default; group modifiers tighten the
+     corner that faces an adjacent user bubble on the same side. */
+  border-radius: 16px;
+}
+
+/* A prompt folds to one line only while its row is actually pinned at the
+   transcript's top edge. In-flow messages remain fully readable and expose no
+   manual fold control. Delivery metadata stays outside the clipped shell.
+   Delivery metadata remains a sibling below this clipped shell, never inside
+   it, so time and ticks are always visible. */
+.cukii-user-content-shell {
+  position: relative;
+  width: 100%;
+  /* The prompt body is text, not a control. A pointer cursor over it promised
+     a click target that only the chevron and the attachment pills own, so the
+     whole click-the-text-to-expand affordance is gone. */
+  cursor: default;
+}
+
+.cukii-user-content-shell .cukii-input-box,
+.cukii-user-content-shell .ProseMirror {
+  cursor: default !important;
+}
+
+.cukii-user-message-content {
+  /* Idle text reactions share this frame so their height participates in the
+     bubble and sticky measurements. Keep it paint-visible until an actual
+     fold starts; otherwise the 44px reaction row is clipped at the text
+     frame's pre-reaction height. */
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cukii-user-message-body {
+  min-width: 0;
+}
+
+/* The fade rides the painted bottom edge of the clipped text and shrinks
+   to nothing as the remaining height approaches one row, so it never eats
+   the last visible line. It is hidden while nothing is folded (fold = 0) and
+   while the chevron holds the capsule open. */
+.cukii-user-truncation-gradient {
+  display: block;
+  position: absolute;
+  right: 0;
+  bottom: min(var(--cukii-fold, 0px), calc(100% - 20px));
+  left: 0;
+  height: clamp(0px, calc(100% - 20px - var(--cukii-fold, 0px)), 20px);
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--cukii-primary-action-background, #e3a867) 100%
+  );
+}
+
+@container style(--cukii-fold-px: 0px) {
+  .cukii-user-truncation-gradient {
+    display: none;
+  }
+
+  .cukii-user-fold-toggle {
+    visibility: hidden;
+  }
+}
+
+.cukii-user-bubble--expanded .cukii-user-truncation-gradient {
+  display: none;
+}
+
+.cukii-user-bubble--expanded .cukii-user-fold-toggle {
+  visibility: visible;
+}
+
+/* The text clips with the same fold, but never below its first line. The
+   bubble keeps 38px (padding + one row + padding), and its bottom padding
+   sits at the real bottom far below the painted strip, so without this the
+   strip's last 10px showed the top half of the second line. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-content-shell {
+  clip-path: inset(0 0 min(var(--cukii-fold, 0px), calc(100% - 1lh)) 0);
+}
+
+/* With attachments the thumbnail strip paints below the text inside a sticky
+   capsule, so the single terminal row is always the first line of text. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-bubble {
+  display: flex;
+  flex-direction: column;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .cukii-user-attachment-strip {
+  order: 2;
+}
+
+/* At the terminal fold the receipt (chevron, time, ticks) rides the single
+   remaining text row, which is always the FIRST visual line. Only that line
+   reserves the receipt width, through a one-line float; padding the whole
+   editor instead narrowed every line of the prompt and, in a narrow panel,
+   left a letter-per-line column tens of thousands of pixels tall. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  .ProseMirror
+  > :first-child::before {
+  content: "";
+  float: right;
+  /* Never wider than the line minus a few characters: in a narrow column the
+     full reserve left no room beside it, the first line wrapped under the
+     float and the folded capsule showed only the receipt (card 526b6026). */
+  width: min(calc(var(--cukii-meta-reserve, 31px) + 20px), calc(100% - 3em));
+  height: 1lh;
+}
+
+.cukii-user-fold-footer {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin: 2px 0 -6px auto;
+  line-height: 14px;
+}
+
+.cukii-user-fold-toggle {
+  display: inline-flex;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--cukii-text, #2c241c);
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  opacity: 0.68;
+  cursor: pointer;
+}
+
+.cukii-user-fold-toggle:hover {
+  opacity: 1;
+}
+
+.cukii-user-fold-toggle:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}
+
+.cukii-user-fold-toggle > svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.8;
+}
+
+.cukii-user-fold-footer > .cukii-user-metadata {
+  margin: 0;
+}
+
+.cukii-user-bubble--meta-inline > .cukii-user-fold-footer {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+/* Long prompts always reserve the receipt inside the bubble instead of
+   appending a second footer row. Keeping this geometry before, during and
+   after the sticky fold makes the painted capsule lose exactly one pixel for
+   every consumed scroll pixel; changing static/absolute at the sticky edge
+   caused a one-line jump and left the fully folded capsule two rows tall. */
+.cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  > .cukii-user-fold-footer {
+  position: absolute;
+  right: 10px;
+  bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)));
+  margin: 0;
+  /* When the capped first-line reserve is narrower than the receipt, the
+     receipt covers the end of that line; paint it on the bubble colour so
+     the hidden letters do not show through the time and ticks. */
+  background-color: inherit;
+  padding-left: 4px;
+  border-radius: 6px;
+}
+
+.cukii-user-bubble--group-start {
+  border-bottom-right-radius: 6px;
+}
+
+.cukii-user-bubble--group-middle {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.cukii-user-bubble--group-end {
+  border-top-right-radius: 6px;
+}
+
+/* MAX receipt layout (measured on web.max.ru): the meta (time + ticks) is
+   absolutely positioned in the bubble's bottom-right corner, while an inline
+   ::after spacer at the end of the prose reserves its width. While the last
+   text line has room, the spacer sits on that line and the meta visually
+   rides it; when it does not fit, the spacer wraps to its own line and the
+   meta drops below the text, right-aligned. The bubble's bottom padding is
+   the meta's band — no reserved footer, no centered gluing, no stolen space
+   beside short lines. */
+.cukii-user-message-bubble {
+  --cukii-meta-reserve: 0px;
+}
+
+.cukii-user-bubble--meta-inline:not(.cukii-user-bubble--reaction-with-meta)
+  .ProseMirror
+  p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: calc(var(--cukii-meta-reserve) + 4px);
+  height: 14px;
+}
+
+.cukii-user-message-bubble .cukii-input-box {
+  /* The capsule itself (.cukii-user-message-bubble) owns the orange fill and
+     geometry; the inner editor box must stay a plain transparent block and
+     never paint a second capsule. */
+  display: block !important;
+  width: auto;
+  max-width: 100%;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0;
+  min-height: 0;
+}
+
+/* The receipt lives absolutely in the bubble's bottom-right corner (see the
+   spacer mechanism above). */
+.cukii-user-metadata {
+  position: static;
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin: 2px 0 -6px auto;
+  padding: 0;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  line-height: 14px;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cukii-user-bubble--meta-inline > .cukii-user-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  margin: 0;
+}
+
+/* Every sticky capsule has exactly one receipt row. The generic MAX fit
+   observer may run before delayed Markdown exists and deliberately keeps a
+   separate footer when it cannot prove fit; a sticky header cannot afford
+   that second line. Reserve the measured receipt width in the final paragraph
+   and pin the receipt in the same visual row. Non-sticky transcript bubbles
+   keep the ordinary measured MAX fallback. */
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]:not(
+    .cukii-user-bubble--reaction-with-meta
+  )
+  > .cukii-user-content-shell
+  .ProseMirror
+  p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: calc(var(--cukii-meta-reserve) + 4px);
+  height: 14px;
+}
+
+.cukii-user-row--sticky
+  .cukii-user-message-bubble[data-cukii-long-prompt="true"]
+  > .cukii-user-metadata {
+  position: absolute;
+  right: 10px;
+  bottom: calc(4px + min(var(--cukii-fold, 0px), calc(100% - 38px)));
+  margin: 0;
+}
+
+/* Dark ink on the orange capsule: time and checks inherit the brand text
+   token instead of the muted description gray. */
+.cukii-user-message-bubble .cukii-user-metadata {
+  color: var(--cukii-text, #2c241c);
+}
+
+.cukii-receipt-status {
+  display: block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  align-self: center;
+}
+
+.cukii-user-attachment-strip {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 0 6px;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.cukii-user-attachment-card {
+  --cukii-attachment-pill-background: color-mix(
+    in srgb,
+    var(--cukii-text, #2c241c) 8%,
+    transparent
+  );
+  display: inline-flex;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 0;
+  max-width: 180px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  /* No vertical padding: the pill is a fixed 24px and the label needs the
+     whole content box. With 4px top/bottom the line box was 14px, which clips
+     the descenders of g, p and y. */
+  padding: 0 6px 0 4px;
+  color: var(--cukii-text, #2c241c);
+  background: var(--cukii-attachment-pill-background);
+  border: 1px solid
+    color-mix(in srgb, var(--cukii-text, #2c241c) 18%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.cukii-user-attachment-card:hover {
+  background: color-mix(in srgb, var(--cukii-text, #2c241c) 14%, transparent);
+}
+
+.cukii-user-attachment-card--image {
+  --cukii-attachment-pill-background: var(
+    --vscode-input-background,
+    rgb(60 60 60 / 72%)
+  );
+  color: var(--vscode-input-foreground, #cccccc);
+  border-color: var(--vscode-input-border, rgb(127 127 127 / 35%));
+}
+
+.cukii-user-attachment-card--image:hover {
+  background: var(--vscode-list-hoverBackground, rgb(90 93 94 / 48%));
+}
+
+.cukii-user-attachment-card:focus-visible {
+  outline: 1px solid var(--cukii-text, #2c241c);
+  outline-offset: -2px;
+}
+
+.cukii-user-attachment-card > img {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  margin: 0;
+  border-radius: 1px;
+  object-fit: cover;
+}
+
+/* line-height:1 makes the line box exactly the font size, so every descender
+   lands outside it and the pill's overflow:hidden cuts it off. 16px clears the
+   ~14.6px ink box of 11px UI text and still fits the 24px pill. */
+.cukii-user-attachment-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.cukii-user-attachment-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0.6;
+}
+
+.cukii-user-attachment-file-icon {
+  display: flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.cukii-user-attachment-file-icon > svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Historical editor state retains the original nodes so Edit/Retry cannot
+   lose attachments. The saved bubble replaces their large previews with the
+   single-line strip above. */
+.cukii-user-bubble .ProseMirror img,
+.cukii-user-bubble .cukii-file-attachment-node-view {
+  display: none !important;
+}
+
+/* Same rule for the live composer: the picture is still a document node (that
+   is what gets sent), but two screenshots as full-width cards used to push the
+   text field out of the panel. File previews keep their card — they carry
+   expandable content and their own delete. */
+.cukii-input-box .ProseMirror img {
+  display: none !important;
+}
+
+.cukii-composer-attachment-strip {
+  position: relative;
+  z-index: 0;
+  width: auto;
+  margin: 0;
+  padding: 6px 4px 4px 8px;
+  /* Static positioning ignored z-index, so the pill painted over the command
+     menu in document order. Stay below the footer (z-index 3) and hide while
+     any composer overlay is open. */
+  color: var(--vscode-input-foreground, #cccccc);
+}
+
+.cukii-main-input-shell:has(.cukii-command-menu):has(
+    [data-headlessui-state~="open"]
+  )
+  .cukii-composer-attachment-strip,
+.cukii-main-input-shell:has(.cukii-model-picker)
+  .cukii-composer-attachment-strip,
+.cukii-main-input-shell:has([data-cukii-suggestion-open="true"])
+  .cukii-composer-attachment-strip {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.cukii-composer-attachment-card {
+  --cukii-attachment-pill-background: var(
+    --vscode-input-background,
+    rgb(60 60 60 / 40%)
+  );
+  padding: 0;
+  color: inherit;
+  border-color: var(--vscode-input-border, rgb(127 127 127 / 35%));
+  cursor: default;
+}
+
+.cukii-composer-attachment-card:hover {
+  background: var(--vscode-list-hoverBackground, rgb(90 93 94 / 31%));
+}
+
+.cukii-composer-attachment-open {
+  display: inline-flex;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px 0 4px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.cukii-composer-attachment-open > img {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border-radius: 1px;
+  object-fit: cover;
+}
+
+.cukii-composer-attachment-remove {
+  display: inline-flex;
+  width: 16px;
+  height: 100%;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.cukii-composer-attachment-remove:hover {
+  opacity: 1;
+}
+
+.cukii-composer-attachment-remove > svg {
+  width: 11px;
+  height: 11px;
+}
+
+.cukii-image-lightbox {
+  position: fixed;
+  z-index: 100003;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.cukii-image-lightbox-dialog {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+}
+
+.cukii-image-lightbox-actions {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  display: flex;
+  gap: 6px;
+}
+
+.cukii-image-lightbox-actions > button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--vscode-menu-foreground, #cccccc);
+  background: var(--vscode-menu-background, #252526);
+  border: 1px solid var(--vscode-input-border, #454545);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.cukii-image-lightbox-actions > button:hover {
+  background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.cukii-image-lightbox-actions > button > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cukii-image-copy-status {
+  position: absolute;
+  right: 0;
+  bottom: -28px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, #cccccc);
+  background: var(--vscode-menu-background, #252526);
+  font-size: 12px;
+}
+
+.cukii-image-lightbox-dialog > img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  object-fit: contain;
+}
+
+.cukii-timeline-item {
+  position: relative;
+  display: block;
+  min-width: 0;
+  /* Claude keeps every timeline body (prose, a tool row, a thought and an
+     interruption) on one axis. Keep this as a token: component-local margin
+     resets must never move just one kind of timeline row. */
+  --cukii-timeline-content-inset: 26px;
+  padding-inline-start: var(--cukii-timeline-content-inset);
+}
+
+/* The rail is independent from the content column. Do not add a second
+   per-child inset here: it made tool rows and Interrupted 12px later than
+   prose/Thought when their local styles did not reset the margin. */
+.cukii-timeline-item > * {
+  margin-inline-start: 0;
+}
+
+/* A timeline event is a discrete checkpoint, not a line of a paragraph.
+   Leave Claude-like breathing room between consecutive events. */
+.cukii-timeline-item + .cukii-timeline-item {
+  margin-top: 8px;
+}
+
+/* Claude keeps shell events readable without giving them full message-card
+   weight: the action stays prominent and the potentially long command line is
+   visually secondary. */
+.cukii-shell-tool-call {
+  color: var(--vscode-foreground);
+}
+
+.cukii-shell-tool-call .cukii-shell-tool-argument {
+  color: var(--vscode-descriptionForeground, #979797);
+}
+
+.cukii-command-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--vscode-commandCenter-inactiveBorder, #555555);
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+
+.cukii-command-card-header {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  /* Keep the shell title off the card stroke. The old zero left inset made
+     every Bash/Shell label look clipped into the border. */
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-commandCenter-inactiveBorder, #555555);
+  background: transparent;
+  color: var(--vscode-foreground, #cccccc);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cukii-command-card-header:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.cukii-command-shell {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cukii-command-description,
+.cukii-command-card-toggle,
+.cukii-command-empty-output {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 12px;
+}
+
+.cukii-command-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cukii-command-card-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.cukii-command-card-panel {
+  max-height: 340px;
+  overflow: auto;
+  padding: 7px 8px 8px;
+}
+
+.cukii-command-section-label {
+  margin: 2px 0 4px;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.cukii-command-code {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  padding: 6px 7px;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(110, 118, 129, 0.15));
+  color: var(--vscode-terminal-foreground, var(--vscode-foreground, #cccccc));
+  font-family: var(
+    --vscode-editor-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cukii-command-output {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.cukii-command-output-toggle {
+  margin-top: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.cukii-timeline-item .thread-message > div,
+.cukii-timeline-item .thread-message .bg-background {
+  /* StepContainer still carries Tailwind `px-1.5` on the nested markdown
+     surface. Tool rows do not, which shifted prose 6px to the right even
+     though both timeline items shared the same outer inset. */
+  padding-inline: 0 !important;
+}
+
+.cukii-timeline-item .thread-message > div {
+  padding-block: 0 !important;
+}
+
+/* Разнобой точек («все едет») — первая строка у текста, thinking и tool-рядов
+   стартует с разного верхнего отступа (текст: markdown-абзац 13px + падинг
+   бабла 4px; thinking: mt-1 4px + падинг кнопки 4px; tool: 0). Сводим ВСЕ
+   первые строки к одной базе (flush), тогда точка ::before с фиксированным top
+   садится в центр первой строки у любого типа. Проверено замером в
+   timeline-harness: дельта «центр точки vs центр первой строки» ≈ 0 по всем. */
+.cukii-timeline-item > *:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.cukii-timeline-item p:first-child {
+  margin-top: 0 !important;
+}
+.cukii-timeline-item .bg-background:not(.cukii-assistant-bubble) {
+  padding-top: 0 !important;
+}
+.cukii-timeline-item .mt-1 {
+  margin-top: 0 !important;
+}
+.cukii-timeline-item .thread-message button {
+  padding-top: 0 !important;
+}
+
+.cukii-timeline-item img {
+  display: block;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Claude Code 2.1.251 webview `.divider_VBlAgQ`: a transcript boundary,
+   including the exact 14×7px repeating wave geometry. */
+.cukii-model-switch-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  color: var(--vscode-disabledForeground);
+}
+
+.cukii-model-switch-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.9em;
+}
+
+.cukii-model-switch-short {
+  display: none;
+}
+
+@media screen and (max-width: 330px) {
+  .cukii-model-switch-full {
+    display: none;
+  }
+
+  .cukii-model-switch-short {
+    display: inline;
+  }
+}
+
+.cukii-model-switch-wave {
+  flex: 1;
+  min-width: 32px;
+  height: 7px;
+  mask-image: url("data:image/svg+xml,%3Csvg width='14' height='7' viewBox='0 0 14 7' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 3.5 Q 3.5 0, 7 3.5 T 14 3.5' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E");
+  mask-repeat: repeat-x;
+  mask-position: left center;
+  background-color: currentColor;
+}
+
+.cukii-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  z-index: 1;
+  background: var(--vscode-descriptionForeground, #55524c);
+}
+
+.cukii-timeline-checkpoint::before {
+  background: #74c991;
+}
+
+.cukii-timeline-event::before {
+  background: var(--vscode-descriptionForeground, #55524c);
+}
+
+.cukii-timeline-service {
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.cukii-md-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 16px;
+}
+
+.cukii-md-table-scroll table {
+  display: table;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.cukii-md-table-scroll th,
+.cukii-md-table-scroll td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Claude's reasoning is a collapsed timeline checkpoint, not a tool card.
+   Keep its dot neutral grey; only the currently-streaming thought receives
+   the subtle contrast lift. The text itself stays in the common prose inset. */
+.cukii-timeline-thinking::before {
+  top: 6px;
+  background: var(--vscode-descriptionForeground, #6f6f6f);
+}
+
+.cukii-timeline-thinking-active::before {
+  background: var(--vscode-foreground, #b7b7b7);
+}
+
+.cukii-timeline-failed::before {
+  background: #c74e39;
+}
+
+.cukii-timeline-warning::before {
+  background: #e1c08d;
+}
+
+.cukii-timeline-current::before {
+  background: var(--vscode-foreground, #cccccc);
+}
+
+.cukii-transcript-streaming .cukii-timeline-current::before {
+  animation: cukiiTimelineBlink 1s linear infinite;
+}
+
+.cukii-timeline-item::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: -8px;
+  width: 1px;
+  background: var(
+    --vscode-sideBarActivityBarTop-border,
+    var(--cukii-line, #3a382f)
+  );
+}
+
+/* Reasoning rows are agent rows: like assistant capsules they live off the
+   rail — no dot, no connector line, transcript gutter only. The rail starts
+   and ends strictly between messages. */
+.cukii-timeline-thinking {
+  padding-inline-start: 0;
+}
+
+.cukii-timeline-thinking::before,
+.cukii-timeline-thinking::after {
+  content: none;
+}
+
+/* Первый элемент: линия начинается от ЦЕНТРА точки (8.5px), а не от верха
+   блока — иначе над первой точкой торчит стуб-разрыв. */
+.cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item)::after {
+  top: 8px;
+}
+
+/* Последний элемент: линия заканчивается НА центре точки, а не ниже — иначе
+   «последняя точка выше конца линии». Центр точки = top(5) + height(7)/2. */
+.cukii-timeline-item:not(:has(+ .cukii-timeline-item))::after {
+  height: 9px;
+  bottom: auto;
+}
+
+.cukii-timeline-item:not(.cukii-timeline-item + .cukii-timeline-item):not(
+    :has(+ .cukii-timeline-item)
+  )::after {
+  display: none;
+}
+
+@keyframes cukiiTimelineBlink {
+  0%,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.cukii-spinner-row {
+  position: relative;
+  display: flex;
+  animation: fadeIn 0.3s ease-in-out;
+  align-items: flex-start;
+  min-height: 1.5em;
+  margin-top: 6px;
+  margin-bottom: 0;
+  /* Глиф в жёлобе таймлайна (left: 8px, 12px), текст начинается ближе к нему,
+     чтобы ровняться с текстом строк выше, как у Claude. */
+  padding-left: 24px;
+}
+
+.cukii-spinner-row .cukii-thinking-row {
+  min-height: 0;
+  align-items: flex-start;
+  color: var(--vscode-foreground, #cccccc);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 19.5px;
+  opacity: 1;
+}
+
+.cukii-thinking-summary {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  letter-spacing: normal;
+  line-height: 19.5px;
+}
+
+.cukii-thinking-summary-active {
+  color: var(--vscode-foreground, rgb(204, 204, 204));
+  font-weight: 500;
+  opacity: 1;
+}
+
+.cukii-thinking-summary-completed {
+  color: rgba(204, 204, 204, 0.7);
+  font-weight: 400;
+}
+
+/* The active Claude thought is a quiet status checkpoint, not a spinner.
+   The dot and chevron are intentionally part of the focusable disclosure. */
+.cukii-thinking-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #979797);
+}
+
+.cukii-crumbs {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  overflow: visible;
+  color: #e3a867;
+}
+
+.cukii-crumbs circle {
+  fill: #e3a867;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.cukii-crumbs-active circle {
+  animation: cukiiCrumbVertex 1.26s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Each hole walks its own three-vertex path. The phase offsets live on the
+   individual circles, so the cookie never behaves like a spinning group. */
+@keyframes cukiiCrumbVertex {
+  0%,
+  100% {
+    opacity: 0.66;
+    transform: translate(-0.35px, 0.2px) scale(0.86);
+  }
+  33% {
+    opacity: 1;
+    transform: translate(0.45px, -0.5px) scale(1.06);
+  }
+  67% {
+    opacity: 0.78;
+    transform: translate(-0.15px, 0.55px) scale(0.94);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cukii-crumbs-active circle {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A terminal cancellation stays in the normal timeline rail; no detached
+   footer/inset is allowed after the last receipt. */
+.cukii-timeline-interrupted {
+  color: var(--vscode-descriptionForeground, #979797);
+}
+
+/* Глиф лоадера — в жёлобе, на оси таймлайн-точек, вне потока текста.
+   Размер чуть крупнее точки таймлайна (7px), но заметно меньше прежнего. */
+.cukii-spinner-row .cukii-thinking-glyph,
+.cukii-spinner-row .cukii-crumbs {
+  position: absolute;
+  left: 6px;
+  top: 1px;
+}
+
+.cukii-thinking-row,
+.cukii-thinking-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground, #c4beb5);
+  font-size: 0.8125rem;
+  font-weight: 350;
+  line-height: 1.5;
+}
+
+.cukii-thinking-text {
+  display: inline-block;
+  min-width: 21ch;
+  padding-top: 1px;
+  white-space: nowrap;
+}
+
+.cukii-thinking-character {
+  display: inline-block;
+  animation: cukiiThinkingCharacter 300ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* Whitespace is deliberately not an animated inline-block: that construction
+   collapses word gaps in the browser. Preserve every source whitespace unit. */
+.cukii-thinking-space {
+  white-space: pre;
+}
+
+@keyframes cukiiThinkingCharacter {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cukii-tab-dot-pulse {
+  animation: cukiiCookiePulse 2600ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+.cukii-thinking-glyph {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  background: #e3a867;
+  filter: drop-shadow(0 0 1px #c9873f);
+  transform-origin: center;
+}
+
+.cukii-thinking-glyph-active {
+  animation: cukiiCookiePulse 2600ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+.cukii-thinking-glyph-inactive {
+  animation: none;
+}
+
+@keyframes cukiiCookiePulse {
+  0% {
+    transform: scale(1);
+  }
+  28% {
+    transform: translateY(0.5px) scale(0.92) rotate(-2deg);
+  }
+  54% {
+    transform: translateY(-0.5px) scale(1.05) rotate(1deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cukii-thinking-character {
+    animation: none;
+  }
+}
+
+@keyframes cukiiMessageIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

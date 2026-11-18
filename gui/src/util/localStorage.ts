@@ -6,7 +6,6 @@ type LocalStorageTypes = {
   hasDismissedExploreDialog: boolean;
   onboardingStatus?: OnboardingStatus;
   hasDismissedOnboardingCard: boolean;
-  mainTextEntryCounter: number;
   ide: "vscode" | "jetbrains";
   vsCodeUriScheme: string;
   fontSize: number;
@@ -16,11 +15,13 @@ type LocalStorageTypes = {
   shownProfilesIntroduction: boolean;
   disableIndexing: boolean;
   hasDismissedDeprecationBanner: boolean;
+  focusView: boolean;
 };
 
 export enum LocalStorageKey {
   IsExploreDialogOpen = "isExploreDialogOpen",
   HasDismissedExploreDialog = "hasDismissedExploreDialog",
+  FocusView = "focusView",
 }
 
 export function getLocalStorage<T extends keyof LocalStorageTypes>(

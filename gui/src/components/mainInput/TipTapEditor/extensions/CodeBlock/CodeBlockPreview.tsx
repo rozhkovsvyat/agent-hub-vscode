@@ -4,6 +4,7 @@ import { ctxItemToRifWithContents } from "core/commands/util";
 import { dedent, getMarkdownLanguageTagForFile } from "core/util";
 import { useContext, useMemo } from "react";
 import { vscBadgeBackground } from "../../../..";
+import { isFileAttachmentContextItem } from "../../../../cukii/userAttachments";
 import { IdeMessengerContext } from "../../../../../context/IdeMessenger";
 import FileIcon from "../../../../FileIcon";
 import StyledMarkdownPreview from "../../../../StyledMarkdownPreview";
@@ -56,7 +57,13 @@ export const CodeBlockPreview = ({
   };
 
   return (
-    <NodeViewWrapper>
+    <NodeViewWrapper
+      className={
+        isFileAttachmentContextItem(item)
+          ? "cukii-file-attachment-node-view"
+          : undefined
+      }
+    >
       <ExpandableToolbarPreview
         isSelected={selected}
         title={item.name}

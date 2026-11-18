@@ -33,19 +33,32 @@ const rootReducer = combineReducers({
   profiles: profilesReducer,
 });
 
+// Chat surfaces restore session identity through the panel serializer state
+// and the history database. Persisting identity in the shared-origin
+// localStorage let a restarted panel counter hand one tab's session (id and
+// title included) to a different tab: a rename then rewrote two panels at
+// once and "new session" tabs opened as the previous one. Only the sidebar
+// still needs persisted identity for last-session restore.
+const persistedSessionFields = [
+  // Persist edit mode in case closes in middle
+  "mode",
+  "brokerModel",
+  "brokerSubagent",
+  "brokerEffort",
+  "brokerSpeed",
+  "brokerAutocompact",
+  "hasReasoningEnabled",
+
+  // higher risk to persist
+  // codeBlockApplyStates
+  // symbols
+];
+if (window.cukiiSurface !== "chat") {
+  persistedSessionFields.push("id", "lastSessionId", "title", "revision");
+}
+
 const saveSubsetFilters = [
-  createFilter("session", [
-    "id",
-    "lastSessionId",
-    "title",
-
-    // Persist edit mode in case closes in middle
-    "mode",
-
-    // higher risk to persist
-    // codeBlockApplyStates
-    // symbols
-  ]),
+  createFilter("session", persistedSessionFields),
   createFilter("editModeState", [
     "returnToMode",
     "lastNonEditSessionWasEmpty",
@@ -57,6 +70,7 @@ const saveSubsetFilters = [
     "toolGroupSettings",
     "ruleSettings",
     "reasoningSettings",
+    "allowAllPermissions",
   ]),
   createFilter("indexing", []),
   createFilter("tabs", ["tabs"]),
@@ -91,7 +105,9 @@ const migrations: MigrationManifest = {
 
 const persistConfig = {
   version: 1,
-  key: "root",
+  // All Cukii webviews share one extension origin. Namespace persisted state
+  // so independent editor tabs cannot overwrite each other's session/model.
+  key: `root:${window.cukiiPanelId ?? "sidebar"}`,
   storage,
   transforms: [...saveSubsetFilters],
   stateReconciler: autoMergeLevel2,

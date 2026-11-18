@@ -1,16 +1,29 @@
-import { RouterProvider, createMemoryRouter } from "react-router-dom";
+import { Navigate, RouterProvider, createMemoryRouter } from "react-router-dom";
 import Layout from "./components/Layout";
 import { MainEditorProvider } from "./components/mainInput/TipTapEditor";
 import { SubmenuContextProvidersProvider } from "./context/SubmenuContextProviders";
 import { VscThemeProvider } from "./context/VscTheme";
 import ParallelListeners from "./hooks/ParallelListeners";
+import { ClaudePermissionPrompt } from "./components/mainInput/ClaudePermissionPrompt";
+import { CukiiUserQuestionPrompt } from "./components/mainInput/CukiiUserQuestionPrompt";
 import ConfigPage from "./pages/config";
 import ErrorPage from "./pages/error";
 import Chat from "./pages/gui";
-import History from "./pages/history";
 import Stats from "./pages/stats";
 import ThemePage from "./styles/ThemePage";
 import { ROUTES } from "./util/navigation";
+import CukiiSessionNavigator from "./pages/sessions/CukiiSessionNavigator";
+import { CukiiVendorUsageDetails } from "./pages/sessions/CukiiVendorUsage";
+
+document.documentElement.dataset.cukiiSurface = window.cukiiSurface ?? "chat";
+// Panel ids carry a random suffix now; derive the alternating tone from a
+// stable hash of the whole id instead of a trailing counter.
+const panelToneSeed = [...(window.cukiiPanelId ?? "sidebar")].reduce(
+  (sum, ch) => sum + ch.charCodeAt(0),
+  0,
+);
+document.documentElement.dataset.cukiiPanelTone =
+  panelToneSeed % 2 === 0 ? "light" : "dark";
 
 const router = createMemoryRouter([
   {
@@ -28,7 +41,7 @@ const router = createMemoryRouter([
       },
       {
         path: "/history",
-        element: <History />,
+        element: <Navigate replace to={ROUTES.HOME} />,
       },
       {
         path: ROUTES.STATS,
@@ -51,6 +64,21 @@ const router = createMemoryRouter([
   most of which interact with redux etc.
 */
 function App() {
+  if (window.cukiiSurface === "usage") {
+    return (
+      <VscThemeProvider>
+        <CukiiVendorUsageDetails vendor={window.cukiiVendor ?? undefined} />
+      </VscThemeProvider>
+    );
+  }
+  if (window.cukiiSurface === "sidebar") {
+    return (
+      <VscThemeProvider>
+        <CukiiSessionNavigator />
+      </VscThemeProvider>
+    );
+  }
+
   return (
     <VscThemeProvider>
       <MainEditorProvider>
@@ -59,6 +87,8 @@ function App() {
         </SubmenuContextProvidersProvider>
       </MainEditorProvider>
       <ParallelListeners />
+      <ClaudePermissionPrompt />
+      <CukiiUserQuestionPrompt />
     </VscThemeProvider>
   );
 }

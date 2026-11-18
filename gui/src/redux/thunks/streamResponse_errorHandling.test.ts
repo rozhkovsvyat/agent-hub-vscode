@@ -71,12 +71,18 @@ beforeEach(() => {
 describe("streamResponseThunk", () => {
   it("should throw error when no chat model is selected", async () => {
     const noModelState = getEmptyRootState();
+    // This contract belongs to the Continue chat path. The default session mode
+    // is "broker", which routes to a vendor CLI and needs no Continue model —
+    // leaving the default here quietly asserted the fresh-install defect where
+    // a broker turn refused to send. See brokerWithoutContinueModel.test.ts.
+    noModelState.session.mode = "chat";
     noModelState.session.history = [
       {
         message: { id: "1", role: "user", content: "Hello" },
         contextItems: [],
       },
     ];
+    noModelState.session.id = "session-123";
 
     // Create store with no selected chat model
     const mockStoreNoModel = createMockStore(noModelState);
@@ -122,9 +128,199 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        // The wrapper's rescue save persists the partial turn before the dialog.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/cancelStream/pending",
         meta: {
-          arg: undefined,
+          arg: {
+            source: "error",
+          },
           requestId: expect.any(String),
           requestStatus: "pending",
         },
@@ -145,7 +341,9 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/cancelStream/fulfilled",
         meta: {
-          arg: undefined,
+          arg: {
+            source: "error",
+          },
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -175,6 +373,24 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/streamResponse/fulfilled",
         meta: {
           arg: {
@@ -188,8 +404,9 @@ describe("streamResponseThunk", () => {
       },
     ]);
 
-    // Verify no IDE messenger calls were made
-    expect(requestSpy).not.toHaveBeenCalled();
+    // Verify session save was called despite the immediate error
+    expect(requestSpy).toHaveBeenCalledWith("history/save", expect.anything());
+    // No compilation or streaming calls were made
     expect(chatSpy).not.toHaveBeenCalled();
 
     // Verify final state shows error dialog and inactive streaming
@@ -198,6 +415,7 @@ describe("streamResponseThunk", () => {
       ...noModelState,
       session: {
         ...noModelState.session,
+        title: "Hello", // The rescue save's fallback title reaches the header
         streamAborter: expect.any(AbortController),
         history: [
           { ...noModelState.session.history[0], isGatheringContext: false },
@@ -226,6 +444,7 @@ describe("streamResponseThunk", () => {
       },
     ];
     initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     const mockStore = createMockStore(initialState);
     const mockIdeMessenger = mockStore.mockIdeMessenger;
     const requestSpy = vi.spyOn(mockIdeMessenger, "request");
@@ -271,15 +490,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        type: "chat/streamWrapper/pending",
-        meta: {
-          arg: expect.any(Function),
-          requestId: expect.any(String),
-          requestStatus: "pending",
-        },
-        payload: undefined,
-      },
-      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -288,6 +498,115 @@ describe("streamResponseThunk", () => {
       },
       {
         type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
+        type: "chat/streamWrapper/pending",
+        meta: {
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
         payload: undefined,
       },
       {
@@ -312,6 +631,110 @@ describe("streamResponseThunk", () => {
             },
           },
         },
+      },
+      {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: {
+          arg: [],
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
       },
       {
         type: "chat/streamNormalInput/pending",
@@ -348,15 +771,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: {
-          arg: [],
-          requestId: expect.any(String),
-          requestStatus: "fulfilled",
-        },
-        payload: undefined,
-      },
-      {
         type: "chat/streamNormalInput/fulfilled",
         meta: {
           arg: {
@@ -380,6 +794,8 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
+        // No assistant reply yet; the provisional save already mirrored the
+        // first-prompt title into the header, so no separate dispatch.
         type: "session/update/pending",
         meta: {
           arg: expect.objectContaining({
@@ -398,6 +814,13 @@ describe("streamResponseThunk", () => {
         payload: {
           sessionId: "session-123",
           title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
         },
       },
       {
@@ -420,9 +843,9 @@ describe("streamResponseThunk", () => {
       {
         type: "session/refreshMetadata/fulfilled",
         meta: {
-          arg: expect.objectContaining({}),
+          arg: {},
           requestId: expect.any(String),
-          requestStatus: expect.any(String),
+          requestStatus: "fulfilled",
         },
         payload: [],
       },
@@ -455,7 +878,30 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -501,9 +947,15 @@ describe("streamResponseThunk", () => {
           ],
         },
       ],
-      options: {},
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
     expect(chatSpy).not.toHaveBeenCalled();
+
+    // Verify session save was called
+    expect(requestSpy).toHaveBeenCalledWith("history/save", expect.anything());
 
     // Verify final state shows error condition
     const finalState = mockStore.getState();
@@ -511,6 +963,9 @@ describe("streamResponseThunk", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        submissionEpoch: 1,
         title: "Hello",
         history: [
           {
@@ -543,9 +998,14 @@ describe("streamResponseThunk", () => {
               id: "mock-uuid-123",
               role: "user",
             },
+            messageReceipt: {
+              sentAt: expect.any(Number),
+              status: "queued",
+            },
           },
           {
             contextItems: [],
+            createdAt: expect.any(Number),
             isGatheringContext: false,
             message: {
               content: "",
@@ -568,6 +1028,8 @@ describe("streamResponseThunk", () => {
         contextItems: [],
       },
     ];
+    initialState.session.id = "session-123";
+    initialState.session.mode = "chat";
     const mockStore = createMockStore(initialState);
     const mockIdeMessenger = mockStore.mockIdeMessenger;
     const requestSpy = vi.spyOn(mockIdeMessenger, "request");
@@ -582,7 +1044,8 @@ describe("streamResponseThunk", () => {
           error: "Model configuration is invalid",
         };
       } else {
-        return await mockIdeMessenger.request(message, data);
+        // Delegate to a fresh messenger so the spy doesn't recurse into itself.
+        return await new MockIdeMessenger().request(message, data);
       }
     });
 
@@ -613,15 +1076,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        type: "chat/streamWrapper/pending",
-        meta: {
-          arg: expect.any(Function),
-          requestId: expect.any(String),
-          requestStatus: "pending",
-        },
-        payload: undefined,
-      },
-      {
         type: "session/submitEditorAndInitAtIndex",
         payload: {
           editorState: mockEditorState,
@@ -630,6 +1084,115 @@ describe("streamResponseThunk", () => {
       },
       {
         type: "session/resetNextCodeBlockToApplyIndex",
+        payload: undefined,
+      },
+      {
+        type: "chat/streamWrapper/pending",
+        meta: {
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        // Pre-stream persist of the previous turns (history is non-empty here).
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
         payload: undefined,
       },
       {
@@ -654,6 +1217,110 @@ describe("streamResponseThunk", () => {
             },
           },
         },
+      },
+      {
+        // First-turn persist: the wrapper pre-save saw an empty session.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "symbols/updateFromContextItems/fulfilled",
+        meta: {
+          arg: [],
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+            provisionalTitle: true,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
       },
       {
         type: "chat/streamNormalInput/pending",
@@ -682,15 +1349,6 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        type: "symbols/updateFromContextItems/fulfilled",
-        meta: {
-          arg: [],
-          requestId: expect.any(String),
-          requestStatus: "fulfilled",
-        },
-        payload: undefined,
-      },
-      {
         type: "chat/streamNormalInput/rejected",
         meta: {
           aborted: false,
@@ -710,9 +1368,104 @@ describe("streamResponseThunk", () => {
         },
       },
       {
+        // The wrapper's rescue save persists the partial turn before the dialog.
+        type: "session/saveCurrent/pending",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+          },
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/update/pending",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/updateSessionMetadata",
+        payload: {
+          sessionId: "session-123",
+          title: "Hello",
+        },
+      },
+      {
+        type: "session/setSessionRevision",
+        payload: {
+          sessionId: "session-123",
+          revision: 0,
+        },
+      },
+      {
+        type: "session/refreshMetadata/pending",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/setIsSessionMetadataLoading",
+        payload: false,
+      },
+      {
+        type: "session/setAllSessionMetadata",
+        payload: [],
+      },
+      {
+        type: "session/refreshMetadata/fulfilled",
+        meta: {
+          arg: {},
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: [],
+      },
+      {
+        type: "session/update/fulfilled",
+        meta: {
+          arg: expect.objectContaining({
+            history: expect.any(Array),
+            sessionId: "session-123",
+            title: "Hello",
+            workspaceDirectory: "",
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "session/saveCurrent/fulfilled",
+        meta: {
+          arg: {
+            generateTitle: false,
+            openNewSession: false,
+          },
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
         type: "chat/cancelStream/pending",
         meta: {
-          arg: undefined,
+          arg: {
+            source: "error",
+          },
           requestId: expect.any(String),
           requestStatus: "pending",
         },
@@ -731,9 +1484,41 @@ describe("streamResponseThunk", () => {
         payload: undefined,
       },
       {
-        type: "chat/cancelStream/fulfilled",
+        type: "session/setCancelling",
+        payload: true,
+      },
+      {
+        type: "session/setCancellingSource",
+        payload: "internal",
+      },
+      {
+        type: "session/setCancelling",
+        payload: false,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
         meta: {
           arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/cancelStream/fulfilled",
+        meta: {
+          arg: {
+            source: "error",
+          },
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -756,7 +1541,30 @@ describe("streamResponseThunk", () => {
       {
         type: "chat/streamWrapper/fulfilled",
         meta: {
-          arg: expect.any(Function),
+          arg: expect.objectContaining({
+            runStream: expect.any(Function),
+            isCurrent: expect.any(Function),
+            isCancelled: expect.any(Function),
+            adoptCancellationBoundary: expect.any(Function),
+          }),
+          requestId: expect.any(String),
+          requestStatus: "fulfilled",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/pending",
+        meta: {
+          arg: undefined,
+          requestId: expect.any(String),
+          requestStatus: "pending",
+        },
+        payload: undefined,
+      },
+      {
+        type: "chat/continueIfTrailingSteer/fulfilled",
+        meta: {
+          arg: undefined,
           requestId: expect.any(String),
           requestStatus: "fulfilled",
         },
@@ -802,9 +1610,15 @@ describe("streamResponseThunk", () => {
           ],
         },
       ],
-      options: {},
+      options: {
+        reasoning: true,
+        reasoningBudgetTokens: 2048,
+      },
     });
     expect(chatSpy).not.toHaveBeenCalled();
+
+    // Verify session save was called despite the compilation error
+    expect(requestSpy).toHaveBeenCalledWith("history/save", expect.anything());
 
     // Verify final state shows error dialog and inactive streaming
     const finalState = mockStore.getState();
@@ -812,6 +1626,12 @@ describe("streamResponseThunk", () => {
       ...initialState,
       session: {
         ...initialState.session,
+        activeBridgeRunId: undefined,
+        bridgeWait: undefined,
+        cancellingSource: undefined,
+        inlineErrorMessage: undefined,
+        submissionEpoch: 1,
+        title: "Hello", // The rescue save's fallback title reaches the header
         streamAborter: expect.any(AbortController),
         mainEditorContentTrigger: mockEditorState, // Editor content that triggered the request
       },

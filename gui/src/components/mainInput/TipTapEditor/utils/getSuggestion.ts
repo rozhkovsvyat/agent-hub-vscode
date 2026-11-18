@@ -10,8 +10,8 @@ import { IIdeMessenger } from "../../../../context/IdeMessenger";
 import { AppDispatch } from "../../../../redux/store";
 import AtMentionDropdown from "../../AtMentionDropdown";
 import { ComboBoxItem, ComboBoxItemType, ComboBoxSubAction } from "../../types";
-import { TIPPY_DIV_ID } from "../TipTapEditor";
 import { SlashCommand } from "../extensions";
+import { findSuggestionContainer } from "./suggestionContainer";
 
 function getSuggestion(
   items: (props: { query: string }) => Promise<ComboBoxItem[]>,
@@ -25,11 +25,20 @@ function getSuggestion(
     render: () => {
       let component: any;
       let popup: any;
+      let container: HTMLElement | null = null;
+      let suggestionOpen = false;
+
+      const markClosed = () => {
+        container?.removeAttribute("data-cukii-suggestion-open");
+        if (!suggestionOpen) return;
+        suggestionOpen = false;
+        onClose();
+      };
 
       const onExit = () => {
         popup?.[0]?.destroy();
         component?.destroy();
-        onClose();
+        markClosed();
       };
 
       return {
@@ -44,47 +53,62 @@ function getSuggestion(
             return;
           }
 
-          const container = document.getElementById(TIPPY_DIV_ID);
+          const suggestionContainer = findSuggestionContainer(
+            props.editor.view.dom,
+          );
 
-          if (!container) {
+          if (!suggestionContainer) {
             console.log("no container");
+            component.destroy();
+            component = undefined;
             return;
           }
+          container = suggestionContainer;
 
           popup = tippy("body", {
             getReferenceClientRect: props.clientRect,
-            appendTo: () => container,
+            appendTo: () => suggestionContainer,
             content: component.element,
             showOnCreate: true,
             interactive: true,
             trigger: "manual",
             placement: "bottom-start",
             maxWidth: `${window.innerWidth - 24}px`,
+            onHide: markClosed,
           });
 
+          suggestionContainer.setAttribute(
+            "data-cukii-suggestion-open",
+            "true",
+          );
+          suggestionOpen = true;
           onOpen();
         },
 
         onUpdate(props: any) {
-          component.updateProps({ ...props, enterSubmenu });
+          component?.updateProps({ ...props, enterSubmenu });
 
-          if (!props.clientRect) {
+          const popupInstance = popup?.[0];
+          if (!props.clientRect || !popupInstance) {
             return;
           }
 
-          popup[0].setProps({
+          popupInstance.setProps({
             getReferenceClientRect: props.clientRect,
           });
         },
 
         onKeyDown(props: any) {
+          const popupInstance = popup?.[0];
           if (props.event.key === "Escape") {
-            popup[0].hide();
+            if (!popupInstance) return false;
+            popupInstance.hide();
+            markClosed();
 
             return true;
           }
 
-          return component.ref?.onKeyDown(props);
+          return component?.ref?.onKeyDown(props) ?? false;
         },
 
         onExit,
@@ -169,7 +193,7 @@ export function getContextProviderDropdownOptions(
         action: () => {
           ideMessenger.post(
             "openUrl",
-            "https://docs.continue.dev/customization/context-providers#built-in-context-providers",
+            "https://github.com/rozhkovsvyat/agent-hub-vscode",
           );
         },
         description: "",

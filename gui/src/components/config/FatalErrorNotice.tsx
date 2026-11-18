@@ -45,7 +45,7 @@ export const FatalErrorIndicator = () => {
           onClick={() => {
             ideMessenger.post(
               "openUrl",
-              "https://docs.continue.dev/troubleshooting",
+              "https://github.com/rozhkovsvyat/agent-hub-vscode",
             );
           }}
           className="cursor-pointer underline"

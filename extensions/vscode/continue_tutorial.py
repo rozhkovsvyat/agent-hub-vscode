@@ -1,10 +1,7 @@
-"""                    _________               _____ _____
-                       __  ____/______ _______ __  /____(_)_______ ____  _______
-                       _  /     _  __ \__  __ \_  __/__  / __  __ \_  / / /_  _ \
-                       / /___   / /_/ /_  / / // /_  _  /  _  / / // /_/ / /  __/
-                       \____/   \____/ /_/ /_/ \__/  /_/   /_/ /_/ \__,_/  \___/
+"""
+    Cukii — one workspace for every AI vendor you already pay for.
 
-                                 Autocomplete, Edit, Chat, and Agent tutorial
+    Autocomplete, Edit, Chat and Agent tutorial.
 """
 
 
@@ -21,7 +18,7 @@
 
 # 1. Highlight the code below
 # 2. Press [Cmd/Ctrl + I] to Edit
-# 3. Try asking Continue to "make this more readable"
+# 3. Try asking Cukii to "make this more readable"
 def sorting_algorithm(x):
     for i in range(len(x)):
         for j in range(len(x) - 1):
@@ -34,7 +31,7 @@ def sorting_algorithm(x):
 
 # 1. Highlight the code below
 # 2. Press [Cmd/Ctrl + L] to add to Chat
-# 3. Try asking Continue "what sorting algorithm is this?"
+# 3. Try asking Cukii "what sorting algorithm is this?"
 def sorting_algorithm2(x):
     for i in range(len(x)):
         for j in range(len(x) - 1):
@@ -47,6 +44,6 @@ def sorting_algorithm2(x):
 #           the model to make decisions and save you the work of manually finding context and performing actions.
 
 # 1. Switch from "Chat" to "Agent" mode using the dropdown in the bottom left of the input box
-# 2. Use the "/init" slash command to generate a CONTINUE.md file
+# 2. Use the "/init" slash command to generate a rules file for this workspace
 
-  # ——————————————————      Learn more at https://docs.continue.dev      ——————————————————— #
+  # ———   Questions and issues: https://github.com/rozhkovsvyat/agent-hub-vscode   ——— #

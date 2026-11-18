@@ -1,16 +1,13 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-If you discover a security vulnerability, please do not open a public issue. Instead, please report it by emailing security@continue.dev. We will be highly responsive to all security concerns and ask that you give us sufficient time to investigate and address the vulnerability before disclosing it publicly.
+Please do not open a public issue for a security problem. Report it privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability**.
 
-Please include the following details in your report:
+Include, if you can:
 
-- A description of the vulnerability
-- Steps to reproduce the issue
-- Your assessment of the potential impact
-- Any possible mitigations
+- what is affected and how to reproduce it;
+- the impact you see;
+- any mitigation you know of.
 
-## Contact
-
-For any other questions or concerns related to security, please contact us at security@continue.dev.
+You will get an answer as soon as possible; please give us time to fix the problem before disclosing it.

@@ -5,9 +5,17 @@
 import { setupCa } from "core/util/ca";
 import * as vscode from "vscode";
 
+import {
+  configureCukiiGlobalDir,
+  migrateLegacyCukiiGlobalDir,
+} from "./cukiiGlobalDir";
+import { describeCukiiEnvironmentError } from "./util/environmentError";
+
 export { default as buildTimestamp } from "./.buildTimestamp";
 
 async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
+  const globalDir = configureCukiiGlobalDir();
+  await migrateLegacyCukiiGlobalDir(globalDir);
   await setupCa();
   const { activateExtension } = await import("./activation/activate");
   return await activateExtension(context);
@@ -16,9 +24,10 @@ async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
 export function activate(context: vscode.ExtensionContext) {
   return dynamicImportAndActivate(context).catch((e) => {
     console.log("Error activating extension: ", e);
+    const environmentError = describeCukiiEnvironmentError(e);
     vscode.window
       .showWarningMessage(
-        "Error activating the Continue extension.",
+        environmentError ?? "Error activating the Cukii Chat extension.",
         "View Logs",
         "Retry",
       )
@@ -33,4 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 }
 
-export function deactivate() {}
+export async function deactivate() {
+  const { deactivateExtension } = await import("./activation/activate");
+  await deactivateExtension();
+}

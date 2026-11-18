@@ -1,4 +1,5 @@
 import { OnboardingModes } from "core/protocol/core";
+import { isLegacyHistoryRoute } from "core/util/legacyHistoryRoute";
 import { useContext, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
@@ -37,6 +38,28 @@ const GridDiv = styled.div`
   overflow-x: visible;
 `;
 
+export function redirectLegacyHistoryNavigation(
+  path: unknown,
+  navigate: (to: string, options?: { replace?: boolean }) => void,
+): boolean {
+  if (!isLegacyHistoryRoute(path)) return false;
+  navigate(ROUTES.HOME, { replace: true });
+  return true;
+}
+
+/** Cukii chat owns its first-run state through the broker Accounts flow. */
+export function shouldOpenLegacyOnboarding({
+  surface,
+  isHome,
+  isNewUser,
+}: {
+  surface?: "sidebar" | "chat" | "usage";
+  isHome: boolean;
+  isNewUser: boolean;
+}): boolean {
+  return surface !== "chat" && isHome && isNewUser;
+}
+
 const Layout = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -52,6 +75,19 @@ const Layout = () => {
   const isHome =
     location.pathname === ROUTES.HOME ||
     location.pathname === ROUTES.HOME_INDEX;
+
+  useEffect(() => {
+    // Best-effort tail persist when the window closes or reloads. Delivery is
+    // not guaranteed during teardown; the in-turn periodic save bounds the
+    // loss, this listener closes the remaining gap in the common case.
+    const persistOnExit = () => {
+      void dispatch(
+        saveCurrentSession({ openNewSession: false, generateTitle: false }),
+      ).catch(() => undefined);
+    };
+    window.addEventListener("beforeunload", persistOnExit);
+    return () => window.removeEventListener("beforeunload", persistOnExit);
+  }, [dispatch]);
 
   useWebviewListener(
     "newSession",
@@ -114,6 +150,7 @@ const Layout = () => {
   useWebviewListener(
     "navigateTo",
     async (data) => {
+      if (redirectLegacyHistoryNavigation(data.path, navigate)) return;
       if (data.toggle && location.pathname === data.path) {
         navigate("/");
       } else {
@@ -126,6 +163,7 @@ const Layout = () => {
   useWebviewListener(
     "setupLocalConfig",
     async () => {
+      if (window.cukiiSurface === "chat") return;
       onboardingCard.open(OnboardingModes.LOCAL);
     },
     [],
@@ -134,6 +172,7 @@ const Layout = () => {
   useWebviewListener(
     "setupApiKey",
     async () => {
+      if (window.cukiiSurface === "chat") return;
       onboardingCard.open(OnboardingModes.API_KEY);
     },
     [],
@@ -189,7 +228,14 @@ const Layout = () => {
   }, []);
 
   useEffect(() => {
-    if (isNewUserOnboarding() && isHome) {
+    if (
+      shouldOpenLegacyOnboarding({
+        surface: window.cukiiSurface,
+        isHome,
+        isNewUser:
+          window.cukiiSurface === "chat" ? false : isNewUserOnboarding(),
+      })
+    ) {
       onboardingCard.open();
     }
   }, [isHome]);

@@ -167,6 +167,11 @@ extensions/.continue-debug/
 
 *.vsix
 
+# Local live-webview acceptance evidence (receipts/screenshots are machine-bound).
+design/ui-parity/runtime-runs/
+design/ui-parity/runtime-baseline/
+tools/ui-parity-runtime/*.png
+
 # intellij module library files
 *.iml
 
@@ -179,3 +184,9 @@ keys
 .copy-status
 .copy-log
 
+
+# Рабочие деревья воркеров и спасённые копии. Это ОТДЕЛЬНЫЕ репозитории: без этой строки
+# `git add -A` втягивает их как gitlink'и, и в коммит правки двух файлов заезжает три
+# десятка чужих указателей (поймано 22.09.2026 — пришлось переделывать коммит).
+worktrees/
+gui/public/session-fixture.json

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RunTerminalCommand } from "./RunTerminalCommand";
 import { ToolCallState } from "core";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 
 // Mock the UnifiedTerminalCommand component since it requires Redux
 vi.mock("../../../components/UnifiedTerminal/UnifiedTerminal", () => ({
@@ -272,5 +273,44 @@ describe("RunTerminalCommand", () => {
     // Status should be failed for errored state
     const statusElement = screen.getByTestId("status");
     expect(statusElement.textContent).toBe("failed");
+  });
+
+  it("shows Tool interrupted when the call was canceled", () => {
+    const canceledToolCallState: ToolCallState = {
+      toolCallId: "test-id",
+      toolCall: {
+        id: "test-id",
+        type: "function",
+        function: {
+          name: "runTerminalCommand",
+          arguments: JSON.stringify({ command: "sleep 30" }),
+        },
+      },
+      status: "canceled",
+      parsedArgs: { command: "sleep 30" },
+      output: [
+        {
+          name: TOOL_INTERRUPTED_MESSAGE,
+          description: TOOL_INTERRUPTED_MESSAGE,
+          content: TOOL_INTERRUPTED_MESSAGE,
+        },
+      ],
+    };
+
+    render(
+      <RunTerminalCommand
+        command="sleep 30"
+        toolCallState={canceledToolCallState}
+        toolCallId="test-id"
+      />,
+    );
+
+    expect(screen.getByTestId("status").textContent).toBe("failed");
+    expect(screen.getByTestId("status-message").textContent).toBe(
+      TOOL_INTERRUPTED_MESSAGE,
+    );
+    expect(screen.getByTestId("output").textContent).toBe(
+      TOOL_INTERRUPTED_MESSAGE,
+    );
   });
 });

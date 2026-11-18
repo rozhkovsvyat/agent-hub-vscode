@@ -1,5 +1,5 @@
 import { BuiltInToolNames } from "core/tools/builtIn";
-import { useContext, useEffect } from "react";
+import { type ReactNode, useContext, useEffect } from "react";
 import { IdeMessengerContext } from "../../../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../../../redux/hooks";
 import {
@@ -11,9 +11,7 @@ import { cancelToolCall } from "../../../../redux/slices/sessionSlice";
 import { callToolById } from "../../../../redux/thunks/callToolById";
 import { cancelStream } from "../../../../redux/thunks/cancelStream";
 import { logToolUsage } from "../../../../redux/util";
-import { isJetBrains } from "../../../../util";
 import { useMainEditor } from "../../TipTapEditor";
-import { BlockSettingsTopToolbar } from "./BlockSettingsTopToolbar";
 import { EditOutcomeToolbar } from "./EditOutcomeToolbar";
 import { EditToolbar } from "./EditToolbar";
 import { IsApplyingToolbar } from "./IsApplyingToolbar";
@@ -28,14 +26,14 @@ const isExecuteToolCallShortcut = (event: KeyboardEvent) => {
   return metaKey && event.key === "Enter";
 };
 
-const isCancelToolCallShortcut = (
-  event: KeyboardEvent,
-  isJetBrains: boolean,
-) => {
-  const metaKey = event.metaKey || event.ctrlKey;
-  const altKey = event.altKey;
-  const modifierKey = isJetBrains ? altKey : metaKey;
-  return modifierKey && event.key === "Backspace";
+const isCancelToolCallShortcut = (event: KeyboardEvent) => {
+  return (
+    event.key === "Escape" &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
 };
 
 // Check if a tool call is a terminal command
@@ -52,7 +50,6 @@ export function LumpToolbar() {
   const ttsActive = useAppSelector((state) => state.ui.ttsActive);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const isInEdit = useAppSelector((state) => state.session.isInEdit);
-  const jetbrains = isJetBrains();
   const pendingToolCalls = useAppSelector(selectPendingToolCalls);
   const firstPendingToolCall = useAppSelector(selectFirstPendingToolCall);
   const editApplyState = useAppSelector(
@@ -66,6 +63,11 @@ export function LumpToolbar() {
   );
   const isApplying = applyStates.some((state) => state.status === "streaming");
   const editor = useMainEditor();
+  const wrap = (toolbar: ReactNode) => (
+    <div className="bg-input rounded-t-default border-command-border mx-1.5 border-l border-r border-t">
+      <div className="xs:px-2 px-1 py-0.5">{toolbar}</div>
+    </div>
+  );
 
   // Get ALL running terminal commands
   const runningToolCalls = useAppSelector((state) =>
@@ -110,15 +112,17 @@ export function LumpToolbar() {
 
   // Combined stop handler
   const handleStopAction = async () => {
+    // Interrupt the native session immediately. Terminal cleanup must not
+    // delay the same cancellation path used by the main Stop button and Esc.
+    const cancellation = isStreaming
+      ? dispatch(cancelStream())
+      : Promise.resolve();
+
     // Stop all terminal commands if any are running
     if (hasRunningTerminalCommand) {
       await handleStopAllTerminalCommands();
     }
-
-    // Also stop regular streaming if it's happening
-    if (isStreaming) {
-      dispatch(cancelStream());
-    }
+    await cancellation;
   };
 
   useEffect(() => {
@@ -134,7 +138,7 @@ export function LumpToolbar() {
         void dispatch(
           callToolById({ toolCallId: firstPendingToolCall.toolCallId }),
         );
-      } else if (isCancelToolCallShortcut(event, jetbrains)) {
+      } else if (isCancelToolCallShortcut(event)) {
         event.preventDefault();
         event.stopPropagation();
 
@@ -169,44 +173,39 @@ export function LumpToolbar() {
   ]);
 
   if (isApplying) {
-    return <IsApplyingToolbar />;
+    return wrap(<IsApplyingToolbar />);
   }
 
   if (isInEdit) {
     if (editApplyState.status === "done") {
-      return <EditOutcomeToolbar />;
+      return wrap(<EditOutcomeToolbar />);
     }
 
-    return <EditToolbar />;
+    return wrap(<EditToolbar />);
   }
 
   if (ttsActive) {
-    return <TtsActiveToolbar />;
+    return wrap(<TtsActiveToolbar />);
   }
 
   // Only show terminal streaming for actual terminal commands
   if (hasRunningTerminalCommand) {
     const count = runningTerminalCalls.length;
     const stopText = `Stop Terminal${count > 1 ? ` (${count})` : ""}`;
-    return (
-      <StreamingToolbar onStop={handleStopAction} displayText={stopText} />
+    return wrap(
+      <StreamingToolbar onStop={handleStopAction} displayText={stopText} />,
     );
-  }
-
-  // Regular streaming (non-terminal)
-  if (isStreaming) {
-    return <StreamingToolbar onStop={() => dispatch(cancelStream())} />;
   }
 
   if (pendingToolCalls.length > 0) {
-    return <PendingToolCallToolbar />;
+    return wrap(<PendingToolCallToolbar />);
   }
 
   if (pendingApplyStates.length > 0) {
-    return (
-      <PendingApplyStatesToolbar pendingApplyStates={pendingApplyStates} />
+    return wrap(
+      <PendingApplyStatesToolbar pendingApplyStates={pendingApplyStates} />,
     );
   }
 
-  return <BlockSettingsTopToolbar />;
+  return null;
 }

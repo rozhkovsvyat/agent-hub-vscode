@@ -61,7 +61,7 @@ async function loadAndSetSession(
     const { loadSessionById } = await import("../session.js");
 
     // Load the session
-    const session = loadSessionById(sessionId);
+    const session = await loadSessionById(sessionId);
     if (!session) {
       logger.error(`Session ${sessionId} could not be loaded.`);
       return;
@@ -298,7 +298,7 @@ const TUIChat: React.FC<TUIChatProps> = ({
         const fs = await import("fs");
         const path = await import("path");
 
-        const session = loadSessionById(sessionId);
+        const session = await loadSessionById(sessionId);
         if (!session) {
           setChatHistory((prev) => [
             ...prev,

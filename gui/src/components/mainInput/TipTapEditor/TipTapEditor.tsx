@@ -16,12 +16,18 @@ import { useAppDispatch, useAppSelector } from "../../../redux/hooks";
 import { selectSelectedChatModel } from "../../../redux/slices/configSlice";
 import InputToolbar, { ToolbarOptions } from "../InputToolbar";
 import { ComboBoxItem } from "../types";
+import { VoiceInputButton } from "../VoiceInputButton";
+import { CukiiComposerImageStrip } from "../../cukii/CukiiComposerImageStrip";
 import { DragOverlay } from "./components/DragOverlay";
 import { InputBoxDiv } from "./components/StyledComponents";
 import { useMainEditor } from "./MainEditorProvider";
 import "./TipTapEditor.css";
 import { createEditorConfig, getPlaceholderText } from "./utils/editorConfig";
-import { handleImageFile } from "./utils/imageUtils";
+import {
+  createOrderedAttachmentQueue,
+  getComposerImageInsertPosition,
+  handleImageFile,
+} from "./utils/imageUtils";
 import { useEditorEventHandlers } from "./utils/keyHandlers";
 
 export interface TipTapEditorProps {
@@ -36,14 +42,13 @@ export interface TipTapEditorProps {
   editorState?: JSONContent;
   toolbarOptions?: ToolbarOptions;
   placeholder?: string;
+  onComposerFocusChange?: (isFocused: boolean) => void;
   historyKey: string;
 
   // TODO: This isn't actually used anywhere in this component, but it appears
   // to be pulled into some of our TipTap extensions.
   inputId: string;
 }
-
-export const TIPPY_DIV_ID = "tippy-js-div";
 
 function TipTapEditorInner(props: TipTapEditorProps) {
   const dispatch = useAppDispatch();
@@ -56,11 +61,25 @@ function TipTapEditorInner(props: TipTapEditorProps) {
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
   const historyLength = useAppSelector((store) => store.session.history.length);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
-
+  const mode = useAppSelector((store) => store.session.mode);
+  const supportsImageInput =
+    mode === "broker" ||
+    modelSupportsImages(
+      defaultModel?.provider || "",
+      defaultModel?.model || "",
+      defaultModel?.title,
+      defaultModel?.capabilities,
+    );
+  const attachmentQueue =
+    useRef<(pending: Promise<(() => void) | undefined>) => Promise<void>>();
+  attachmentQueue.current ??= createOrderedAttachmentQueue<() => void>(
+    (insert) => insert(),
+  );
   const { editor, onEnter } = createEditorConfig({
     props,
     ideMessenger,
     dispatch,
+    enqueueAttachment: attachmentQueue.current,
   });
 
   // Register the main editor with the provider
@@ -127,26 +146,33 @@ function TipTapEditorInner(props: TipTapEditorProps) {
     }
   }, [props.isMainInput, isStreaming, editor]);
 
-  // Recovery mechanism: ensure historical inputs regain editability when streaming ends
+  // Historical capsules stay read-only. Re-enabling them after a stream
+  // made a click on a sent prompt open an editor (ID-267).
   useEffect(() => {
-    if (!isStreaming && !props.isMainInput && editor) {
-      // Small delay to ensure editor state has settled after streaming transition
-      const timeoutId = setTimeout(() => {
-        if (editor && !editor.isDestroyed) {
-          // Force re-enable the editor
-          editor.setOptions({ editable: true });
-          // Trigger view update to refresh editor state
-          editor.view.dispatch(editor.state.tr);
-        }
-      }, 100);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [isStreaming, props.isMainInput]);
+    if (!editor || editor.isDestroyed) return;
+    editor.setOptions({ editable: Boolean(props.isMainInput) });
+  }, [editor, isStreaming, props.isMainInput]);
 
   const [showDragOverMsg, setShowDragOverMsg] = useState(false);
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
+
+  // Пустой ли редактор — нужно тулбару: во время хода при непустом вводе кнопка
+  // становится «отправить» (steering), а Stop показывается только на пустом поле.
+  const [isEditorEmpty, setIsEditorEmpty] = useState(true);
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    const syncEmpty = () => setIsEditorEmpty(editor.isEmpty);
+    syncEmpty();
+    editor.on("update", syncEmpty);
+    editor.on("transaction", syncEmpty);
+    return () => {
+      editor.off("update", syncEmpty);
+      editor.off("transaction", syncEmpty);
+    };
+  }, [editor]);
 
   const insertCharacterWithWhitespace = useCallback(
     (char: string) => {
@@ -182,13 +208,15 @@ function TipTapEditorInner(props: TipTapEditorProps) {
 
   const handleBlur = useCallback(
     (e: React.FocusEvent) => {
+      const currentTarget = e.currentTarget;
+      const relatedTarget = e.relatedTarget as Node | null;
+      if (!relatedTarget || !currentTarget?.contains(relatedTarget)) {
+        props.onComposerFocusChange?.(false);
+      }
       if (isInEdit) {
         return;
       }
       // Check if the new focus target is within our InputBoxDiv
-      const currentTarget = e.currentTarget;
-      const relatedTarget = e.relatedTarget as Node | null;
-
       if (relatedTarget && currentTarget?.contains(relatedTarget)) {
         return;
       }
@@ -197,13 +225,14 @@ function TipTapEditorInner(props: TipTapEditorProps) {
         setShouldHideToolbar(true);
       }, 100);
     },
-    [isInEdit, blurTimeout],
+    [isInEdit, blurTimeout, props.onComposerFocusChange],
   );
 
   const handleFocus = useCallback(() => {
     cancelBlurTimeout();
     setShouldHideToolbar(false);
-  }, [cancelBlurTimeout]);
+    props.onComposerFocusChange?.(true);
+  }, [cancelBlurTimeout, props.onComposerFocusChange]);
 
   return (
     <InputBoxDiv
@@ -213,8 +242,8 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       onKeyUp={handleKeyUp}
       className={
         !props.isMainInput && shouldHideToolbar
-          ? "cursor-pointer"
-          : "cursor-text"
+          ? "cukii-input-box cursor-pointer"
+          : "cukii-input-box cursor-text"
       }
       onClick={() => {
         editor?.commands.focus();
@@ -237,36 +266,59 @@ function TipTapEditorInner(props: TipTapEditorProps) {
       }}
       onDrop={(event) => {
         setShowDragOverMsg(false);
-        if (
-          !defaultModel ||
-          !modelSupportsImages(
-            defaultModel.provider,
-            defaultModel.model,
-            defaultModel.title,
-            defaultModel.capabilities,
-          )
-        ) {
+        if (!supportsImageInput || !editor) {
           return;
         }
-        let file = event.dataTransfer.files[0];
-        void handleImageFile(ideMessenger, file).then((result) => {
-          if (!editor) {
-            return;
-          }
-          if (result) {
-            const [_, dataUrl] = result;
-            const { schema } = editor.state;
-            const node = schema.nodes.image.create({ src: dataUrl });
-            const tr = editor.state.tr.insert(0, node);
-            editor.view.dispatch(tr);
-          }
-        });
+        for (const file of Array.from(event.dataTransfer.files)) {
+          const prepared = handleImageFile(ideMessenger, file).then(
+            (result) => {
+              if (!result) return undefined;
+              return () => {
+                if (editor.isDestroyed) return;
+                const [, dataUrl, originalSrc, inlineArgvSrc] = result;
+                const { schema } = editor.state;
+                const node = schema.nodes.image.create({
+                  alt: file.name,
+                  inlineArgvSrc: inlineArgvSrc ?? null,
+                  originalSrc,
+                  src: dataUrl,
+                  title: file.name,
+                });
+                const tr = editor.state.tr.insert(
+                  getComposerImageInsertPosition(editor.state.doc),
+                  node,
+                );
+                editor.view.dispatch(tr);
+              };
+            },
+          );
+          void attachmentQueue.current!(prepared).catch((error) => {
+            console.error("Failed to insert composer image", error);
+          });
+        }
         event.preventDefault();
       }}
     >
-      <div className="px-2.5 pb-1 pt-2">
+      <div className="cukii-editor-stack px-2.5 pb-1 pt-2">
+        {props.isMainInput && (
+          <VoiceInputButton
+            onTranscript={(text) => {
+              if (!editor) return;
+              const { from } = editor.state.selection;
+              const previousCharacter = editor.state.doc.textBetween(
+                Math.max(0, from - 1),
+                from,
+                "",
+              );
+              const prefix =
+                previousCharacter && !/\s/.test(previousCharacter) ? " " : "";
+              editor.chain().focus().insertContent(`${prefix}${text}`).run();
+            }}
+          />
+        )}
+        {props.isMainInput && <CukiiComposerImageStrip editor={editor} />}
         <EditorContent
-          className={`scroll-container overflow-y-scroll ${props.isMainInput ? "max-h-[70vh]" : ""}`}
+          className="scroll-container overflow-y-auto"
           spellCheck={false}
           editor={editor}
           onClick={(event) => {
@@ -277,39 +329,35 @@ function TipTapEditorInner(props: TipTapEditorProps) {
           isMainInput={props.isMainInput}
           toolbarOptions={props.toolbarOptions}
           activeKey={activeKey}
+          isInputEmpty={isEditorEmpty}
           hidden={shouldHideToolbar && !props.isMainInput}
           onAddContextItem={() => insertCharacterWithWhitespace("@")}
-          onEnter={onEnter}
-          onImageFileSelected={(file) => {
-            void handleImageFile(ideMessenger, file).then((result) => {
-              if (!editor) {
-                return;
-              }
-              if (result) {
-                const [_, dataUrl] = result;
-                const { schema } = editor.state;
-                const node = schema.nodes.image.create({ src: dataUrl });
-                editor.commands.command(({ tr }) => {
-                  tr.insert(0, node);
-                  return true;
-                });
-              }
-            });
+          onFilesSelected={(files) => {
+            if (!editor) return;
+            const nodes = files.map((file) => ({
+              type: "code-block",
+              attrs: {
+                inputId: props.inputId,
+                item: {
+                  id: { providerTitle: "file", itemId: file.path },
+                  name: file.name,
+                  description: file.path,
+                  content: `Attached local file: ${file.path}`,
+                  uri: { type: "file", value: file.path },
+                },
+              },
+            }));
+            editor.chain().focus().insertContent(nodes).run();
           }}
-          disabled={isStreaming}
+          onEnter={onEnter}
+          disabled={isStreaming && !props.isMainInput}
         />
       </div>
 
-      {showDragOverMsg &&
-        modelSupportsImages(
-          defaultModel?.provider || "",
-          defaultModel?.model || "",
-          defaultModel?.title,
-          defaultModel?.capabilities,
-        ) && (
-          <DragOverlay show={showDragOverMsg} setShow={setShowDragOverMsg} />
-        )}
-      <div id={TIPPY_DIV_ID} className="fixed z-50" />
+      {showDragOverMsg && supportsImageInput && (
+        <DragOverlay show={showDragOverMsg} setShow={setShowDragOverMsg} />
+      )}
+      <div className="fixed z-50" data-cukii-tippy-container />
     </InputBoxDiv>
   );
 }
@@ -331,6 +379,7 @@ const MemoInner = memo(
   (prev, next) =>
     prev.isMainInput === next.isMainInput &&
     prev.placeholder === next.placeholder &&
+    prev.onComposerFocusChange === next.onComposerFocusChange &&
     prev.historyKey === next.historyKey &&
     prev.inputId === next.inputId &&
     toolbarOptionsEqual(prev.toolbarOptions, next.toolbarOptions) &&

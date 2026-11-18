@@ -1,0 +1,11 @@
+Cukii Chat
+Copyright 2026 Svyat Rozhkov
+
+Cukii Chat is a fork of Continue (https://github.com/continuedev/continue),
+Copyright 2023 Continue, licensed under the Apache License, Version 2.0.
+Cukii Chat is not affiliated with or endorsed by Continue.
+
+Claude Code is a product of Anthropic, Codex of OpenAI, Grok of xAI,
+Qwen Code of Alibaba, Kimi of Moonshot AI and Cursor of Anysphere. Cukii Chat
+runs their unmodified command-line tools under the user's own accounts and is
+not affiliated with or endorsed by any of them.

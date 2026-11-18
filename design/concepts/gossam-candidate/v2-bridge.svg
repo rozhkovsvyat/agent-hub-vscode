@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-labelledby="title">
+  <title id="title">Bridge concept</title>
+  <!-- Two independent clusters, coupled by one deliberate thread. -->
+  <g stroke="currentColor" stroke-width="3" stroke-linecap="round">
+    <path d="M10 16L22 31L10 48M10 16L10 48"/>
+    <path d="M54 16L42 31L54 48M54 16L54 48"/>
+    <path d="M22 31C28 18 36 46 42 31" stroke-width="4"/>
+  </g>
+  <circle cx="10" cy="16" r="4" fill="currentColor"/><circle cx="10" cy="48" r="4" fill="currentColor"/>
+  <circle cx="54" cy="16" r="4" fill="currentColor"/><circle cx="54" cy="48" r="4" fill="currentColor"/>
+  <circle cx="32" cy="32" r="4.5" fill="currentColor"/>
+</svg>

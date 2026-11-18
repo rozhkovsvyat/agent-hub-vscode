@@ -20,6 +20,8 @@ import { selectUseActiveFile } from "../../../../redux/selectors";
 import { selectSelectedChatModel } from "../../../../redux/slices/configSlice";
 import { AppDispatch } from "../../../../redux/store";
 import { exitEdit } from "../../../../redux/thunks/edit";
+import { steerDuringStream } from "../../../../redux/thunks/steerDuringStream";
+import { cancelStream } from "../../../../redux/thunks/cancelStream";
 import { getFontSize, isJetBrains } from "../../../../util";
 import { CodeBlock, Mention, PromptBlock, SlashCommand } from "../extensions";
 import { TipTapEditorProps } from "../TipTapEditor";
@@ -27,7 +29,26 @@ import {
   getContextProviderDropdownOptions,
   getSlashCommandDropdownOptions,
 } from "./getSuggestion";
-import { handleImageFile } from "./imageUtils";
+import { getComposerImageInsertPosition, handleImageFile } from "./imageUtils";
+
+export const CUKII_EDITOR_IMMEDIATELY_RENDER = false;
+
+/**
+ * A suggestion callback can miss its final onExit when TipTap destroys or
+ * reparents the popup. The ref is therefore only a hint: plain Enter is
+ * deferred only while this exact editor owns a visibly mounted popup.
+ */
+export function shouldDeferEnterToSuggestion(
+  dropdownHint: boolean,
+  editorDom: HTMLElement,
+): boolean {
+  if (!dropdownHint) return false;
+  return Boolean(
+    editorDom
+      .closest<HTMLElement>(".cukii-input-box")
+      ?.querySelector('[data-cukii-suggestion-open="true"]'),
+  );
+}
 
 export function getPlaceholderText(
   placeholder: TipTapEditorProps["placeholder"],
@@ -44,15 +65,20 @@ export function getPlaceholderText(
 
 /**
  * Checks if the editor content is valid for submission.
- * A valid submission can contain either text content or prompt/code blocks
+ * A valid submission can contain text, an image, or prompt/code blocks.
  *
  * @param json The editor JSON content
  * @returns true if the content is valid for submission, false otherwise
  */
 export function hasValidEditorContent(json: JSONContent): boolean {
-  // Check for prompt or code blocks
-  const hasPromptOrCodeBlock = json.content?.some(
-    (c) => c.type === PromptBlock.name || c.type === CodeBlock.name,
+  // Images inserted by paste/drop are top-level nodes, just like prompt and
+  // code blocks. Treating only nested text as content made an attachment-only
+  // Send button look active while `onEnter` silently returned.
+  const hasStandaloneContent = json.content?.some(
+    (c) =>
+      c.type === PromptBlock.name ||
+      c.type === CodeBlock.name ||
+      c.type === Image.name,
   );
 
   // Check for non-whitespace text content
@@ -69,8 +95,26 @@ export function hasValidEditorContent(json: JSONContent): boolean {
     }),
   );
 
-  // Content is valid if it has either non-whitespace text or special blocks
-  return hasNonWhitespaceText || hasPromptOrCodeBlock || false;
+  return hasNonWhitespaceText || hasStandaloneContent || false;
+}
+
+/** Sent transcript capsules are prose, never a second editor (ID-267). */
+export function isComposerEditable(isMainInput: boolean | undefined): boolean {
+  return Boolean(isMainInput);
+}
+
+/** Clear the live composer immediately after its captured JSON is submitted. */
+export function clearSubmittedMainComposer(
+  editor: Editor,
+  isMainInput: boolean,
+  isInEdit: boolean,
+): void {
+  if (isMainInput && !isInEdit) {
+    // `CukiiComposerImageStrip` mirrors image nodes through TipTap's `update`
+    // event. The default clear does not emit that event, leaving stale pills
+    // visible until the user's next keystroke.
+    editor.commands.clearContent(true);
+  }
 }
 
 /**
@@ -80,12 +124,17 @@ export function createEditorConfig(options: {
   props: TipTapEditorProps;
   ideMessenger: IIdeMessenger;
   dispatch: AppDispatch;
+  enqueueAttachment: (
+    pending: Promise<(() => void) | undefined>,
+  ) => Promise<void>;
 }) {
-  const { props, ideMessenger, dispatch } = options;
+  const { props, ideMessenger, dispatch, enqueueAttachment } = options;
 
   const { getSubmenuContextItems } = useSubmenuContextProviders();
   const defaultModel = useAppSelector(selectSelectedChatModel);
+  const sessionMode = useAppSelector((state) => state.session.mode);
   const isStreaming = useAppSelector((state) => state.session.isStreaming);
+  const isCancelling = useAppSelector((state) => state.session.isCancelling);
   const useActiveFile = useAppSelector(selectUseActiveFile);
   const historyLength = useAppSelector((store) => store.session.history.length);
   const codeToEdit = useAppSelector((store) => store.editModeState.codeToEdit);
@@ -94,8 +143,17 @@ export function createEditorConfig(options: {
 
   const inSubmenuRef = useRef<string | undefined>(undefined);
   const inDropdownRef = useRef(false);
+  // The extension list is frozen on the render that builds the view, and with
+  // `immediatelyRender: false` that render is the one where `useEditor` still
+  // returns `null`. A shortcut that closes over `onEnter` directly would keep
+  // calling the version whose `editor` is forever `null`, so Enter would be
+  // swallowed without ever submitting. Every submit goes through this ref.
+  const onEnterRef = useRef<(modifiers: InputModifiers) => void>(() => {});
+  const useActiveFileRef = useUpdatingRef(useActiveFile);
   const defaultModelRef = useUpdatingRef(defaultModel);
+  const sessionModeRef = useUpdatingRef(sessionMode);
   const isStreamingRef = useUpdatingRef(isStreaming);
+  const isCancellingRef = useUpdatingRef(isCancelling);
   const getSubmenuContextItemsRef = useUpdatingRef(getSubmenuContextItems);
   const availableContextProvidersRef = useUpdatingRef(
     props.availableContextProviders,
@@ -148,42 +206,102 @@ export function createEditorConfig(options: {
   };
 
   const editor: Editor | null = useEditor({
+    // Build the ProseMirror view after React commits the component. Creating it
+    // synchronously inside useState can race a model-switch remount and leave
+    // TipTap's EditorState without a live schema/view.
+    immediatelyRender: CUKII_EDITOR_IMMEDIATELY_RENDER,
     extensions: [
       Document,
       History,
       Image.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            /** Legacy preview source retained for 2.0.114 editor nodes. */
+            displaySrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+            /**
+             * Exact original used by previews and out-of-band broker
+             * transports. It stays in editor JSON, never in rendered markup.
+             */
+            originalSrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+            /** Small alternate used only by Grok's inline argv carrier. */
+            inlineArgvSrc: {
+              default: null,
+              parseHTML: () => null,
+              renderHTML: () => ({}),
+            },
+          };
+        },
         addProseMirrorPlugins() {
           const pastePlugin = new Plugin({
             props: {
               handleDOMEvents: {
                 paste(view, event) {
                   const model = defaultModelRef.current;
-                  if (!model) return;
+                  const broker = sessionModeRef.current === "broker";
                   const items = event.clipboardData?.items;
-                  if (items) {
-                    for (const item of items) {
-                      const file = item.getAsFile();
-                      file &&
+                  if (!items) {
+                    return false;
+                  }
+                  let handled = false;
+                  for (const item of items) {
+                    const file = item.getAsFile();
+                    if (!file || !file.type.startsWith("image/")) {
+                      continue;
+                    }
+                    const allowed =
+                      broker ||
+                      (model &&
                         modelSupportsImages(
                           model.provider,
                           model.model,
                           model.title,
                           model.capabilities,
-                        ) &&
-                        void handleImageFile(ideMessenger, file).then(
-                          (resp) => {
-                            if (!resp) return;
-                            const [img, dataUrl] = resp;
-                            const { schema } = view.state;
-                            const node = schema.nodes.image.create({
-                              src: dataUrl,
-                            });
-                            const tr = view.state.tr.insert(0, node);
-                            view.dispatch(tr);
-                          },
-                        );
+                        ));
+                    if (!allowed) {
+                      continue;
                     }
+                    handled = true;
+                    const prepared = handleImageFile(ideMessenger, file).then(
+                      (response) => {
+                        if (response === undefined) return undefined;
+                        return () => {
+                          if (view.isDestroyed) return;
+                          const [, dataUrl, originalSrc, inlineArgvSrc] =
+                            response;
+                          const { schema } = view.state;
+                          const node = schema.nodes.image.create({
+                            alt: file.name,
+                            inlineArgvSrc: inlineArgvSrc ?? null,
+                            originalSrc,
+                            src: dataUrl,
+                            title: file.name,
+                          });
+                          const tr = view.state.tr.insert(
+                            getComposerImageInsertPosition(view.state.doc),
+                            node,
+                          );
+                          view.dispatch(tr);
+                        };
+                      },
+                    );
+                    void enqueueAttachment(prepared).catch((error) => {
+                      console.error("Failed to insert composer image", error);
+                    });
                   }
+                  if (handled) {
+                    event.preventDefault();
+                    return true;
+                  }
+                  return false;
                 },
               },
             },
@@ -232,29 +350,37 @@ export function createEditorConfig(options: {
         addKeyboardShortcuts() {
           return {
             Enter: () => {
-              if (inDropdownRef.current) {
+              if (
+                shouldDeferEnterToSuggestion(
+                  inDropdownRef.current,
+                  this.editor.view.dom,
+                )
+              ) {
                 return false;
               }
+              // A missing popup makes a stale lifecycle hint non-authoritative
+              // for every subsequent Enter as well.
+              inDropdownRef.current = false;
 
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !useActiveFile,
+                noContext: !useActiveFileRef.current,
               });
               return true;
             },
 
             "Mod-Enter": () => {
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !!useActiveFile,
+                noContext: !!useActiveFileRef.current,
               });
 
               return true;
             },
             "Alt-Enter": () => {
-              onEnter({
+              onEnterRef.current({
                 useCodebase: false,
-                noContext: !!useActiveFile,
+                noContext: !!useActiveFileRef.current,
               });
 
               return true;
@@ -304,8 +430,17 @@ export function createEditorConfig(options: {
               return false;
             },
             Escape: () => {
-              if (inDropdownRef.current) {
+              if (inDropdownRef.current || this.editor.view.composing) {
                 return false;
+              }
+              // Esc stops the turn (Claude parity). Consume it so we don't
+              // also blur to the editor or close the JetBrains sidebar.
+              if (isStreamingRef.current) {
+                if (isCancellingRef.current) {
+                  return false;
+                }
+                void dispatch(cancelStream());
+                return true;
               }
               // In JetBrains, this is how we close the sidebar when the input box is focused
               if (isJetBrains()) {
@@ -384,14 +519,14 @@ export function createEditorConfig(options: {
       },
     },
     content: props.editorState,
-    editable: !isStreaming || props.isMainInput,
+    editable: isComposerEditable(props.isMainInput),
   });
 
   const onEnter = (modifiers: InputModifiers) => {
     if (!editor) {
       return;
     }
-    if (isStreamingRef.current || (codeToEdit.length === 0 && isInEdit)) {
+    if (codeToEdit.length === 0 && isInEdit) {
       return;
     }
 
@@ -402,12 +537,31 @@ export function createEditorConfig(options: {
       return;
     }
 
+    if (isStreamingRef.current) {
+      if (!props.isMainInput) {
+        return;
+      }
+      void dispatch(
+        steerDuringStream({
+          editorState: json,
+          modifiers,
+        }),
+      );
+      editor.commands.clearContent(true);
+      return;
+    }
+
     if (props.isMainInput) {
       addRef.current(json);
     }
 
     props.onEnter(json, modifiers, editor);
+    clearSubmittedMainComposer(editor, props.isMainInput, isInEdit);
   };
+
+  // Keep the frozen keyboard shortcuts pointed at this render's closure, which
+  // is the only one that can see the live editor and the current session state.
+  onEnterRef.current = onEnter;
 
   return { editor, onEnter };
 }

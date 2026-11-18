@@ -26,14 +26,29 @@ import {
   ToolCallState,
 } from "core";
 import { mergeReasoningDetails } from "core/llm/openaiTypeConverters";
+import { canonicalCukiiModelLabel } from "core/cukiiModelPresentation";
 import { NEW_SESSION_TITLE } from "core/util/constants";
 import {
   renderChatMessage,
   renderContextItems,
 } from "core/util/messageContent";
+import { TOOL_INTERRUPTED_MESSAGE } from "core/tools/constants";
 import { findUriInDirs, getUriPathBasename } from "core/util/uri";
+import type {
+  BrokerAutocompact,
+  BrokerEffort,
+  BrokerModel,
+  BrokerModelScope,
+  BrokerSpeed,
+  BrokerSubagent,
+  CukiiPermissionMode,
+  CukiiClaudePermissionRequest,
+  CukiiUserQuestionRequest,
+  CukiiUserMessageReaction,
+} from "core/protocol/ideWebview";
 import { findLastIndex } from "lodash";
 import { v4 as uuidv4 } from "uuid";
+import { coerceStoredPermissionMode } from "core/cukiiPermissionModes";
 import { type InlineErrorMessageType } from "../../components/mainInput/InlineErrorMessage";
 import { toolCallCtxItemToCtxItemWithId } from "../../pages/gui/ToolCallDiv/utils";
 import { addToolCallDeltaToState, isEditTool } from "../../util/toolCallState";
@@ -198,43 +213,234 @@ export function handleStreamingToolCallUpdates(
 // The proper fix is adding a UUID to all chat messages, but this is the temp workaround.
 export type ChatHistoryItemWithMessageId = ChatHistoryItem & {
   message: ChatMessage & { id: string };
+  /**
+   * A local transcript receipt for a real broker-model transition. It is a
+   * system message so it is retained with session history but never sent to a
+   * vendor as conversational context.
+   */
+  modelSwitch?: {
+    model: BrokerModel;
+    displayName: string;
+  };
+  /** Messenger-style receipt persisted on every newly sent user message. */
+  messageReceipt?: {
+    sentAt: number;
+    status:
+      | "queued"
+      | "delivered"
+      | "read"
+      | "deferred"
+      | "failed"
+      | "cancelled";
+  };
+  isSteer?: boolean;
+  /**
+   * `delivered` means the live/durable bridge transport accepted the
+   * follow-up. `read` requires an explicit inbox ack, a native echo, or
+   * structured activity from the exact turn whose prompt carries this
+   * message ID; raw stdout and local launch events never qualify. `cancelled`
+   * is terminal after an explicit user Stop: the bubble stays visible, but no
+   * drain or late transport frame may revive it.
+   */
+  steerStatus?:
+    | "queued"
+    | "delivered"
+    | "read"
+    | "deferred"
+    | "failed"
+    | "cancelled";
+  /** Epoch milliseconds captured at send time and persisted with history. */
+  steerSentAt?: number;
+  /** Epoch milliseconds of the assistant placeholder; drives the capsule
+   * corner time. Legacy history has no per-turn stamp, so restore stamps it
+   * with the reload moment (see `newSession`) and persistence keeps it. */
+  createdAt?: number;
+  // Set on the last kept assistant turn when the user cancels (Esc). Drives the
+  // turn-level "Interrupted" marker for text/thinking streams that have no
+  // in-flight tool call to carry the label.
+  interrupted?: boolean;
+};
+
+/**
+ * History predates message receipts. Never manufacture a timestamp from
+ * reload time: it would make an old message look newly sent. A legacy steer
+ * with no explicit status is conservatively failed/unconfirmed.
+ */
+export function normalizeRestoredHistory(
+  history: ChatHistoryItemWithMessageId[],
+): ChatHistoryItemWithMessageId[] {
+  return history.map(({ modelSwitch, ...item }) => {
+    const normalizedModelSwitch =
+      modelSwitch &&
+      typeof modelSwitch.model === "string" &&
+      typeof modelSwitch.displayName === "string" &&
+      modelSwitch.model.trim() &&
+      modelSwitch.displayName.trim()
+        ? {
+            model: modelSwitch.model,
+            displayName: canonicalCukiiModelLabel(
+              modelSwitch.model,
+              modelSwitch.displayName,
+            ),
+          }
+        : undefined;
+    const receipt = item.messageReceipt;
+    const sentAt = item.steerSentAt;
+    if (receipt && Number.isFinite(receipt.sentAt)) {
+      return normalizedModelSwitch
+        ? { ...item, modelSwitch: normalizedModelSwitch }
+        : item;
+    }
+    if (!item.isSteer) {
+      return normalizedModelSwitch
+        ? { ...item, modelSwitch: normalizedModelSwitch }
+        : item;
+    }
+    const normalized = {
+      ...item,
+      messageReceipt: Number.isFinite(sentAt)
+        ? { sentAt: sentAt!, status: item.steerStatus ?? "failed" }
+        : undefined,
+      steerSentAt: Number.isFinite(sentAt) ? sentAt : undefined,
+      steerStatus: item.steerStatus ?? "failed",
+    };
+    return normalizedModelSwitch
+      ? { ...normalized, modelSwitch: normalizedModelSwitch }
+      : normalized;
+  });
+}
+
+function finishActiveThinking(history: ChatHistoryItemWithMessageId[]): void {
+  const active = history.findLast((item) => item.reasoning?.active);
+  if (active?.reasoning?.active) {
+    active.reasoning.active = false;
+    active.reasoning.endAt = Date.now();
+  }
+}
+
+/**
+ * Restore never guesses vendor capability from a bundled help fixture. The
+ * live host snapshot reconciles this value after discovery and the bridge
+ * validates it again before process creation.
+ */
+export function reconcileRestoredPermissionMode(
+  _model: BrokerModel,
+  current: CukiiPermissionMode,
+): CukiiPermissionMode {
+  return current;
+}
+
+/** An explicit native-worker pause, carried separately from chat text. */
+export type CukiiBridgeWait = {
+  condition: string;
+  deadline?: string;
 };
 
 type SessionState = {
   lastSessionId?: string;
+  isSessionLoading: boolean;
   isSessionMetadataLoading: boolean;
   allSessionMetadata: BaseSessionMetadata[];
   history: ChatHistoryItemWithMessageId[];
   isStreaming: boolean;
+  isCancelling?: boolean;
+  /** Distinguishes a duplicate user Stop from a user Stop that must overtake
+   * an internal provider/recovery cancellation already waiting on native. */
+  cancellingSource?: "user" | "internal";
+  /** Ephemeral owner of broker streaming state. Late frames/finalizers from a
+   * stopped run may not mutate a replacement run in the same session. */
+  activeBridgeRunId?: string;
+  /** Monotonic owner of a submitted turn. It remains after completion so a
+   * late cancellation receipt from an older turn cannot mutate a newer turn
+   * that has already finished. */
+  submissionEpoch?: number;
+  /** Ephemeral per-tab state; deliberately excluded from persisted Session. */
+  bridgeWait?: CukiiBridgeWait;
+  /** A live steer could not be injected, so the current turn was interrupted
+   * to redeliver it. Consumed by the next bridge turn to resume the task.
+   * Ephemeral; never persisted. */
+  steerInterruptPending?: boolean;
+  /** The user pressed Stop on a running turn. The next bridge turn tells the
+   * agent not to redo the stopped work. Ephemeral; never persisted. */
+  userStopPending?: boolean;
   title: string;
+  titleManuallySet: boolean;
+  revision: number;
   id: string;
   streamAborter: AbortController;
   mainEditorContentTrigger?: JSONContent | undefined;
   symbols: FileSymbolMap;
   mode: MessageModes;
+  brokerModel?: BrokerModel;
+  brokerSubagent?: BrokerSubagent;
+  brokerEffort: BrokerEffort;
+  brokerSpeed: BrokerSpeed;
+  /**
+   * Share of the context window at which the thread auto-compacts.
+   * Owned by the plugin so every vendor reads one value instead of restating
+   * the rule in its own agent contract.
+   */
+  brokerAutocompact: BrokerAutocompact;
+  /** Model picker scope; preserved per session so Milky/All survives reloads. */
+  brokerModelScope: BrokerModelScope;
+  brokerPermissionMode: CukiiPermissionMode;
+  /** Keyed by run/request so parallel Claude tools cannot overwrite each other. */
+  pendingClaudePermissions: Record<string, CukiiClaudePermissionRequest>;
+  /** Keyed by run/request so a delayed question cannot replace another run's UI. */
+  pendingUserQuestions: Record<string, CukiiUserQuestionRequest>;
   isInEdit: boolean;
   codeBlockApplyStates: {
     states: ApplyState[];
     curIndex: number;
   };
   newestToolbarPreviewForInput: Record<string, string>;
-  hasReasoningEnabled?: boolean;
+  hasReasoningEnabled: boolean;
   isPruned?: boolean;
   contextPercentage?: number;
   inlineErrorMessage?: InlineErrorMessageType;
   compactionLoading: Record<number, boolean>; // Track compaction loading by message index
 };
 
+export type {
+  BrokerAutocompact,
+  BrokerEffort,
+  BrokerModel,
+  BrokerModelScope,
+  BrokerSpeed,
+  BrokerSubagent,
+  CukiiPermissionMode,
+} from "core/protocol/ideWebview";
+
 export const INITIAL_SESSION_STATE: SessionState = {
+  isSessionLoading:
+    typeof window !== "undefined" &&
+    window.cukiiSurface === "chat" &&
+    Boolean(window.initialSessionId),
   isSessionMetadataLoading: false,
   allSessionMetadata: [],
   history: [],
   isStreaming: false,
+  isCancelling: false,
+  activeBridgeRunId: undefined,
+  submissionEpoch: 0,
+  bridgeWait: undefined,
   title: NEW_SESSION_TITLE,
+  titleManuallySet: false,
+  revision: 0,
   id: uuidv4(),
   streamAborter: new AbortController(),
   symbols: {},
-  mode: "agent",
+  mode: "broker",
+  brokerModel: "qwen-3-8-max",
+  brokerSubagent: "auto",
+  brokerEffort: "high",
+  brokerSpeed: "standard",
+  brokerAutocompact: "50",
+  brokerModelScope: "best",
+  brokerPermissionMode: "bypass",
+  pendingClaudePermissions: {},
+  pendingUserQuestions: {},
+  hasReasoningEnabled: true,
   isInEdit: false,
   codeBlockApplyStates: {
     states: [],
@@ -271,6 +477,14 @@ export const sessionSlice = createSlice({
     },
     setActive: (state) => {
       state.isStreaming = true;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    claimBridgeRun: (state, action: PayloadAction<{ runId: string }>) => {
+      state.activeBridgeRunId = action.payload.runId;
+      state.isStreaming = true;
+      state.isCancelling = false;
+      state.bridgeWait = undefined;
     },
     setIsGatheringContext: (state, { payload }: PayloadAction<boolean>) => {
       const curMessage = state.history.at(-1);
@@ -278,7 +492,10 @@ export const sessionSlice = createSlice({
         curMessage.isGatheringContext = payload;
       }
     },
-    clearDanglingMessages: (state) => {
+    clearDanglingMessages: (
+      state,
+      action: PayloadAction<"turn" | "tool" | undefined>,
+    ) => {
       // This is used during cancellation
       // After the last user or tool message, we can have thinking and or valid assitant message (content or generated tool calls) OR nothing.
       // The only thing allowed after the last assistant message that has either content or generated tool calls
@@ -287,27 +504,86 @@ export const sessionSlice = createSlice({
         return;
       }
 
+      const isDurableSteer = (item: ChatHistoryItemWithMessageId) =>
+        item.isSteer &&
+        (item.steerStatus === "queued" ||
+          item.steerStatus === "deferred" ||
+          item.steerStatus === "cancelled");
       const lastUserOrToolIdx = findLastIndex(
         state.history,
-        (item) => item.message.role === "tool" || item.message.role === "user",
+        (item) =>
+          !isDurableSteer(item) &&
+          (item.message.role === "tool" || item.message.role === "user"),
       );
 
       let validAssistantMessageIdx = -1;
       for (let i = state.history.length - 1; i > lastUserOrToolIdx; i--) {
         const message = state.history[i];
-        const hasGeneratedMsg = message.toolCallStates?.some(
-          (toolCallState) => toolCallState.status !== "generating",
-        );
-        if (message.message.content || hasGeneratedMsg) {
+        // Steer bubbles are a durable outbox, including ones an explicit Stop
+        // already cancelled. Cancellation cleanup may settle the active turn,
+        // but must never delete or truncate these entries.
+        if (isDurableSteer(message)) continue;
+        // Any in-flight tool call (even still "generating") makes this message
+        // worth keeping: we mark it canceled below so the transcript shows
+        // "Tool interrupted", instead of silently deleting the turn on Esc.
+        const hasToolCalls = (message.toolCallStates?.length ?? 0) > 0;
+        const hasReasoning = !!message.reasoning?.text?.trim();
+        if (message.message.content || hasToolCalls || hasReasoning) {
           validAssistantMessageIdx = i;
+          // Mark the turn interrupted so the transcript shows "Interrupted"
+          // even when the cancel happened mid text/thinking (no tool call to
+          // carry the per-tool label).
+          // Only an explicit user turn-cancel paints Interrupted. Lifecycle
+          // cleanup/provider errors pass undefined and must not add OR erase
+          // a real user cancellation. A tool receipt suppresses the general
+          // marker because the tool card carries its own interruption state.
+          // The marker belongs to the turn's last assistant answer, not to a
+          // trailing "thinking" status line (which never paints it), so a
+          // Stop after a background tool still shows Interrupted.
+          let markIdx = i;
+          for (let j = i; j > lastUserOrToolIdx; j--) {
+            if (state.history[j].message.role === "assistant") {
+              markIdx = j;
+              break;
+            }
+          }
+          const markTarget = state.history[markIdx];
+          const hadInFlightTool = (markTarget.toolCallStates ?? []).some(
+            (tool) =>
+              tool.status === "generated" ||
+              tool.status === "generating" ||
+              tool.status === "calling",
+          );
+          if (action.payload === "turn") markTarget.interrupted = true;
+          // A tool receipt hands the label to an interrupted tool card; tools
+          // that already finished (a CLI's background task) carry no label.
+          if (
+            action.payload === "tool" &&
+            (hadInFlightTool ||
+              markTarget.toolCallStates?.some(
+                (tool) => tool.status === "canceled",
+              ))
+          ) {
+            markTarget.interrupted = false;
+          }
           // Cancel any tool calls that are dangling and generated
           if (message.toolCallStates) {
             message.toolCallStates.forEach((toolCallState) => {
               if (
                 toolCallState.status === "generated" ||
-                toolCallState.status === "generating"
+                toolCallState.status === "generating" ||
+                toolCallState.status === "calling"
               ) {
                 toolCallState.status = "canceled";
+                if (!toolCallState.output?.length) {
+                  toolCallState.output = [
+                    {
+                      name: TOOL_INTERRUPTED_MESSAGE,
+                      description: TOOL_INTERRUPTED_MESSAGE,
+                      content: TOOL_INTERRUPTED_MESSAGE,
+                    },
+                  ];
+                }
               }
             });
           }
@@ -317,15 +593,23 @@ export const sessionSlice = createSlice({
 
       if (validAssistantMessageIdx === -1) {
         const lastMsg = state.history[lastUserOrToolIdx];
+        if (!lastMsg) return;
         const lastRole = lastMsg.message.role as "user" | "tool";
         if (lastRole === "user") {
           state.mainEditorContentTrigger = lastMsg.editorState;
-          state.history = state.history.slice(0, lastUserOrToolIdx);
+          state.history = state.history.filter(
+            (item, index) => index < lastUserOrToolIdx || isDurableSteer(item),
+          );
         } else {
-          state.history = state.history.slice(0, lastUserOrToolIdx + 1);
+          state.history = state.history.filter(
+            (item, index) => index <= lastUserOrToolIdx || isDurableSteer(item),
+          );
         }
       } else {
-        state.history = state.history.slice(0, validAssistantMessageIdx + 1);
+        state.history = state.history.filter(
+          (item, index) =>
+            index <= validAssistantMessageIdx || isDurableSteer(item),
+        );
       }
     },
     // Trigger value picked up by editor with isMainInput to set its content
@@ -364,6 +648,7 @@ export const sessionSlice = createSlice({
       }>,
     ) => {
       const { index, editorState } = payload;
+      state.submissionEpoch = (state.submissionEpoch ?? 0) + 1;
 
       if (state.history.length && index < state.history.length) {
         // Resubmission - update input message, truncate history after resubmit with new empty response message
@@ -385,6 +670,7 @@ export const sessionSlice = createSlice({
             content: "", // IMPORTANT - this is subsequently updated by response streaming
           },
           contextItems: [],
+          createdAt: Date.now(),
         });
       } else {
         // New input/response messages
@@ -397,6 +683,7 @@ export const sessionSlice = createSlice({
             },
             contextItems: [],
             editorState,
+            messageReceipt: { sentAt: Date.now(), status: "queued" },
           },
           {
             message: {
@@ -405,6 +692,7 @@ export const sessionSlice = createSlice({
               content: "", // IMPORTANT - this is subsequently updated by response streaming
             },
             contextItems: [],
+            createdAt: Date.now(),
           },
         ]);
       }
@@ -430,6 +718,7 @@ export const sessionSlice = createSlice({
             content: "", // IMPORTANT - this is subsequently updated by response streaming
           },
           contextItems: [],
+          createdAt: Date.now(),
         });
         state.inlineErrorMessage = undefined;
         state.isPruned = false;
@@ -515,13 +804,169 @@ export const sessionSlice = createSlice({
         curMessage.isGatheringContext = false;
       }
 
+      finishActiveThinking(state.history);
       state.isStreaming = false;
+      state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    settleBridgeRun: (state, action: PayloadAction<{ runId: string }>) => {
+      if (state.activeBridgeRunId !== action.payload.runId) return;
+      const curMessage = state.history.at(-1);
+      if (curMessage) curMessage.isGatheringContext = false;
+      finishActiveThinking(state.history);
+      state.isStreaming = false;
+      state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    setCancelling: (state, action: PayloadAction<boolean>) => {
+      state.isCancelling = action.payload;
+      if (!action.payload) state.cancellingSource = undefined;
+    },
+    setCancellingSource: (
+      state,
+      action: PayloadAction<"user" | "internal" | undefined>,
+    ) => {
+      state.cancellingSource = action.payload;
+    },
+    appendUserSteerMessage: (
+      state,
+      action: PayloadAction<{
+        content: ChatMessage["content"];
+        messageId: string;
+        editorState?: JSONContent;
+        contextItems?: ContextItemWithId[];
+      }>,
+    ) => {
+      if (!state.isStreaming) {
+        return;
+      }
+      state.history.push({
+        message: {
+          id: action.payload.messageId,
+          role: "user",
+          content: action.payload.content,
+        },
+        contextItems: action.payload.contextItems ?? [],
+        editorState: action.payload.editorState,
+        isSteer: true,
+        steerStatus: "queued",
+        steerSentAt: Date.now(),
+        messageReceipt: { sentAt: Date.now(), status: "queued" },
+      });
+    },
+    setSteerStatus: (
+      state,
+      action: PayloadAction<{
+        messageId: string;
+        status: NonNullable<ChatHistoryItemWithMessageId["steerStatus"]>;
+      }>,
+    ) => {
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      // An explicit user Stop is terminal. A late transport frame must not
+      // requeue a cancelled follow-up and make the broker resume by itself.
+      if (
+        item?.isSteer &&
+        item.steerStatus === "cancelled" &&
+        (action.payload.status === "queued" ||
+          action.payload.status === "deferred")
+      ) {
+        return;
+      }
+      if (item?.isSteer) item.steerStatus = action.payload.status;
+      if (item?.messageReceipt)
+        item.messageReceipt.status = action.payload.status;
+    },
+    cancelQueuedSteers: (state) => {
+      for (const item of state.history) {
+        if (
+          item.isSteer &&
+          (item.steerStatus === "queued" || item.steerStatus === "deferred")
+        ) {
+          item.steerStatus = "cancelled";
+          if (item.messageReceipt) item.messageReceipt.status = "cancelled";
+        }
+      }
+    },
+    requestSteerInterrupt: (state) => {
+      state.steerInterruptPending = true;
+    },
+    clearSteerInterrupt: (state) => {
+      state.steerInterruptPending = false;
+    },
+    markUserStop: (state) => {
+      state.userStopPending = true;
+    },
+    clearUserStop: (state) => {
+      state.userStopPending = false;
+    },
+    markSteerRead: (state, action: PayloadAction<{ messageId: string }>) => {
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      // A delayed/duplicate transport frame must not upgrade a message which
+      // was never accepted by the bridge in the first place.
+      if (item?.isSteer && item.steerStatus === "delivered") {
+        item.steerStatus = "read";
+      }
+      if (item?.messageReceipt?.status === "delivered") {
+        item.messageReceipt.status = "read";
+      }
+    },
+    setUserMessageReaction: (
+      state,
+      action: PayloadAction<CukiiUserMessageReaction>,
+    ) => {
+      if (action.payload.sessionId !== state.id) return;
+      const item = state.history.find(
+        (entry) => entry.message.id === action.payload.messageId,
+      );
+      if (item?.message.role !== "user") return;
+      item.message.metadata = {
+        ...item.message.metadata,
+        cukiiReaction: {
+          reactionId: action.payload.reactionId,
+          emoji: action.payload.emoji,
+          reactedAt: action.payload.reactedAt,
+          source: "agent",
+        },
+      };
+    },
+    markLatestUserReceiptDelivered: (state) => {
+      const item = state.history.findLast(
+        (entry) => entry.message.role === "user" && !entry.isSteer,
+      );
+      if (item?.messageReceipt?.status === "queued") {
+        item.messageReceipt.status = "delivered";
+      }
     },
     abortStream: (state) => {
       state.streamAborter.abort();
       state.streamAborter = new AbortController();
+      // Safety: any path that aborts the stream must also clear the streaming
+      // flag. This prevents the bottom loader from staying visible if a race
+      // or bridge error leaves isStreaming stuck to true.
+      finishActiveThinking(state.history);
+      state.isStreaming = false;
+      state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+    },
+    setBridgeWait: (
+      state,
+      action: PayloadAction<CukiiBridgeWait | undefined>,
+    ) => {
+      state.bridgeWait = action.payload;
     },
     streamUpdate: (state, action: PayloadAction<ChatMessage[]>) => {
+      // Every actual bridge message proves the worker resumed. Silence is not
+      // an event and must leave the animated loader alone.
+      if (action.payload.length) {
+        state.bridgeWait = undefined;
+      }
       if (state.history.length) {
         for (const message of action.payload) {
           let lastItem = state.history[state.history.length - 1];
@@ -574,6 +1019,7 @@ export const sessionSlice = createSlice({
                   id: uuidv4(),
                 },
                 contextItems: [],
+                createdAt: Date.now(),
               });
               lastItem = state.history[state.history.length - 1];
               lastMessage = lastItem.message;
@@ -589,6 +1035,10 @@ export const sessionSlice = createSlice({
             lastMessage.role !== message.role ||
             message.role === "tool" // Tool messages should always create new messages
           ) {
+            if (lastMessage.role === "thinking" && lastItem.reasoning?.active) {
+              lastItem.reasoning.active = false;
+              lastItem.reasoning.endAt = Date.now();
+            }
             // Create a new message
             const historyItem: ChatHistoryItemWithMessageId = {
               message: {
@@ -598,6 +1048,16 @@ export const sessionSlice = createSlice({
               },
               contextItems: [],
             };
+            if (message.role === "assistant") {
+              historyItem.createdAt = Date.now();
+            }
+            if (message.role === "thinking") {
+              historyItem.reasoning = {
+                text: "",
+                startAt: Date.now(),
+                active: true,
+              };
+            }
             state.history.push(historyItem);
             lastItem = state.history[state.history.length - 1];
             lastMessage = lastItem.message;
@@ -685,11 +1145,18 @@ export const sessionSlice = createSlice({
     },
     newSession: (state, { payload }: PayloadAction<Session | undefined>) => {
       state.lastSessionId = state.id;
+      state.submissionEpoch = (state.submissionEpoch ?? 0) + 1;
 
       state.streamAborter.abort();
       state.streamAborter = new AbortController();
 
       state.isStreaming = false;
+      state.isCancelling = false;
+      state.activeBridgeRunId = undefined;
+      state.bridgeWait = undefined;
+      state.steerInterruptPending = false;
+      state.userStopPending = false;
+      state.isSessionLoading = false;
       state.symbols = {};
 
       state.inlineErrorMessage = undefined;
@@ -697,26 +1164,84 @@ export const sessionSlice = createSlice({
       state.contextPercentage = undefined;
 
       if (payload) {
-        state.history = payload.history as any;
+        state.history = normalizeRestoredHistory(payload.history as any);
+        // Legacy turns predate the capsule corner time; without a backfill
+        // their capsules render with an empty corner forever.
+        for (const restored of state.history) {
+          if (
+            restored.message.role === "assistant" &&
+            restored.createdAt === undefined
+          ) {
+            restored.createdAt = Date.now();
+          }
+        }
         state.title = payload.title;
+        state.titleManuallySet = Boolean(payload.titleManuallySet);
+        state.revision = payload.revision ?? 0;
         state.id = payload.sessionId;
         if (payload.mode) {
           state.mode = payload.mode;
         }
+        state.brokerModel = payload.brokerModel ?? "qwen-3-8-max";
+        state.brokerSubagent = payload.brokerSubagent ?? "auto";
+        state.brokerEffort = payload.brokerEffort ?? "high";
+        state.brokerSpeed = payload.brokerSpeed ?? "standard";
+        state.brokerAutocompact = payload.brokerAutocompact ?? "50";
+        state.brokerModelScope =
+          payload.brokerModelScope === "all" ? "all" : "best";
+        state.hasReasoningEnabled = payload.hasReasoningEnabled ?? true;
+        // Restored vendors normally keep their saved draft while live
+        // discovery is pending. Kimi is the exception: its only verified
+        // headless prompt-mode route is Bypass, so stale Manual must not
+        // reach bridgeControls before the picker is opened.
+        state.brokerPermissionMode =
+          payload.brokerPermissionMode === undefined
+            ? "bypass"
+            : reconcileRestoredPermissionMode(
+                state.brokerModel,
+                coerceStoredPermissionMode(payload.brokerPermissionMode),
+              );
       } else {
         state.history = [];
         state.title = NEW_SESSION_TITLE;
+        state.titleManuallySet = false;
+        state.revision = 0;
         state.id = uuidv4();
+        state.mode = "broker";
+        state.brokerModel = "qwen-3-8-max";
+        state.brokerSubagent = "auto";
+        state.brokerEffort = "high";
+        state.brokerSpeed = "standard";
+        state.brokerAutocompact = "50";
+        state.brokerModelScope = "best";
+        state.brokerPermissionMode = "bypass";
+        state.hasReasoningEnabled = true;
       }
     },
     updateSessionTitle: (state, { payload }: PayloadAction<string>) => {
       state.title = payload;
+    },
+    setTitleManuallySet: (state, { payload }: PayloadAction<boolean>) => {
+      state.titleManuallySet = payload;
+    },
+    setSessionRevision: (
+      state,
+      { payload }: PayloadAction<{ sessionId: string; revision: number }>,
+    ) => {
+      if (state.id === payload.sessionId) {
+        // Save receipts can arrive out of order; a late stale receipt must
+        // never roll the revision back and re-deadlock the CAS check.
+        state.revision = Math.max(state.revision ?? 0, payload.revision);
+      }
     },
     setIsSessionMetadataLoading: (
       state,
       { payload }: PayloadAction<boolean>,
     ) => {
       state.isSessionMetadataLoading = payload;
+    },
+    setIsSessionLoading: (state, { payload }: PayloadAction<boolean>) => {
+      state.isSessionLoading = payload;
     },
     setAllSessionMetadata: (
       state,
@@ -960,11 +1485,99 @@ export const sessionSlice = createSlice({
     setMode: (state, action: PayloadAction<MessageModes>) => {
       state.mode = action.payload;
     },
+    setBrokerModel: (state, action: PayloadAction<BrokerModel>) => {
+      state.brokerModel = action.payload;
+    },
+    /**
+     * Model choice is a persistent transcript boundary. Keep it separate from
+     * setBrokerModel because restore/draft hydration must not manufacture an
+     * event, while every user-initiated transition must be visible.
+     */
+    switchBrokerModel: (
+      state,
+      action: PayloadAction<{ model: BrokerModel; displayName: string }>,
+    ) => {
+      const { model, displayName } = action.payload;
+      if ((state.brokerModel ?? "qwen-3-8-max") === model) return;
+
+      state.brokerModel = model;
+      state.history.push({
+        message: {
+          id: uuidv4(),
+          role: "system",
+          content: "",
+        },
+        contextItems: [],
+        modelSwitch: {
+          model,
+          displayName: canonicalCukiiModelLabel(model, displayName || model),
+        },
+      });
+    },
+    setBrokerSubagent: (state, action: PayloadAction<BrokerSubagent>) => {
+      state.brokerSubagent = action.payload;
+    },
+    setBrokerEffort: (state, action: PayloadAction<BrokerEffort>) => {
+      state.brokerEffort = action.payload;
+    },
+    setBrokerSpeed: (state, action: PayloadAction<BrokerSpeed>) => {
+      state.brokerSpeed = action.payload;
+    },
+    setBrokerAutocompact: (state, action: PayloadAction<BrokerAutocompact>) => {
+      state.brokerAutocompact = action.payload;
+    },
+    setBrokerModelScope: (state, action: PayloadAction<BrokerModelScope>) => {
+      state.brokerModelScope = action.payload;
+    },
     setIsInEdit: (state, action: PayloadAction<boolean>) => {
       state.isInEdit = action.payload;
     },
     setHasReasoningEnabled: (state, action: PayloadAction<boolean>) => {
       state.hasReasoningEnabled = action.payload;
+    },
+    setBrokerPermissionMode: (
+      state,
+      action: PayloadAction<CukiiPermissionMode>,
+    ) => {
+      state.brokerPermissionMode = action.payload;
+    },
+    enqueueClaudePermission: (
+      state,
+      action: PayloadAction<CukiiClaudePermissionRequest>,
+    ) => {
+      const request = action.payload;
+      state.pendingClaudePermissions[`${request.runId}:${request.requestId}`] =
+        request;
+    },
+    removeClaudePermission: (
+      state,
+      action: PayloadAction<{ runId: string; requestId: string }>,
+    ) => {
+      delete state.pendingClaudePermissions[
+        `${action.payload.runId}:${action.payload.requestId}`
+      ];
+    },
+    clearClaudePermissions: (state) => {
+      state.pendingClaudePermissions = {};
+    },
+    enqueueUserQuestion: (
+      state,
+      action: PayloadAction<CukiiUserQuestionRequest>,
+    ) => {
+      const request = action.payload;
+      state.pendingUserQuestions[`${request.runId}:${request.requestId}`] =
+        request;
+    },
+    removeUserQuestion: (
+      state,
+      action: PayloadAction<{ runId: string; requestId: string }>,
+    ) => {
+      delete state.pendingUserQuestions[
+        `${action.payload.runId}:${action.payload.requestId}`
+      ];
+    },
+    clearUserQuestions: (state) => {
+      state.pendingUserQuestions = {};
     },
     setNewestToolbarPreviewForInput: (
       state,
@@ -1053,12 +1666,29 @@ export const {
   addContextItemsAtIndex,
   setAppliedRulesAtIndex,
   setInactive,
+  claimBridgeRun,
+  settleBridgeRun,
+  setCancelling,
+  setCancellingSource,
+  appendUserSteerMessage,
+  markSteerRead,
+  setUserMessageReaction,
+  markLatestUserReceiptDelivered,
+  setSteerStatus,
+  cancelQueuedSteers,
+  requestSteerInterrupt,
+  clearSteerInterrupt,
+  clearUserStop,
+  markUserStop,
   streamUpdate,
   newSession,
   updateSessionTitle,
+  setTitleManuallySet,
+  setSessionRevision,
   addHighlightedCode,
   addPromptCompletionPair,
   setActive,
+  setBridgeWait,
   submitEditorAndInitAtIndex,
   truncateHistoryToMessage,
   updateHistoryItemAtIndex,
@@ -1078,6 +1708,14 @@ export const {
   updateToolCallOutput,
   setProcessedToolCallArgs,
   setMode,
+  setBrokerModel,
+  switchBrokerModel,
+  setBrokerSubagent,
+  setBrokerEffort,
+  setBrokerSpeed,
+  setBrokerAutocompact,
+  setBrokerModelScope,
+  setIsSessionLoading,
   setIsSessionMetadataLoading,
   setAllSessionMetadata,
   addSessionMetadata,
@@ -1086,6 +1724,13 @@ export const {
   setNewestToolbarPreviewForInput,
   setIsInEdit,
   setHasReasoningEnabled,
+  setBrokerPermissionMode,
+  enqueueClaudePermission,
+  removeClaudePermission,
+  clearClaudePermissions,
+  enqueueUserQuestion,
+  removeUserQuestion,
+  clearUserQuestions,
   setInlineErrorMessage,
   setIsPruned,
   setContextPercentage,

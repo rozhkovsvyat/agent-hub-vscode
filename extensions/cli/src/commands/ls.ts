@@ -70,7 +70,7 @@ export async function listSessionsCommand(
         app.unmount();
 
         // Handle local session
-        const sessionHistory = loadSessionById(sessionId);
+        const sessionHistory = await loadSessionById(sessionId);
         if (!sessionHistory) {
           logger.error(`Session ${sessionId} could not be loaded.`);
           resolve();

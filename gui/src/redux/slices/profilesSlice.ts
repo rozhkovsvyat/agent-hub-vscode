@@ -1,4 +1,6 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+
+const EMPTY_BOOKMARKED_SLASH_COMMANDS: string[] = [];
 import { SlashCommandDescWithSource } from "core";
 import { ProfileDescription } from "core/config/ProfileLifecycleManager";
 
@@ -124,9 +126,11 @@ export const profilesSlice = createSlice({
     },
 
     selectBookmarkedSlashCommands: (state) => {
-      if (!state.selectedProfileId) return [];
+      if (!state.selectedProfileId) return EMPTY_BOOKMARKED_SLASH_COMMANDS;
       const preferences = state.preferencesByProfileId[state.selectedProfileId];
-      return preferences?.bookmarkedSlashCommands || [];
+      return (
+        preferences?.bookmarkedSlashCommands ?? EMPTY_BOOKMARKED_SLASH_COMMANDS
+      );
     },
 
     selectPreferencesByProfileId: (state) => state.preferencesByProfileId,

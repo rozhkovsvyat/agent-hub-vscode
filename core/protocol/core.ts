@@ -48,6 +48,7 @@ import { ConfigHandler } from "../config/ConfigHandler";
 import { ProcessedItem } from "../nextEdit/NextEditPrefetchQueue";
 import { NextEditOutcome } from "../nextEdit/types";
 import { ContinueErrorReason } from "../util/errors";
+import { SessionGroupState } from "../util/sessionGroups";
 
 export enum OnboardingModes {
   API_KEY = "API Key",
@@ -60,6 +61,11 @@ export interface ListHistoryOptions {
   workspaceDirectory?: string;
 }
 
+export type HistorySaveReceipt = Pick<
+  Session,
+  "sessionId" | "title" | "revision" | "titleManuallySet"
+>;
+
 export type ToCoreFromIdeOrWebviewProtocol = {
   // Special
   ping: [string, string];
@@ -70,9 +76,13 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "history/list": [ListHistoryOptions, BaseSessionMetadata[]];
   "history/delete": [{ id: string }, void];
   "history/load": [{ id: string }, Session];
-  "history/save": [Session, void];
+  "history/save": [Session, HistorySaveReceipt];
+  "history/rename": [{ id: string; title: string }, Session | undefined];
   "history/share": [{ id: string; outputDir?: string }, void];
   "history/clear": [undefined, void];
+  // Session groups persist beside the journal, one identical set per host.
+  "cukii/sessionGroupsLoad": [undefined, SessionGroupState];
+  "cukii/sessionGroupsSave": [SessionGroupState, { ok: boolean }];
   "devdata/log": [DevDataLogEvent, void];
   "config/addOpenAiKey": [string, void];
   "config/addModel": [
@@ -221,6 +231,7 @@ export type ToCoreFromIdeOrWebviewProtocol = {
   "llm/streamChat": [
     {
       messages: ChatMessage[];
+      sessionId: string;
       completionOptions: LLMFullCompletionOptions;
       title: string;
       messageOptions?: MessageOption;
@@ -301,13 +312,25 @@ export type ToCoreFromIdeOrWebviewProtocol = {
 
   "auth/getAuthUrl": [{ useOnboarding: boolean }, { url: string }];
   "tools/call": [
-    { toolCall: ToolCall },
+    // Tool invocations can outlive the stream that created them. Carry the
+    // session explicitly; never infer it from mutable Core state.
+    { toolCall: ToolCall; sessionId: string },
     {
       contextItems: ContextItem[];
       errorMessage?: string;
       errorReason?: ContinueErrorReason;
       mcpUiState?: McpUiState;
     },
+  ];
+  "tools/runHook": [
+    {
+      event: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
+      sessionId: string;
+      toolCall: ToolCall;
+      toolInput: Record<string, unknown>;
+      extra?: Record<string, unknown>;
+    },
+    { blocked: boolean; reason?: string; updatedInput?: unknown },
   ];
   "tools/evaluatePolicy": [
     {

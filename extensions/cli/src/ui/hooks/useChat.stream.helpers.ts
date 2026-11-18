@@ -59,7 +59,7 @@ export function createStreamCallbacks(
         );
 
         if (generatedTitle) {
-          updateSessionTitle(generatedTitle);
+          await updateSessionTitle(generatedTitle);
         }
       }
     },

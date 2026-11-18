@@ -214,8 +214,17 @@ export class IdeMessenger implements IIdeMessenger {
 
     const handleAbort = () => {
       this.post("abort", undefined, messageId);
+      // Cancellation is a local terminal event too. Waiting for the Extension
+      // Host to echo `done` made `gen.return()` powerless while `next()` was
+      // pending, leaked the message listener, and let an old run outlive Stop.
+      done = true;
+      window.removeEventListener("message", handler);
     };
-    cancelToken?.addEventListener("abort", handleAbort);
+    if (cancelToken?.aborted) {
+      handleAbort();
+    } else {
+      cancelToken?.addEventListener("abort", handleAbort, { once: true });
+    }
 
     try {
       while (!done) {
@@ -243,6 +252,7 @@ export class IdeMessenger implements IIdeMessenger {
       throw e;
     } finally {
       cancelToken?.removeEventListener("abort", handleAbort);
+      window.removeEventListener("message", handler);
     }
   }
 

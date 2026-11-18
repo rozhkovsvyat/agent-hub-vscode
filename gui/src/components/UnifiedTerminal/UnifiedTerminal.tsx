@@ -10,6 +10,7 @@ import { getFontSize } from "../../util";
 import { CopyButton } from "../StyledMarkdownPreview/StepContainerPreToolbar/CopyButton";
 import { RunInTerminalButton } from "../StyledMarkdownPreview/StepContainerPreToolbar/RunInTerminalButton";
 import { ButtonContent, SpoilerButton } from "../ui/SpoilerButton";
+import { processTerminalOutput } from "./terminalOutputProcessing";
 
 const blinkCursor = keyframes`
   0%, 50% { opacity: 1; }
@@ -352,40 +353,13 @@ export function UnifiedTerminalCommand({
   const isRunning = toolCallState?.status === "calling" || status === "running";
   const hasOutput = output.length > 0;
 
-  // Process terminal content for line limiting
-  const processedTerminalContent = useMemo(() => {
-    if (!output) {
-      return {
-        fullContent: "",
-        limitedContent: "",
-        totalLines: 0,
-        isLimited: false,
-        hiddenLinesCount: 0,
-      };
-    }
-
-    const lines = output.split("\n");
-    const totalLines = lines.length;
-
-    if (totalLines > displayLines) {
-      const lastLines = lines.slice(-displayLines);
-      return {
-        fullContent: output,
-        limitedContent: lastLines.join("\n"),
-        totalLines,
-        isLimited: true,
-        hiddenLinesCount: totalLines - displayLines,
-      };
-    }
-
-    return {
-      fullContent: output,
-      limitedContent: output,
-      totalLines,
-      isLimited: false,
-      hiddenLinesCount: 0,
-    };
-  }, [output, displayLines]);
+  // Process terminal content for line limiting. Giant single lines count as
+  // wrapped virtual rows and blank runs collapse, so a megabyte-long payload
+  // or an empty stretch cannot bypass the "+N more lines" budget.
+  const processedTerminalContent = useMemo(
+    () => processTerminalOutput(output, displayLines),
+    [output, displayLines],
+  );
 
   // Determine status type
   let statusType: "running" | "completed" | "failed" | "background" = status;
@@ -425,7 +399,7 @@ export function UnifiedTerminalCommand({
       <div className="outline-command-border rounded-default bg-editor !my-2 flex min-w-0 flex-col outline outline-1">
         {/* Toolbar */}
         <div
-          className={`find-widget-skip bg-editor sticky -top-2 z-10 m-0 flex items-center justify-between gap-3 px-1.5 py-1 ${
+          className={`find-widget-skip bg-editor relative m-0 flex items-center justify-between gap-3 px-1.5 py-1 ${
             isExpanded
               ? "rounded-t-default border-command-border border-b"
               : "rounded-default"
@@ -493,8 +467,13 @@ export function UnifiedTerminalCommand({
                         />
                       ) : (
                         <div>
+                          {/* limitedContent is the shaped view (blank runs
+                              collapsed); fullContent is the verbatim vendor
+                              bytes reserved for Copy and the expanded card,
+                              so painting it here would repaint thousand-line
+                              blank bands (Fable review M1). */}
                           <AnsiRenderer linkify>
-                            {processedTerminalContent.fullContent}
+                            {processedTerminalContent.limitedContent}
                           </AnsiRenderer>
                         </div>
                       )}

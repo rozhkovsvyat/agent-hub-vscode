@@ -15,6 +15,7 @@ interface SimpleToolCallUIProps {
   tool: Tool | undefined;
   icon?: ComponentType<React.SVGProps<SVGSVGElement>>;
   historyIndex: number;
+  showLeadingIcon?: boolean;
 }
 
 export function SimpleToolCallUI({
@@ -22,6 +23,7 @@ export function SimpleToolCallUI({
   toolCallState,
   tool,
   historyIndex,
+  showLeadingIcon = true,
 }: SimpleToolCallUIProps) {
   const ideMessenger = useContext(IdeMessengerContext);
   const shownContextItems = useMemo(() => {
@@ -45,21 +47,23 @@ export function SimpleToolCallUI({
   }
 
   return (
-    <div className="mt-1 flex flex-col px-4">
+    <div className="flex flex-col px-0 py-0.5">
       <div className="flex min-w-0 flex-row items-center justify-between gap-2">
         <div
-          className={`text-description flex min-w-0 flex-row items-center justify-between gap-1.5 text-xs transition-colors duration-200 ease-in-out ${
+          className={`text-description-muted flex min-w-0 flex-row items-center justify-between gap-1.5 text-xs transition-colors duration-200 ease-in-out ${
             isClickable ? "cursor-pointer hover:brightness-125" : ""
           }`}
           onClick={isClickable ? handleClick : undefined}
           data-testid="context-items-peek"
         >
-          <ToggleWithIcon
-            icon={Icon}
-            isToggleable={isToggleable}
-            open={shouldShowContent}
-            isClickable={isSingleItem}
-          />
+          {(showLeadingIcon || isToggleable) && (
+            <ToggleWithIcon
+              icon={showLeadingIcon ? Icon : undefined}
+              isToggleable={isToggleable}
+              open={shouldShowContent}
+              isClickable={isSingleItem}
+            />
+          )}
           <ToolCallStatusMessage tool={tool} toolCallState={toolCallState} />
         </div>
 
@@ -79,7 +83,7 @@ export function SimpleToolCallUI({
               <ContextItemsPeekItem key={idx} contextItem={contextItem} />
             ))
           ) : (
-            <div className="text-description pl-5 text-xs italic">
+            <div className="text-description-muted pl-5 text-xs italic">
               No tool call output
             </div>
           )}

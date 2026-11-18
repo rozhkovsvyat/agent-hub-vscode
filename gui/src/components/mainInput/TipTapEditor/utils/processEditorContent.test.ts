@@ -276,6 +276,78 @@ describe("processEditorContent", () => {
     ]);
   });
 
+  test("keeps original, 1024px transport preview, and Grok argv alternate in broker history", () => {
+    const editorState: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "data:image/jpeg;base64,standard-1024",
+            originalSrc: "data:image/png;base64,original-full-size",
+            inlineArgvSrc: "data:image/jpeg;base64,grok-384",
+          },
+        },
+      ],
+    };
+
+    expect(processEditorContent(editorState).parts[0]).toEqual({
+      type: "imageUrl",
+      imageUrl: { url: "data:image/jpeg;base64,standard-1024" },
+    });
+    expect(processEditorContent(editorState, true).parts[0]).toEqual({
+      type: "imageUrl",
+      imageUrl: {
+        url: "data:image/png;base64,original-full-size",
+        transportPreviewUrl: "data:image/jpeg;base64,standard-1024",
+        inlineArgvUrl: "data:image/jpeg;base64,grok-384",
+      },
+    });
+  });
+
+  test("preserves a missing fresh Grok alternate instead of restoring the larger src", () => {
+    const editorState: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: { src: "data:image/jpeg;base64,legacy" },
+        },
+      ],
+    };
+
+    expect(processEditorContent(editorState, true).parts[0]).toEqual({
+      type: "imageUrl",
+      imageUrl: {
+        url: "data:image/jpeg;base64,legacy",
+      },
+    });
+  });
+
+  test("reuses legacy displaySrc when a 2.0.114 editor node is converted again", () => {
+    const editorState: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "data:image/jpeg;base64,legacy-384",
+            displaySrc: "data:image/png;base64,legacy-display-copy",
+          },
+        },
+      ],
+    };
+
+    expect(processEditorContent(editorState, true).parts[0]).toEqual({
+      type: "imageUrl",
+      imageUrl: {
+        url: "data:image/png;base64,legacy-display-copy",
+        transportPreviewUrl: "data:image/jpeg;base64,legacy-384",
+        inlineArgvUrl: "data:image/jpeg;base64,legacy-384",
+      },
+    });
+  });
+
   test("processEditorContent should handle complex content with multiple elements", () => {
     const codeItem = createContextItem(
       "const x = 42;",

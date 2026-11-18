@@ -1,0 +1,119 @@
+name: cukii-ci
+
+on:
+  push:
+    branches:
+      - cukii/trunk
+      - "cukii/**"
+  pull_request:
+  workflow_call:
+    secrets:
+      # cukii-release.yml calls this workflow, and the caller may only pass a
+      # secret that the called workflow declares. Without this declaration the
+      # whole release run dies as startup_failure before any job is created.
+      VENDOR_BRIDGE_DEPLOY_KEY:
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      # extensions/vscode resolves @cukii/vendor-bridge from the private
+      # rozhkovsvyat/vendor-bridge repo over git+ssh (see package-lock.json).
+      # GITHUB_TOKEN cannot read another private repo, so authorize the
+      # read-only deploy key before any install step runs.
+      - name: Authorize vendor-bridge deploy key
+        shell: bash
+        env:
+          VENDOR_BRIDGE_DEPLOY_KEY: ${{ secrets.VENDOR_BRIDGE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VENDOR_BRIDGE_DEPLOY_KEY" ]; then
+            echo "::error::VENDOR_BRIDGE_DEPLOY_KEY is not available to this job"
+            exit 1
+          fi
+          # RUNNER_TEMP carries Windows backslashes; ssh and git want forward slashes.
+          keydir="${RUNNER_TEMP//\\//}/vendor-bridge-ci-key"
+          mkdir -p "$keydir"
+          printf '%s\n' "$VENDOR_BRIDGE_DEPLOY_KEY" > "$keydir/id_ed25519"
+          chmod 600 "$keydir/id_ed25519"
+          ssh-keyscan -t ed25519,rsa github.com > "$keydir/known_hosts"
+          if [ ! -s "$keydir/known_hosts" ]; then
+            echo "::error::ssh-keyscan returned no github.com host keys"
+            exit 1
+          fi
+          git config --global core.sshCommand "ssh -i $keydir/id_ed25519 -o UserKnownHostsFile=$keydir/known_hosts -o IdentitiesOnly=yes"
+          printf 'GIT_SSH_COMMAND=ssh -i %s/id_ed25519 -o UserKnownHostsFile=%s/known_hosts -o IdentitiesOnly=yes\n' "$keydir" "$keydir" >> "$GITHUB_ENV"
+          # Prove read access to the library now, so a key problem cannot
+          # surface later as an opaque npm install failure.
+          git ls-remote git@github.com:rozhkovsvyat/vendor-bridge.git HEAD > /dev/null
+          echo "vendor-bridge deploy key authorized (read-only)"
+
+      # Fail-fast guard from the vacation repo pipeline: an unfinished merge
+      # must not reach build/test; fail before any install work happens.
+      - name: Conflict marker guard
+        run: |
+          if grep -rInE '^(<<<<<<<|>>>>>>>)' --exclude-dir=.git --exclude-dir=node_modules .; then
+            echo "git conflict markers found; resolve the merge before pushing"
+            exit 1
+          fi
+
+      - name: Build shared packages
+        run: node ./scripts/build-packages.js
+
+      - name: Install core
+        working-directory: core
+        run: npm ci
+
+      - name: Install gui
+        working-directory: gui
+        run: npm ci
+
+      - name: Install extension
+        working-directory: extensions/vscode
+        run: npm ci
+        env:
+          # vscode-ripgrep downloads a binary from GitHub releases
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write build timestamp
+        working-directory: extensions/vscode
+        run: npm run write-build-timestamp
+
+      - name: Typecheck core
+        working-directory: core
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Typecheck gui
+        working-directory: gui
+        run: npm run tsc:check
+
+      - name: Typecheck extension
+        working-directory: extensions/vscode
+        run: npm run tsc:check
+
+      - name: Extension tests
+        working-directory: extensions/vscode
+        run: npm test
+
+      - name: GUI tests
+        working-directory: gui
+        run: npm test
+        env:
+          # Several chat tests assert clock strings rendered in the developer
+          # timezone; pin TZ so CI (UTC) matches local runs (UTC+3).
+          TZ: Europe/Moscow
+
+      - name: Packaging build graph
+        working-directory: extensions/vscode
+        run: npm run test:build-graph

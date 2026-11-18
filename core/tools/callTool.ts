@@ -20,6 +20,7 @@ import { readSkillImpl } from "./implementations/readSkill";
 import { requestRuleImpl } from "./implementations/requestRule";
 import { runTerminalCommandImpl } from "./implementations/runTerminalCommand";
 import { searchWebImpl } from "./implementations/searchWeb";
+import { todoWriteImpl } from "./implementations/todoWrite";
 import { viewDiffImpl } from "./implementations/viewDiff";
 import { viewRepoMapImpl } from "./implementations/viewRepoMap";
 import { viewSubdirectoryImpl } from "./implementations/viewSubdirectory";
@@ -220,6 +221,8 @@ export async function callBuiltInTool(
       return await codebaseToolImpl(args, extras);
     case BuiltInToolNames.ReadSkill:
       return await readSkillImpl(args, extras);
+    case BuiltInToolNames.TodoWrite:
+      return await todoWriteImpl(args, extras);
     case BuiltInToolNames.ViewRepoMap:
       return await viewRepoMapImpl(args, extras);
     case BuiltInToolNames.ViewSubdirectory:

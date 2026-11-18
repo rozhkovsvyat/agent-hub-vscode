@@ -2,14 +2,14 @@ import { IDE } from "..";
 import { joinPathsToUri } from "../util/uri";
 
 const DEFAULT_ASSISTANT_FILE = `# This is an example configuration file
-# To learn more, see the full config.yaml reference: https://docs.continue.dev/reference
+# To learn more, see the project repository: https://github.com/rozhkovsvyat/agent-hub-vscode
 
 name: Example Config
 version: 1.0.0
 schema: v1
 
 # Define which models can be used
-# https://docs.continue.dev/customization/models
+# https://github.com/rozhkovsvyat/agent-hub-vscode
 models:
   - name: my gpt-5
     provider: openai

@@ -52,7 +52,10 @@ function resolveParagraph(p: JSONContent): [string, GetContextRequest[]] {
   return [text, contextRequests];
 }
 
-export function processEditorContent(editorState: JSONContent) {
+export function processEditorContent(
+  editorState: JSONContent,
+  brokerMode = false,
+) {
   const contextRequests: GetContextRequest[] = [];
   const selectedCode: RangeInFile[] = [];
   let slashCommandName: string | undefined;
@@ -105,9 +108,34 @@ export function processEditorContent(editorState: JSONContent) {
         }
         break;
       case Image.name:
+        // `displaySrc` can recover a 2.0.114 editor node when it is converted
+        // again. It cannot reconstruct an already-serialized old ChatMessage,
+        // whose only image URL was the 384px transport copy.
+        const originalUrl =
+          p.attrs?.originalSrc ?? p.attrs?.displaySrc ?? p.attrs?.src;
+        // A missing fresh alternate means the encoder could not satisfy
+        // Grok's argv ceiling. Preserve that absence so the final transport
+        // boundary can reject the request instead of silently falling back to
+        // the larger 1024px copy. Only 2.0.114 nodes have `displaySrc`; their
+        // `src` is the already-bounded legacy transport image.
+        const inlineArgvUrl =
+          p.attrs?.inlineArgvSrc ??
+          (p.attrs?.displaySrc ? p.attrs?.src : undefined);
         parts.push({
           type: "imageUrl",
-          imageUrl: { url: p.attrs?.src },
+          imageUrl: brokerMode
+            ? {
+                url: originalUrl,
+                // The editor already owns a 1024px JPEG display copy. Native
+                // CLIs such as Qwen retain every expanded image in all later
+                // model requests; carrying full camera originals there made
+                // multi-photo turns fail repeatedly.
+                ...(p.attrs?.src && p.attrs.src !== originalUrl
+                  ? { transportPreviewUrl: p.attrs.src }
+                  : {}),
+                ...(inlineArgvUrl ? { inlineArgvUrl } : {}),
+              }
+            : { url: p.attrs?.src },
         });
         break;
       default: {

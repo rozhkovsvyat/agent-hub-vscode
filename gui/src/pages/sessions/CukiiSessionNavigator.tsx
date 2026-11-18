@@ -1,0 +1,1510 @@
+import {
+  BoltIcon,
+  CheckIcon,
+  ChevronDownIcon as ChevronDownIcon16,
+  FunnelIcon,
+} from "@heroicons/react/16/solid";
+import {
+  ChevronDownIcon,
+  MagnifyingGlassIcon,
+  PencilIcon,
+  PlusIcon,
+  TrashIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
+import type { BaseSessionMetadata } from "core";
+import type {
+  CukiiActiveChatContext,
+  CukiiOpenChatPanel,
+} from "core/protocol/ideWebview";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import styled from "styled-components";
+import { IdeMessengerContext } from "../../context/IdeMessenger";
+import { useWebviewListener } from "../../hooks/useWebviewListener";
+import {
+  groupSessions,
+  parseSessionGroups,
+  type SessionGroupState,
+} from "./sessionGroups";
+import {
+  mergeSessionsWithOpenPanels,
+  type CukiiNavigatorSession,
+} from "./cukiiSessionMerge";
+import {
+  countSelectedSessionFilters,
+  countSessionFilters,
+  defaultSessionFilters,
+  isSessionFilterExempt,
+  matchesSessionFilters,
+  SESSION_STATUS_LABELS,
+  SESSION_STATUS_SECTION,
+  SESSION_STATUSES,
+  SESSION_TAB_STATE_LABELS,
+  SESSION_TAB_STATES,
+  SESSION_TABS_SECTION,
+  toggleStatusFilter,
+  toggleTabStateFilter,
+  type SessionFilters,
+} from "./cukiiSessionFilters";
+import { CukiiVendorUsageSection } from "./CukiiVendorUsage";
+
+const STORAGE_KEY = "cukii.session-groups.v1";
+// Survives remounts: once this window has touched the journal-side copy,
+// an empty snapshot is a real state (all groups deleted elsewhere), not a
+// trigger to migrate this window's cache over the shared file.
+const EVER_SYNCED_KEY = "cukii.session-groups-synced.v1";
+const Shell = styled.div`
+  min-height: 100%;
+  color: var(--vscode-foreground);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+`;
+const Action = styled.button`
+  display: flex;
+  width: 100%;
+  height: 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  &:hover {
+    background: var(--vscode-list-hoverBackground);
+  }
+`;
+const Tools = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 8px;
+`;
+/* 1:1 with Claude's `.searchRow_OOQiHg`: one wrapping flex row so the filter
+   chips drop below the input instead of squeezing it in a narrow sidebar. */
+const SearchRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 2px;
+  margin: 10px 12px 8px;
+`;
+/* `.searchBox_OOQiHg` */
+const SearchWrap = styled.label`
+  position: relative;
+  display: flex;
+  flex: auto;
+  min-width: min(150px, 100%);
+`;
+/* `.searchRowActions_OOQiHg` */
+const SearchRowActions = styled.div`
+  display: flex;
+  min-width: 0;
+  flex: 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+`;
+const SearchIcon = styled(MagnifyingGlassIcon)`
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  color: var(--vscode-input-placeholderForeground);
+  pointer-events: none;
+`;
+/* `.searchClearButton_OOQiHg`: 20×20, on the right inside the box. Measured on
+   the live sidebar, it does not merely clear — it clears AND collapses, and it
+   is the only way back to the magnifier without the keyboard. */
+const SearchClear = styled.button`
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  transform: translateY(-50%);
+  background: transparent;
+  color: var(--vscode-input-placeholderForeground);
+  cursor: pointer;
+  &:hover,
+  &:focus {
+    outline: none;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+  }
+`;
+/* `.filterInput_90gk3A .searchInput_OOQiHg`, measured on the live sidebar:
+   28.8px tall, 8px 28px 8px 32px of padding, 11.7px text — the same type size
+   the buttons in the row below already use. Ours stood at 30px and 13px, which
+   read as a heavier field than the reference. The base class is shared with the
+   group-name field there, so both keep one size here too. */
+const Search = styled.input`
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28.8px;
+  padding: 8px 28px 8px 32px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  font-size: 11.7px;
+  &::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+  }
+  &:focus {
+    border-color: var(--vscode-focusBorder);
+  }
+`;
+/* The group name field borrows the search field's shape but neither the leading
+   magnifier nor the trailing clear button, so it takes its side padding back. */
+const GroupInput = styled(Search)`
+  padding-left: 9px;
+  padding-right: 9px;
+`;
+const SmallButton = styled.button`
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  font: inherit;
+  &:hover {
+    background: var(--vscode-list-hoverBackground);
+  }
+`;
+/* 1:1 with Claude's `.newGroupButton_OOQiHg`, the shared geometry of every
+   control in the search row (Active chip, status funnel, New group). */
+const ToolButton = styled.button`
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9em;
+  &:hover,
+  &:focus {
+    outline: none;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+  }
+`;
+/* `.filterToggleOn_OOQiHg` */
+const ToolButtonOn = styled(ToolButton)`
+  &,
+  &:hover,
+  &:focus {
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+  }
+  &:focus-visible {
+    outline: 1px solid var(--vscode-list-activeSelectionForeground);
+    outline-offset: -1px;
+  }
+`;
+/* `.activeFilterToggle_OOQiHg`: the count must not jitter as it changes. */
+const activeChipStyle = { fontVariantNumeric: "tabular-nums" } as const;
+/* `.statusFilterMenuButton_OOQiHg` */
+const funnelButtonStyle = { gap: 2, paddingRight: 6 } as const;
+/* `.newGroupIcon_OOQiHg` */
+const toolIconStyle = { width: 16, height: 16, flexShrink: 0 } as const;
+/* `.statusFilterCaret_OOQiHg` */
+const caretIconStyle = { width: 14, height: 14, flexShrink: 0 } as const;
+const GroupHeader = styled.button`
+  display: grid;
+  width: calc(100% - 16px);
+  height: 30px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 8px 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  &:hover {
+    background: var(--vscode-list-hoverBackground);
+  }
+`;
+const Count = styled.span`
+  display: inline-flex;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 11px;
+  font-weight: 500;
+`;
+const Row = styled.div`
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  align-items: center;
+  margin: 1px 8px;
+  border-radius: 5px;
+  &:hover,
+  &:focus-within {
+    background: var(--vscode-list-hoverBackground);
+  }
+`;
+const SessionButton = styled.button`
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 29px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+`;
+const SessionTitle = styled.span`
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+const RenameInput = styled.input`
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid #e3a867;
+  border-radius: 4px;
+  outline: none;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+`;
+const Age = styled.span`
+  min-width: max-content;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  white-space: nowrap;
+`;
+const RowActions = styled.div`
+  display: flex;
+  width: 56px;
+  min-width: 56px;
+  height: 29px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1px;
+  padding-right: 4px;
+`;
+const RowAction = styled.button`
+  display: inline-flex;
+  flex: 0 0 25px;
+  min-width: 25px;
+  width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  &:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+  }
+`;
+/* 1:1 with Claude's `.contextMenu__ozcbg`, down to the token each of its own
+   `--app-*` aliases resolves to. One shell for all three menus here, as in the
+   reference client: the status filter menu must not be dressed differently
+   from the session and group menus it opens beside. */
+const CONTEXT_MENU_MAX_WIDTH = 260;
+const ContextMenu = styled.div`
+  position: fixed;
+  z-index: 10000;
+  min-width: 140px;
+  width: max-content;
+  max-width: min(${CONTEXT_MENU_MAX_WIDTH}px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 0;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 6px;
+  background: var(--vscode-menu-background);
+  color: var(--vscode-menu-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+`;
+/* `.menuItem__ozcbg`: one line, clipped rather than wrapped, and selection
+   wears the menu tokens — never the list ones. */
+const MenuItem = styled.button`
+  display: block;
+  width: 100%;
+  max-width: ${CONTEXT_MENU_MAX_WIDTH}px;
+  overflow: hidden;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-menu-foreground);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  &:hover,
+  &:focus-visible {
+    background: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground);
+  }
+`;
+/* `.separator__ozcbg` */
+const MenuSeparator = styled.div`
+  height: 1px;
+  margin: 2px 0;
+  background: var(--vscode-menu-separatorBackground, var(--vscode-menu-border));
+`;
+/* 1:1 with Claude's `.sectionHeader_G_S7FQ` used by its context menu. */
+const MenuSectionHeader = styled.div`
+  padding: 4px 12px;
+  color: var(--vscode-foreground);
+  opacity: 0.5;
+  font-size: 0.9em;
+`;
+/* `.menuItemCheck__ozcbg`: a fixed gutter so ticked and unticked rows align. */
+const MenuCheck = styled.span`
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: -3px;
+`;
+
+export function formatSessionAge(date: string) {
+  const timestamp = new Date(date).getTime();
+  if (!Number.isFinite(timestamp)) return "";
+  const hours = Math.max(0, (Date.now() - timestamp) / 36e5);
+  if (hours < 1) return `${Math.max(1, Math.floor(hours * 60))}m`;
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+export type { CukiiNavigatorSession } from "./cukiiSessionMerge";
+export { mergeSessionsWithOpenPanels } from "./cukiiSessionMerge";
+
+type ContextPosition = {
+  x: number;
+  y: number;
+};
+
+type ContextState =
+  | ({ kind: "session"; session: CukiiNavigatorSession } & ContextPosition)
+  | ({ kind: "group"; groupId: string; groupName: string } & ContextPosition)
+  | ({ kind: "statusFilter" } & ContextPosition)
+  | null;
+
+export default function CukiiSessionNavigator() {
+  const messenger = useContext(IdeMessengerContext);
+  const [sessions, setSessions] = useState<BaseSessionMetadata[]>([]);
+  const [openPanels, setOpenPanels] = useState<CukiiOpenChatPanel[]>([]);
+  const [activeChat, setActiveChat] = useState<CukiiActiveChatContext | null>(
+    null,
+  );
+  const [query, setQuery] = useState("");
+  /* The search field is collapsed behind a magnifier, exactly as in Claude's
+     sidebar: closed there is no field at all, only a 24×24 button next to
+     "New group"; opening it puts the field on its own line above the filter
+     chips and takes the button away. Closing always clears the query too — an
+     invisible field must never leave the list silently filtered. */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setQuery("");
+  }, []);
+  const [filters, setFilters] = useState<SessionFilters>(defaultSessionFilters);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [assignNewGroupTo, setAssignNewGroupTo] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [context, setContext] = useState<ContextState>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupRenameDraft, setGroupRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const contextRef = useRef<HTMLDivElement | null>(null);
+  const funnelRef = useRef<HTMLButtonElement | null>(null);
+  const renameSavingRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const renameSequenceRef = useRef(0);
+  const latestRenameRef = useRef(new Map<string, number>());
+  const titleVersionsRef = useRef(
+    new Map<string, { title: string; revision: number }>(),
+  );
+  const deletingSessionIdsRef = useRef(new Set<string>());
+  const groupsSyncedWithCoreRef = useRef(false);
+  const groupsLoadSequenceRef = useRef(0);
+  // Serialized writer for the shared copy: at most one save in flight, the
+  // newest payload wins the re-save, and lastAckedJson tells the poll
+  // whether the UI still holds an edit that has not landed yet.
+  const groupsSaveRef = useRef<{
+    inFlight: boolean;
+    pending: SessionGroupState | null;
+    lastAckedJson: string | null;
+  }>({ inFlight: false, pending: null, lastAckedJson: null });
+  const groupsJsonRef = useRef<string>(
+    JSON.stringify(parseSessionGroups(localStorage.getItem(STORAGE_KEY))),
+  );
+  const [groups, setGroups] = useState<SessionGroupState>(() =>
+    parseSessionGroups(localStorage.getItem(STORAGE_KEY)),
+  );
+
+  const load = useCallback(async () => {
+    const sequence = ++loadSequenceRef.current;
+    const [historyResult, panelResult, activeResult] = await Promise.all([
+      // 🔴 The explicit limit is the navigator's horizon. `history/list`
+      // defaults to the 100 newest sessions, so without it the 101st chat
+      // simply stops being listed — it is not deleted, not archived, just
+      // invisible, with nothing on screen to say so. The query itself reads
+      // metadata only (no session bodies), so asking for all of them is cheap.
+      messenger.request("history/list", { limit: 1_000_000 }),
+      messenger.request("cukii/listOpenChatPanels", undefined),
+      messenger.request("cukii/getActiveChatContext", undefined),
+    ]);
+    if (sequence !== loadSequenceRef.current) return;
+    if (historyResult.status === "success") {
+      setSessions(
+        historyResult.content
+          .filter(
+            (session) => !deletingSessionIdsRef.current.has(session.sessionId),
+          )
+          .map((session) => {
+            const known = titleVersionsRef.current.get(session.sessionId);
+            const revision = Number(session.revision ?? 0);
+            if (known && known.revision > revision) {
+              return { ...session, title: known.title };
+            }
+            if (!known || revision >= known.revision) {
+              titleVersionsRef.current.set(session.sessionId, {
+                title: session.title,
+                revision,
+              });
+            }
+            return session;
+          }),
+      );
+    }
+    if (panelResult.status === "success") {
+      setOpenPanels(
+        panelResult.content
+          .filter(
+            (panel) =>
+              !deletingSessionIdsRef.current.has(panel.sessionId ?? ""),
+          )
+          .map((panel) => {
+            const known = panel.sessionId
+              ? titleVersionsRef.current.get(panel.sessionId)
+              : undefined;
+            return known ? { ...panel, title: known.title } : panel;
+          }),
+      );
+    }
+    if (activeResult.status === "success") {
+      setActiveChat(activeResult.content);
+    }
+  }, [messenger]);
+
+  const saveGroups = useCallback(
+    async (state: SessionGroupState) => {
+      const saveState = groupsSaveRef.current;
+      const json = JSON.stringify(state);
+      if (json === saveState.lastAckedJson) return;
+      if (saveState.inFlight) {
+        // Rapid edits: only the newest payload matters; the running save
+        // re-saves it instead of racing a second request to the journal.
+        saveState.pending = state;
+        return;
+      }
+      saveState.inFlight = true;
+      let payload = state;
+      for (;;) {
+        try {
+          await messenger.request("cukii/sessionGroupsSave", payload);
+        } catch {
+          // Transport failure keeps the localStorage cache as the fallback.
+          // lastAckedJson stays stale, so the poll keeps protecting the edit
+          // it failed to persist instead of clobbering it with remote state.
+          saveState.pending = null;
+          saveState.inFlight = false;
+          return;
+        }
+        saveState.lastAckedJson = JSON.stringify(payload);
+        if (!saveState.pending) break;
+        payload = saveState.pending;
+        saveState.pending = null;
+      }
+      saveState.inFlight = false;
+    },
+    [messenger],
+  );
+
+  const loadGroups = useCallback(async () => {
+    const sequence = ++groupsLoadSequenceRef.current;
+    let result;
+    try {
+      result = await messenger.request("cukii/sessionGroupsLoad", undefined);
+    } catch {
+      // Core unreachable (a Remote-SSH host can boot slower than this view
+      // mounts): keep the per-window cache and retry on the next poll
+      // instead of staying on an empty grouping forever.
+      return;
+    }
+    if (sequence !== groupsLoadSequenceRef.current) return;
+    if (result.status !== "success") return;
+    const remote = result.content;
+    if (
+      !remote ||
+      !Array.isArray(remote.groups) ||
+      !remote.assignments ||
+      typeof remote.assignments !== "object"
+    ) {
+      return;
+    }
+    // Synced only after a real, well-formed core answer: marking an error
+    // response as synced would let this window's cache overwrite the
+    // shared copy on the very next edit.
+    groupsSyncedWithCoreRef.current = true;
+    const everSynced = localStorage.getItem(EVER_SYNCED_KEY) === "1";
+    localStorage.setItem(EVER_SYNCED_KEY, "1");
+    const remoteEmpty =
+      remote.groups.length === 0 &&
+      Object.keys(remote.assignments).length === 0;
+    if (remoteEmpty && !everSynced) {
+      // One-shot migration: per-window localStorage was the old home. An
+      // empty answer after this point is a legitimate state (another
+      // window deleted everything) and goes through the normal apply path.
+      const local = parseSessionGroups(localStorage.getItem(STORAGE_KEY));
+      if (
+        local.groups.length > 0 ||
+        Object.keys(local.assignments).length > 0
+      ) {
+        setGroups(local);
+      }
+      return;
+    }
+    const remoteJson = JSON.stringify(remote);
+    const saveState = groupsSaveRef.current;
+    if (
+      remoteJson === saveState.lastAckedJson &&
+      remoteJson === groupsJsonRef.current
+    ) {
+      // Pure echo: the shared copy equals what this window already shows.
+      return;
+    }
+    if (
+      saveState.lastAckedJson !== null &&
+      groupsJsonRef.current !== saveState.lastAckedJson
+    ) {
+      // This window holds an edit whose save is in flight, queued, or
+      // failed; applying any snapshot now could roll it back.
+      return;
+    }
+    saveState.lastAckedJson = remoteJson;
+    setGroups((current) =>
+      JSON.stringify(current) === remoteJson ? current : remote,
+    );
+  }, [messenger]);
+
+  useEffect(() => {
+    void load();
+    void loadGroups();
+    const timer = window.setInterval(() => {
+      void load();
+      // Separate windows (local and Remote-SSH) share one journal-side
+      // copy but have no direct notification channel; polling converges
+      // edits made in any other window within one cycle.
+      void loadGroups();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [load, loadGroups]);
+
+  useWebviewListener(
+    "cukii/openChatPanelsChanged",
+    async (panels) => {
+      setOpenPanels(panels);
+      // A panel becomes visible at the same time as its first history/save.
+      // Refresh metadata now rather than leaving the new semantic row hidden
+      // until the five-second poll fires.
+      await load();
+    },
+    [load],
+  );
+  useWebviewListener(
+    "cukii/activeChatContextChanged",
+    async (active) => setActiveChat(active),
+    [],
+  );
+  useWebviewListener(
+    "cukii/sessionTitleChanged",
+    async ({ sessionId, title, revision }) => {
+      const effectiveTitle = title.trim();
+      if (!effectiveTitle) return;
+      const known = titleVersionsRef.current.get(sessionId);
+      const effectiveRevision = Number(revision ?? (known?.revision ?? 0) + 1);
+      if (known && effectiveRevision < known.revision) return;
+      titleVersionsRef.current.set(sessionId, {
+        title: effectiveTitle,
+        revision: effectiveRevision,
+      });
+      setSessions((items) =>
+        items.map((item) =>
+          item.sessionId === sessionId
+            ? { ...item, title: effectiveTitle }
+            : item,
+        ),
+      );
+      setOpenPanels((panels) =>
+        panels.map((panel) =>
+          panel.sessionId === sessionId
+            ? { ...panel, title: effectiveTitle }
+            : panel,
+        ),
+      );
+    },
+    [],
+  );
+  useEffect(() => {
+    // First-paint cache and offline fallback; the authoritative copy lives
+    // beside the journal so every surface on this host (local window,
+    // Remote-SSH window) shares one identical grouping.
+    const json = JSON.stringify(groups);
+    groupsJsonRef.current = json;
+    localStorage.setItem(STORAGE_KEY, json);
+    if (!groupsSyncedWithCoreRef.current) return;
+    void saveGroups(groups);
+  }, [groups, messenger, saveGroups]);
+  useEffect(() => {
+    if (!context) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node;
+      // The funnel button is its own toggle: letting the outside-click guard
+      // close the menu first would make the button re-open it on click.
+      if (funnelRef.current?.contains(target)) return;
+      if (!contextRef.current?.contains(target)) setContext(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setContext(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [context]);
+
+  const combinedSessions = useMemo(
+    () => mergeSessionsWithOpenPanels(sessions, openPanels),
+    [openPanels, sessions],
+  );
+  // Counts are taken over the whole list, before search and before the
+  // filters themselves, exactly as Claude does (`HG0(l5.map(a1))`).
+  const filterCounts = useMemo(
+    () =>
+      countSessionFilters(
+        combinedSessions.map((session) => ({
+          attention: session.attention,
+          isOpen: session.openPanelId !== undefined,
+        })),
+      ),
+    [combinedSessions],
+  );
+  const selectedFilterCount = countSelectedSessionFilters(filters);
+  const searched = useMemo(
+    () =>
+      combinedSessions.filter((session) =>
+        session.title.toLowerCase().includes(query.trim().toLowerCase()),
+      ),
+    [combinedSessions, query],
+  );
+  const visible = useMemo(
+    () =>
+      searched.filter(
+        (session) =>
+          isSessionFilterExempt(session.sessionId, editingSessionId) ||
+          matchesSessionFilters(filters, {
+            attention: session.attention,
+            isOpen: session.openPanelId !== undefined,
+          }),
+      ),
+    [searched, filters, editingSessionId],
+  );
+  const buckets = useMemo(
+    () => groupSessions(visible, groups),
+    [visible, groups],
+  );
+  const toggleActiveOnly = () =>
+    setFilters((state) => ({ ...state, activeOnly: !state.activeOnly }));
+  const openStatusFilterMenu = () => {
+    if (context?.kind === "statusFilter") {
+      setContext(null);
+      return;
+    }
+    const anchor = funnelRef.current?.getBoundingClientRect();
+    setContext({
+      kind: "statusFilter",
+      x: anchor?.left ?? 0,
+      y: (anchor?.bottom ?? 0) + 2,
+    });
+  };
+
+  const assignSession = (sessionId: string, groupId: string) => {
+    setGroups((state) => ({
+      ...state,
+      assignments: { ...state.assignments, [sessionId]: groupId },
+    }));
+    setContext(null);
+  };
+  const createGroup = () => {
+    const name = groupName.trim();
+    if (!name) return;
+    const id = crypto.randomUUID();
+    setGroups((state) => ({
+      groups: [...state.groups, { id, name }],
+      assignments: assignNewGroupTo
+        ? { ...state.assignments, [assignNewGroupTo]: id }
+        : state.assignments,
+    }));
+    setGroupName("");
+    setAssignNewGroupTo(null);
+    setAddingGroup(false);
+    setContext(null);
+    // Claude's create-group path ends in `O1(""),n5(!1),P0(Ih)`: search and
+    // filters are cleared so the group you just made is on screen rather than
+    // hidden behind whatever narrowed the list a moment ago. The field collapses
+    // with the query — leaving it open and empty would be a field the user did
+    // not open, sitting where the magnifier belongs.
+    closeSearch();
+    setFilters(defaultSessionFilters());
+  };
+  const openSession = (session: CukiiNavigatorSession) =>
+    messenger.request("cukii/openChatPanel", {
+      panelId: session.openPanelId,
+      sessionId: session.sessionId,
+      title: session.title,
+    });
+  const beginRename = (session: CukiiNavigatorSession) => {
+    setRenameError(null);
+    setRenameDraft(session.title);
+    setEditingSessionId(session.sessionId);
+  };
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameDraft("");
+  };
+  const beginGroupRename = (group: { id: string; name: string }) => {
+    setGroupRenameDraft(group.name);
+    setEditingGroupId(group.id);
+  };
+  const cancelGroupRename = () => {
+    setEditingGroupId(null);
+    setGroupRenameDraft("");
+  };
+  const renameGroup = (group: { id: string; name: string }) => {
+    const name = groupRenameDraft.trim();
+    if (!name || name === group.name) {
+      cancelGroupRename();
+      return;
+    }
+    setGroups((state) => ({
+      ...state,
+      groups: state.groups.map((item) =>
+        item.id === group.id ? { ...item, name } : item,
+      ),
+    }));
+    cancelGroupRename();
+  };
+  const deleteGroup = (groupId: string) => {
+    setGroups((state) => {
+      const assignments = { ...state.assignments };
+      for (const [sessionId, assignedGroupId] of Object.entries(assignments)) {
+        if (assignedGroupId === groupId) delete assignments[sessionId];
+      }
+      return {
+        groups: state.groups.filter((group) => group.id !== groupId),
+        assignments,
+      };
+    });
+    setCollapsed((state) => {
+      const next = { ...state };
+      delete next[groupId];
+      return next;
+    });
+    if (editingGroupId === groupId) cancelGroupRename();
+    setContext(null);
+  };
+  const renameSession = async (session: CukiiNavigatorSession) => {
+    if (renameSavingRef.current) return;
+    const title = renameDraft.trim();
+    if (!title || title === session.title) {
+      cancelRename();
+      return;
+    }
+    renameSavingRef.current = true;
+    const sequence = ++renameSequenceRef.current;
+    latestRenameRef.current.set(session.sessionId, sequence);
+    try {
+      const result = await messenger.request("cukii/renameSession", {
+        sessionId: session.sessionId,
+        title,
+      });
+      if (result.status !== "success" || !result.content.ok) {
+        if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
+        setRenameError("Could not rename session. Try again.");
+        cancelRename();
+        return;
+      }
+      if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
+      const effectiveTitle = result.content.title?.trim() || title;
+      const known = titleVersionsRef.current.get(session.sessionId);
+      const revision = Number(
+        result.content.revision ?? (known?.revision ?? 0) + 1,
+      );
+      titleVersionsRef.current.set(session.sessionId, {
+        title: effectiveTitle,
+        revision,
+      });
+      // Update both sources immediately. The extension also broadcasts the same
+      // title to an already-open chat panel, so neither side needs a reload.
+      setSessions((items) =>
+        items.map((item) =>
+          item.sessionId === session.sessionId
+            ? { ...item, title: effectiveTitle }
+            : item,
+        ),
+      );
+      setOpenPanels((panels) =>
+        panels.map((panel) =>
+          panel.sessionId === session.sessionId
+            ? { ...panel, title: effectiveTitle }
+            : panel,
+        ),
+      );
+      cancelRename();
+    } catch {
+      if (latestRenameRef.current.get(session.sessionId) !== sequence) return;
+      setRenameError("Could not rename session. Try again.");
+      cancelRename();
+    } finally {
+      if (latestRenameRef.current.get(session.sessionId) === sequence) {
+        renameSavingRef.current = false;
+      }
+    }
+  };
+  const deleteSession = async (session: CukiiNavigatorSession) => {
+    const sessionId = session.sessionId;
+    if (deletingSessionIdsRef.current.has(sessionId)) return;
+
+    // Capture the exact local placement before hiding the row. A failed disk
+    // delete must restore this row rather than waiting for a later history poll.
+    const snapshot = {
+      sessions,
+      openPanels,
+      groupId: groups.assignments[sessionId],
+    };
+    deletingSessionIdsRef.current.add(sessionId);
+    setDeleteError(null);
+    setContext(null);
+    if (editingSessionId === sessionId) cancelRename();
+    setSessions((items) =>
+      items.filter((item) => item.sessionId !== sessionId),
+    );
+    setOpenPanels((panels) =>
+      panels.filter((panel) => panel.sessionId !== sessionId),
+    );
+    setGroups((state) => {
+      const assignments = { ...state.assignments };
+      delete assignments[sessionId];
+      return { ...state, assignments };
+    });
+
+    try {
+      const result = await messenger.request("history/delete", {
+        id: sessionId,
+      });
+      if (result.status !== "success") throw new Error(result.error);
+      // Reconcile with the durable source only after it has acknowledged the
+      // delete. Until then, load() suppresses the tombstoned id above.
+      await load();
+    } catch {
+      const restoreAtOriginalIndex = <T,>(
+        items: T[],
+        originalItems: T[],
+        matches: (item: T) => boolean,
+      ) => {
+        const originalIndex = originalItems.findIndex(matches);
+        const original = originalItems[originalIndex];
+        if (!original) return items;
+        const restored = items.filter((item) => !matches(item));
+        restored.splice(Math.min(originalIndex, restored.length), 0, original);
+        return restored;
+      };
+      setSessions((items) =>
+        restoreAtOriginalIndex(
+          items,
+          snapshot.sessions,
+          (item) => item.sessionId === sessionId,
+        ),
+      );
+      setOpenPanels((panels) =>
+        restoreAtOriginalIndex(
+          panels,
+          snapshot.openPanels,
+          (panel) => panel.sessionId === sessionId,
+        ),
+      );
+      setGroups((state) => {
+        const assignments = { ...state.assignments };
+        if (snapshot.groupId) assignments[sessionId] = snapshot.groupId;
+        else delete assignments[sessionId];
+        return { ...state, assignments };
+      });
+      setDeleteError("Could not delete session. Try again.");
+    } finally {
+      deletingSessionIdsRef.current.delete(sessionId);
+    }
+  };
+  const openContext = (
+    event: React.MouseEvent,
+    session: CukiiNavigatorSession,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = Math.min(CONTEXT_MENU_MAX_WIDTH, window.innerWidth - 16);
+    const x = Math.max(
+      8,
+      Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+    );
+    const estimatedHeight = 86 + groups.groups.length * 31;
+    const y = Math.max(
+      8,
+      Math.min(event.clientY, window.innerHeight - estimatedHeight - 8),
+    );
+    setContext({ kind: "session", session, x, y });
+  };
+  const openGroupContext = (
+    event: React.MouseEvent,
+    group: { id: string; name: string },
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = Math.min(CONTEXT_MENU_MAX_WIDTH, window.innerWidth - 16);
+    const x = Math.max(
+      8,
+      Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+    );
+    const estimatedHeight = 31 * 3 + 1 + 8;
+    const y = Math.max(
+      8,
+      Math.min(event.clientY, window.innerHeight - estimatedHeight - 8),
+    );
+    setContext({
+      kind: "group",
+      groupId: group.id,
+      groupName: group.name,
+      x,
+      y,
+    });
+  };
+
+  return (
+    <Shell data-testid="cukii-session-navigator">
+      <CukiiVendorUsageSection brokerModel={activeChat?.brokerModel} />
+      <Action
+        className="cukii-session-action"
+        onClick={() =>
+          void messenger.request("cukii/openChatPanel", { forceNew: true })
+        }
+      >
+        <PlusIcon width={16} height={16} /> New session
+      </Action>
+      <SearchRow>
+        {searchOpen && (
+          <SearchWrap>
+            <SearchIcon />
+            <Search
+              autoFocus
+              aria-label="Search sessions"
+              placeholder="Search sessions…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeSearch();
+                }
+              }}
+            />
+            <SearchClear
+              className="cukii-session-search-clear"
+              type="button"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={closeSearch}
+            >
+              <XMarkIcon style={toolIconStyle} />
+            </SearchClear>
+          </SearchWrap>
+        )}
+        <SearchRowActions>
+          {(() => {
+            const ActiveChip = filters.activeOnly ? ToolButtonOn : ToolButton;
+            return (
+              <ActiveChip
+                className="cukii-session-action cukii-session-filter-active"
+                style={activeChipStyle}
+                title="Show only sessions that need input or are working"
+                aria-pressed={filters.activeOnly}
+                onClick={toggleActiveOnly}
+              >
+                <BoltIcon style={toolIconStyle} />
+                {`Active · ${filterCounts.active}`}
+              </ActiveChip>
+            );
+          })()}
+          {(() => {
+            const FunnelButton =
+              selectedFilterCount > 0 ? ToolButtonOn : ToolButton;
+            return (
+              <FunnelButton
+                ref={funnelRef}
+                className="cukii-session-action cukii-session-filter-status"
+                style={funnelButtonStyle}
+                title="Filter by status"
+                aria-label={
+                  selectedFilterCount > 0
+                    ? `Filter by status, ${selectedFilterCount} selected`
+                    : "Filter by status"
+                }
+                aria-haspopup="menu"
+                aria-expanded={context?.kind === "statusFilter"}
+                onClick={openStatusFilterMenu}
+              >
+                <FunnelIcon style={toolIconStyle} />
+                <ChevronDownIcon16 style={caretIconStyle} />
+              </FunnelButton>
+            );
+          })()}
+          {!searchOpen && (
+            /* 24×24 and square: the shared control geometry with no label, so
+               it sits flush against "New group" the way Claude's does. */
+            <ToolButton
+              className="cukii-session-action cukii-session-search-toggle"
+              style={{ padding: 4 }}
+              title="Search sessions"
+              aria-label="Search sessions"
+              aria-expanded={false}
+              onClick={() => setSearchOpen(true)}
+            >
+              <MagnifyingGlassIcon style={toolIconStyle} />
+            </ToolButton>
+          )}
+          <ToolButton
+            className="cukii-session-action"
+            onClick={() => setAddingGroup(true)}
+          >
+            <PlusIcon style={toolIconStyle} /> New group
+          </ToolButton>
+        </SearchRowActions>
+      </SearchRow>
+      {addingGroup && (
+        <Tools>
+          <GroupInput
+            autoFocus
+            aria-label="Group name"
+            placeholder="Group name"
+            value={groupName}
+            onChange={(event) => setGroupName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") createGroup();
+              if (event.key === "Escape") setAddingGroup(false);
+            }}
+          />
+          <SmallButton className="cukii-session-action" onClick={createGroup}>
+            Create
+          </SmallButton>
+        </Tools>
+      )}
+      {buckets.map((bucket) => {
+        const isCollapsed = Boolean(collapsed[bucket.id]);
+        return (
+          <div key={bucket.id || "ungrouped"}>
+            {bucket.name &&
+              (editingGroupId === bucket.id ? (
+                <GroupHeader as="div">
+                  <ChevronDownIcon width={13} height={13} />
+                  <RenameInput
+                    aria-label={`Rename group ${bucket.name}`}
+                    autoFocus
+                    value={groupRenameDraft}
+                    onChange={(event) =>
+                      setGroupRenameDraft(event.target.value)
+                    }
+                    onBlur={() => renameGroup(bucket)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        renameGroup(bucket);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelGroupRename();
+                      }
+                    }}
+                  />
+                  <Count>{bucket.sessions.length}</Count>
+                </GroupHeader>
+              ) : (
+                <GroupHeader
+                  className="cukii-session-action"
+                  aria-expanded={!isCollapsed}
+                  onClick={() =>
+                    setCollapsed((state) => ({
+                      ...state,
+                      [bucket.id]: !state[bucket.id],
+                    }))
+                  }
+                  onContextMenu={(event) => openGroupContext(event, bucket)}
+                >
+                  <ChevronDownIcon
+                    width={13}
+                    height={13}
+                    style={{
+                      transform: isCollapsed ? "rotate(-90deg)" : undefined,
+                    }}
+                  />
+                  <span>{bucket.name}</span>
+                  <Count>{bucket.sessions.length}</Count>
+                </GroupHeader>
+              ))}
+            {!isCollapsed &&
+              bucket.sessions.map((session) => (
+                <Row
+                  key={session.sessionId}
+                  className="cukii-session-row"
+                  onContextMenu={(event) => openContext(event, session)}
+                >
+                  {editingSessionId === session.sessionId ? (
+                    <RenameInput
+                      aria-label={`Rename ${session.title}`}
+                      autoFocus
+                      value={renameDraft}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onBlur={() => void renameSession(session)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void renameSession(session);
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          cancelRename();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <SessionButton
+                      className="cukii-session-button"
+                      title={session.title}
+                      onClick={() => void openSession(session)}
+                    >
+                      <SessionTitle className="cukii-session-title">
+                        {session.title || "New session"}
+                      </SessionTitle>
+                      <Age>{formatSessionAge(session.dateCreated)}</Age>
+                    </SessionButton>
+                  )}
+                  {editingSessionId !== session.sessionId && (
+                    <RowActions className="cukii-session-actions">
+                      <RowAction
+                        className="cukii-session-menu-button"
+                        aria-label={`Rename ${session.title}`}
+                        title="Rename session"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          beginRename(session);
+                        }}
+                      >
+                        <PencilIcon width={15} height={15} />
+                      </RowAction>
+                      <RowAction
+                        className="cukii-session-menu-button"
+                        aria-label={`Delete ${session.title}`}
+                        title="Delete session"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteSession(session);
+                        }}
+                      >
+                        <TrashIcon width={16} height={16} />
+                      </RowAction>
+                    </RowActions>
+                  )}
+                </Row>
+              ))}
+          </div>
+        );
+      })}
+      {visible.length === 0 && (
+        // Claude's `.emptyState_OOQiHg` / "No sessions found": the same line
+        // covers an empty history and a search or filter that matched nothing,
+        // so a filtered-out list never reads as a broken sidebar.
+        <div
+          data-testid="cukii-session-empty-state"
+          style={{
+            padding: 20,
+            color: "var(--vscode-descriptionForeground)",
+            opacity: 0.7,
+            fontSize: "0.9em",
+            textAlign: "center",
+          }}
+        >
+          No sessions found
+        </div>
+      )}
+      {context?.kind === "statusFilter" && (
+        // 1:1 with Claude's `BG0`: a "Status" section of three checkboxes,
+        // then a separator and a "Tabs" section of two, each labelled
+        // "<name> · <count>" and each staying open on click (`keepOpen:!0`).
+        <ContextMenu
+          ref={contextRef}
+          role="menu"
+          aria-label="Filter by status"
+          style={{ left: context.x, top: context.y }}
+        >
+          <MenuSectionHeader role="presentation">
+            {SESSION_STATUS_SECTION}
+          </MenuSectionHeader>
+          {SESSION_STATUSES.map((status) => {
+            const selected = filters.statuses.has(status);
+            return (
+              <MenuItem
+                key={status}
+                className="cukii-session-menu-button"
+                role="menuitemcheckbox"
+                aria-checked={selected}
+                onClick={() =>
+                  setFilters((state) => toggleStatusFilter(state, status))
+                }
+              >
+                <MenuCheck aria-hidden="true">
+                  {selected && <CheckIcon style={toolIconStyle} />}
+                </MenuCheck>
+                {`${SESSION_STATUS_LABELS[status]} · ${filterCounts.byStatus[status]}`}
+              </MenuItem>
+            );
+          })}
+          <MenuSeparator role="separator" />
+          <MenuSectionHeader role="presentation">
+            {SESSION_TABS_SECTION}
+          </MenuSectionHeader>
+          {SESSION_TAB_STATES.map((tabState) => {
+            const selected = filters.tabStates.has(tabState);
+            return (
+              <MenuItem
+                key={tabState}
+                className="cukii-session-menu-button"
+                role="menuitemcheckbox"
+                aria-checked={selected}
+                onClick={() =>
+                  setFilters((state) => toggleTabStateFilter(state, tabState))
+                }
+              >
+                <MenuCheck aria-hidden="true">
+                  {selected && <CheckIcon style={toolIconStyle} />}
+                </MenuCheck>
+                {`${SESSION_TAB_STATE_LABELS[tabState]} · ${filterCounts.byTabState[tabState]}`}
+              </MenuItem>
+            );
+          })}
+        </ContextMenu>
+      )}
+      {context?.kind === "session" && (
+        <ContextMenu
+          ref={contextRef}
+          role="menu"
+          aria-label={`Session actions for ${context.session.title}`}
+          style={{ left: context.x, top: context.y }}
+        >
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() =>
+              void openSession(context.session).then(() => setContext(null))
+            }
+          >
+            Resume session
+          </MenuItem>
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() =>
+              void deleteSession(context.session).then(() => setContext(null))
+            }
+          >
+            Delete session
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              setAssignNewGroupTo(context.session.sessionId);
+              setAddingGroup(true);
+              setContext(null);
+            }}
+          >
+            New group from session
+          </MenuItem>
+          {groups.groups
+            .filter(
+              (group) =>
+                group.id !== groups.assignments[context.session.sessionId],
+            )
+            .map((group) => (
+              <MenuItem
+                className="cukii-session-menu-button"
+                role="menuitem"
+                key={group.id}
+                onClick={() =>
+                  assignSession(context.session.sessionId, group.id)
+                }
+              >
+                Move to &quot;{group.name}&quot;
+              </MenuItem>
+            ))}
+          <MenuSeparator />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => assignSession(context.session.sessionId, "")}
+          >
+            Remove from group
+          </MenuItem>
+        </ContextMenu>
+      )}
+      {context?.kind === "group" && (
+        <ContextMenu
+          ref={contextRef}
+          role="menu"
+          aria-label={`Group actions for ${context.groupName}`}
+          style={{ left: context.x, top: context.y }}
+        >
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              setAddingGroup(true);
+              setContext(null);
+            }}
+          >
+            New group
+          </MenuItem>
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => {
+              beginGroupRename({
+                id: context.groupId,
+                name: context.groupName,
+              });
+              setContext(null);
+            }}
+          >
+            Rename group
+          </MenuItem>
+          <MenuSeparator role="separator" />
+          <MenuItem
+            className="cukii-session-menu-button"
+            role="menuitem"
+            onClick={() => deleteGroup(context.groupId)}
+          >
+            Delete group
+          </MenuItem>
+        </ContextMenu>
+      )}
+      {renameError && (
+        <div
+          role="alert"
+          className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]"
+        >
+          {renameError}
+        </div>
+      )}
+      {deleteError && (
+        <div
+          role="alert"
+          className="px-3 py-1 text-xs text-[var(--vscode-errorForeground)]"
+        >
+          {deleteError}
+        </div>
+      )}
+    </Shell>
+  );
+}

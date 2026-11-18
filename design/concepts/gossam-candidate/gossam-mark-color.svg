@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-labelledby="title">
+  <title id="title">Gossam candidate colour mark</title>
+  <path d="M12 18C20 8 41 8 51 19C61 30 52 50 34 52C20 54 9 44 12 31"
+        stroke="#4F46E5" stroke-width="4" stroke-linecap="round"/>
+  <path d="M12 18C23 18 29 25 32 37M51 19C42 23 36 29 32 37M14 47C20 40 26 37 32 37"
+        stroke="#64748B" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="12" cy="18" r="4" fill="#4F46E5"/>
+  <circle cx="51" cy="19" r="4" fill="#4F46E5"/>
+  <circle cx="14" cy="47" r="4" fill="#4F46E5"/>
+  <circle cx="32" cy="37" r="5" fill="#F59E0B"/>
+</svg>

@@ -20,6 +20,7 @@ import { stringifyMcpPrompt } from "../../commands/slash/mcpSlashCommand";
 import { convertRuleBlockToSlashCommand } from "../../commands/slash/ruleBlockSlashCommand";
 import { MCPManagerSingleton } from "../../context/mcp/MCPManagerSingleton";
 import MCPContextProvider from "../../context/providers/MCPContextProvider";
+import { compactSlashCommand } from "../../promptFiles/compactPrompt";
 import { initSlashCommand } from "../../promptFiles/initPrompt";
 import { getConfigDependentToolDefinitions } from "../../tools";
 import { encodeMCPToolUri } from "../../tools/callTool";
@@ -170,6 +171,7 @@ export default async function doLoadConfig(options: {
   }
 
   newConfig.slashCommands.push(initSlashCommand);
+  newConfig.slashCommands.push(compactSlashCommand);
 
   // Show deprecation warnings for providers
   const globalContext = new GlobalContext();

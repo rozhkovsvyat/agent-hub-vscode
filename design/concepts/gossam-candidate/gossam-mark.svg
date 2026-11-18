@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-labelledby="title">
+  <title id="title">Gossam candidate mark</title>
+  <!-- One continuous silk thread: connection without centralisation. -->
+  <path d="M12 18C20 8 41 8 51 19C61 30 52 50 34 52C20 54 9 44 12 31"
+        stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <!-- Three crossings are intentionally offset: this is a woven path, not a wheel. -->
+  <path d="M12 18C23 18 29 25 32 37" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M51 19C42 23 36 29 32 37" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M14 47C20 40 26 37 32 37" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="12" cy="18" r="4" fill="currentColor"/>
+  <circle cx="51" cy="19" r="4" fill="currentColor"/>
+  <circle cx="14" cy="47" r="4" fill="currentColor"/>
+  <circle cx="32" cy="37" r="5" fill="currentColor"/>
+</svg>

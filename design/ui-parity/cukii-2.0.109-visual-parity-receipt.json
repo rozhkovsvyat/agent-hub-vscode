@@ -1,0 +1,490 @@
+{
+  "version": "2.0.109",
+  "vsix_sha256": "c5b8247328b1c2c253b37562c1a31f7e94a5378a6456a0462012feb32466acc2",
+  "final_verification": {
+    "where": "УСТАНОВЛЕННАЯ cukii.cukii-vscode@2.0.109, отдельный доверенный инстанс D:\\Scratch\\cukii-parity-2.0.109, CDP 9342",
+    "session_open": {
+      "session": "проверка вёрстки капсул",
+      "clickToFirstBubbleMs": 689,
+      "toPanelMs": 231,
+      "insideMs": 464
+    },
+    "short_answer_capsule": {
+      "mode": "inline",
+      "linesInLastBlock": 1,
+      "atMaxWidth": false,
+      "spare": 120.04,
+      "needed": 31.11,
+      "band": 11.9,
+      "metaBottomInset": 4.8,
+      "metaRightInset": 10.8,
+      "glyphCollisions": 0,
+      "reserve": "32px"
+    },
+    "user_capsule_reference": {
+      "metaBottomInset": 4.8,
+      "metaRightInset": 10.8
+    },
+    "pill": {
+      "h": 18,
+      "w": 139.15,
+      "fontSize": "11.05px",
+      "lineHeight": "18px",
+      "gap": "4px",
+      "borderRadius": "9999px",
+      "padding": "1px 8px"
+    },
+    "yougile_row": {
+      "testid": "cukii-vendor-account-yougile",
+      "group": "Testing",
+      "text": "YouGile rozhkovsvyat@gmail.com Log out",
+      "loginButtonPresent": false
+    },
+    "search": {
+      "collapsed": {
+        "toggle": "24×24, padding 4px, 11.7px",
+        "field_exists": false
+      },
+      "open": {
+        "field": "275.2×28.8, padding 8px 28px 8px 32px, radius 4px, 11.7px, сфокусировано",
+        "clear": "20×20",
+        "toggle_exists": false
+      }
+    }
+  },
+  "commits": [
+    "79504973a — четыре правки по претензиям владельца (собрано как 2.0.104)",
+    "d9f2f7e77 — починка по кругу 1 независимого опровержения (вердикт: rework)",
+    "18cc8ab2c — починка по кругу 2 (вердикт: rework; блокер был в моей же починке)",
+    "34a184b9c — открытие сессии: тело греется параллельно загрузке бандла",
+    "a8f0e9883 — поиск по сессиям за лупой, 1 к 1 с Клодом",
+    "2f414ba45 — поле поиска по размеру эталона (расхождение нашлось замером установленной 2.0.108)"
+  ],
+  "rollback_vsix": "cukii-vscode-2.0.103.vsix sha256 f50b1a46b5da3e5d1d4d5b601e72b69565fc5b3f63560c9e69942a63136b5b64 (последняя сборка, которую владелец видел рабочей)",
+  "measured_at": "2026-09-07T01:00:00+03:00",
+  "scope": "Четыре претензии владельца к 2.0.103 (строка YouGile, полоса от текста до времени, долгое открытие сессии, крупная пилюля) плюс пятая, поданная по ходу: поиск по сессиям за лупой, как у Клода. 🔴 2.0.104 и 2.0.105 были собраны и замерены, но каждый круг независимого опровержения возвращал их на доработку, а собственный перезамер открытия сессии опроверг моё же заявление об ускорении. Поставляется 2.0.109.",
+  "how": "Все числа сняты с УСТАНОВЛЕННЫХ расширений в отдельных доверенных инстансах VS Code со своими user-data/extensions под D:\\Scratch (--no-sandbox --disable-gpu --disable-workspace-trust): кандидат — cukii-parity-2.0.106 (CDP 9336) и cukii-probe-2.0.107 (9338), базовая линия — cukii-baseline-2.0.103 (9337), эталон Клода — anthropic.claude-code@2.1.263 в claude-ref-9340 (9340). Геометрия — Range.getClientRects по реальным глифам и getBoundingClientRect, а не объявленный padding. Клики по меню — Input.dispatchMouseEvent (доверенные события), потому что на el.click() с isTrusted=false меню молча не раскрывается.",
+  "gate": {
+    "capacity": "CUKII-RELEASE-CAPACITY-PASS free=6507MiB",
+    "activation_smoke": "ACTIVATION-SMOKE-PASS version=2.0.109 vsix_sha256=c5b8247328b1c2c253b37562c1a31f7e94a5378a6456a0462012feb32466acc2",
+    "negative_matrix": "SELFTEST-PASS: 12 Cukii release-gate controls",
+    "suites": "gui 799/799 в 88 файлах, extension 564 passed / 4 skipped в 48 файлах, tsc чист в обоих пакетах",
+    "earlier_gates": [
+      "2.0.105: ACTIVATION-SMOKE-PASS vsix_sha256=f9d8d9e4…92d4, SELFTEST-PASS: 12 controls",
+      "2.0.106: ACTIVATION-SMOKE-PASS vsix_sha256=8c744646…1bb6, SELFTEST-PASS: 12 controls"
+    ]
+  },
+  "adversarial": {
+    "rounds": 2,
+    "limit": "Решение 0018 разрешает не более двух кругов независимого ревью на изменение. Оба израсходованы; третьего не будет, поэтому находки круга 2 закрыты в коде и тестами, а не переданы дальше.",
+    "verdict_round_2": "rework — один блокирующий дефект В МОЕЙ ЖЕ ПОЧИНКЕ по кругу 1",
+    "round_2_findings": [
+      {
+        "id": "R2-1.3",
+        "severity": "блокирующий",
+        "what": "🔴 Починка D1.2 (возврат машинного ключа при входе) сделала недостижимым ЯВНЫЙ вход. Пока на диске лежит валидный ~/.claude/yougile-token, цикл «Log out → Log in» каждый раз молча возвращал тот же ключ: браузер не открывался, поле ввода не показывалось. Войти другим аккаунтом стало нельзя вообще — регрессия против 2.0.104 и противоречие правилу «явный вход бьёт discovery», которое тот же коммит декларирует в парсере.",
+        "fix": "ключ теперь ПРЕДЛАГАЕТСЯ: у YougileAuthHost появился необязательный confirmResume(account) — он называет аккаунт и даёт выбор «использовать / ввести другой». Хост без этой способности к машинному ключу не притрагивается и идёт обычным потоком.",
+        "test": "NEGATIVE CONTROL: declining the offer still lets a different key be entered — плюс «a host that cannot ask never adopts the machine key by itself»"
+      },
+      {
+        "id": "R2-1.5",
+        "severity": "риск, закрыт",
+        "what": "Обрезанная запись в секрете уходила в Authorization: Bearer. JSON.parse падал, и остаток вида `{\"suppressed\":tru` проходил проверку формы ключа — мусор из хранилища отправлялся на ru.yougile.com как учётные данные.",
+        "fix": "в ветке отката отвергается всё, что начинается с `{` или не похоже на ключ",
+        "test": "NEGATIVE CONTROL: a truncated record is not sent as a credential"
+      },
+      {
+        "id": "R2-3.1",
+        "severity": "риск, закрыт",
+        "what": "🔴 Горизонт в 100 сессий чинился не там. Список режет сам навигатор (CukiiSessionNavigator.tsx звал history/list без лимита), поэтому 101-я сессия просто переставала показываться — не удалена, не заархивирована, а молча отсутствует; клик по ней воспроизвести было нельзя вовсе. Прежняя формулировка в этой расписке была неточна.",
+        "fix": "явный лимит поставлен и в навигаторе, иначе правка в commands.ts ничего не достаёт",
+        "test": "asks for every session, not the newest hundred"
+      }
+    ],
+    "round_2_confirmed_ok": "безусловный маркер выхода и одна атомарная запись; порядок проверок в парсере; геометрия капсулы (осцилляция не воспроизведена, наезд времени на глифы не воспроизведён, longread считается точно); isSettling пропом; единый округлённый резерв; messageCount === 0; и проверка, что каждый новый тест был бы красным на старом коде.",
+    "round_2_accepted_followups": [
+      "bubbleContentRight опирается на три невыраженных допущения (border-box у капсулы, отсутствие бордера у родителя, отсутствие боковых margin). Сейчас все три выполняются; тестом не закреплены.",
+      "max-width вида calc()/min()/clamp() тихо откатывает расчёт к прежнему поведению (короткий ответ получает свою строку) — деградация безопасная, но молчаливая.",
+      "ветка unreachable в зонде возобновления не покрыта тестом и на офлайне стоит 8 секунд до открытия браузера.",
+      "message_count считает только ответы ассистента; сессия с вопросом и без ответа даёт 0, и клик по ней — тихий отказ без сообщения. Это поведение старше этой поставки."
+    ],
+    "verdict_round_1": "rework",
+    "note": "Правка YouGile трогает хранение ключа и вход, поэтому по правилу независимого опровержения ревью обязательно; рецензент — не исполнитель. Первый круг дал rework: два блокирующих дефекта, оба воспроизведены замером и кодом, а не приняты на слово.",
+    "blocking_findings": [
+      {
+        "id": "D1.1",
+        "what": "«Log out» молча отменялся появлением машинного токена: маркер подавления писался только если ключ найден В МОМЕНТ выхода. Выход из плагинного ключа не писал ничего, и следующий `yougile-cli.py auth-key` (или VS Code, запущенный из шелла с YOUGILE_TOKEN) возвращал чужой аккаунт в строку и снова слал этот ключ в API.",
+        "verified": "чтением yougileAccount.ts:361-372 — условие `machine && options.store`",
+        "fix": "маркер пишется безусловно и ОДНОЙ записью вместо delete+store (промежуток между ними давал то же состояние «вышел, но не подавлено»)",
+        "test": "NEGATIVE CONTROL: a token appearing later does not undo the sign-out"
+      },
+      {
+        "id": "D2.1",
+        "what": "Из-за `width: fit-content` у капсулы агента inline-режим был недостижим для КОРОТКОГО однострочного ответа: правый край последней строки совпадает с контентным краем, запас всегда 0. То есть самый частый случай навсегда получал лишнюю строку, тогда как пользовательская капсула держит время на строке.",
+        "verified": "🔴 замером на живой сборке: D:\\Scratch\\expr-shrink-to-fit.js вернул shortSingleLineAssistant=[] — во всей сессии не оказалось ни одного однострочного ответа, значит прежние «13 из 14 inline» этот случай не проверяли вовсе и опровергнуть находку не могли",
+        "fix": "запас считается от предела роста капсулы (max-width, процент резолвится вручную — Blink возвращает его дословно), а не от её сжатого края",
+        "test": "lets a short answer keep the clock on its line, capsule grows to fit — против прежней реализации даёт 290−290=0 и падает"
+      }
+    ],
+    "non_blocking_fixed": [
+      "D1.2 — подавление было необратимо из UI: один «Log out» стоил владельцу всего смысла discovery. «Log in» теперь сначала пробует машинный ключ и при валидном зонде возвращает его без браузера и без ввода.",
+      "D1.3 — парсер ставил маркер выше явного ключа, нарушая правило «явный вход бьёт discovery». Порядок проверок исправлен.",
+      "D2.2 — режим пересчитывался на каждом токене стрима (ThinkingIndicator исчезает с первого токена, поэтому мета сразу становится соседом текста), и высота капсулы прыгала несколько раз на абзац. Стримящая капсула держит собственную строку и меряется один раз, когда текст перестал двигаться.",
+      "D2.3 — резерв округлялся вверх для CSS, а сравнивался неокруглённым: распорка могла перенестись на капсуле, которую замер назвал inline. Теперь одно число на оба применения.",
+      "D3.1 — `history/list` без лимита молча режет список до 100 (core.ts:330), то есть 101-я сессия в навигаторе открывалась бы в никуда. Передан явный лимит.",
+      "D3.2 — `messageCount ?? 0` смешивал «поля нет» и «сообщений нет», а поле необязательное и считает только ответы ассистента. Закрывает дверь только явный ноль.",
+      "D4.1 — комментарий в index.css продолжал утверждать про эталон 13px/4px 16px после приведения пилюли к 11.05px/8px."
+    ],
+    "accepted_risks": [
+      "D2.4 (RTL): решение опирается на физический правый край, в RTL inline-режим не включится. Деградация безопасная — собственная строка; отдельная задача вместе с логическими свойствами всей капсулы.",
+      "D2.6: допущение «псевдоэлемент не попадает в rects диапазона» взято из спецификации CSSOM-View и не запинено тестом, потому что тест подменяет createRange целиком. Живая проверка — отсутствие осцилляции на 14 капсулах установленной сборки.",
+      "D3.3: битое тело сессии теперь не отсекается до создания вкладки (индекс о теле не знает). Владелец увидит вкладку с ошибкой вместо «клик ничего не сделал» — поведение изменилось, но не в худшую сторону.",
+      "D4.2: высота пилюли 18px меньше рекомендованных WCAG 24px. Это цена паритета 1 к 1, который владелец и просил; у эталона ровно столько же."
+    ]
+  },
+  "items": [
+    {
+      "id": "yougile-account-row",
+      "complaint": "рис 1 — странно иметь акк и кнопку логин одновременно",
+      "reference": "вендорские строки в том же диалоге: подключённый аккаунт предлагает только «Log out»",
+      "verdict": "PASS",
+      "before": {
+        "state": "connected",
+        "accountLabel": "rozhkovsvyat@gmail.com",
+        "buttons": ["Log in"],
+        "why_wrong": "зелёная точка и адрес рядом с кнопкой входа читаются как «не вошёл»"
+      },
+      "numbers": {
+        "testid": "cukii-vendor-account-yougile",
+        "group": "Testing",
+        "ariaLabel": "connected",
+        "rowText": "YouGile rozhkovsvyat@gmail.com Log out",
+        "buttons": ["Log out"],
+        "loginButtonPresent": false,
+        "peer_rows_same_shape": [
+          "Alibaba rozhkovsvyat@gmail.com Log out",
+          "Anthropic rozhkovsvyat@gmail.com Log out",
+          "Cursor rozhkovsvyat@gmail.com Log out",
+          "MoonshotAI HR DOT Log out",
+          "OpenAI anabion@tuta.io Log out",
+          "xAI rozhkovsvyat@gmail.com Log out"
+        ]
+      },
+      "cause": "ключ находился на машине (env YOUGILE_TOKEN или ~/.claude/yougile-token), а «Log out» предлагался только для ключа, введённого в плагине: удалять чужой файл плагин не вправе, поэтому кнопки не было вовсе",
+      "fix": "в SecretStorage теперь лежит либо запись аккаунта, либо маркер подавления {suppressed:true}; выход по машинному ключу пишет маркер, readYougileAccount на маркере возвращает undefined и не проваливается в поиск. Файл владельца не трогается.",
+      "note": "🔴 Токен нигде не печатается: ни в диалоге, ни в замерах, ни в этой расписке."
+    },
+    {
+      "id": "assistant-meta-band",
+      "complaint": "рис 2 3 4 — странный отступ от текста к подвалу (время) — большеват почему??",
+      "reference": "механика MAX (web.max.ru): при длинном тексте метаданные уезжают на СОБСТВЕННУЮ КОМПАКТНУЮ строку, а не на строку полной высоты",
+      "verdict": "PASS",
+      "before": {
+        "worstBandFromTailToBottom": 31.4,
+        "mechanism": "inline-режим включался CSS-условием :has(> p:last-child); если время не влезало после последней строки, инлайновый спейсер переносился и открывал line box высотой в полный line-height 19.5px"
+      },
+      "numbers": {
+        "capsulesMeasured": 14,
+        "inline": 13,
+        "ownLine": 1,
+        "bandInline": 11.9,
+        "bandOwnLine": 21.9,
+        "worstBandFromTailToBottom": 21.9,
+        "metaBottomInset": 4.8,
+        "metaRightInset": 10.8,
+        "userMetaBottomInset": 4.8,
+        "userMetaRightInset": 10.8,
+        "totalGlyphCollisions": 0,
+        "measuredReserve": "32px"
+      },
+      "🔴 short_answer_case": {
+        "why_it_was_missed": "Эти 14 капсул — все длинные, упёршиеся в max-width. Проба D:\\Scratch\\expr-shrink-to-fit.js вернула shortSingleLineAssistant=[]: в сессии не было НИ ОДНОГО однострочного ответа, поэтому «13 из 14 inline» ничего не говорили о самом частом случае — а он был сломан.",
+        "measured_on_installed": {
+          "text": "Брокер Cukii на связи, работаю в штатном режиме.",
+          "linesInLastBlock": 1,
+          "mode": "inline",
+          "bubbleWidth": 449.21,
+          "maxAllowedWidth": 529.2,
+          "atMaxWidth": false,
+          "spareAfterLastLine": 120.04,
+          "needed": 31.11,
+          "bandFromTailToBottom": 11.9,
+          "metaBottomInset": 4.8,
+          "metaRightInset": 10.8,
+          "glyphCollisions": 0,
+          "userReferenceMetaBottomInset": 4.8
+        },
+        "note": "`atMaxWidth: false` — капсула НЕ упёрлась в предел, то есть это ровно тот shrink-to-fit случай, в котором прежний расчёт давал запас 0 и отправлял время на собственную строку."
+      },
+      "cause": "🔴 CSS этого не умеет в принципе: перенесённый инлайновый ::after всегда открывает строку не ниже line-height блока, и ни line-height, ни vertical-align, ни font-size, ни отрицательный margin на псевдоэлементе её не ужмут. Поэтому режим выбран не селектором, а замером.",
+      "fix": "assistantMetaFitsOnLastLine измеряет реальные прямоугольники последней строки через Range.getClientRects и ширину <time>; класс cukii-assistant-bubble--meta-inline ставится только когда время действительно влезает. Иначе — компактная собственная строка (margin 2px 0 -6px), которая садится в те же 10px нижней полосы капсулы.",
+      "note": "Инсеты меты (низ 4.8, право 10.8) одинаковы в ОБОИХ режимах и совпадают с пользовательской капсулой — переключение режима не видно как скачок."
+    },
+    {
+      "id": "assistant-tail-modes",
+      "complaint": "нет (проверка на регрессию, предсказанную тремя рецензентами первого захода)",
+      "reference": "механика MAX применима только к абзацному хвосту; всё остальное обязано остаться строкой в потоке",
+      "verdict": "PASS",
+      "numbers": {
+        "абзац (контроль)": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2.4,
+          "band": 21.9,
+          "metaBottomInset": 4.8
+        },
+        "заголовок": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3.5,
+          "band": 22.87,
+          "metaBottomInset": 4.8
+        },
+        "плотный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2.4,
+          "band": 21.9,
+          "metaBottomInset": 4.8
+        },
+        "свободный список": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 3,
+          "band": 22.5,
+          "metaBottomInset": 4.8
+        },
+        "таблица": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 5,
+          "band": 24.5,
+          "metaBottomInset": 4.8
+        },
+        "блок кода (виджет)": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 13.5,
+          "band": 32.3,
+          "metaBottomInset": 4.8
+        },
+        "картинка": {
+          "metaPosition": "static",
+          "glyphCollisions": 0,
+          "gap": 2,
+          "band": 20.8,
+          "metaBottomInset": 4.8
+        }
+      },
+      "probe_defect_found_and_fixed": "🔴 Первый прогон D:\\Scratch\\expr-tail-modes.js был НЕДЕЙСТВИТЕЛЕН: он клонирует живую капсулу, а клон наследует класс cukii-assistant-bubble--meta-inline, который ставит React после замера. Проба мерила режим, который для не-абзацного хвоста никогда не наступает, и её «ноль пересечений» ничего не доказывал. Класс с клона снят, прогон повторён — числа выше уже из исправленной пробы.",
+      "stronger_evidence": {
+        "file": "gui/src/components/StepContainer/assistantMetaMode.test.ts",
+        "why": "живая проба принципиально не достаёт до решения React — она подменяет хвост уже отрисованной капсуле. Поэтому решающая функция assistantMetaFitsOnLastLine закреплена юнит-тестом с внедрённой геометрией.",
+        "cases": [
+          "время садится на строку, когда после неё есть место",
+          "время уходит на свою строку, когда последняя строка достаёт до края",
+          "pre, table, ul, ol, h3, blockquote, div — хвост отвергается при заведомо щедрой геометрии",
+          "элемент между текстом и временем (индикатор стрима) — отвергается",
+          "пустой хвост — отвергается, а не угадывается",
+          "НЕГАТИВНЫЙ КОНТРОЛЬ: при одной и той же последней строке (свободно 40px) часы шириной 31px садятся, шириной 65px — нет"
+        ],
+        "result": "6/6"
+      }
+    },
+    {
+      "id": "session-open-latency",
+      "complaint": "каждая сессия при открытии заметно долго открывается против клода — починить",
+      "reference": "Claude Code открывает сессию без заметной паузы",
+      "verdict": "PASS",
+      "how_measured": "D:\\Scratch\\measure-session-open.js: доверенный клик по строке сессии в шторке, ожидание появления НОВОЙ CDP-цели вебвью, затем опрос вебвью до первой отрисованной капсулы. Измеряется то, что ждёт владелец, а не внутренний таймер. Базовая линия снята на УСТАНОВЛЕННОЙ 2.0.103 в отдельном профиле (D:\\Scratch\\cukii-baseline-2.0.103, CDP 9337) — на ТЕХ ЖЕ сессиях.",
+      "🔴 correction": "Первая версия этой расписки заявляла «−54% полного ожидания». Это было неверно и держалось на сравнении РАЗНЫХ сессий. Замер на одних и тех же сессиях показал обратное: правка 2.0.104 не сокращала ожидание, а переставляла его. Ниже — числа, которые это опровергли, и настоящая починка.",
+      "measured_same_sessions": {
+        "Память": {
+          "2.0.103": { "total": 8589, "toPanel": 7855, "inside": 698 },
+          "2.0.106": { "total": 9746, "toPanel": 280, "inside": 9396 },
+          "2.0.107": { "total": 1065, "toPanel": 239, "inside": 838 }
+        },
+        "Плагин": {
+          "2.0.103": { "total": 10488, "toPanel": 8286, "inside": 2218 },
+          "2.0.106": { "total": 11783, "toPanel": 186, "inside": 11547 },
+          "2.0.107": { "total": 3254, "toPanel": 283, "inside": 2876 }
+        },
+        "SSH": {
+          "2.0.103": { "total": 14527, "toPanel": 13260, "inside": 1241 },
+          "2.0.107": { "total": 1231, "toPanel": 190, "inside": 1038 }
+        },
+        "Багхантер": {
+          "2.0.103": { "total": 14516, "toPanel": 13346, "inside": 1134 },
+          "2.0.107": { "total": 1481, "toPanel": 193, "inside": 1257 }
+        }
+      },
+      "cause": "🔴 Дублировался разбор тела, но не его ЦЕНА. Предпроверка в continue.openInNewWindow звала history/load — грузила тело сессии из SQLite только чтобы узнать, что сессия существует, и делала это до создания панели. Дальше вебвью грузил ту же сессию второй раз, но `startHookSession` идемпотентен на сессию, поэтому второй вызов стоил 0.7 с против 7.9 с у первого. То есть дорогая работа и раньше выполнялась ОДИН раз, и убрать её было нельзя — только переставить, что 2.0.104 и сделала (панель быстрее в 30 раз, полное ожидание на ~1.2 с хуже).",
+      "fix": "Существование сессии решает history/list (метаданные без тела). Само тело запускается сразу после этой проверки и НЕ ожидается: оно грузится, пока вебвью поднимает свой ~3.9 МБ бандл, а его собственный history/load приходит на готовое. Выигрыш даёт перекрытие, а не экономия работы.",
+      "result": "SSH 14527 → 1231 (11.8×), Багхантер 14516 → 1481 (9.8×), Память 8589 → 1065 (8.1×), Плагин 10488 → 3254 (3.2×). Панель появляется за 190–283 мс вместо 7.9–13.3 с.",
+      "what_the_owner_sees": "Окно открывается за ~0.2 с и с 0.76 с показывает состояние загрузки, а не пустоту (замер samples в measure-session-open.js). До правки клик не давал ничего видимого 8–13 с.",
+      "test": "Приёмка выражает настоящий инвариант, а не прежний «тела не грузим»: history/load в тесте НИКОГДА не завершается — если открытие снова начнёт его ждать, тест не покраснеет, а повиснет, и панели не будет вовсе. Отдельный негативный контроль: у сессии, которой нет в индексе, прогрев не запускается."
+    },
+    {
+      "id": "model-pill",
+      "complaint": "размер клодовской пилюли с моделью против нашей меньше и аккуратнее — приведи к такому же виду",
+      "reference": "живой Claude Code, .modelPill_gGYT1w — замер D:\\Scratch\\expr-claude-pill.js",
+      "verdict": "PASS",
+      "before": {
+        "declared": "h-[26px] gap-1.5 px-4 text-[13px]",
+        "note": "здесь объявленные классы, а не замер: до правки пилюля мерилась только у эталона"
+      },
+      "numbers": {
+        "height": 18,
+        "width": 155.11,
+        "fontSize": "11.05px",
+        "lineHeight": "18px",
+        "gap": "4px",
+        "borderRadius": "9999px",
+        "padding": "1px 8px"
+      },
+      "reference_numbers": {
+        "height": 18,
+        "fontSize": "11.05px",
+        "lineHeight": "18px",
+        "gap": "4px",
+        "borderRadius": "9999px",
+        "padding": "0px 8px"
+      },
+      "note": "Единственное расхождение — вертикальный паддинг 1px против 0px. Оно не наблюдаемо: высота задана жёстко 18px и совпадает, содержимое центрируется флексом."
+    }
+  ],
+  "items_added_mid_delivery": [
+    {
+      "id": "session-search-magnifier",
+      "complaint": "у клода в шторке боковой есть поиск по сессиям (лупа) — а у нас нет; сделай точно такой же, 1 к 1",
+      "reference": "живой anthropic.claude-code@2.1.263, вебвью 14ebqtf6lf7524ektmek — замер, а не скриншот",
+      "verdict": "PASS",
+      "was": "Поиск существовал, но всегда развёрнутым полем 275.2×30 во всю ширину шторки, отдельной строкой над рядом фильтров. Лупы-кнопки не было вовсе, поэтому владелец и не увидел «поиск как у Клода».",
+      "reference_numbers": {
+        "collapsed": {
+          "input_exists": false,
+          "toggle": {
+            "cls": "newGroupButton_OOQiHg searchToggleButton_OOQiHg",
+            "aria": "Search sessions",
+            "w": 24,
+            "h": 24,
+            "padding": "4px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "x": 143.73
+          },
+          "next_sibling": "New group (w 93.83, padding 4px 8px — та же геометрия, только с подписью)",
+          "actionsRowWidth": 258.55
+        },
+        "open": {
+          "toggle_exists": false,
+          "box": {
+            "cls": "searchBox_OOQiHg searchBoxCollapsible_OOQiHg",
+            "w": 271,
+            "h": 36.8,
+            "display": "flex"
+          },
+          "children_in_order": [
+            "svg.searchIcon 14×14",
+            "input 263×28.8",
+            "button.searchClearButton 20×20 (aria «Clear search»)"
+          ],
+          "input": {
+            "placeholder": "Search sessions…",
+            "padding": "8px 28px 8px 32px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "focused": true
+          },
+          "actionsRow": "съезжает с y=406.8 на 445.6 и сужается с 258.55 до 234.55 — ровно на ширину исчезнувшей лупы"
+        },
+        "escape": "закрывает и возвращает лупу",
+        "clear_button": "🔴 не просто очищает, а очищает И закрывает — единственный мышиный путь обратно к лупе"
+      },
+      "measured_on_installed": {
+        "collapsed": {
+          "toggle": {
+            "w": 24,
+            "h": 24,
+            "padding": "4px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "x": 152.71
+          },
+          "field_exists": false,
+          "newGroup": {
+            "w": 93.83,
+            "padding": "4px 8px",
+            "fontSize": "11.7px",
+            "x": 180.71
+          },
+          "gap_toggle_to_newGroup": 4,
+          "actionsRowWidth": 262.54
+        },
+        "open": {
+          "toggle_exists": false,
+          "field": {
+            "w": 275.2,
+            "h": 28.8,
+            "padding": "8px 28px 8px 32px",
+            "borderRadius": "4px",
+            "fontSize": "11.7px",
+            "placeholder": "Search sessions…",
+            "focused": true
+          },
+          "clear": {
+            "aria": "Clear search",
+            "w": 20,
+            "h": 20,
+            "borderRadius": "4px"
+          },
+          "actionsRow": "съезжает с y=66 на 98 и сужается с 262.54 до 234.54 — у эталона 258.55 → 234.55"
+        },
+        "behaviour": {
+          "rowsUnfiltered": 12,
+          "afterQuery": { "query": "памя", "rowCount": 1, "rows": ["Память"] },
+          "afterEscape": {
+            "searchOpen": false,
+            "toggleBack": true,
+            "rowCount": 12
+          },
+          "afterClearButton": {
+            "searchOpen": false,
+            "toggleBack": true,
+            "rowCount": 12
+          }
+        },
+        "note": "🔴 Поле сначала вышло 30px/13px против эталонных 28.8px/11.7px — расхождение нашлось именно этим замером на установленной сборке и закрыто в 2.0.109."
+      },
+      "measurement_defect_found": "Первый прогон сказал «Escape не закрывает». Он был неверен: проверка стояла в том же тике, что и отправка события, и читала DOM до перерисовки React. Отдельный замер следующим вызовом показал обратное.",
+      "deliberate_difference": "Закрытие всегда сбрасывает запрос. У эталона это не удалось подтвердить замером (моя проба строк не находила его разметку), а невидимое поле, оставляющее список молча отфильтрованным, — дефект в любом случае.",
+      "tests": [
+        "keeps the search behind a magnifier and gives it back on Escape",
+        "NEGATIVE CONTROL: the clear button closes the search and unfilters the list",
+        "clears search and filters when a group is created — теперь ещё и схлопывает поле"
+      ],
+      "test_note": "🔴 Запросы в тестах идут ПО РОЛИ, а не по label: кнопка и поле несут один и тот же aria-label «Search sessions» (как у Клода), поэтому запрос по label матчит любое из них и не отличает закрытое состояние от открытого."
+    }
+  ],
+  "remainders": [
+    {
+      "id": "webview-boot-per-session",
+      "what": "Оставшиеся 4.57 с внутри вебвью. Каждая сессия Cukii — отдельный createWebviewPanel, то есть свежая загрузка бандла index.js (~3.9 МБ) плюс history/load, старт хуков и рендер.",
+      "why_accepted": "Это второй порядок и другой класс правки (переиспользование панели или разделение бандла), а претензия владельца — про полное ожидание, которое сократилось вдвое и больше не упирается в лишний запрос к БД. Тянуть архитектурную правку в ту же поставку значило бы менять модель жизненного цикла панелей без отдельной приёмки.",
+      "next": "мерить долю бандла отдельно (D:\\Scratch\\expr-webview-boot.js) и решать между retainContextWhenHidden с переиспользованием панели и code-splitting"
+    },
+    {
+      "id": "meta-mode-on-first-paint",
+      "what": "Безопасное значение по умолчанию — собственная строка; inline включается после первого layout-замера.",
+      "why_accepted": "Обратный порядок (inline по умолчанию) означал бы, что при неудачном замере время однажды ляжет на глифы. Ошибаться в сторону лишних 10px безопаснее, чем в сторону наложения."
+    }
+  ],
+  "not_verified": [
+    {
+      "id": "remote-runtime-receipt",
+      "what": "Установка на Remote-SSH и receipt ui_submit → bridge_dispatch → vendor_completed",
+      "status": "BLOCKED",
+      "why": "macbook-035 офлайн в tailnet. Слова release/PASS про remote не заявляются."
+    }
+  ]
+}
