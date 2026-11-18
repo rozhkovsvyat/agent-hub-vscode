@@ -15,6 +15,7 @@ export const CUKII_MEMORY_MCP_NAME = "cukii-memory";
 
 export type CukiiMemoryProxyDescriptor = {
   endpoint: string;
+  workEndpoint?: string;
   proxyPath: string;
   nodePath: string;
 };

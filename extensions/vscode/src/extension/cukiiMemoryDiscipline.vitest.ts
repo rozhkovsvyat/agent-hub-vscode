@@ -57,6 +57,12 @@ describe("Cukii discipline bootstrap", () => {
     expect(disciplineUrl("https://box.cukii.ru/mcp")).toBe(
       "https://box.cukii.ru/client/cukii-memory-rules.md",
     );
+    expect(disciplineUrl("https://box.cukii.ru/core/personal/mcp")).toBe(
+      "https://box.cukii.ru/client/cukii-memory-rules.md",
+    );
+    expect(disciplineUrl("https://box.cukii.ru/core/work/mcp")).toBe(
+      "https://box.cukii.ru/client/cukii-memory-rules.md",
+    );
     expect(disciplineUrl("http://127.0.0.1:8780/mcp")).toBe(
       "http://127.0.0.1:8780/client/cukii-memory-rules.md",
     );

@@ -82,6 +82,57 @@ describe("Cukii Box account", () => {
     expect(httpFetch).toHaveBeenCalledTimes(2);
   });
 
+  it("migrates the stored Box endpoint to both production bank routes", async () => {
+    const store = new MemoryStore();
+    const token = "m".repeat(43);
+    await store.store(
+      CUKII_MEMORY_SECRET_KEY,
+      JSON.stringify({ endpoint: "https://box.cukii.ru/mcp", token }),
+    );
+    const descriptors: any[] = [];
+    const httpFetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:"))
+        return new Response("unauthorized", { status: 401 });
+      if (url.endsWith("/healthz")) return new Response('{"ok":true}');
+      return new Response(
+        JSON.stringify({
+          result: { serverInfo: { name: "cukii-agent-store" } },
+        }),
+      );
+    }) as typeof fetch;
+    const controller = new CukiiMemoryAccountController(
+      store,
+      extensionRoot(),
+      process.execPath,
+      httpFetch,
+      {
+        ensure: (_vendor, descriptor) => {
+          descriptors.push(descriptor);
+          return true;
+        },
+        remove: vi.fn(),
+      },
+    );
+
+    const launch = await controller.prepareForModel("gpt-5.6-sol");
+    expect(launch).toEqual({
+      configured: true,
+      spawnEnv: {
+        CUKII_MEMORY_RELAY_URL: "https://box.cukii.ru/core/personal/mcp",
+        CUKII_MEMORY_WORK_RELAY_URL: "https://box.cukii.ru/core/work/mcp",
+        CUKII_MEMORY_RELAY_TOKEN: token,
+      },
+    });
+    expect(descriptors[0]).toMatchObject({
+      endpoint: "https://box.cukii.ru/core/personal/mcp",
+      workEndpoint: "https://box.cukii.ru/core/work/mcp",
+    });
+    expect(store.values.get(CUKII_MEMORY_SECRET_KEY)).toContain(
+      "https://box.cukii.ru/core/personal/mcp",
+    );
+  });
+
   it("stores the bearer in SecretStorage and injects the direct edge only at spawn", async () => {
     const store = new MemoryStore();
     const descriptors: unknown[] = [];
@@ -90,7 +141,10 @@ describe("Cukii Box account", () => {
       async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/healthz")) return new Response('{"ok":true}');
-        if (url === "http://127.0.0.1:8780/mcp") {
+        if (
+          url === "http://127.0.0.1:8785/mcp" ||
+          url === "http://127.0.0.1:8786/mcp"
+        ) {
           return new Response("unauthorized", { status: 401 });
         }
         const authorization = (
@@ -130,6 +184,7 @@ describe("Cukii Box account", () => {
     expect(JSON.stringify(descriptors)).not.toContain(boxToken);
     expect(descriptors[0]).toEqual({
       endpoint: "https://box.example.test/mcp",
+      workEndpoint: "https://box.example.test/mcp",
       proxyPath: expect.stringMatching(/cukiiMemoryProxy\.js$/),
       nodePath: process.execPath,
     });
@@ -142,6 +197,7 @@ describe("Cukii Box account", () => {
       configured: true,
       spawnEnv: {
         CUKII_MEMORY_RELAY_URL: "https://box.example.test/mcp",
+        CUKII_MEMORY_WORK_RELAY_URL: "https://box.example.test/mcp",
         CUKII_MEMORY_RELAY_TOKEN: boxToken,
       },
     });
@@ -551,7 +607,7 @@ describe("Cukii Box account", () => {
 
 describe("выбор адреса коробки реле памяти", () => {
   const remote = "https://box.cukii.ru/mcp";
-  const local = "http://127.0.0.1:8780/mcp";
+  const local = "http://127.0.0.1:8785/mcp";
   const connection = { endpoint: remote, token: "t0ken" };
 
   /** Ответ НАШЕЙ коробки: 2xx и `serverInfo.name`, по которому её и опознают. */

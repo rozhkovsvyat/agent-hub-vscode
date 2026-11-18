@@ -72,10 +72,16 @@ export function disciplineTargets(home: string = os.homedir()): string[] {
   ];
 }
 
-/** `https://box.cukii.ru/mcp` -> `https://box.cukii.ru/client/cukii-memory-rules.md` */
+/**
+ * `https://box.cukii.ru/mcp` and the new bank routes both serve the discipline
+ * from the Box root.  The MCP path is deliberately kept separate from this
+ * resource path so a bank endpoint cannot turn into a nonexistent
+ * `/core/personal/client/...` URL.
+ */
 export function disciplineUrl(endpoint: string): string {
   const url = new URL(endpoint);
-  url.pathname = `${url.pathname.replace(/\/mcp$/, "")}/${CUKII_RULES_RESOURCE}`;
+  const rootPath = url.pathname.replace(/\/core\/(?:personal|work)\/mcp$/, "");
+  url.pathname = `${rootPath.replace(/\/mcp$/, "")}/${CUKII_RULES_RESOURCE}`;
   return url.toString();
 }
 

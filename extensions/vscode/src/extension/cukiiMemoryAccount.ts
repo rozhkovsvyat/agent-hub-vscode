@@ -27,7 +27,8 @@ import {
 
 export const CUKII_MEMORY_ACCOUNT_ID = "memory" as const;
 export const CUKII_MEMORY_SECRET_KEY = "cukii.memory.connection";
-export const CUKII_MEMORY_DEFAULT_ENDPOINT = "https://box.cukii.ru/mcp";
+export const CUKII_MEMORY_DEFAULT_ENDPOINT =
+  "https://box.cukii.ru/core/personal/mcp";
 
 /**
  * Коробка, стоящая на этой же машине.
@@ -45,7 +46,8 @@ export const CUKII_MEMORY_DEFAULT_ENDPOINT = "https://box.cukii.ru/mcp";
  * ошибки здесь не «медленно», а «агент читает и пишет чужую память». Пробуем `initialize` с
  * тем же bearer: успех означает, что на локальном порту стоит коробка, принимающая наш токен.
  */
-const CUKII_MEMORY_LOCAL_ENDPOINT = "http://127.0.0.1:8780/mcp";
+const CUKII_MEMORY_LOCAL_ENDPOINT = "http://127.0.0.1:8785/mcp";
+const CUKII_MEMORY_LOCAL_WORK_ENDPOINT = "http://127.0.0.1:8786/mcp";
 /** Проба короткая намеренно: она стоит перед каждым запросом, пока решение не закэшировано. */
 const LOCAL_PROBE_TIMEOUT_MS = 500;
 /** Решение живёт минуту: коробку поднимают и гасят руками, но не чаще. */
@@ -61,7 +63,11 @@ const ALL_MEMORY_VENDORS: BrokerVendorId[] = [
   "qwen",
 ];
 
-type MemoryConnection = { endpoint: string; token: string };
+type MemoryConnection = {
+  endpoint: string;
+  workEndpoint?: string;
+  token: string;
+};
 
 export type CukiiMemoryLaunchBinding = {
   configured: boolean;
@@ -146,13 +152,42 @@ function parseConnection(
     ) {
       return undefined;
     }
+    const endpoint = normalizeMemoryEndpoint(parsed.endpoint);
+    const migrated = migrateBoxEndpoint(endpoint);
+    const configuredWork =
+      typeof parsed.workEndpoint === "string"
+        ? normalizeMemoryEndpoint(parsed.workEndpoint)
+        : undefined;
     return {
-      endpoint: normalizeMemoryEndpoint(parsed.endpoint),
+      endpoint: migrated?.personal ?? endpoint,
+      workEndpoint: migrated?.work ?? configuredWork,
       token: validateMemoryToken(parsed.token),
     };
   } catch {
     return undefined;
   }
+}
+
+function migrateBoxEndpoint(
+  endpoint: string,
+): { personal: string; work: string } | undefined {
+  const url = new URL(endpoint);
+  if (url.hostname !== "box.cukii.ru" || url.pathname !== "/mcp") {
+    return undefined;
+  }
+  const personal = new URL(url.toString());
+  personal.pathname = "/core/personal/mcp";
+  const work = new URL(url.toString());
+  work.pathname = "/core/work/mcp";
+  return { personal: personal.toString(), work: work.toString() };
+}
+
+function workEndpointFor(endpoint: string): string {
+  const url = new URL(endpoint);
+  if (url.pathname === "/core/personal/mcp") {
+    url.pathname = "/core/work/mcp";
+  }
+  return url.toString();
 }
 
 export function normalizeMemoryEndpoint(value: string): string {
@@ -286,7 +321,9 @@ export class CukiiMemoryUpstream {
         error?: { message?: unknown };
       };
       if (body?.error) return false;
-      return body?.result?.serverInfo?.name === "cukii-memory";
+      return ["cukii-memory", "cukii-agent-store"].includes(
+        String(body?.result?.serverInfo?.name),
+      );
     } catch {
       return false;
     } finally {
@@ -305,61 +342,76 @@ export async function probeCukiiMemory(
   connection: MemoryConnection,
   httpFetch: MemoryFetch = fetch,
 ): Promise<void> {
-  const healthController = new AbortController();
-  const healthTimer = setTimeout(() => healthController.abort(), 5_000);
-  try {
-    const health = await httpFetch(healthUrl(connection.endpoint), {
-      method: "GET",
-      signal: healthController.signal,
-    });
-    if (!health.ok)
-      throw new Error(`Cukii Box health check returned HTTP ${health.status}.`);
-  } finally {
-    clearTimeout(healthTimer);
-  }
+  const endpoints = [
+    connection.endpoint,
+    ...(connection.workEndpoint &&
+    connection.workEndpoint !== connection.endpoint
+      ? [connection.workEndpoint]
+      : []),
+  ];
+  for (const endpoint of endpoints) {
+    const healthController = new AbortController();
+    const healthTimer = setTimeout(() => healthController.abort(), 5_000);
+    try {
+      const health = await httpFetch(healthUrl(endpoint), {
+        method: "GET",
+        signal: healthController.signal,
+      });
+      if (!health.ok)
+        throw new Error(
+          `Cukii Box health check returned HTTP ${health.status}.`,
+        );
+    } finally {
+      clearTimeout(healthTimer);
+    }
 
-  const initController = new AbortController();
-  const initTimer = setTimeout(() => initController.abort(), 12_000);
-  try {
-    const response = await httpFetch(connection.endpoint, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${connection.token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "cukii-vscode", version: "2.0.130" },
+    const initController = new AbortController();
+    const initTimer = setTimeout(() => initController.abort(), 12_000);
+    try {
+      const response = await httpFetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.token}`,
+          "content-type": "application/json",
         },
-      }),
-      signal: initController.signal,
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Cukii Box rejected the connection (HTTP ${response.status}).`,
-      );
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "cukii-vscode", version: "2.0.171" },
+          },
+        }),
+        signal: initController.signal,
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Cukii Box rejected the connection (HTTP ${response.status}).`,
+        );
+      }
+      const body = (await response.json()) as {
+        result?: { serverInfo?: { name?: unknown } };
+        error?: { message?: unknown };
+      };
+      if (body.error) {
+        throw new Error(
+          typeof body.error.message === "string"
+            ? body.error.message
+            : "Cukii Box rejected initialize.",
+        );
+      }
+      if (
+        !["cukii-memory", "cukii-agent-store"].includes(
+          String(body.result?.serverInfo?.name),
+        )
+      ) {
+        throw new Error("The endpoint is not a Cukii Box memory server.");
+      }
+    } finally {
+      clearTimeout(initTimer);
     }
-    const body = (await response.json()) as {
-      result?: { serverInfo?: { name?: unknown } };
-      error?: { message?: unknown };
-    };
-    if (body.error) {
-      throw new Error(
-        typeof body.error.message === "string"
-          ? body.error.message
-          : "Cukii Box rejected initialize.",
-      );
-    }
-    if (body.result?.serverInfo?.name !== "cukii-memory") {
-      throw new Error("The endpoint is not a Cukii Box memory server.");
-    }
-  } finally {
-    clearTimeout(initTimer);
   }
 }
 
@@ -512,6 +564,8 @@ export class CukiiMemoryRelay {
 export class CukiiMemoryAccountController {
   private directUpstream?: CukiiMemoryUpstream;
   private directUpstreamConnection?: string;
+  private directWorkUpstream?: CukiiMemoryUpstream;
+  private directWorkUpstreamConnection?: string;
   private disciplineRun?: Promise<DisciplineOutcome>;
   private disciplineOutcome?: DisciplineOutcome;
   private disciplineRetryAfter?: number;
@@ -648,7 +702,15 @@ export class CukiiMemoryAccountController {
   }
 
   private async connection(): Promise<MemoryConnection | undefined> {
-    return parseConnection(await this.store.get(CUKII_MEMORY_SECRET_KEY));
+    const raw = await this.store.get(CUKII_MEMORY_SECRET_KEY);
+    const connection = parseConnection(raw);
+    if (connection && raw) {
+      const migrated = JSON.stringify(connection);
+      if (migrated !== raw) {
+        await this.store.store(CUKII_MEMORY_SECRET_KEY, migrated);
+      }
+    }
+    return connection;
   }
 
   private async descriptor(): Promise<CukiiMemoryProxyDescriptor | undefined> {
@@ -656,6 +718,8 @@ export class CukiiMemoryAccountController {
     if (!connection) return undefined;
     return {
       endpoint: connection.endpoint,
+      workEndpoint:
+        connection.workEndpoint ?? workEndpointFor(connection.endpoint),
       proxyPath: path.join(this.extensionPath, "out", "cukiiMemoryProxy.js"),
       nodePath: this.nodePath,
     };
@@ -668,6 +732,27 @@ export class CukiiMemoryAccountController {
       this.directUpstreamConnection = identity;
     }
     return this.directUpstream.choose();
+  }
+
+  private async directWorkEndpoint(
+    connection: MemoryConnection,
+  ): Promise<string> {
+    const endpoint =
+      connection.workEndpoint ?? workEndpointFor(connection.endpoint);
+    const identity = `${endpoint}\n${connection.token}`;
+    if (
+      !this.directWorkUpstream ||
+      this.directWorkUpstreamConnection !== identity
+    ) {
+      this.directWorkUpstream = new CukiiMemoryUpstream(
+        { endpoint, token: connection.token },
+        this.httpFetch,
+        undefined,
+        CUKII_MEMORY_LOCAL_WORK_ENDPOINT,
+      );
+      this.directWorkUpstreamConnection = identity;
+    }
+    return this.directWorkUpstream.choose();
   }
 
   async status(): Promise<BrokerVendorAuthStatus> {
@@ -718,6 +803,8 @@ export class CukiiMemoryAccountController {
       await this.store.delete(CUKII_MEMORY_SECRET_KEY);
       this.directUpstream = undefined;
       this.directUpstreamConnection = undefined;
+      this.directWorkUpstream = undefined;
+      this.directWorkUpstreamConnection = undefined;
       this.disciplineRun = undefined;
       this.disciplineRetryAfter = undefined;
       for (const vendor of ALL_MEMORY_VENDORS) this.vendorMcp.remove(vendor);
@@ -736,12 +823,15 @@ export class CukiiMemoryAccountController {
     if (!tokenInput) return { opened: false, message: "Connection cancelled." };
     const connection = {
       endpoint: normalizeMemoryEndpoint(endpointInput),
+      workEndpoint: workEndpointFor(normalizeMemoryEndpoint(endpointInput)),
       token: validateMemoryToken(tokenInput),
     };
     await probeCukiiMemory(connection, this.httpFetch);
     await this.store.store(CUKII_MEMORY_SECRET_KEY, JSON.stringify(connection));
     this.directUpstream = undefined;
     this.directUpstreamConnection = undefined;
+    this.directWorkUpstream = undefined;
+    this.directWorkUpstreamConnection = undefined;
     const descriptor = await this.descriptor();
     if (!descriptor) throw new Error("Cukii Box connection was not stored.");
     const configured = ALL_MEMORY_VENDORS.filter((vendor) =>
@@ -785,6 +875,7 @@ export class CukiiMemoryAccountController {
     const connection = await this.connection();
     if (!connection) return { configured: false };
     const endpoint = await this.directEndpoint(connection);
+    const workEndpoint = await this.directWorkEndpoint(connection);
     const descriptor = await this.descriptor();
     if (!descriptor) return { configured: false };
     const vendor = brokerVendorForModel(model);
@@ -799,6 +890,7 @@ export class CukiiMemoryAccountController {
       configured,
       spawnEnv: {
         CUKII_MEMORY_RELAY_URL: endpoint,
+        CUKII_MEMORY_WORK_RELAY_URL: workEndpoint,
         CUKII_MEMORY_RELAY_TOKEN: connection.token,
       },
     };
